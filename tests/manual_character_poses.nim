@@ -62,11 +62,13 @@ block:
   var first, second: CharacterPose
   scene.prepareCharacter(first, model, vec3(-0.4, 0, 0), 0.3, clip, 0.25)
   scene.prepareCharacter(second, secondModel, vec3(0.4, 0, 0), -0.5, clip, 0.75)
+  scene.toon.cacheSkinning = false
   sunShadowsEnabled = false
   clearFrame(window.size)
   scene.drawCharacter(model, vec3(-0.4, 0, 0), 0.3, clip, 0.25)
   scene.drawCharacter(freshModel, vec3(0.4, 0, 0), -0.5, clip, 0.75)
   let reference = readColors(window.size)
+  scene.toon.cacheSkinning = true
   clearFrame(window.size)
   scene.drawCharacter(first)
   scene.drawCharacter(second)
@@ -81,11 +83,13 @@ block:
   sunShadowsEnabled = true
   scene.sunDepthPass = true
   for step in 0 .. 1:
+    scene.toon.cacheSkinning = false
     beginSunDepthPass(step)
     scene.drawCharacter(model, vec3(-0.4, 0, 0), 0.3, clip, 0.25)
     scene.drawCharacter(freshModel, vec3(0.4, 0, 0), -0.5, clip, 0.75)
     let referenceDepth = readDepth()
     endSunDepthPass(window.size)
+    scene.toon.cacheSkinning = true
     beginSunDepthPass(step)
     scene.drawCharacter(first)
     scene.drawCharacter(second)
@@ -125,3 +129,6 @@ block:
     doAssert after[0] == before[0], "Character passes must reuse storage."
     echo "Character preparation and four draw passes allocate zero"
   doAssert glGetError() == GL_NO_ERROR
+
+  first.toon.clearToonPose()
+  second.toon.clearToonPose()

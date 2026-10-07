@@ -26,7 +26,7 @@ import
   std/[math, sets, tables],
   opengl, vmath, chroma, pixie, shady,
   gltf,
-  frustums, shadowmeshes, shadows
+  frustums, shadowmeshes, shadows, profiles
 
 ## Shaders
 
@@ -126,7 +126,7 @@ proc sunShadowFactor(worldPos: Vec3): float32 =
     result = 1.0'f - (1.0'f - lit) * toonShadowStrength
 
 proc toonVert(
-  vertexPosition: Vec3,
+  vertexPosition: Vec4,
   vertexColor: Vec4,
   vertexNormal: Vec3,
   vertexUV: Vec2,
@@ -149,7 +149,7 @@ proc toonVert(
       vertexWeights.z * toonJointMatrices[vertexJoints.z.int] +
       vertexWeights.w * toonJointMatrices[vertexJoints.w.int]
   let
-    skinnedPosition = skin * vec4(vertexPosition, 1.0'f)
+    skinnedPosition = skin * vertexPosition
     skinnedNormal = (skin * vec4(vertexNormal, 0.0'f)).xyz
   worldPos = (toonModel * skinnedPosition).xyz
   color = vertexColor
@@ -218,7 +218,7 @@ proc toonFrag(
 var toonDepthLightMvp: Uniform[Mat4]
 
 proc toonDepthVert(
-  vertexPosition: Vec3,
+  vertexPosition: Vec4,
   vertexUV: Vec2,
   vertexJoints: UVec4,
   vertexWeights: Vec4,
@@ -233,7 +233,7 @@ proc toonDepthVert(
       vertexWeights.z * toonJointMatrices[vertexJoints.z.int] +
       vertexWeights.w * toonJointMatrices[vertexJoints.w.int]
   gl_Position =
-    toonDepthLightMvp * toonModel * (skin * vec4(vertexPosition, 1.0'f))
+    toonDepthLightMvp * toonModel * (skin * vertexPosition)
   uv = vertexUV
 
 proc toonDepthFrag(uv: Vec2, fragColor: var Vec4) =
@@ -241,6 +241,29 @@ proc toonDepthFrag(uv: Vec2, fragColor: var Vec4) =
   if albedo.a < toonAlphaCutoff:
     discardFragment()
   fragColor = vec4(1.0'f, 1.0'f, 1.0'f, 1.0'f)
+
+proc skinVert(
+  vertexPosition: Vec3,
+  vertexNormal: Vec3,
+  vertexJoints: UVec4,
+  vertexWeights: Vec4,
+  gl_Position: var Vec4,
+  skinPosition: var Vec4,
+  skinNormal: var Vec3
+) =
+  ## Captures local skinned vertices without rasterizing or reading them back.
+  let skin =
+    vertexWeights.x * toonJointMatrices[vertexJoints.x.int] +
+    vertexWeights.y * toonJointMatrices[vertexJoints.y.int] +
+    vertexWeights.z * toonJointMatrices[vertexJoints.z.int] +
+    vertexWeights.w * toonJointMatrices[vertexJoints.w.int]
+  skinPosition = skin * vec4(vertexPosition, 1.0'f)
+  skinNormal = (skin * vec4(vertexNormal, 0.0'f)).xyz
+  gl_Position = skinPosition
+
+proc skinFrag(fragColor: var Vec4) =
+  ## Provides a complete program while rasterizer discard skips fragments.
+  fragColor = vec4(1.0'f)
 
 ## Background: a full-screen sky-to-ground gradient in the palette's
 ## colours, so the character is not floating in a void of another palette.
@@ -274,6 +297,8 @@ const
       glsl3WebGL
     else:
       glsl4Desktop
+  SkinVertSrc = toShader(skinVert, ToonShaderTarget, shaderVertex)
+  SkinFragSrc = toShader(skinFrag, ToonShaderTarget, shaderFragment)
   ToonVertSrc* = toShader(toonVert, ToonShaderTarget, shaderVertex)
   ToonFragSrc* = toShader(toonFrag, ToonShaderTarget, shaderFragment)
   ToonDepthVertSrc* = toShader(toonDepthVert, ToonShaderTarget, shaderVertex)
@@ -405,6 +430,11 @@ type
     boundsValid: bool
     weightScale: float32
     weightMinimum: float32
+    skinBuffer, skinDepthArray: GLuint
+    skinArrays: seq[GLuint]
+    skinCapacity, skinRevision: int
+    skinMesh: Mesh
+    skinReady: bool
 
   ToonPose* = object
     meshes*: seq[ToonMeshPose]
@@ -416,18 +446,25 @@ type
     primitive: Primitive
     version: uint64
     alpha: AlphaMode
+    offset: int
 
   ShadowGeometry = object
     sources: seq[ShadowSource]
     primitives: seq[Primitive]
+    skinInput: Primitive
+    revision: int
 
   ToonBlend = object
     node: Node
     primitive: Primitive
     pose: ptr ToonMeshPose
+    vertexArray: GLuint
 
   ToonContext* = ref object
     shader: GLuint
+    skinShader: GLuint
+    skinJoints: GLint
+    cacheSkinning*: bool
     uniforms: ToonUniforms
     depthShader: GLuint
     depthUniforms: ToonDepthUniforms
@@ -502,11 +539,25 @@ proc setPalette*(ctx: ToonContext, palette: ToonPalette) =
 proc newToonContext*(): ToonContext =
   result = ToonContext(
     transform: mat4(),
+    cacheSkinning: defined(cachedSkinning),
     lightDirection: ToonLightDirection,
     tint: color(1, 1, 1, 1),
     rimColor: color(1, 1, 1, 0),
   )
   result.setPalette(ToonPalettes[0])
+  result.skinShader = compileShaderFiles(SkinVertSrc, SkinFragSrc)
+  var outputs = [cstring("skinPosition"), cstring("skinNormal")]
+  glTransformFeedbackVaryings(
+    result.skinShader, 2, cast[cstringArray](outputs[0].addr),
+    GL_INTERLEAVED_ATTRIBS
+  )
+  glLinkProgram(result.skinShader)
+  var linked: GLint
+  glGetProgramiv(result.skinShader, GL_LINK_STATUS, linked.addr)
+  if linked == 0:
+    raise newException(GltfError, "Cannot link cached skinning outputs.")
+  result.skinJoints = glGetUniformLocation(
+    result.skinShader, "toonJointMatrices")
   result.shader = compileShaderFiles(ToonVertSrc, ToonFragSrc)
   template loc(field: untyped, name: string) =
     result.uniforms.field = glGetUniformLocation(result.shader, name)
@@ -710,6 +761,7 @@ proc prepareMeshPoses(
     mesh.unlit = node.name in unlitParts
     mesh.transform = node.mat
     mesh.normal = node.mat.normalMatrix
+    mesh.skinReady = false
     root.skinMatricesInto(node, mesh.joints)
     pose.bounds.extend(mesh[].posedBounds(node))
     pose.boundsValid = pose.boundsValid and mesh.boundsValid
@@ -743,7 +795,7 @@ proc uploadPose(
 
 proc drawPrimitive(
   ctx: ToonContext, root, owner: Node, primitive: Primitive,
-  pose: ptr ToonMeshPose = nil
+  pose: ptr ToonMeshPose = nil, vertexArray: GLuint = 0
 ) =
   let u = ctx.uniforms
   var
@@ -753,7 +805,9 @@ proc drawPrimitive(
   glUniformMatrix3fv(
     u.normalMatrix, 1, GL_FALSE, cast[ptr float32](normalMat.addr))
 
-  if pose == nil:
+  if vertexArray != 0:
+    glUniform1i(u.useSkinning, 0)
+  elif pose == nil:
     root.skinMatricesInto(owner, ctx.jointMatrices)
     uploadPose(u.useSkinning, u.jointMatrices, ctx.jointMatrices)
   else:
@@ -766,7 +820,8 @@ proc drawPrimitive(
   )
 
   primitive.uploadToGpu()
-  glBindVertexArray(primitive.data.vertexArrayId)
+  glBindVertexArray(
+    if vertexArray == 0: primitive.data.vertexArrayId else: vertexArray)
 
   let material = primitive.material
   glActiveTexture(GL_TEXTURE0)
@@ -824,11 +879,17 @@ proc drawToonMesh(
   ctx: ToonContext, root, node: Node, pose: ptr ToonMeshPose = nil
 ) =
   ## Retains transparent draws in the context's reusable queue.
-  for primitive in node.mesh.primitives:
+  for i, primitive in node.mesh.primitives:
+    let vertexArray =
+      if pose != nil and ctx.cacheSkinning and pose.skinReady:
+        pose.skinArrays[i]
+      else:
+        0.GLuint
     if primitive.material.alphaMode == BlendAlphaMode:
-      ctx.blended.add ToonBlend(node: node, primitive: primitive, pose: pose)
+      ctx.blended.add ToonBlend(
+        node: node, primitive: primitive, pose: pose, vertexArray: vertexArray)
     else:
-      ctx.drawPrimitive(root, node, primitive, pose)
+      ctx.drawPrimitive(root, node, primitive, pose, vertexArray)
 
 proc drawToonNodes(ctx: ToonContext, root, node: Node) =
   ## Walks visible nodes without allocating a recursive closure.
@@ -838,6 +899,9 @@ proc drawToonNodes(ctx: ToonContext, root, node: Node) =
     ctx.drawToonMesh(root, node)
   for child in node.nodes:
     ctx.drawToonNodes(root, child)
+
+proc skinPose(ctx: ToonContext, pose: var ToonPose)
+  ## Captures each instance's vertices once before its first visible pass.
 
 proc draw*(
   ctx: ToonContext,
@@ -851,6 +915,8 @@ proc draw*(
       return
   if pose == nil:
     root.updateTransforms(ctx.transform)
+  if pose != nil and ctx.cacheSkinning:
+    ctx.skinPose(pose[])
   glUseProgram(ctx.shader)
   let u = ctx.uniforms
   var
@@ -915,7 +981,8 @@ proc draw*(
       let mesh = addr pose.meshes[i]
       ctx.drawToonMesh(root, mesh.node, mesh)
   for entry in ctx.blended:
-    ctx.drawPrimitive(root, entry.node, entry.primitive, entry.pose)
+    ctx.drawPrimitive(
+      root, entry.node, entry.primitive, entry.pose, entry.vertexArray)
   ctx.blended.setLen(0)
 
   glDisable(GL_BLEND)
@@ -926,19 +993,22 @@ proc draw*(
 
 proc drawSunDepthPrimitive(
   ctx: ToonContext, root, owner: Node, primitive: Primitive,
-  pose: ptr ToonMeshPose = nil
+  pose: ptr ToonMeshPose = nil, vertexArray: GLuint = 0
 ) =
   let u = ctx.depthUniforms
   var modelMat = if pose == nil: owner.mat else: pose.transform
   glUniformMatrix4fv(u.model, 1, GL_FALSE, cast[ptr float32](modelMat.addr))
-  if pose == nil:
+  if vertexArray != 0:
+    glUniform1i(u.useSkinning, 0)
+  elif pose == nil:
     root.skinMatricesInto(owner, ctx.jointMatrices)
     uploadPose(u.useSkinning, u.jointMatrices, ctx.jointMatrices)
   else:
     uploadPose(u.useSkinning, u.jointMatrices, pose.joints)
 
   primitive.uploadToGpu()
-  glBindVertexArray(primitive.data.vertexArrayId)
+  glBindVertexArray(
+    if vertexArray == 0: primitive.data.vertexArrayId else: vertexArray)
 
   let material = primitive.material
   glActiveTexture(GL_TEXTURE0)
@@ -994,6 +1064,125 @@ proc prepareShadowGeometry(ctx: ToonContext, mesh: Mesh) =
       alpha: primitive.material.alphaMode
     )
   geometry.primitives = mesh.shadowPrimitives()
+  if geometry.skinInput != nil:
+    geometry.skinInput.clearFromGpu()
+  geometry.skinInput = Primitive(material: Material())
+  # Opaque triangles lead the buffer in the batched shadow vertex order.
+  for opaque in [true, false]:
+    for i, primitive in mesh.primitives:
+      if (primitive.material.alphaMode == OpaqueAlphaMode and
+        primitive.mode == TrianglesMode) != opaque:
+          continue
+      geometry.sources[i].offset = geometry.skinInput.points.len
+      geometry.skinInput.points.add primitive.points
+      for j in 0 ..< primitive.points.len:
+        geometry.skinInput.normals.add(
+          if j < primitive.normals.len: primitive.normals[j] else: vec3(0))
+        geometry.skinInput.jointIds.add(
+          if j < primitive.jointIds.len: primitive.jointIds[j]
+          else: default(JointIds))
+        geometry.skinInput.jointWeights.add(
+          if j < primitive.jointWeights.len: primitive.jointWeights[j]
+          else: vec4(0))
+  inc geometry.revision
+
+proc clearSkinArrays(mesh: var ToonMeshPose) =
+  ## Releases vertex arrays while retaining the output buffer capacity.
+  for vertexArray in mesh.skinArrays.mitems:
+    if vertexArray != 0:
+      glDeleteVertexArrays(1, vertexArray.addr)
+      vertexArray = 0
+  if mesh.skinDepthArray != 0:
+    glDeleteVertexArrays(1, mesh.skinDepthArray.addr)
+    mesh.skinDepthArray = 0
+
+proc clearToonPose*(pose: var ToonPose) =
+  ## Releases cached skinning while its OpenGL context is still current.
+  for mesh in pose.meshes.mitems:
+    mesh.clearSkinArrays()
+    if mesh.skinBuffer != 0:
+      glDeleteBuffers(1, mesh.skinBuffer.addr)
+      mesh.skinBuffer = 0
+    mesh.skinCapacity = 0
+    mesh.skinMesh = nil
+    mesh.skinReady = false
+
+proc skinArray(
+  buffer: GLuint, offset: int, primitive: Primitive = nil
+): GLuint =
+  ## Binds captured vertices alongside the source material attributes.
+  glGenVertexArrays(1, result.addr)
+  glBindVertexArray(result)
+  glBindBuffer(GL_ARRAY_BUFFER, buffer)
+  glVertexAttribI4ui(5, 0, 0, 0, 0)
+  let stride = (sizeof(Vec4) + sizeof(Vec3)).GLsizei
+  glEnableVertexAttribArray(0)
+  glVertexAttribPointer(
+    0, 4, cGL_FLOAT, GL_FALSE, stride, cast[pointer](offset * stride.int))
+  glEnableVertexAttribArray(2)
+  glVertexAttribPointer(
+    2, 3, cGL_FLOAT, GL_FALSE, stride,
+    cast[pointer](offset * stride.int + sizeof(Vec4)))
+  if primitive != nil:
+    primitive.uploadToGpu()
+    glBindVertexArray(result)
+    let gpu = primitive.data
+    if gpu.uvsId != 0:
+      glBindBuffer(GL_ARRAY_BUFFER, gpu.uvsId)
+      glEnableVertexAttribArray(3)
+      glVertexAttribPointer(3, 2, cGL_FLOAT, GL_FALSE, 0, nil)
+    if gpu.colorsId != 0:
+      glBindBuffer(GL_ARRAY_BUFFER, gpu.colorsId)
+      glEnableVertexAttribArray(1)
+      glVertexAttribPointer(1, 4, cGL_UNSIGNED_BYTE, GL_TRUE, 0, nil)
+  glBindVertexArray(0)
+
+proc skinPose(ctx: ToonContext, pose: var ToonPose) {.measure.} =
+  ## Streams each visible mesh once and reuses its output for every pass.
+  for i in 0 ..< pose.meshCount:
+    let mesh = addr pose.meshes[i]
+    if mesh.skinReady or mesh.joints.len == 0:
+      continue
+    ctx.prepareShadowGeometry(mesh.node.mesh)
+    let geometry = addr ctx.shadowGeometry[cast[pointer](mesh.node.mesh)]
+    if mesh.skinBuffer == 0:
+      glGenBuffers(1, mesh.skinBuffer.addr)
+    let count = geometry.skinInput.points.len
+    if count > mesh.skinCapacity:
+      glBindBuffer(GL_ARRAY_BUFFER, mesh.skinBuffer)
+      glBufferData(
+        GL_ARRAY_BUFFER, count * (sizeof(Vec4) + sizeof(Vec3)), nil,
+        GL_DYNAMIC_COPY
+      )
+      mesh.skinCapacity = count
+    if mesh.skinMesh != mesh.node.mesh or
+      mesh.skinRevision != geometry.revision:
+        mesh[].clearSkinArrays()
+        mesh.skinArrays.setLen(geometry.sources.len)
+        for j, source in geometry.sources:
+          mesh.skinArrays[j] = skinArray(
+            mesh.skinBuffer, source.offset, source.primitive)
+        mesh.skinDepthArray = skinArray(mesh.skinBuffer, 0)
+        mesh.skinMesh = mesh.node.mesh
+        mesh.skinRevision = geometry.revision
+    geometry.skinInput.uploadToGpu()
+    glUseProgram(ctx.skinShader)
+    glUniformMatrix4fv(
+      ctx.skinJoints, mesh.joints.len.GLsizei, GL_FALSE,
+      cast[ptr float32](mesh.joints[0].addr)
+    )
+    glBindVertexArray(geometry.skinInput.data.vertexArrayId)
+    glBindBuffer(GL_ARRAY_BUFFER, 0)
+    glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 0, mesh.skinBuffer)
+    glEnable(GL_RASTERIZER_DISCARD)
+    glBeginTransformFeedback(GL_POINTS)
+    glDrawArrays(GL_POINTS, 0, count.GLsizei)
+    glEndTransformFeedback()
+    glDisable(GL_RASTERIZER_DISCARD)
+    # WebGL prohibits drawing from a buffer still bound for feedback.
+    glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 0, 0)
+    glBindVertexArray(0)
+    mesh.skinReady = true
 
 proc drawDepthMesh(
   ctx: ToonContext, root, node: Node, pose: ptr ToonMeshPose = nil
@@ -1002,7 +1191,14 @@ proc drawDepthMesh(
   ctx.prepareShadowGeometry(node.mesh)
   let geometry = addr ctx.shadowGeometry[cast[pointer](node.mesh)]
   for primitive in geometry.primitives:
-    ctx.drawSunDepthPrimitive(root, node, primitive, pose)
+    var vertexArray: GLuint
+    if pose != nil and ctx.cacheSkinning and pose.skinReady:
+      vertexArray = pose.skinDepthArray
+      for i, source in geometry.sources:
+        if source.primitive == primitive:
+          vertexArray = pose.skinArrays[i]
+          break
+    ctx.drawSunDepthPrimitive(root, node, primitive, pose, vertexArray)
 
 proc drawDepthNodes(ctx: ToonContext, root, node: Node) =
   ## Walks visible shadow casters without allocating a recursive closure.
@@ -1027,6 +1223,8 @@ proc drawSunDepth*(
       return
   if pose == nil:
     root.updateTransforms(ctx.transform)
+  if pose != nil and ctx.cacheSkinning:
+    ctx.skinPose(pose[])
   glUseProgram(ctx.depthShader)
   var lightMatrix = sunDepthPassMvp()
   glUniformMatrix4fv(

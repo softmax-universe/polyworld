@@ -1,5 +1,5 @@
 import
-  std/[strutils, sysrand, times],
+  std/[strutils, sysrand, times, json],
   rooms
 
 const
@@ -11,7 +11,6 @@ const
   MaxUnacknowledgedBytes* = 512 * 1024
   MaxInputBytesPerSecond* = 256 * 1024
   CatchupBatch* = 16
-  MaxAheadTicks* = 6
 
 type
   Delivery = object
@@ -33,6 +32,7 @@ type
     room*: string
     ready*, recovering*: bool
     readyHash: uint64
+    readyRevision: uint32
     applied*, hashTick*, finishTick: uint32
     hash, finishHash: uint64
     receipts: seq[Receipt]
@@ -46,6 +46,8 @@ type
     identity*: GameIdentity
     owner*: uint32
     public*, paused*: bool
+    galconStartPending: bool
+    lvdStartPending: bool
     phase*: RoomPhase
     revision*, match*, tickRate*, tick*: uint32
     payload*: string
@@ -73,7 +75,7 @@ type
     now: float64
 
 proc secret(): string =
-  ## Creates an unguessable guest or invite token from operating-system entropy.
+  ## Creates an unguessable reconnect token from operating-system entropy.
   var bytes: array[24, byte]
   if not urandom(bytes):
     reject("Cannot obtain reconnect token entropy")
@@ -97,6 +99,27 @@ proc room*(relay: Relay, id: string): RelayRoom =
   for candidate in relay.rooms:
     if candidate.id == id:
       return candidate
+
+proc newRoomId*(relay: Relay,
+    entropy: proc(bytes: var openArray[byte]): bool = urandom): string =
+  ## Short invite codes are discovery IDs, not authentication secrets.
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+  var bytes: array[6, byte]
+  # Bound both collision retries and rejection sampling entropy requests.
+  for attempt in 0 ..< 32:
+    if not entropy(bytes):
+      reject("Cannot obtain room code entropy")
+    for value in bytes:
+      # Reject the incomplete alphabet bucket instead of biasing modulo 36.
+      if int(value) < 256 - (256 mod alphabet.len):
+        result.add alphabet[int(value) mod alphabet.len]
+        if result.len == 6:
+          break
+    if result.len == 6:
+      if relay.room(result) == nil:
+        return
+      result.setLen(0)
+  reject("Cannot allocate a unique room code")
 
 proc controls(room: RelayRoom, id: uint32): bool =
   ## Reports whether a participant owns any seats in this room.
@@ -164,7 +187,8 @@ proc state*(relay: Relay, room: RelayRoom): RoomMessage =
     kind: RoomState, room: room.id, name: room.name,
     participant: room.owner, revision: room.revision, phase: room.phase,
     match: room.match, tickRate: room.tickRate, payload: room.payload,
-    flag: room.paused,
+    # Lobby snapshots expose visibility; match snapshots expose pause state.
+    flag: (if room.phase == Lobby: room.public else: room.paused),
     seats: room.seats
   )
   for id in room.participants:
@@ -178,11 +202,15 @@ proc publish(relay: Relay, room: RelayRoom) =
   ## Publishes the current room snapshot.
   relay.broadcast(room, relay.state(room))
 
+proc playbackTick(room: RelayRoom): uint32 =
+  ## Keeps issued history immutable while exposing the actual completed edge.
+  if room.phase == Ended: room.finalTick else: room.tick
+
 proc status(relay: Relay, room: RelayRoom) =
   ## Publishes the exact frozen or running server tick.
   relay.broadcast(room, RoomMessage(
     kind: MatchStatus, match: room.match, phase: room.phase,
-    tick: room.tick, detail: room.detail, flag: room.paused
+    tick: room.playbackTick(), detail: room.detail, flag: room.paused
   ))
 
 proc stop(relay: Relay, room: RelayRoom, detail: string) =
@@ -190,6 +218,7 @@ proc stop(relay: Relay, room: RelayRoom, detail: string) =
   if room.phase == Desynced:
     return
   room.phase = Desynced
+  room.lvdStartPending = false
   room.detail = detail
   relay.logEvent("match.stopped", room = room, detail = detail)
   relay.status(room)
@@ -200,15 +229,70 @@ proc retainedBytes(relay: Relay): int =
     result += room.historyBytes + room.pendingBytes +
       room.checkpoints.len * sizeof(Checkpoint)
 
-proc changed(relay: Relay, room: RelayRoom) =
-  ## Invalidates all readiness after a roster or configuration change.
+proc changed(relay: Relay, room: RelayRoom, rosterOnly = false) =
+  ## Keeps roster readiness intent, but requires hashes for the new revision.
   inc room.revision
+  room.galconStartPending = false
+  if not rosterOnly:
+    room.lvdStartPending = false
+  elif room.lvdStartPending:
+    var occupied = false
+    for seat in room.seats:
+      occupied = occupied or seat.owner != 0
+    if not occupied:
+      room.lvdStartPending = false
   for id in room.participants:
-    relay.guest(id).ready = false
+    if not rosterOnly or not room.controls(id):
+      relay.guest(id).ready = false
   relay.publish(room)
 
-proc disconnect*(relay: Relay, connection: int) =
-  ## Freezes active rooms when an owning client loses its connection.
+proc clearMembership(guest: Guest) =
+  ## Preparation, receipts and playback cursors belong to the old room only.
+  guest.room = ""
+  guest.ready = false
+  guest.recovering = false
+  guest.readyHash = 0
+  guest.readyRevision = 0
+  guest.applied = 0
+  guest.hashTick = 0
+  guest.finishTick = 0
+  guest.hash = 0
+  guest.finishHash = 0
+  guest.receipts.setLen(0)
+
+proc closeIfUnwatched(relay: Relay, room: RelayRoom): bool =
+  ## Seats and private bots have no residency independent of connected people.
+  for id in room.participants:
+    let guest = relay.guest(id)
+    if guest != nil and guest.room == room.id and guest.connection != 0:
+      return false
+  relay.logEvent("room.closed", room = room)
+  for guest in relay.guests:
+    if guest.room == room.id:
+      guest.clearMembership()
+  room.galconStartPending = false
+  room.lvdStartPending = false
+  room.paused = false
+  room.deadline = 0
+  room.owner = 0
+  room.participants.setLen(0)
+  room.seats.setLen(0)
+  room.pending.setLen(0)
+  room.pendingBytes = 0
+  room.history.setLen(0)
+  room.historyBytes = 0
+  room.checkpoints.setLen(0)
+  room.payload = ""
+  room.detail = ""
+  room.pausedBy = ""
+  for i in 0 ..< relay.rooms.len:
+    if relay.rooms[i] == room:
+      relay.rooms.delete(i)
+      break
+  true
+
+proc disconnectConnection(relay: Relay, connection: int, preserveRoom = false) =
+  ## Releases one connection without holding up the shared timeline.
   let guest = relay.connectionGuest(connection)
   if guest == nil:
     return
@@ -217,15 +301,18 @@ proc disconnect*(relay: Relay, connection: int) =
   guest.deliveries.setLen(0)
   guest.unacknowledged = 0
   let room = relay.room(guest.room)
-  if room == nil:
+  if room == nil or (not preserveRoom and relay.closeIfUnwatched(room)):
     return
-  if room.phase in {Playing, Waiting} and room.controls(guest.id):
-    room.phase = Waiting
-    room.detail = "Waiting for " & guest.name & " to reconnect"
-    relay.status(room)
-  elif room.phase == Lobby:
+  if room.phase == Lobby:
     guest.ready = false
+    room.galconStartPending = false
+    if guest.id == room.owner:
+      room.lvdStartPending = false
   relay.publish(room)
+
+proc disconnect*(relay: Relay, connection: int) =
+  ## Ordinary socket closure retires a room when its final watcher leaves.
+  relay.disconnectConnection(connection)
 
 proc hello(relay: Relay, connection: int, message: RoomMessage, now: float64) =
   ## Binds a new connection or restores an existing participant securely.
@@ -245,7 +332,8 @@ proc hello(relay: Relay, connection: int, message: RoomMessage, now: float64) =
     if guest.connection != 0:
       let oldConnection = guest.connection
       relay.outgoing.add Outgoing(connection: oldConnection, close: true)
-      relay.disconnect(oldConnection)
+      # A token-authenticated takeover is continuous presence, not abandonment.
+      relay.disconnectConnection(oldConnection, preserveRoom = true)
   else:
     if relay.guests.len >= MaxGuests:
       reject("Server participant limit reached")
@@ -277,8 +365,8 @@ proc hello(relay: Relay, connection: int, message: RoomMessage, now: float64) =
     kind: Welcome, participant: guest.id, token: guest.token
   ))
   if room != nil:
-    if room.phase == Lobby and renamed:
-      relay.changed(room)
+    if room.phase == Lobby and renamed and room.controls(guest.id):
+      relay.changed(room, rosterOnly = true)
     else:
       relay.publish(room)
     if room.phase != Lobby:
@@ -289,7 +377,7 @@ proc hello(relay: Relay, connection: int, message: RoomMessage, now: float64) =
       ))
       relay.send(guest, RoomMessage(
         kind: MatchStatus, match: room.match, phase: room.phase,
-        tick: room.tick, detail: room.detail, flag: room.paused
+        tick: room.playbackTick(), detail: room.detail, flag: room.paused
       ))
 
 proc acknowledge(guest: Guest, sequence: uint64) =
@@ -312,34 +400,60 @@ proc catchup(relay: Relay, guest: Guest, room: RelayRoom, tick: uint32) =
   ## Streams bounded chunks of the immutable history to one client.
   if tick > room.tick:
     reject("Catch-up tick is ahead of the server")
-  let last = min(room.tick, tick + CatchupBatch)
+  let edge = room.playbackTick()
+  let last = min(edge, tick + CatchupBatch)
   for index in int(tick) ..< int(last):
     relay.send(guest, decode(room.history[index]))
   relay.send(guest, RoomMessage(
-    kind: CaughtUp, match: room.match, tick: last, number: room.tick
+    kind: CaughtUp, match: room.match, tick: last, number: edge
   ))
 
 proc removeGuest(relay: Relay, room: RelayRoom, guest: Guest) =
   ## Removes lobby membership and frees its seats without transferring bots.
   relay.logEvent("room.left", guest.connection, room,
     "player=" & $guest.id)
-  guest.room = ""
-  guest.receipts.setLen(0)
+  guest.clearMembership()
+  var seatsChanged = false
   if room.phase == Lobby:
     for seat in room.seats.mitems:
       if seat.owner == guest.id:
         seat = Seat()
+        seatsChanged = true
   for i in 0 ..< room.participants.len:
     if room.participants[i] == guest.id:
       room.participants.delete(i)
       break
-  if room.owner == guest.id and room.participants.len > 0:
-    room.owner = room.participants[0]
+  if room.owner == guest.id:
+    if room.participants.len > 0:
+      room.owner = room.participants[0]
+    room.galconStartPending = false
+    room.lvdStartPending = false
   relay.send(guest, RoomMessage(kind: RoomState))
-  if room.phase == Lobby:
-    relay.changed(room)
+  if relay.closeIfUnwatched(room):
+    return
+  if seatsChanged:
+    relay.changed(room, rosterOnly = true)
   else:
     relay.publish(room)
+
+proc receive*(
+    relay: Relay, connection: int, message: RoomMessage, now: float64
+)
+
+proc tryLvdStart(relay: Relay, room: RelayRoom, now: float64) =
+  ## Retain host intent across roster revisions, never stale preparation.
+  if room == nil or room.phase != Lobby or not room.lvdStartPending:
+    return
+  let owner = relay.guest(room.owner)
+  if owner == nil or owner.connection == 0:
+    return
+  for seat in room.seats:
+    if seat.owner == 0: continue
+    let controller = relay.guest(seat.owner)
+    if controller == nil or controller.connection == 0 or
+        controller.readyRevision != room.revision:
+      return
+  relay.receive(owner.connection, RoomMessage(kind: StartMatch), now)
 
 proc receive*(
     relay: Relay, connection: int, message: RoomMessage, now: float64
@@ -350,6 +464,7 @@ proc receive*(
     reject("Clients cannot assign delivery identifiers")
   if message.kind == Hello:
     relay.hello(connection, message, now)
+    relay.tryLvdStart(relay.room(relay.connectionGuest(connection).room), now)
     return
   let guest = relay.connectionGuest(connection)
   if guest == nil:
@@ -410,13 +525,15 @@ proc receive*(
       message.tickRate notin 1'u32 .. 120'u32 or not message.name.validName:
         reject("Invalid room settings")
     let room = RelayRoom(
-      id: secret(), name: message.name, identity: guest.identity,
+      id: relay.newRoomId(), name: message.name, identity: guest.identity,
       owner: guest.id, public: message.flag, phase: Lobby, revision: 1,
       tickRate: message.tickRate, payload: message.payload,
       seats: newSeq[Seat](int(message.number)), participants: @[guest.id]
     )
     guest.room = room.id
     relay.rooms.add room
+    if room.identity.game == "light_vs_dark" and room.identity.protocol >= 3:
+      guest.readyRevision = 0
     relay.logEvent("room.created", connection, room,
       "seats=" & $message.number & " tickRate=" & $message.tickRate &
       " public=" & $message.flag)
@@ -425,17 +542,24 @@ proc receive*(
   if message.kind == JoinRoom:
     if guest.room.len > 0:
       reject("Leave the current room first")
-    let room = relay.room(message.room)
+    # Preserve exact legacy IDs; only six-character alphanumeric invites fold case.
+    var room = relay.room(message.room)
+    if room == nil and message.room.len == 6 and
+        message.room.allCharsInSet({'A'..'Z', 'a'..'z', '0'..'9'}):
+      room = relay.room(message.room.toUpperAscii)
     if room == nil or room.identity != guest.identity:
       reject("Room not found or incompatible exact game/protocol version")
     if room.participants.len >= MaxParticipants:
       reject("Room participant limit reached")
     guest.room = room.id
     guest.ready = false
+    if room.identity.game == "light_vs_dark" and room.identity.protocol >= 3:
+      guest.readyRevision = 0
     room.participants.add guest.id
     relay.logEvent("room.joined", connection, room)
     if room.phase == Lobby:
-      relay.changed(room)
+      # Joining does not claim a seat or alter the prepared game setup.
+      relay.publish(room)
     else:
       guest.applied = 0
       guest.hashTick = 0
@@ -447,7 +571,7 @@ proc receive*(
       ))
       relay.send(guest, RoomMessage(
         kind: MatchStatus, match: room.match, phase: room.phase,
-        tick: room.tick, detail: room.detail, flag: room.paused
+        tick: room.playbackTick(), detail: room.detail, flag: room.paused
       ))
     return
   let room = relay.room(guest.room)
@@ -457,12 +581,48 @@ proc receive*(
       FinishMatch, AbortMatch, PauseMatch} and message.match != room.match:
     reject("Stale match identifier")
   case message.kind
-  of ConfigureRoom:
+  of ConfigureRoom, ResizeRoom:
     if guest.id != room.owner or room.phase != Lobby:
       reject("Only the lobby owner can change settings")
     if message.number notin 1'u32 .. uint32(MaxSeats) or
       message.tickRate notin 1'u32 .. 120'u32 or not message.name.validName:
         reject("Invalid room settings")
+    var rosterOnly = message.kind == ResizeRoom and
+      message.tickRate == room.tickRate
+    if rosterOnly and message.payload != room.payload:
+      rosterOnly = false
+      if room.identity.game in ["galcon", "light_vs_dark"]:
+        try:
+          let before = parseJson(room.payload)
+          let after = parseJson(message.payload)
+          if before.kind == JObject and after.kind == JObject:
+            if room.identity.game == "galcon" and
+                after.hasKey("players") and after["players"].kind == JInt and
+                after["players"].getInt == message.number.int:
+              before.delete("players")
+              after.delete("players")
+              rosterOnly = before == after
+            elif room.identity.game == "light_vs_dark" and
+                before.hasKey("players") and before["players"].kind == JArray and
+                after.hasKey("players") and after["players"].kind == JArray and
+                after["players"].len == message.number.int and
+                after.hasKey("playerCount") and after["playerCount"].kind == JInt and
+                after["playerCount"].getInt == message.number.int:
+              # Resizing may truncate or append empty records, never alter survivors.
+              var namesUnchanged = true
+              for index in 0 ..< min(before["players"].len, after["players"].len):
+                if before["players"][index] != after["players"][index]:
+                  namesUnchanged = false
+              for index in before["players"].len ..< after["players"].len:
+                if after["players"][index] != %*{"name": ""}:
+                  namesUnchanged = false
+              before.delete("players")
+              after.delete("players")
+              before.delete("playerCount")
+              after.delete("playerCount")
+              rosterOnly = namesUnchanged and before == after
+        except JsonParsingError:
+          discard
     # Validate the entire removed tail before changing settings or assignments.
     for index in int(message.number) ..< room.seats.len:
       let owner = room.seats[index].owner
@@ -474,12 +634,15 @@ proc receive*(
     room.public = message.flag
     room.tickRate = message.tickRate
     relay.logEvent("room.configured", connection, room)
-    relay.changed(room)
+    relay.changed(room, rosterOnly = rosterOnly)
   of ClaimSeat, ReleaseSeat:
     if room.phase != Lobby or message.seat >= uint32(room.seats.len):
       reject("Seats can only change in the lobby")
     let owner = room.seats[message.seat].owner
-    if owner != 0 and owner != guest.id:
+    let hostBotRemoval = message.kind == ReleaseSeat and
+      room.identity.game in ["galcon", "gods_of_the_arena", "light_vs_dark"] and
+      guest.id == room.owner and room.seats[message.seat].name != "Human"
+    if owner != 0 and owner != guest.id and not hostBotRemoval:
       reject("Seat belongs to another participant")
     if message.kind == ClaimSeat:
       if not message.name.validName:
@@ -487,25 +650,74 @@ proc receive*(
       room.seats[message.seat] = Seat(owner: guest.id, name: message.name)
     else:
       room.seats[message.seat] = Seat()
-    relay.changed(room)
-  of Ready:
+    relay.changed(room, rosterOnly = true)
+  of ReadyStatus:
+    if room.phase != Lobby or not room.controls(guest.id):
+      reject("Only lobby controllers can change ready status")
+    guest.ready = message.flag
+    relay.publish(room)
+  of Ready, Prepared:
     if room.phase != Lobby or message.revision != room.revision:
       reject("Ready refers to outdated room settings")
-    guest.ready = true
+    if not room.controls(guest.id):
+      reject("Only controllers can ready up")
+    if message.kind == Ready:
+      guest.ready = true
     guest.readyHash = message.hash
+    guest.readyRevision = room.revision
     relay.publish(room)
+    if room.identity.game == "galcon" and room.identity.protocol >= 2 and
+      room.galconStartPending:
+      relay.receive(relay.guest(room.owner).connection,
+        RoomMessage(kind: StartMatch), now)
+    else:
+      relay.tryLvdStart(room, now)
   of StartMatch:
     if room.phase != Lobby or room.owner != guest.id:
       reject("Only the owner can start a lobby")
+    let hostPrepared = room.identity.game == "gods_of_the_arena"
+    let lvdAutomatic = room.identity.game == "light_vs_dark" and
+      room.identity.protocol >= 3
+    let automaticPreparation = lvdAutomatic or
+      (room.identity.game == "galcon" and room.identity.protocol >= 2)
+    if automaticPreparation:
+      var occupied, pending: bool
+      for seat in room.seats:
+        if seat.owner == 0: continue
+        occupied = true
+        let controller = relay.guest(seat.owner)
+        if controller == nil or controller.connection == 0:
+          reject("Every controlling client must be connected")
+        pending = pending or controller.readyRevision != room.revision
+      if not occupied: reject("At least one controlling client is required")
+      if pending:
+        if lvdAutomatic:
+          room.lvdStartPending = true
+        else:
+          room.galconStartPending = true
+        return
+    if hostPrepared and message.revision != room.revision:
+      reject("Start refers to outdated room settings")
     var
       first = true
-      initialHash: uint64
+      initialHash = if hostPrepared: message.hash else: 0'u64
     for seat in room.seats:
       if seat.owner == 0:
-        reject("Every game seat must have an owner")
+        # Legacy LvD versions predate the packed-seat adapter.
+        if room.identity.game == "light_vs_dark" and not lvdAutomatic:
+          reject("Every game seat must have an owner")
+        continue
+      if hostPrepared:
+        # Peers validate BeginMatch independently and report tick zero against
+        # this immutable checkpoint; cosmetic readiness is never consulted.
+        first = false
+        continue
       let controller = relay.guest(seat.owner)
-      if controller.connection == 0 or not controller.ready:
+      if controller.connection == 0 or
+        (not automaticPreparation and not controller.ready):
         reject("Every controlling client must load the setup and be ready")
+      if controller.readyRevision != room.revision:
+        reject("Controllers must automatically prepare the current roster revision")
       if first:
         initialHash = controller.readyHash
         first = false
@@ -514,6 +726,10 @@ proc receive*(
           $initialHash & " versus " & $controller.readyHash &
           " from " & controller.name)
         return
+    if first:
+      reject("At least one controlling client is required")
+    room.galconStartPending = false
+    room.lvdStartPending = false
     room.initialHash = initialHash
     room.checkpoints = @[Checkpoint(present: true, hash: initialHash)]
     room.finalTick = 0
@@ -542,7 +758,7 @@ proc receive*(
     relay.logEvent("match.started", connection, room,
       "seats=" & $room.seats.len & " initialHash=" & $initialHash)
   of SubmitCommand:
-    if room.phase notin {Playing, Waiting} or
+    if room.phase == Lobby or
       message.seat >= uint32(room.seats.len) or
       room.seats[message.seat].owner != guest.id:
         reject("Command seat is not owned by this participant")
@@ -558,6 +774,8 @@ proc receive*(
         sequence: message.sequence, tick: receipt.tick
       ))
       return
+    if room.phase notin {Playing, Waiting}:
+      reject("New commands require an active match")
     if room.pending.len >= MaxCommandsPerTick or
       room.pendingBytes + message.payload.len + 32 > MaxWireBytes div 2:
         relay.stop(room, "Pending command limit exhausted")
@@ -591,11 +809,11 @@ proc receive*(
   of ReportHash, FinishMatch:
     if room.phase == Lobby:
       reject("State hashes require an active or completed match")
-    if message.tick > room.tick or message.tick < guest.hashTick:
+    if message.tick > room.tick:
       reject("Invalid state hash tick")
-    if message.kind == ReportHash:
-      if message.tick mod room.tickRate != 0:
-        reject("State hash must refer to a second boundary")
+    if message.kind == ReportHash and message.tick mod room.tickRate != 0:
+      reject("State hash must refer to a second boundary")
+    if message.tick mod room.tickRate == 0:
       let index = int(message.tick div room.tickRate)
       if room.checkpoints.len <= index:
         room.checkpoints.setLen(index + 1)
@@ -605,12 +823,14 @@ proc receive*(
           $checkpoint.hash & " versus " & $message.hash &
           " from " & guest.name & " (participant " & $guest.id & ")")
         return
-      room.checkpoints[index] = Checkpoint(
-        present: true, hash: message.hash, participant: guest.id
-      )
-      guest.hashTick = message.tick
-      guest.hash = message.hash
-    else:
+      if not checkpoint.present:
+        room.checkpoints[index] = Checkpoint(
+          present: true, hash: message.hash, participant: guest.id
+        )
+      if message.tick >= guest.hashTick:
+        guest.hashTick = message.tick
+        guest.hash = message.hash
+    if message.kind == FinishMatch:
       if message.tick == 0:
         reject("A finished match must contain at least one tick")
       if room.finalTick != 0 and
@@ -650,7 +870,7 @@ proc receive*(
       if room.paused:
         "Match paused by " & guest.name & " at tick " & $room.tick
       else:
-        "Checking controllers and hashes before resuming"
+        "Resuming match"
     room.deadline = now + 1.0 / float64(room.tickRate)
     relay.status(room)
   of AbortMatch:
@@ -678,7 +898,7 @@ proc receive*(
     reject("Message is not a client room operation")
 
 proc advance*(relay: Relay, now: float64) =
-  ## Emits immutable ticks only while controllers and hash barriers agree.
+  ## Emits ticks independently of client progress; hashes are checked on receipt.
   relay.now = now
   for guest in relay.guests:
     if guest.connection != 0 and now - guest.lastSeen > 15:
@@ -691,47 +911,16 @@ proc advance*(relay: Relay, now: float64) =
       continue
     var
       reason: string
-      allFinished = true
-      finishedTick: uint32
-      finishedHash: uint64
-      checkedHash: uint64
-      hasHash = false
-    let boundary = room.tick - room.tick mod room.tickRate
+      finished = false
     for id in room.participants:
-      if not room.controls(id):
-        continue
-      let guest = relay.guest(id)
-      if guest.connection == 0:
-        reason = "Waiting for " & guest.name & " to reconnect"
-      elif guest.recovering:
-        reason = "Waiting for " & guest.name & " to catch up"
-      elif guest.applied + MaxAheadTicks < room.tick:
-        reason = "Waiting for " & guest.name & " at tick " & $guest.applied
-      if guest.hashTick < boundary:
-        reason = "Waiting for state hash at tick " & $boundary
-      elif boundary > 0:
-        if hasHash and checkedHash != guest.hash:
-          relay.stop(room, "Desync at tick " & $boundary & ": " &
-            $checkedHash & " versus " & $guest.hash & " from " & guest.name)
-          break
-        checkedHash = guest.hash
-        hasHash = true
-      if guest.finishTick == 0:
-        allFinished = false
-      elif finishedTick == 0:
-        reason = "Waiting for final state confirmations"
-        finishedTick = guest.finishTick
-        finishedHash = guest.finishHash
-      elif finishedTick != guest.finishTick or finishedHash != guest.finishHash:
-        relay.stop(room, "Final state mismatch at tick " & $guest.finishTick)
+      if room.controls(id) and relay.guest(id).finishTick != 0:
+        finished = true
         break
-    if room.phase == Desynced:
-      continue
-    if allFinished:
+    if finished:
       room.phase = Ended
-      room.detail = "Match completed at tick " & $finishedTick
+      room.detail = "Match completed at tick " & $room.finalTick
       relay.logEvent("match.ended", room = room,
-        detail = "finalTick=" & $finishedTick & " finalHash=" & $finishedHash)
+        detail = "finalTick=" & $room.finalTick & " finalHash=" & $room.finalHash)
       relay.status(room)
       continue
     if reason.len == 0 and room.paused:
@@ -767,13 +956,13 @@ proc advance*(relay: Relay, now: float64) =
     room.pendingBytes = 0
     for id in room.participants:
       let guest = relay.guest(id)
-      if room.controls(id) or guest.applied + CatchupBatch >= room.tick:
+      # Slow controllers, like spectators, pull bounded history batches.
+      if guest.applied + CatchupBatch >= room.tick:
         relay.send(guest, packet)
     room.deadline = now + 1.0 / float64(room.tickRate)
   for i in countdown(relay.rooms.high, 0):
-    if relay.rooms[i].participants.len == 0:
-      relay.logEvent("room.closed", room = relay.rooms[i])
-      relay.rooms.delete(i)
+    # send() may retire a backpressured connection during this scheduler pass.
+    discard relay.closeIfUnwatched(relay.rooms[i])
   for i in countdown(relay.guests.high, 0):
     let guest = relay.guests[i]
     if guest.room.len == 0 and guest.connection == 0 and

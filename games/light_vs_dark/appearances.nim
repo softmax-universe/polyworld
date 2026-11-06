@@ -2,7 +2,7 @@ import
   std/[sets, tables],
   chroma, gltf,
   polyworld/[characters, chargen, profiles],
-  assets, content
+  assets, content, resourcepacks
 
 type
   UnitAppearance = object
@@ -151,31 +151,42 @@ proc loadUnitModel*(
   cache: var UnitModelCache,
   manifest: Manifest,
   entry: UnitPreset,
-  kind: UnitKind
+  kind: UnitKind,
+  woodAxe = false,
+  pack = NoPack
 ): CharacterModel =
   ## Reuses an assembled outfit while keeping variant colors and rigs separate.
+  var variant = entry
+  if pack != NoPack:
+    if kind != PeonUnit:
+      raise newException(ChargenError, "Resource packs require a peon.")
+    variant.preset = resourcePackPreset(variant.preset, pack)
+  if woodAxe:
+    if kind != PeonUnit:
+      raise newException(ChargenError, "Wood axe is only supported for peons.")
+    variant.preset = woodAxePreset(variant.preset)
   var
-    preset = entry.preset
+    preset = variant.preset
     templateModel: CharacterModel
   preset.name = ""
   for appearance in cache.appearances:
     if appearance.kind != kind or appearance.preset != preset:
       continue
-    if appearance.skin == entry.skinRgb:
+    if appearance.skin == variant.skinRgb:
       return appearance.model
     templateModel = appearance.model
   if templateModel == nil:
     profileBlock "unit outfit":
-      result = loadUnitModel(manifest, entry, kind)
+      result = loadUnitModel(manifest, variant, kind)
   else:
     result = copyUnitModel(templateModel)
     let
-      rgb = entry.skinRgb
-      inventory = manifest.presetManifest(entry.preset)
+      rgb = variant.skinRgb
+      inventory = manifest.presetManifest(variant.preset)
     partNodes(result.file.root).applySkin(
       inventory, color(rgb[0], rgb[1], rgb[2], 1)
     )
     discard result.mergeCharacterParts()
   cache.appearances.add UnitAppearance(
-    preset: preset, kind: kind, skin: entry.skinRgb, model: result
+    preset: preset, kind: kind, skin: variant.skinRgb, model: result
   )

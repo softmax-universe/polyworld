@@ -2,7 +2,8 @@ import
   std/os,
   jsony,
   polyworld/[assets, chargen, common, terrainsurfaces],
-  content, factions
+  polyworld/chargen/teamcolors,
+  content, factions, resourcepacks
 
 const
   LogoPath* = DataRoot & "/themes/lvd/lvd_logo.png"
@@ -37,7 +38,7 @@ const
   ]
   UnitNames*: array[UnitKind, string] = [
     "Peon", "Swordsman", "Archer", "Mage", "Armored knight", "Bomber",
-    "Cleric", "Fire elemental"
+    "Cleric", "Elemental"
   ]
   BuildingModelRoot* = DataRoot & "/terrain/lvd_buildings/models"
   FactionTextureRoot* = DataRoot & "/terrain/lvd_buildings/textures/factions"
@@ -85,14 +86,49 @@ proc readCharacterRoster*(
     if units.len != UnitKind.high.ord + 1:
       raise newException(ChargenError, "LvD roster needs all eight roles.")
     for kind in UnitKind:
-      if kind != SummonUnit:
-        units[kind.ord].skinRgb = result.factions[player].skinRgb()
+      units[kind.ord].skinRgb = result.factions[player].skinRgb()
+      if kind == KnightUnit:
+        # Roster looks repeat for more than two seats; isolate the mutable
+        # parts before assigning each owner's faction-specific equipment.
+        var parts: seq[PresetPart]
+        for part in units[kind.ord].preset.parts:
+          parts.add part
+        units[kind.ord].preset.parts = parts
+        units[kind.ord].preset.tintVanguardTeam(result.factions[player].skinRgb())
       let entry = units[kind.ord]
       if entry.kind != $kind:
         raise newException(ChargenError, "LvD roster is missing " & $kind)
       for channel in entry.skinRgb:
         if not (channel >= 0 and channel <= 1):
           raise newException(ChargenError, "Invalid LvD skin color.")
+
+proc woodAxePreset*(preset: Preset): Preset =
+  ## Retains the approved outfit, replacing only its right-hand equipment.
+  result = preset
+  result.parts = @[]
+  for part in preset.parts:
+    if part.category != "Right hand":
+      result.parts.add part
+  result.parts.add PresetPart(category: "Right hand", item: "Berserker axe")
+
+proc resourcePackPreset*(preset: Preset, pack: ResourcePack): Preset =
+  ## Replaces only the back slot while preserving the approved worker outfit.
+  result = preset
+  if pack == NoPack:
+    return
+  result.parts = @[]
+  for part in preset.parts:
+    if part.category != "Back":
+      result.parts.add part
+  let name =
+    case pack
+    of WoodPack:
+      "Wood stack backpack"
+    of GoldPack:
+      "Gold sack backpack"
+    of NoPack:
+      "None"
+  result.parts.add PresetPart(category: "Back", item: name)
 
 proc unitPortraitPath*(player: int32, kind: UnitKind): string =
   ## Returns a runtime-rendered portrait of the approved player and role.
@@ -147,14 +183,20 @@ proc generatedCharacterAssets*(): seq[Asset] =
   result.add modelAsset(directory / manifest.rig)
   for units in roster.players:
     for entry in units:
-      let inventory = manifest.presetManifest(entry.preset)
-      for category in inventory.categories:
-        for item in category.items:
-          for path in item.files:
-            result.add modelAsset(directory / path, textureSize = 512)
-          for path in [item.texture, item.pupilMask]:
-            if path.len > 0:
-              result.add imageAsset(directory / path, 512)
+      var presets = @[entry.preset]
+      if entry.kind == $PeonUnit:
+        presets.add woodAxePreset(entry.preset)
+        for pack in WoodPack .. GoldPack:
+          presets.add resourcePackPreset(entry.preset, pack)
+      for preset in presets:
+        let inventory = manifest.presetManifest(preset)
+        for category in inventory.categories:
+          for item in category.items:
+            for path in item.files:
+              result.add modelAsset(directory / path, textureSize = 512)
+            for path in [item.texture, item.pupilMask]:
+              if path.len > 0:
+                result.add imageAsset(directory / path, 512)
   for name in CharacterClips:
     var found = false
     for clip in manifest.clips:

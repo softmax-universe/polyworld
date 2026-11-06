@@ -110,6 +110,12 @@ import
   test_visions,
   test_worldtexts,
   test_rooms,
+  test_room_codes,
+  test_room_cleanup,
+  test_relay_async_hashes,
+  test_relay_readiness,
+  test_lvd_start_intent,
+  test_sparse_rooms,
   test_roomclients,
   test_networks,
   ../games/gods_of_the_arena/tests/test_multiplayer as TestGotaMultiplayer

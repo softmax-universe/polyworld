@@ -136,7 +136,8 @@ for client in clients:
     kind: Ready, revision: session.revision, hash: session.game.networkHash
   ))
 exchange()
-first.send(RoomMessage(kind: StartMatch))
+first.send(RoomMessage(kind: StartMatch, revision: sessions[0].revision,
+  hash: sessions[0].game.networkHash()))
 exchange()
 for session in sessions:
   doAssert session.client.events.len == 1
@@ -155,7 +156,9 @@ for iteration in 0 ..< 600:
     first.lost()
     disconnectedTick = relay.rooms[0].tick
   if iteration in 41 .. 49:
-    doAssert relay.rooms[0].tick == disconnectedTick
+    doAssert relay.rooms[0].tick > disconnectedTick,
+      "A disconnected controller must not stall the shared timeline"
+    doAssert relay.rooms[0].phase == Playing
   if iteration == 50:
     first.opened()
   if iteration == 80:
@@ -194,7 +197,13 @@ for iteration in 0 ..< 600:
   exchange()
   advanceClients()
   if relay.rooms[0].phase == rooms.Ended:
-    break
+    # First controller completion stops production, not lagging client playback.
+    var allFinished = true
+    for session in sessions:
+      if not session.finished:
+        allFinished = false
+    if allFinished:
+      break
   doAssert relay.rooms[0].phase != Desynced, relay.rooms[0].detail
 for session in sessions:
   doAssert session.finished

@@ -2,6 +2,7 @@ import
   std/os,
   jsony,
   polyworld/[assets, chargen, common, terrainsurfaces],
+  polyworld/chargen/teamcolors,
   content, factions
 
 const
@@ -37,7 +38,7 @@ const
   ]
   UnitNames*: array[UnitKind, string] = [
     "Peon", "Swordsman", "Archer", "Mage", "Armored knight", "Bomber",
-    "Cleric", "Fire elemental"
+    "Cleric", "Elemental"
   ]
   BuildingModelRoot* = DataRoot & "/terrain/lvd_buildings/models"
   FactionTextureRoot* = DataRoot & "/terrain/lvd_buildings/textures/factions"
@@ -60,6 +61,22 @@ type
   CharacterRoster* = object
     factions*: seq[Faction]
     players*: seq[seq[UnitPreset]]
+
+proc woodAxePreset*(preset: Preset): Preset =
+  ## Preserve the outfit and its colors while equipping the right-hand axe.
+  result = preset
+  result.parts = @[]
+  var replaced = false
+  for part in preset.parts:
+    if part.category == "Right hand":
+      var axe = part
+      axe.item = "Berserker axe"
+      result.parts.add axe
+      replaced = true
+    else:
+      result.parts.add part
+  if not replaced:
+    result.parts.add PresetPart(category: "Right hand", item: "Berserker axe")
 
 proc readCharacterRoster*(
   factions: openArray[Faction] = []
@@ -85,8 +102,14 @@ proc readCharacterRoster*(
     if units.len != UnitKind.high.ord + 1:
       raise newException(ChargenError, "LvD roster needs all eight roles.")
     for kind in UnitKind:
-      if kind != SummonUnit:
-        units[kind.ord].skinRgb = result.factions[player].skinRgb()
+      units[kind.ord].skinRgb = result.factions[player].skinRgb()
+      if kind == KnightUnit:
+        # Looks repeat across seats; separate their mutable part lists.
+        var parts: seq[PresetPart]
+        for part in units[kind.ord].preset.parts:
+          parts.add part
+        units[kind.ord].preset.parts = parts
+        units[kind.ord].preset.tintVanguardTeam(result.factions[player].skinRgb())
       let entry = units[kind.ord]
       if entry.kind != $kind:
         raise newException(ChargenError, "LvD roster is missing " & $kind)
@@ -145,16 +168,22 @@ proc generatedCharacterAssets*(): seq[Asset] =
     for path in walkFiles(directory / category.directory / "*.json"):
       result.add fileAsset(path)
   result.add modelAsset(directory / manifest.rig)
+  for name in ["resource_wood", "resource_gold"]:
+    result.add modelAsset(directory / "clothing/backs" / (name & ".glb"))
   for units in roster.players:
     for entry in units:
-      let inventory = manifest.presetManifest(entry.preset)
-      for category in inventory.categories:
-        for item in category.items:
-          for path in item.files:
-            result.add modelAsset(directory / path, textureSize = 512)
-          for path in [item.texture, item.pupilMask]:
-            if path.len > 0:
-              result.add imageAsset(directory / path, 512)
+      var presets = @[entry.preset]
+      if entry.kind == $PeonUnit:
+        presets.add woodAxePreset(entry.preset)
+      for preset in presets:
+        let inventory = manifest.presetManifest(preset)
+        for category in inventory.categories:
+          for item in category.items:
+            for path in item.files:
+              result.add modelAsset(directory / path, textureSize = 512)
+            for path in [item.texture, item.pupilMask]:
+              if path.len > 0:
+                result.add imageAsset(directory / path, 512)
   for name in CharacterClips:
     var found = false
     for clip in manifest.clips:

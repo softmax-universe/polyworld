@@ -1,0 +1,7 @@
+
+[Suite] Cosmetic readiness
+rooms.nim(64)            reject
+
+    Unhandled exception: Every controlling client must be connected [RoomsError]
+  [FAILED] host starts unready controllers after automatic preparation
+Error: execution of an external program failed: '/Users/me/p/polyworld/build/test_cosmetic_ready'

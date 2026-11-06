@@ -1,0 +1,349 @@
+{
+  "cacheVersion": "D20240927T193831",
+  "outputFile": "/Users/me/p/polyworld/build/galcon-rematch-relay",
+  "outputLastModificationTime": "",
+  "compile": [
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@psystem@sexceptions.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@psystem@sexceptions.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@psystem@sexceptions.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@psystem@sctypes.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@psystem@sctypes.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@psystem@sctypes.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@sprivate@ssyslocks.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@sprivate@ssyslocks.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@sprivate@ssyslocks.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@sprivate@sthreadtypes.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@sprivate@sthreadtypes.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@sprivate@sthreadtypes.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@sprivate@sdigitsutils.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@sprivate@sdigitsutils.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@sprivate@sdigitsutils.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@sassertions.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@sassertions.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@sassertions.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@psystem@sdollars.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@psystem@sdollars.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@psystem@sdollars.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@stypedthreads.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@stypedthreads.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@stypedthreads.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@ssyncio.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@ssyncio.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@ssyncio.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@psystem.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@psystem.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@psystem.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pparseutils.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pparseutils.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pparseutils.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pbitops.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pbitops.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pbitops.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pmath.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pmath.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pmath.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@palgorithm.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@palgorithm.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@palgorithm.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@punicode.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@punicode.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@punicode.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstrutils.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstrutils.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstrutils.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@poptions.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@poptions.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@poptions.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pposix.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pposix.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pposix.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@ptimes.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@ptimes.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@ptimes.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@smonotimes.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@smonotimes.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@smonotimes.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@soserrors.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@soserrors.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@soserrors.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@sprivate@sospaths2.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@sprivate@sospaths2.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@sprivate@sospaths2.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@senvvars.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@senvvars.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@senvvars.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@scmdline.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@scmdline.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@scmdline.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pos.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pos.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pos.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pmummy@scommon.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pmummy@scommon.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pmummy@scommon.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pnativesockets.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pnativesockets.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pnativesockets.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pwebby@shttpheaders.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pwebby@shttpheaders.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pwebby@shttpheaders.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pmummy@sinternal.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pmummy@sinternal.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pmummy@sinternal.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@patomics.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@patomics.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@patomics.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pbase64.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pbase64.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pbase64.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pcpuinfo.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pcpuinfo.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pcpuinfo.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@phashes.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@phashes.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@phashes.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pdeques.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pdeques.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pdeques.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@ssysrand.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@ssysrand.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@ssysrand.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@prandom.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@prandom.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@prandom.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pkqueue.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pkqueue.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pkqueue.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pselectors.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pselectors.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pselectors.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@psets.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@psets.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@psets.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pcrunchy@ssha1.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pcrunchy@ssha1.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pcrunchy@ssha1.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@ptables.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@ptables.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@ptables.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pwebby@sinternal.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pwebby@sinternal.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pwebby@sinternal.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pwebby@squeryparams.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pwebby@squeryparams.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pwebby@squeryparams.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pwebby@surls.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pwebby@surls.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pwebby@surls.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@scommon.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@scommon.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@scommon.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@sinternal.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@sinternal.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@sinternal.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@sadler32_simd.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@sadler32_simd.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@sadler32_simd.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@sadler32.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@sadler32.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@sadler32.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@scrc32_simd.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@scrc32_simd.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@scrc32_simd.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@scrc.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@scrc.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@scrc.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@sbitstreams.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@sbitstreams.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@sbitstreams.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@slz77.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@slz77.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@slz77.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@ssnappy.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@ssnappy.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@ssnappy.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pheapqueue.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pheapqueue.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pheapqueue.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@sdeflate.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@sdeflate.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@sdeflate.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pmummy.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pmummy.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pmummy.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@ppolyworld@scli.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@ppolyworld@scli.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@ppolyworld@scli.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstreams.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstreams.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstreams.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@plexbase.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@plexbase.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@plexbase.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pparsejson.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pparsejson.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pparsejson.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pjson.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pjson.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pjson.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@ppolyworld@srooms.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@ppolyworld@srooms.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@ppolyworld@srooms.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@ppolyworld@srelays.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@ppolyworld@srelays.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@ppolyworld@srelays.nim.c"
+    ],
+    [
+      "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@mgameserver.nim.c",
+      "clang -c  -w -ferror-limit=3 -fno-strict-aliasing -pthread -O3   -I/Users/me/.nimby/nim/lib -I/Users/me/p/polyworld/tools -o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@mgameserver.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@mgameserver.nim.c"
+    ]
+  ],
+  "link": [
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@psystem@sexceptions.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@psystem@sctypes.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@sprivate@ssyslocks.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@sprivate@sthreadtypes.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@sprivate@sdigitsutils.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@sassertions.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@psystem@sdollars.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@stypedthreads.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@ssyncio.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@psystem.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pparseutils.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pbitops.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pmath.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@palgorithm.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@punicode.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstrutils.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@poptions.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pposix.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@ptimes.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@smonotimes.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@soserrors.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@sprivate@sospaths2.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@senvvars.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@scmdline.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pos.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pmummy@scommon.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pnativesockets.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pwebby@shttpheaders.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pmummy@sinternal.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@patomics.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pbase64.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pcpuinfo.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@phashes.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pdeques.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@ssysrand.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@prandom.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pkqueue.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pselectors.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@psets.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pcrunchy@ssha1.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@ptables.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pwebby@sinternal.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pwebby@squeryparams.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pwebby@surls.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@scommon.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@sinternal.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@sadler32_simd.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@sadler32.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@scrc32_simd.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@scrc.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@sbitstreams.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@slz77.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@ssnappy.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pheapqueue.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@sdeflate.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pmummy.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@ppolyworld@scli.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstreams.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@plexbase.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pparsejson.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pjson.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@ppolyworld@srooms.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@ppolyworld@srelays.nim.c.o",
+    "/Users/me/p/polyworld/build/galcon-rematch-relay-cache/@mgameserver.nim.c.o"
+  ],
+  "linkcmd": "clang   -o /Users/me/p/polyworld/build/galcon-rematch-relay /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@psystem@sexceptions.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@psystem@sctypes.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@sprivate@ssyslocks.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@sprivate@sthreadtypes.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@sprivate@sdigitsutils.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@sassertions.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@psystem@sdollars.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@stypedthreads.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@ssyncio.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@psystem.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pparseutils.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pbitops.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pmath.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@palgorithm.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@punicode.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstrutils.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@poptions.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pposix.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@ptimes.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@smonotimes.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@soserrors.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@sprivate@sospaths2.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@senvvars.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@scmdline.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pos.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pmummy@scommon.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pnativesockets.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pwebby@shttpheaders.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pmummy@sinternal.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@patomics.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pbase64.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pcpuinfo.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@phashes.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pdeques.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstd@ssysrand.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@prandom.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pkqueue.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pselectors.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@psets.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pcrunchy@ssha1.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@ptables.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pwebby@sinternal.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pwebby@squeryparams.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pwebby@surls.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@scommon.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@sinternal.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@sadler32_simd.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@sadler32.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@scrc32_simd.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@scrc.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@sbitstreams.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@slz77.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@ssnappy.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pheapqueue.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy@sdeflate.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pzippy.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pmummy.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@ppolyworld@scli.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pstreams.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@plexbase.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pparsejson.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@pjson.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@ppolyworld@srooms.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@ppolyworld@srelays.nim.c.o /Users/me/p/polyworld/build/galcon-rematch-relay-cache/@mgameserver.nim.c.o  -framework Security   -ldl",
+  "extraCmds": [],
+  "configFiles": [
+    "/Users/me/.nimby/nim/config/nim.cfg",
+    "/Users/me/.nimby/nim/config/config.nims",
+    "/Users/me/p/nim.cfg",
+    "/Users/me/p/polyworld/config.nims"
+  ],
+  "stdinInput": false,
+  "projectIsCmd": false,
+  "cmdInput": "",
+  "currentDir": "/Users/me/p/polyworld",
+  "cmdline": "",
+  "depfiles": [],
+  "nimexe": ""
+}

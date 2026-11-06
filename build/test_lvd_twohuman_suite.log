@@ -1,0 +1,102 @@
+Checking distinct and repeatable faction assignments
+test_content: all checks passed
+  contentHash = 00000000B18431B6
+Testing neutral starts, bilateral deadlines, and offer validation
+Testing combat permissions, shared vision, and independent snapshots
+Testing base policy ranking, peace after elimination, and final betrayal
+Testing diplomacy settings and policy commands replay tick for tick
+LvD diplomacy and base policy passed
+Checking generated scenery placement, harvesting, and restoration
+2026: 2861 trees, 397 rocks
+42: 2151 trees, 318 rocks
+73: 2306 trees, 336 rocks
+Checking the native and browser ground use only generated assets
+LvD generated scenery passed
+Testing node layouts across seeds, rosters, and expansion counts
+Testing seeded variation in spokes and expansion angles
+Testing map size and spacing settings
+Testing invalid settings and damaged maps
+LvD node maps passed
+Testing every supplied bot acts and records deterministic commands
+LvD multiplayer and replay tests passed
+Testing Flatty action replay round trip
+Testing allocation-free exact-tick playback
+Testing that skipping a recorded tick is loud
+Testing per-tick hash lookup
+Testing replay file I/O and privacy shape
+Testing replay validation
+Testing recorder ordering and limits
+test_replays: all checks passed
+Testing the opening position
+Testing rectangular construction reserves and releases its base
+Testing starting building bases never overlap or block their approaches
+Testing determinism across identical runs
+Testing that the hash actually responds to state
+Testing movement, occupancy, and arrival
+Testing paths go around other units
+Testing mine approach tiles spread across peons
+Testing only accepted RTS commands contribute to APM
+Testing failure queries are read-only
+Testing rejected orders preserve the complete world
+Testing accepted unit orders clear previous failures
+Testing accepted orders can report a new failure
+Testing live history seek does not skip recorded actions
+Testing the gold round trip
+  five peons gathered 2900 gold in 60 seconds
+Testing the wood round trip and tree depletion
+Testing wood drop-off uses the closer hall or mill
+Testing construction, training, food, and cancellation
+Testing the reference overlord starts building
+  2 farm(s) finished in the opening 30s
+Testing combat and defeat
+Testing attack-move engages enemies that a move walks past
+Testing the chokepoint does not deadlock
+  all 40 units crossed the ford in both directions
+Testing that an army can cross the whole map
+  20/20 reached the enemy base, 8 gave up
+Testing that a recorded match replays tick for tick
+  27 commands replayed over 1600 ticks with no divergence
+test_sim: all checks passed
+Testing the simulation winner determines standings
+Testing credited kills and deterministic statistics checkpoints
+Testing LVD decimal move orders and replay payloads
+LvD config passed
+LvD multiplayer deterministic replay passed
+
+[Suite] LvD retained readiness
+  [OK] roster resize retains readiness intent without treating it as map settings
+  [OK] ResizeRoom cannot disguise map or surviving player changes as roster only
+  [OK] remaining host refreshes after controller leave/refill without another click
+  [OK] a late retained peer refresh rejects Start until its current hash arrives
+  [OK] configuration edits still require an explicit Ready
+  [OK] missing private sources wait and failed preparation is bounded per revision
+  [OK] exit resets preparation and room-scoped retry latch
+  [OK] room changes cannot reuse a matching numeric prepared revision
+LvD empty lobby defaults passed
+LvD host controls and removed modal route guards passed
+LvD game-name defaults and owner route guards passed
+
+[Suite] LvD name-only real relay operation
+  [OK] rename preserves every authoritative setting and public/private visibility
+  [OK] guest helper and forged relay packet cannot rename the owner's room
+  [OK] retained intent requires both controllers to refresh revision-bound hashes
+LvD opaque names survive wire, snapshot, preparation and startup
+LvD roster resizing uses roster-only operation
+LvD real relay, reconnect, private bots and replay passed
+LvD unit order queue tests passed
+QUEUED human=0 unit=1000000000 target=(x: 46, y: 39)
+QUEUED human=1 unit=1000000005 target=(x: 11, y: 71)
+DISPLACEMENT human=0 initial=fixedVec2(49.50000, 42.50000) final=fixedVec2(46.74234, 39.74234)
+DISPLACEMENT human=1 initial=fixedVec2(14.50000, 74.50000) final=fixedVec2(11.74234, 71.74234)
+PASS two humans moved; peer and replay hashes agree for 96 ticks
+LvD network order queue replay passed
+occupied entrance deposits: [3, 3]
+occupied entrance deposits: [3, 3]
+retarget with Shift deposits: [1, 1]
+sealed ring deposits: [3, 3]
+Wood congestion tests passed
+head-on mining deposits: [6, 7]; passed: true
+head-on mining deposits: [6, 7]; passed: true
+head-on mining deposits: [1, 1]; passed: true
+Worker passing tests passed
+Game tests passed

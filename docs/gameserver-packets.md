@@ -205,9 +205,9 @@ Claim an empty lobby seat or rename your own seat.
 
 ## 9. ReleaseSeat — Client → server
 
-Release your lobby seat; an already empty seat is accepted. In Galcon only,
-the host may also release a foreign bot seat (seat name is not `Human`),
-without removing its participant or their other seats.
+Release your lobby seat; an already empty seat is accepted. In Galcon, GotA,
+and LvD, the host may also release a foreign bot seat (seat name is not
+`Human`), without removing its participant or their other seats.
 
 | Field | Nim wire type | Carries / rules |
 | --- | --- | --- |
@@ -230,8 +230,10 @@ Owner-only start. GotA accepts a sparse, nonempty occupied roster without Ready
 clicks: the host prepares the current snapshot and supplies its initial hash.
 Peers prepare on BeginMatch, check its exact revision/hash before ticks, and
 report tick zero against the relay's immutable checkpoint. Missing reports do
-not block the clock; mismatches still desync. Other adapters retain their
-existing connected-controller, readiness and hash gates (including dense LvD).
+not block the clock; mismatches still desync. Galcon protocol 2+ and LvD
+protocol 3+ use automatic revision-bound preparation and can defer a host start
+until proofs arrive, independently of cosmetic Ready. Legacy policies retain
+their existing Ready gates; legacy LvD requires every seat to be occupied.
 
 | Field | Nim wire type | Carries / rules |
 | --- | --- | --- |
@@ -398,11 +400,12 @@ A controller pauses or resumes the current match; spectators cannot.
 
 Uses the same body and owner/lobby validation as ConfigureRoom. When tick rate
 and opaque payload are unchanged, preserves controlling participants' ready
-intent while incrementing revision. For Galcon JSON setups, a change only to
-integer `players` matching `number` is also roster-only. Other payload changes
-invalidate readiness. Every controller must confirm the resulting revision
-before StartMatch. Name-only changes use the same operation; preserve visibility
-from the Lobby RoomState flag.
+intent while incrementing revision. A Galcon JSON change only to integer
+`players` matching `number`, or an LvD JSON roster resize that preserves the
+surviving player entries and appends only empty names, is also roster-only.
+Other payload changes invalidate readiness. Name-only changes use the same
+operation; preserve visibility from the Lobby RoomState flag. Revision-bound
+proofs must be refreshed where required by the adapter's startup policy.
 
 Spectator membership changes publish snapshots without changing setup revision.
 Seat changes and controller renames require new revision-bound proofs even when

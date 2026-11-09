@@ -62,9 +62,11 @@ remain only in the running client's memory.
 
 Each participant may own several seats. A participant can bring only bots
 and watch them play. Each bot runs solely in its owner's client. Remote seats
-have no VM. Roster or settings changes invalidate readiness. All seats must
-have an owner and all controlling clients must load the same setup before
-Start succeeds. Spectators may join after the match starts.
+have no VM. Startup policy depends on the adapter: GotA uses a host-prepared
+hash and sparse seats; Galcon protocol 2+ and LvD protocol 3+ use automatic
+revision-bound preparation, independently of cosmetic Ready. Older policies
+retain their readiness gates, and older LvD requires a dense roster. Spectators
+may join after the match starts. See the packet reference for details.
 
 Rooms exist only while at least one participant is connected. Controllers,
 bot-only seat owners and seatless spectators all count as people watching;
@@ -85,8 +87,10 @@ including empty packets. GotA uses 24 Hz. Every client applies the same packet
 exactly once and never advances without a packet. The server checks seat
 ownership and envelope bounds. Each game checks its own payload semantics.
 
-Hash checking cannot be disabled. All controlling clients must agree before
-startup. During play, clients report a hash every simulated second. The first
+Hash checking cannot be disabled. Galcon and LvD automatic preparation
+compares current-revision controller hashes before startup. GotA instead starts
+from the host's prepared hash; peers validate and report tick zero. During play,
+clients report a hash every simulated second. The first
 report for a match/tick establishes its historical hash; subsequent reports
 compare against that same checkpoint. Missing or late hashes never delay ticks.
 A differing hash stops the match and reports the tick and hash values. The first

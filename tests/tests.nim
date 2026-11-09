@@ -114,6 +114,7 @@ import
   test_room_cleanup,
   test_relay_async_hashes,
   test_relay_readiness,
+  test_lvd_start_intent,
   test_sparse_rooms,
   test_room_resize,
   test_galcon_relay_support,

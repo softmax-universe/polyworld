@@ -16,7 +16,7 @@ type
     tokens: seq[string]
   CoworldSeat* = object
     slot*: int
-    kind*: string = "policy"
+    kind*: string
     fileUri*, contentHash*: string
     sizeBytes*: int64
     logUri*, artifactUri*, annotationsUri*: string
@@ -310,6 +310,9 @@ proc coworldOptions*(requiredSlots: int,
   except JsonError as error:
     raise newException(CoworldError,
       "Invalid Coworld configuration: " & error.msg)
+  if seats.schema in ["coworld-player-seats/1", "coworld-player-seats/2"]:
+    for seat in seats.seats.mitems:
+      seat.kind = "policy"
   let slotCount =
     if requiredSlots > 0: requiredSlots else: config.players.len
   if slotCount < 1 or seats.schema notin ["coworld-player-seats/1", "coworld-player-seats/2",

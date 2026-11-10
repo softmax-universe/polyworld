@@ -61,6 +61,28 @@ status message and exact Ping/Pong. Gameplay uses files. `/healthz` is live;
 `/client/global` and other legacy clients show a static page. Unimplemented routes
 return HTTP 501. No player artifact ZIP is produced.
 
+## Mixed player rosters
+
+Games that implement container players pass HTTP and WebSocket callbacks to
+`coworldOptions(requiredSlots, onPlayerRequest, onPlayerEvent)`. The wrapper
+accepts `coworld-play-seats/2` and preserves slot order for `policy`, `container`,
+and `human` entries. File-only games reject network seats before starting.
+
+Only `policy` entries load files and receive private file-player outputs.
+Network entries have empty `BotGroup.path` values; games must skip their BASIC
+runtimes. `seats.seats[slot].kind` identifies the owning runtime.
+
+The HTTP callback owns `/player`, including slot/token authentication against
+`playerTokens`. The WebSocket callback returns true for sockets it owns and
+false for global viewers. Both callbacks run on Mummy workers: synchronize
+shared state and keep simulation mutation on the game thread. The wrapper
+initializes the roster, tokens and callbacks before starting the server.
+
+Games own observation/action schemas, deadlines, and terminal messages. They
+must declare both runtimes in their manifest and verify container actions in
+full matches before enabling hosted use. `rejectPlayer` attributes a network
+player failure to its seat without creating a file-player log or status.
+
 ## Policy annotations
 
 All Polyworld policy hosts register the same annotation API through

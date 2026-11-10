@@ -16,6 +16,7 @@ type
     tokens: seq[string]
   CoworldSeat* = object
     slot*: int
+    kind*: string = "policy"
     fileUri*, contentHash*: string
     sizeBytes*: int64
     logUri*, artifactUri*, annotationsUri*: string
@@ -46,12 +47,18 @@ type
     outcome*: string
     bankedGold*: seq[int32]
     returned*: seq[bool]
+  PlayerEvents* = proc(socket: WebSocket, event: WebSocketEvent,
+    message: Message): bool {.gcsafe.}
+    ## Returns true for a game-owned player socket; false for global viewers.
   ServerAddress = object
     server: Server
     host: string
     port: Port
 
 var
+  playerTokens*: seq[string]
+  playerRequest: RequestHandler
+  playerEvents: PlayerEvents
   seats*: CoworldSeats
   config*: GameConfig
   logs: seq[PlayerLog]
@@ -192,6 +199,8 @@ proc writePlayerStatus() =
   ## Writes diagnostic VM outcomes using the platform's process-status schema.
   var status = PlayerStatuses(schemaVersion: "1")
   for slot, log in logs:
+    if seats.seats[slot].kind != "policy":
+      continue
     status.players.add PlayerStatus(
       slot: slot,
       state: "exited",
@@ -208,11 +217,13 @@ proc waitForCollection*() =
 
 proc rejectPlayer*(slot: int, message: string) {.noreturn.} =
   ## Reports staged player failures through the owning seat boundary.
-  playerError(slot, message)
+  if seats.seats[slot].kind == "policy":
+    playerError(slot, message)
   closePlayerOutputs()
   writePlayerStatus()
   writeAtomic(failurePath, PlayerFailure(
-    message: "Policy loading failed for player slot " & $slot,
+    message: "Player slot " & $slot & " failed: " &
+      (if seats.seats[slot].kind == "policy": "Policy loading failed" else: message),
     failedPolicyIndex: slot
   ).toJson())
   waitForCollection()
@@ -253,6 +264,12 @@ proc requestHandler(request: Request) {.gcsafe.} =
       @[ ("Content-Type", "text/html; charset=utf-8") ],
       GlobalHtml
     )
+  of "/player":
+    {.cast(gcsafe).}:
+      if playerRequest == nil:
+        request.respond(501, body = "This game does not accept socket players.")
+      else:
+        playerRequest(request)
   of "/global":
     discard request.upgradeToWebSocket()
   else:
@@ -263,7 +280,10 @@ proc websocketHandler(
     event: WebSocketEvent,
     message: Message
 ) {.gcsafe.} =
-  ## Provides a status message and exact Ping/Pong without gameplay traffic.
+  ## Delegates player traffic while preserving the global viewer contract.
+  {.cast(gcsafe).}:
+    if playerEvents != nil and playerEvents(socket, event, message):
+      return
   case event
   of OpenEvent:
     socket.send("{\"type\":\"status\",\"player_runtime\":\"game-hosted\"}")
@@ -277,8 +297,10 @@ proc serve(address: ServerAddress) {.thread.} =
   ## Runs the contract server independently of deterministic simulation ticks.
   address.server.serve(address.port, address.host)
 
-proc coworldOptions*(requiredSlots: int): GameOptions =
-  ## Loads the file handoff, opens logs, and starts the optional host wrapper.
+proc coworldOptions*(requiredSlots: int,
+    onPlayerRequest: RequestHandler = nil,
+    onPlayerEvent: PlayerEvents = nil): GameOptions =
+  ## Loads the roster, opens file-player logs, and starts the host wrapper.
   var tokens: CoworldTokens
   try:
     let bytes = readLocal(getEnv("COGAME_CONFIG_URI"))
@@ -290,7 +312,8 @@ proc coworldOptions*(requiredSlots: int): GameOptions =
       "Invalid Coworld configuration: " & error.msg)
   let slotCount =
     if requiredSlots > 0: requiredSlots else: config.players.len
-  if slotCount < 1 or seats.schema notin ["coworld-player-seats/1", "coworld-player-seats/2"] or
+  if slotCount < 1 or seats.schema notin ["coworld-player-seats/1", "coworld-player-seats/2",
+      "coworld-play-seats/2"] or
     seats.seats.len != slotCount or tokens.tokens.len != slotCount or
     config.players.len != slotCount:
       raise newException(CoworldError, "Coworld roster does not match the game")
@@ -310,10 +333,21 @@ proc coworldOptions*(requiredSlots: int): GameOptions =
     recordPath: replayPath,
     speed: 1
   )
+  playerTokens = tokens.tokens
+  playerRequest = onPlayerRequest
+  playerEvents = onPlayerEvent
   logs.setLen(slotCount)
   for slot, seat in seats.seats:
     if seat.slot != slot:
       raise newException(CoworldError, "Coworld seats must be in slot order")
+    if seat.kind notin ["policy", "container", "human"]:
+      raise newException(CoworldError, "Unknown Coworld player kind")
+    if seat.kind != "policy":
+      if seats.schema != "coworld-play-seats/2" or
+        onPlayerRequest == nil or onPlayerEvent == nil:
+          raise newException(CoworldError, "Game does not implement socket players")
+      result.botGroups.add BotGroup(count: 1)
+      continue
     let path = localPath(seat.fileUri)
     try:
       if getFileSize(path) != seat.sizeBytes:
@@ -329,7 +363,7 @@ proc coworldOptions*(requiredSlots: int): GameOptions =
     playerLog(slot, "Player slot " & $slot & " started.\n")
   annotationSinks = newSeq[AnnotationSink](slotCount)
   for slot, seat in seats.seats:
-    if seat.annotationsUri.len > 0:
+    if seat.kind == "policy" and seat.annotationsUri.len > 0:
       annotationSinks[slot] = newAnnotationSink(localPath(seat.annotationsUri))
   var port: int
   try:
@@ -362,6 +396,8 @@ proc finishCoworld*(
   if totalXp.len > 0 and totalXp.len != logs.len:
     raise newException(CoworldError, "XP results do not match the roster")
   for slot in 0 ..< logs.len:
+    if seats.seats[slot].kind != "policy":
+      continue
     playerLog(slot, "\nPlayer slot " & $slot & " completed.\n")
   closePlayerOutputs()
   writePlayerStatus()

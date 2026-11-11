@@ -292,6 +292,12 @@ proc tickLimitsValid*(
   ## True when the configured tick limits are acceptable.
   maxTicks > 0 and (cap == 0 or maxTicks <= cap) and spawnIntervalTicks > 0
 
+proc checkTickLimits*(config: GameConfig) =
+  ## Validate host tick limits before opening outputs or starting the server.
+  if not tickLimitsValid(config.maxTicks, config.spawnIntervalTicks,
+      tickCap(getEnv("POLYWORLD_MAX_TICKS_CAP"))):
+    raise newException(CoworldError, "Coworld tick limits are invalid")
+
 proc coworldOptions*(requiredSlots: int): GameOptions =
   ## Loads the file handoff, opens logs, and starts the optional host wrapper.
   var tokens: CoworldTokens
@@ -309,10 +315,7 @@ proc coworldOptions*(requiredSlots: int): GameOptions =
     seats.seats.len != slotCount or tokens.tokens.len != slotCount or
     config.players.len != slotCount:
       raise newException(CoworldError, "Coworld roster does not match the game")
-  if not tickLimitsValid(
-      config.maxTicks, config.spawnIntervalTicks,
-      tickCap(getEnv("POLYWORLD_MAX_TICKS_CAP"))):
-      raise newException(CoworldError, "Coworld tick limits are invalid")
+  checkTickLimits(config)
   resultsPath = localPath(getEnv("COGAME_RESULTS_URI"))
   replayPath = localPath(getEnv("COGAME_SAVE_REPLAY_URI"))
   failurePath = localPath(getEnv("COGAME_PLAYER_FAILURE_URI"))

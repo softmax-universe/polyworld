@@ -11,6 +11,7 @@ import ../games/gods_of_the_arena/tests/test_abilities as TestGotaAbilities
 import determinism
 import
   test_cli,
+  test_coworld_tick_cap,
   ../games/crewrift/tests/test_sim as TestCrewrift,
   ../games/crewrift/tests/test_skins as TestCrewriftSkins,
   test_annotations,

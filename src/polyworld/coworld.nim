@@ -278,13 +278,19 @@ proc serve(address: ServerAddress) {.thread.} =
   address.server.serve(address.port, address.host)
 
 proc tickCap*(setting: string): int32 =
-  DefaultDurationTicks
+  ## Highest allowed max_ticks. `POLYWORLD_MAX_TICKS_CAP` raises it; 0 removes
+  ## it. Unset or invalid keeps the default 28,800-tick cap for existing games.
+  try:
+    let value = parseInt(setting.strip())
+    if value in 0 .. int32.high.int: value.int32 else: DefaultDurationTicks
+  except ValueError:
+    DefaultDurationTicks
 
 proc tickLimitsValid*(
     maxTicks, spawnIntervalTicks: int32, cap = DefaultDurationTicks
 ): bool =
   ## True when the configured tick limits are acceptable.
-  not (maxTicks <= 0 or maxTicks > cap or spawnIntervalTicks <= 0)
+  maxTicks > 0 and (cap == 0 or maxTicks <= cap) and spawnIntervalTicks > 0
 
 proc coworldOptions*(requiredSlots: int): GameOptions =
   ## Loads the file handoff, opens logs, and starts the optional host wrapper.
@@ -303,7 +309,9 @@ proc coworldOptions*(requiredSlots: int): GameOptions =
     seats.seats.len != slotCount or tokens.tokens.len != slotCount or
     config.players.len != slotCount:
       raise newException(CoworldError, "Coworld roster does not match the game")
-  if not tickLimitsValid(config.maxTicks, config.spawnIntervalTicks):
+  if not tickLimitsValid(
+      config.maxTicks, config.spawnIntervalTicks,
+      tickCap(getEnv("POLYWORLD_MAX_TICKS_CAP"))):
       raise newException(CoworldError, "Coworld tick limits are invalid")
   resultsPath = localPath(getEnv("COGAME_RESULTS_URI"))
   replayPath = localPath(getEnv("COGAME_SAVE_REPLAY_URI"))

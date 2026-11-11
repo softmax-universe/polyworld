@@ -277,6 +277,15 @@ proc serve(address: ServerAddress) {.thread.} =
   ## Runs the contract server independently of deterministic simulation ticks.
   address.server.serve(address.port, address.host)
 
+proc tickCap*(setting: string): int32 =
+  DefaultDurationTicks
+
+proc tickLimitsValid*(
+    maxTicks, spawnIntervalTicks: int32, cap = DefaultDurationTicks
+): bool =
+  ## True when the configured tick limits are acceptable.
+  not (maxTicks <= 0 or maxTicks > cap or spawnIntervalTicks <= 0)
+
 proc coworldOptions*(requiredSlots: int): GameOptions =
   ## Loads the file handoff, opens logs, and starts the optional host wrapper.
   var tokens: CoworldTokens
@@ -294,8 +303,7 @@ proc coworldOptions*(requiredSlots: int): GameOptions =
     seats.seats.len != slotCount or tokens.tokens.len != slotCount or
     config.players.len != slotCount:
       raise newException(CoworldError, "Coworld roster does not match the game")
-  if config.maxTicks <= 0 or config.maxTicks > DefaultDurationTicks or
-    config.spawnIntervalTicks <= 0:
+  if not tickLimitsValid(config.maxTicks, config.spawnIntervalTicks):
       raise newException(CoworldError, "Coworld tick limits are invalid")
   resultsPath = localPath(getEnv("COGAME_RESULTS_URI"))
   replayPath = localPath(getEnv("COGAME_SAVE_REPLAY_URI"))

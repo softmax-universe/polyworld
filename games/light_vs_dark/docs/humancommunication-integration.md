@@ -13,7 +13,7 @@ server deployment or commit was performed for this integration.
   teardown clears communication, `hudNetwork`, frame/key/release/rune/focus
   callbacks and native rune capture, including exceptional/early-return exits.
 - Enter opens/sends and Escape cancels through the production button callback,
-  before sequential shortcuts, pause/menu, fullscreen and chrome hotkeys.
+  before contextual action keys, pause/menu, fullscreen and chrome hotkeys.
   Entry cancels gestures, build placement and armed attack. Repeated Enter is
   quarantined until release; release forwarding is unconditional.
 - The rune callback forwards Unicode to communication only with the match menu

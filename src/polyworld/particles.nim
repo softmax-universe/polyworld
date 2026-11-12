@@ -18,7 +18,11 @@ const
     "uParticleSeed",
     "uParticleEffectKind",
     "uParticleOrigin",
-    "uParticleTarget"
+    "uParticleTarget",
+    "uParticleSight",
+    "uParticleSightOrigin",
+    "uParticleSightWidth",
+    "uParticleClipSight"
   ]
   ParticleVertexSource =
     when defined(emscripten):
@@ -51,7 +55,11 @@ type
     SeedUniform,
     EffectKindUniform,
     OriginUniform,
-    TargetUniform
+    TargetUniform,
+    SightUniform,
+    SightOriginUniform,
+    SightWidthUniform,
+    ClipSightUniform
 
   ParticleProgram = object
     id: GLuint
@@ -75,6 +83,7 @@ type
     effects: seq[ParticleEffect]
     time: float32
     nextSeed: uint32
+    sightTexture: GLuint
 
 proc compileParticleStage(
     kind: GLenum,
@@ -143,6 +152,19 @@ proc initParticleSystem*(): ParticleSystem =
   result.program = compileParticleProgram()
   result.nextSeed = 1
   glGenVertexArrays(1, result.vertexArray.addr)
+  var previous: GLint
+  glGetIntegerv(GL_TEXTURE_BINDING_2D, previous.addr)
+  glGenTextures(1, result.sightTexture.addr)
+  glBindTexture(GL_TEXTURE_2D, result.sightTexture)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST.GLint)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST.GLint)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE.GLint)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE.GLint)
+  # Keep the sampler complete even for callers that don't use sight clipping.
+  var white = [255'u8, 255, 255, 255]
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8.GLint, 1, 1, 0,
+    GL_RGBA, GL_UNSIGNED_BYTE, white[0].addr)
+  glBindTexture(GL_TEXTURE_2D, previous.GLuint)
 
 proc effectParticleCount(kind: ParticleEffectKind): int =
   ## Returns the bounded instance count for one semantic effect.
@@ -441,22 +463,49 @@ proc drawParticles*(
     visibilityWidth = 0,
     visibilityOrigin = vec2(0),
     visibilityPadding = 0,
-    viewer = -1'i32
+    viewer = -1'i32,
+    clipToSight = false
 ) =
   ## Draws every visible active effect with instanced, depth-tested billboards.
   if system.program.id == 0 or system.effects.len == 0:
     return
+  # Opt-in exact fragment clipping preserves the default path policy for other
+  # games, without suppressing a whole incoming shot at a sight boundary.
+  let clip = clipToSight and visibility.len > 0
+  if clip and (visibilityWidth <= 0 or visibility.len != visibilityWidth * visibilityWidth):
+    return
+  var oldActive, oldTexture, oldAlignment: GLint
+  glGetIntegerv(GL_ACTIVE_TEXTURE, oldActive.addr)
+  glActiveTexture(GL_TEXTURE0)
+  glGetIntegerv(GL_TEXTURE_BINDING_2D, oldTexture.addr)
+  glBindTexture(GL_TEXTURE_2D, system.sightTexture)
+  if clip:
+    glGetIntegerv(GL_UNPACK_ALIGNMENT, oldAlignment.addr)
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8.GLint, visibilityWidth.GLsizei,
+      visibilityWidth.GLsizei, 0, GL_RED, GL_UNSIGNED_BYTE, visibility[0].unsafeAddr)
+    glPixelStorei(GL_UNPACK_ALIGNMENT, oldAlignment)
   var matrix = viewProjection
   glEnable(GL_DEPTH_TEST)
   glDepthMask(GL_FALSE)
   glEnable(GL_BLEND)
   glDisable(GL_CULL_FACE)
   glUseProgram(system.program.id)
+  let clipLocation = system.program.locations[ClipSightUniform]
+  glUniform1i(system.program.locations[SightUniform], 0)
+  glUniform1i(clipLocation, 0)
+  if clip:
+    glUniform2f(system.program.locations[SightOriginUniform],
+      visibilityOrigin.x, visibilityOrigin.y)
+    glUniform1f(system.program.locations[SightWidthUniform],
+      visibilityWidth.float32)
   glBindVertexArray(system.vertexArray)
   for effect in system.effects:
     if effect.startTime > system.time:
       continue
-    if viewer < 0 or effect.owner != viewer:
+    let owned = viewer >= 0 and effect.owner == viewer
+    glUniform1i(clipLocation, (clip and not owned).GLint)
+    if not clip and not owned:
       if not particlePathVisible(
         effect.origin,
         effect.target,
@@ -498,6 +547,8 @@ proc drawParticles*(
   glUseProgram(0)
   glDepthMask(GL_TRUE)
   glDisable(GL_BLEND)
+  glBindTexture(GL_TEXTURE_2D, oldTexture.GLuint)
+  glActiveTexture(oldActive.GLenum)
 
 proc closeParticles*(system: var ParticleSystem) =
   ## Releases particle GPU resources and clears presentation state.
@@ -505,4 +556,6 @@ proc closeParticles*(system: var ParticleSystem) =
     glDeleteProgram(system.program.id)
   if system.vertexArray != 0:
     glDeleteVertexArrays(1, system.vertexArray.addr)
+  if system.sightTexture != 0:
+    glDeleteTextures(1, system.sightTexture.addr)
   system = ParticleSystem()

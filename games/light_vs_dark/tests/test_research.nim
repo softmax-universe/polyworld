@@ -1,4 +1,5 @@
 ## Deterministic player-wide research, through the authoritative action path.
+import hallfixture
 import polyworld/tapes, ../[content, maps, replays, sim, controls, multiplayer]
 
 let researchMap = generateMap(DefaultSeed)
@@ -13,6 +14,7 @@ proc laboratory(): World =
   for building in result.buildings.mitems:
     if building.owner == 0: building.kind = BlacksmithBuilding
     elif building.owner == 1: building.kind = BarracksBuilding
+  result.retainFixtureHalls()
   # A completed prerequisite owned by player zero, away from combat.
   var site = NoTile
   for y in 1'i32 ..< researchMap.side - 4:
@@ -219,7 +221,7 @@ block eligibilityAndPlayerWideLocks:
   # Reuse opponent's registered structure as another smith for this lock check.
   var other = -1
   for index, b in w.buildings:
-    if b.owner == 1: other = index
+    if b.owner == 1 and b.kind == BarracksBuilding: other = index
   w.buildings[other].owner = 0
   w.buildings[other].kind = BlacksmithBuilding
   doAssert not w.canResearch(0, w.buildings[other].id, TemperedEdges)

@@ -235,6 +235,7 @@ proc applyPacket*(session: NetworkMatch, packet: RoomMessage) =
       if w.applyReplayAction(action):
         game.recorder.record(action)
         game.metrics.command(int(action.playerId), w.tick)
+      w.retireProductionReservation(action)
     game.networkActions.setLen(0)
   game.world.tickWorld(apply)
   if uint32(game.world.tick) != packet.tick:

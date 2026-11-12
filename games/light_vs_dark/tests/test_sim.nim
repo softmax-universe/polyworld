@@ -787,17 +787,17 @@ block losingEverythingLosesTheMatch:
   for index in 0 ..< w.units.len:
     if w.units[index].owner == DarkPlayer:
       w.damageEntity(w.units[index].id, w.units[index].hp)
-  w.run(1)
-  doAssert w.over, "a player with nothing left did not lose"
+  w.run(TownHallDefeatGraceTicks)
+  doAssert w.over, "a player without a Town Hall did not lose after grace"
   doAssert w.winner == LightPlayer, &"the wrong player won: {w.winner}"
 
-block reachingTheCapDecidesOnScore:
+block reachingTheCapWithoutEliminationDraws:
   var w = newWorld(map, TickRate * 4)
   w.players[LightPlayer].goldGathered = 50_000
   w.run(TickRate * 4)
   doAssert w.over, "the match did not end at its tick limit"
-  doAssert w.winner == LightPlayer,
-    "the richer player did not win on score"
+  doAssert w.winner == -1,
+    "A score lead must not decide elimination victory"
 
 echo "Testing attack-move engages enemies that a move walks past"
 block attackMoveFightsOnTheWay:

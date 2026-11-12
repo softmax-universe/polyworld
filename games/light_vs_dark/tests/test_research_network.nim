@@ -1,5 +1,6 @@
 ## In-process real relay test: human research intents, authoritative packets,
 ## duplicate rejection, completion and serialized replay from the fixture snapshot.
+import hallfixture
 import jsony, polyworld/[rooms, relays, roomclients, tapes],
   ../[multiplayer, presets, sim, replays, content, controls]
 
@@ -50,6 +51,7 @@ for client in clients:
   # Preserve IDs, footprint and resources; use registered opening structures.
   for building in session.game.world.buildings.mitems:
     if building.owner >= 0: building.kind = LumberMillBuilding
+  session.game.world.retainFixtureHalls()
   sessions.add session
   if initial == nil: initial = session.game.world.clone()
   client.send(RoomMessage(kind: Ready, revision: session.revision,
@@ -65,7 +67,8 @@ for player in 0'i32 .. 1'i32:
   let session = sessions[player]
   var id = NoEntity
   for building in session.game.world.buildings:
-    if building.owner == player: id = building.id
+    if building.owner == player and building.kind == LumberMillBuilding:
+      id = building.id
   let baseline = session.game.stateHash()
   queueResearch(player, id, KeenflightArrows)
   queueResearch(player, id, KeenflightArrows) # same-tick duplicate costs nothing

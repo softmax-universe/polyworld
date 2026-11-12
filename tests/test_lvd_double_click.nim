@@ -80,7 +80,7 @@ suite "LvD double-left-click selection":
     platformDoubleClickInterval = 60 # Deterministic even on a busy test host.
     window.state.doubleClickTime = 0
     window.handleButtonPress(MouseLeft)
-    updateCamera(0)
+    updateCamera(0, focused = true)
     updateWorldSelection(projection)
     window.state.perFrame = PerFrame()
     window.handleButtonRelease(MouseLeft)
@@ -89,7 +89,7 @@ suite "LvD double-left-click selection":
     window.state.perFrame = PerFrame()
     window.handleButtonPress(MouseLeft)
     require window.buttonPressed[DoubleClick]
-    updateCamera(0)
+    updateCamera(0, focused = true)
     updateWorldSelection(projection)
     check selectedIds == @[clicked, remote]
     check primaryId == clicked
@@ -97,29 +97,82 @@ suite "LvD double-left-click selection":
       check excluded notin selectedIds
     window.state.perFrame = PerFrame()
     window.handleButtonRelease(MouseLeft)
-    updateCamera(0)
+    updateCamera(0, focused = true)
     updateWorldSelection(projection)
     check selectedIds == @[clicked, remote]
     check primaryId == clicked
+
+    # Sub-threshold travel remains a click at every HUD scale; 10px is a drag.
+    for scale in [0.5'f32, 1'f32, 2'f32]:
+      sk.uiScale = scale
+      for travel in [1'i32, 9'i32, 10'i32, 12'i32]:
+        selectedIds = @[other]
+        primaryId = other
+        selectionStarted = true
+        selectionAdditive = false
+        selectionPressPosition = vec2(point.x.int32.float32, point.y.int32.float32) + vec2(0, 5)
+        window.state.mousePos = ivec2(point.x.int32 + travel, point.y.int32 + 5)
+        sk.mousePos = window.mousePos.vec2 / scale
+        window.state.perFrame = PerFrame(buttonReleased: {MouseLeft})
+        updateWorldSelection(projection)
+        if travel < 10:
+          check selectedIds == @[clicked]
+        else:
+          check selectedIds != @[clicked] # zero-height tiny box excludes the unit
+      sk.uiScale = 1
+    window.state.mousePos = ivec2(point.x.int32, point.y.int32)
+    sk.mousePos = window.mousePos.vec2
 
     # Shift is a union, not the single-click toggle; clicked stays primary.
     selectedIds = @[other, remote]
     primaryId = other
     window.state.buttonDown = {KeyLeftShift, MouseLeft}
     window.state.perFrame = PerFrame(buttonPressed: {MouseLeft, DoubleClick})
-    updateCamera(0)
+    updateCamera(0, focused = true)
     updateWorldSelection(projection)
     check selectedIds == @[other, remote, clicked]
     check primaryId == clicked
     window.state.perFrame = PerFrame()
     window.handleButtonRelease(MouseLeft)
-    updateCamera(0)
+    updateCamera(0, focused = true)
     updateWorldSelection(projection)
     check selectedIds == @[other, remote, clicked]
     check primaryId == clicked
 
-    # A double click over UI or in a modal/command state must not select.
-    for blocked in 0 .. 5:
+    # A changes right orders only; jittered Shift clicks and double-click releases
+    # keep left selection semantics and never enqueue an order.
+    for travel in [1'i32, 9'i32]:
+      attackMoveArmed = true
+      selectedIds = @[other]
+      primaryId = other
+      selectionStarted = true
+      selectionAdditive = true
+      selectionPressPosition = point
+      window.state.mousePos = ivec2(point.x.int32 + travel, point.y.int32)
+      sk.mousePos = window.mousePos.vec2
+      window.state.perFrame = PerFrame(buttonReleased: {MouseLeft})
+      updateWorldSelection(projection)
+      check selectedIds == @[other, clicked]
+      window.state.mousePos = ivec2(point.x.int32, point.y.int32)
+      sk.mousePos = window.mousePos.vec2
+      window.state.buttonDown = {MouseLeft}
+      window.state.perFrame = PerFrame(buttonPressed: {MouseLeft, DoubleClick})
+      updateCamera(0, focused = true)
+      updateWorldSelection(projection)
+      window.state.mousePos.x += travel
+      sk.mousePos = window.mousePos.vec2
+      window.state.perFrame = PerFrame(buttonReleased: {MouseLeft})
+      updateWorldSelection(projection)
+      check selectedIds == @[clicked, remote]
+      run.networked = true
+      run.flushPlayerCommands()
+      check run.submissions.len == 0
+    attackMoveArmed = false
+    window.state.mousePos = ivec2(point.x.int32, point.y.int32)
+    sk.mousePos = window.mousePos.vec2
+
+    # A double click over UI, a modal or paused gameplay must not select.
+    for blocked in [0, 1, 2, 5]:
       selectedIds = @[other]
       primaryId = other
       selectionStarted = false
@@ -132,7 +185,7 @@ suite "LvD double-left-click selection":
         else: window.mousePos.vec2
       window.state.buttonDown = {MouseLeft}
       window.state.perFrame = PerFrame(buttonPressed: {MouseLeft, DoubleClick})
-      updateCamera(0)
+      updateCamera(0, focused = true)
       updateWorldSelection(projection)
       checkpoint "blocked input case " & $blocked
       check selectedIds == @[other]
@@ -145,7 +198,7 @@ suite "LvD double-left-click selection":
       sk.mousePos = window.mousePos.vec2
       window.state.perFrame = PerFrame()
       window.handleButtonRelease(MouseLeft)
-      updateCamera(0)
+      updateCamera(0, focused = true)
       updateWorldSelection(projection)
       check selectedIds == @[other]
       check primaryId == other
@@ -161,7 +214,7 @@ suite "LvD double-left-click selection":
       # A press and release may both arrive before the next graphics frame.
       window.state.perFrame = PerFrame(buttonPressed: {MouseLeft, DoubleClick},
         buttonReleased: {MouseLeft, DoubleClick})
-      updateCamera(0)
+      updateCamera(0, focused = true)
       updateWorldSelection(projection)
       check selectedIds == (if mode == 0: @[clicked, remote, enemy] else: @[clicked, remote])
       check primaryId == clicked

@@ -3,6 +3,17 @@ import content, sim
 import chroma, pixie, silky, vmath
 import polyworld/[chrome, gameuis]
 
+proc hallDefeatWarning*(world: World, playerSlot: int32): string =
+  ## The local seat alone sees the authoritative, tick-based grace period.
+  if world == nil or playerSlot <= 0 or playerSlot > world.players.len: return
+  let player = playerSlot - 1
+  for b in world.buildings:
+    if b.owner == player and b.kind == TownHallBuilding and b.hp > 0 and
+        b.state != BuildingDying: return
+  let ticks = world.hallDefeatTicksRemaining(player)
+  if ticks > 0:
+    result = "No Town Hall — defeat in " & $((ticks + TickRate - 1) div TickRate) & "s"
+
 proc drawBuildPortrait*(sk: Silky, slot: GameUiPanel, key: string, ready: bool) =
   ## Preserve the authored colors when available. Fade the entire unavailable
   ## well, not just the sprite: the dark atlas art otherwise disappears into
@@ -77,6 +88,20 @@ proc cargoLabel*(unit: Unit): string =
     if result.len > 0: result.add " / "
     result.add "WOOD " & $unit.carryWood
   if result.len == 0: result = "CARGO: EMPTY"
+
+proc manaLabel*(unit: Unit): string =
+  ## Only the live portrait Cleric, never a summed group resource.
+  if unit == nil or unit.kind != ClericUnit or unit.hp <= 0 or
+      unit.state == UnitDying: return ""
+  "MANA " & $unit.mana & "/" & $ClericMaxMana
+
+proc drawClericMana*(sk: Silky, panel: GameUiPanel, cleric: Unit) =
+  let label = cleric.manaLabel
+  if label.len == 0: return
+  sk.drawLabel("PORTRAIT CLERIC", panel.origin, vec2(panel.size.x, 20),
+    rgbx(166, 174, 190, 255), "Small")
+  sk.drawValueBar(panel.origin + vec2(0, 23), vec2(panel.size.x, 23),
+    cleric.mana.float32, ClericMaxMana.float32, rgbx(90, 140, 240, 255), label)
 
 proc drawWorkerCargo*(sk: Silky, panel: GameUiPanel, worker: Unit) =
   ## This caption explicitly refers to the large portrait, not the group.

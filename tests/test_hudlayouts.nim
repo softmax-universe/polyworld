@@ -177,10 +177,8 @@ for origin in [vec2(0), vec2(123, 57), vec2(2200, 1100)]:
     let
       panel = GameUiPanel(origin: origin, size: lvd.PanelBuild)
       build = panel.buildPanels()
-    checkPanels(panel, build.tabs)
     checkPanels(build.contents, build.slots)
-    doAssert build.slots[0].origin.y >=
-      build.tabs[0].origin.y + build.tabs[0].size.y
+    doAssert build.slots[0].origin.y == build.contents.origin.y
   block:
     let
       panel = GameUiPanel(origin: origin, size: cta.PanelParty)

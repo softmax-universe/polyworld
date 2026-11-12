@@ -31,6 +31,9 @@ proc defeat(game: Game, player: int32) =
   for building in game.world.buildings:
     if building.owner == player:
       game.world.damageEntity(building.id, building.hp)
+  # This fixture isolates diplomacy after elimination; grace duration has its
+  # own exact-boundary regression in test_hall_defeat. Expire next tick here.
+  game.world.players[player].hallLossDeadline = game.world.tick + 1
 
 echo "Testing neutral starts, bilateral deadlines, and offer validation"
 block transitions:

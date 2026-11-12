@@ -54,7 +54,7 @@ suite "LvD command tooltip content":
     check buildingDetails(StablesBuilding, DarkPlayer).title == "Kennels"
     check buildingDetails(ChurchBuilding, DarkPlayer).title == "Temple"
     check buildingDetails(StablesBuilding).production == "None"
-    check buildingDetails(ChurchBuilding).description.contains("do not heal")
+    check buildingDetails(ChurchBuilding).description.contains("automatically heal")
 
   test "all units report side-specific combat, training and prerequisites":
     for player in [LightPlayer, DarkPlayer, 7'i32]:
@@ -81,7 +81,11 @@ suite "LvD command tooltip content":
           check card.requirements.contains(tooltipBuildingName(required, player))
         if stats.splash > 0:
           check card.row("Splash damage") == $stats.splash
-    check unitDetails(ClericUnit).description.contains("does not heal")
+    check unitDetails(ClericUnit).description.contains("automatically heals")
+    check unitDetails(ClericUnit).row("Heal") == $ClericHealAmount & " HP (capped at missing HP)"
+    check unitDetails(ClericUnit).row("Mana cost") == $ClericHealManaCost
+    check unitDetails(ClericUnit).row("Mana") == $ClericMaxMana
+    check unitDetails(ClericUnit).row("Heal interval") == tooltipSeconds(ClericHealCooldown)
     check unitDetails(CatapultUnit).description.contains("neighbour")
     check unitDetails(CatapultUnit).description.contains("structures")
     check unitDetails(PeonUnit).row("Gold per trip") == $GoldPerTrip

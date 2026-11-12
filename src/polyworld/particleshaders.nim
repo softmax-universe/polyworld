@@ -40,6 +40,10 @@ var
   uParticleEffectKind*: Uniform[int32]
   uParticleOrigin*: Uniform[Vec3]
   uParticleTarget*: Uniform[Vec3]
+  uParticleSight*: Uniform[Sampler2D]
+  uParticleSightOrigin*: Uniform[Vec2]
+  uParticleSightWidth*: Uniform[float32]
+  uParticleClipSight*: Uniform[int32]
 
 func particleHash(value: float32): float32 =
   ## Produces a repeatable zero-to-one value for one particle.
@@ -612,7 +616,8 @@ proc gameParticleVertex*(
     fragmentLife: var float32,
     fragmentAlive: var float32,
     fragmentBotanical: var float32,
-    fragmentFlame: var float32
+    fragmentFlame: var float32,
+    fragmentWorldXZ: var Vec2
 ) =
   ## Expands one GPU instance into a camera-facing particle quad.
   let
@@ -703,6 +708,7 @@ proc gameParticleVertex*(
   let worldPosition: Vec3 = position +
     right * corner.x * size +
     up * corner.y * size * lengthScale
+  fragmentWorldXZ = vec2(worldPosition.x, worldPosition.z)
   gl_Position = uParticleViewProjection * vec4(worldPosition, 1.0'f)
 
 proc gameParticleFragment*(
@@ -712,11 +718,19 @@ proc gameParticleFragment*(
     fragmentAlive: float32,
     fragmentBotanical: float32,
     fragmentFlame: float32,
+    fragmentWorldXZ: Vec2,
     fragColor: var Vec4
 ) =
   ## Draws a feathered particle with a bright center.
   if fragmentAlive < 0.5'f:
     discardFragment()
+  if uParticleClipSight != 0:
+    let cell = floor(fragmentWorldXZ - uParticleSightOrigin)
+    if cell.x < 0.0'f or cell.y < 0.0'f or
+        cell.x >= uParticleSightWidth or cell.y >= uParticleSightWidth:
+      discardFragment()
+    if texture(uParticleSight, (cell + vec2(0.5'f)) / uParticleSightWidth).x < 0.5'f:
+      discardFragment()
   if uParticleEffectKind == LeafBolt.ord.int32 or
     uParticleEffectKind == LeafBurst.ord.int32:
       let

@@ -9,6 +9,8 @@ proc orderFeedbackColor*(attack: bool): ColorRGBX =
 
 proc orderMarkSettings*(attack: bool): FxSettings =
   result = clickMarkSettings()
+  result.radius *= 0.5'f32
+  result.height *= 0.5'f32
   let color = orderFeedbackColor(attack)
   let tint = vec3(color.r.float32, color.g.float32, color.b.float32) / 255'f32
   result.startColor = vec4(tint, 0.95)

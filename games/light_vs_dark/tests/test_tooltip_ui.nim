@@ -6,6 +6,7 @@ import polyworld/viewers
 import ../presets
 include ../ui
 privateAccess(Window)
+privateAccess(TooltipHover)
 
 let window = newWindow("LvD global tooltip regression", ivec2(1280,900), visible = false)
 window.makeContextCurrent()
@@ -70,7 +71,7 @@ sk.uiScale = gameUiScale(window)
 sk.beginUi(window, window.size)
 let build = sk.beginFrame(currentLayout(window).panel(GameUiRegion.BottomRight, PanelBuild)).buildPanels()
 sk.endUi()
-commandTab = 0
+selectedIds = @[run.world.units[0].id]
 let a = build.slots[0].origin + vec2(20)
 let b = build.slots[1].origin + vec2(20)
 frame(a)
@@ -112,11 +113,11 @@ for y in int((panel.origin.y+4)*scale) ..< int((panel.origin.y+panel.size.y-4)*s
     if after[x,y].r > 140: inc ink
 doAssert ink > 100, "Real tooltip text/icon pixels must be rendered"
 # All catalog paths share warmth (no intervening empty frame).
-commandTab = 1
+selectedIds = @[run.world.buildings[producerIndex].id]
 frame(a)
 doAssert commandHover.visible and commandHover.target.kind == UnitCommandTooltip
 run.world.buildings[producerIndex].kind = BlacksmithBuilding
-commandTab = 2
+selectedIds = @[run.world.buildings[producerIndex].id]
 let researchAt = researchPanels(build.contents)[0].origin + vec2(20)
 frame(researchAt)
 doAssert commandHover.visible and commandHover.target.kind == ResearchCommandTooltip
@@ -127,7 +128,7 @@ doAssert commandHover.visible and commandHover.target.kind == ResearchCommandToo
 run.world.buildings[producerIndex].hp = 0
 frame(researchPopup)
 doAssert not commandHover.visible, "Dead producer must retire its popup"
-commandTab = 0
+selectedIds = @[run.world.units[0].id]
 frame(a)
 doAssert not commandHover.visible
 sleep(550)
@@ -150,15 +151,17 @@ doAssert not commandHover.visible
 # Leaving/replacing the selected producer cannot keep an orphaned research card.
 run.world.buildings[producerIndex].hp = 100
 primaryId = run.world.buildings[producerIndex].id
-commandTab = 2
+selectedIds = @[run.world.buildings[producerIndex].id]
 frame(researchAt)
 sleep(550)
 frame(researchAt)
 doAssert commandHover.visible
 primaryId = NoEntity
+selectedIds = @[]
 frame(commandHover.panel.origin + commandHover.panel.size / 2)
 doAssert not commandHover.visible
 primaryId = run.world.buildings[producerIndex].id
+selectedIds = @[primaryId]
 frame(researchAt)
 sleep(550)
 frame(researchAt)
@@ -168,7 +171,7 @@ run.world.buildings.delete(producerIndex)
 frame(missingPopup)
 doAssert not commandHover.visible
 # Lifecycle clearing is immediate even while still over the same target.
-commandTab = 0
+selectedIds = @[run.world.units[0].id]
 frame(a)
 sleep(550)
 frame(a)
@@ -176,6 +179,46 @@ doAssert commandHover.visible
 resetHudTooltips()
 frame(a)
 doAssert not commandHover.visible
+# The actual HUD draws the local defeat warning, and hides it for a site/watch.
+run.world = newWorld(generateMap(DefaultSeed), TickRate * 60)
+selectedIds = @[]
+primaryId = NoEntity
+resetHudTooltips()
+for b in run.world.buildings.mitems:
+  if b.owner == 0 and b.kind == TownHallBuilding: b.state = BuildingDying
+run.world.players[0].hallLossDeadline = run.world.tick + TickRate + 1
+frame(vec2(500,400))
+let warningPixels = pixels()
+let warningAt = vec2((currentLayout(window).size.x - 350) / 2 + 2, 86) * gameUiScale(window)
+doAssert warningPixels[warningAt.x.int, warningAt.y.int].r > 45
+options.playerSlot = 0
+frame(vec2(500,400))
+let spectatorPixels = pixels()
+doAssert warningPixels[warningAt.x.int, warningAt.y.int] != spectatorPixels[warningAt.x.int, warningAt.y.int]
+options.playerSlot = 1
+# Cancel's live tooltip uses the same full content cost as authoritative refund.
+var cancelId = NoEntity
+for b in run.world.buildings.mitems:
+  if b.owner >= 0:
+    b.owner = 0
+    b.kind = FarmBuilding
+    b.state = BuildingUnderConstruction
+    b.hp = 100
+    b.buildTicks = 1
+    b.buildTotal = 100
+    cancelId = b.id
+    break
+doAssert cancelId != NoEntity
+selectedIds = @[cancelId]
+primaryId = cancelId
+resetHudTooltips()
+frame(a)
+sleep(550)
+frame(a)
+doAssert commandHover.visible and commandHover.target.kind == CancelCommandTooltip
+doAssert commandHover.card.rows == @[("Gold refund", $BuildingTable[FarmBuilding].gold),
+  ("Wood refund", $BuildingTable[FarmBuilding].wood)]
+doAssert commandHover.card.subtitle == "Unfinished selected sites / Shortcut: X"
 let output = getEnv("LVD_TOOLTIP_FIXTURE", getTempDir()) / "lvd-tooltip-retained.png"
 after.writeFile(output)
 glDeleteTextures(1, texture.addr)

@@ -23,6 +23,9 @@ const
   UnitBodyRadius = 0.22'fx
   BodyTurnRate = 0.35'fx
   PathArrive = 0.35'fx
+  RangedRevealTicks* = TickRate * 2
+  RangedRevealRadius* = 2'i32
+  TownHallDefeatGraceTicks* = 15'i32 * TickRate
 
 type
   UnitOrder* = object
@@ -52,6 +55,8 @@ type
     stateTicks*: int32
       ## Countdown shared by mining, chopping, building, and depositing.
     cooldown*: int32
+    mana*, manaRegenTicks*, healCooldown*: int32
+      ## Cleric support state; separate from weapon and movement orders.
     targetId*: int32
       ## Whatever the unit is currently walking to or swinging at.
     constructionSiteId*: int32
@@ -67,7 +72,8 @@ type
     goalOffset*: FixedVec2
     hasGoal*: bool
     holdPosition*: bool
-      ## Direct moves keep their destination until another order replaces them.
+      ## Suppress idle acquisition for explicit hold / failed direct moves.
+      ## Successful Move completion releases it; Stop cancels rather than holds.
     attackMove*: bool
       ## True while walking a destination that should stop to fight.
     attackMoveGoal*: Tile2
@@ -124,6 +130,8 @@ type
     unitsTrained*, unitsLost*: int32
     buildingsBuilt*, buildingsLost*: int32
     defeated*: bool
+    hallLossDeadline*: int32
+      ## Zero while a living Town Hall/site exists; otherwise exact defeat tick.
 
   PathRequest* = object
     unitId*: int32
@@ -132,6 +140,11 @@ type
   TileEdit* = object
     tick*: int32
     index*: int32
+
+  RangedReveal* = object
+    sourceId*, recipient*, expiresTick*: int32
+    origin*: Tile2
+    footprint*: Footprint
 
   World* = ref object
     stats*: CombatStats
@@ -148,6 +161,7 @@ type
     nextUnitId*, nextBuildingId*: int32   # HASH: include
     pathQueue*: seq[PathRequest]          # HASH: include
     terrainEdits*: seq[TileEdit]          # HASH: include
+    rangedReveals*: seq[RangedReveal]     # HASH: include, insertion order
     pathTerrainRevision*: int32          # HASH: include; partial-route validity
     exploredCount*: seq[int32]  # HASH: include
     map*: MapData                         # HASH: derived, fixed at generation
@@ -381,6 +395,14 @@ proc fillVisionKeys(w: World, dest: var seq[int32]) =
   for pair in w.diplomacy.pairs:
     dest.add int32(pair.state in {Allied, AllianceEnding})
   dest.add int32(w.terrainEdits.len)
+  dest.add int32(w.rangedReveals.len)
+  for reveal in w.rangedReveals:
+    dest.add reveal.recipient
+    dest.add int32(reveal.origin.x)
+    dest.add int32(reveal.origin.y)
+    dest.add reveal.footprint.width
+    dest.add reveal.footprint.depth
+    dest.add int32(w.tick < reveal.expiresTick)
   dest.add int32(w.units.len)
   for i in 0 ..< w.units.len:
     let unit = w.units[i]
@@ -462,8 +484,38 @@ proc rebuildVision*(w: World) {.measure.} =
         if w.explored[player][index] == 0:
           w.explored[player][index] = 1
           inc w.exploredCount[player]
+    # A muzzle flash reveals a small local patch even behind an occluder.
+    # Paint after cached LOS, never into its retained coverage counts.
+    for reveal in w.rangedReveals:
+      if w.tick >= reveal.expiresTick or (reveal.recipient != player and
+          not w.diplomacy.sharesVision(player, reveal.recipient)):
+        continue
+      for y in max(0'i32, reveal.origin.y.int32 - RangedRevealRadius) ..<
+          min(w.map.side, reveal.origin.y.int32 + reveal.footprint.depth + RangedRevealRadius):
+        for x in max(0'i32, reveal.origin.x.int32 - RangedRevealRadius) ..<
+            min(w.map.side, reveal.origin.x.int32 + reveal.footprint.width + RangedRevealRadius):
+          let index = w.map.tileIndex(x, y)
+          w.visibleStamp[player][index] = w.visionGeneration[player]
+          if w.explored[player][index] == 0:
+            w.explored[player][index] = 1
+            inc w.exploredCount[player]
   copyVisionKeys(visionSkipKeys, visionSkipNow)
   visionSkipWorld = cast[pointer](w)
+
+proc revealRangedShot(w: World, sourceId, target: int32, origin: Tile2,
+    footprint: Footprint) =
+  let recipient = if target.isUnitId: w.unitOwner(target)
+                  else: w.buildingOwner(target)
+  if recipient < 0: return
+  let reveal = RangedReveal(sourceId: sourceId, recipient: recipient,
+    origin: origin, footprint: footprint, expiresTick: w.tick + RangedRevealTicks)
+  for existing in w.rangedReveals.mitems:
+    if existing.sourceId == sourceId and existing.recipient == recipient:
+      existing = reveal
+      w.rebuildVision()
+      return
+  w.rangedReveals.add reveal
+  w.rebuildVision()
 
 proc visible*(w: World, player, x, y: int32): bool =
   ## Returns whether a player can currently see a tile.
@@ -1030,6 +1082,7 @@ proc spawnUnit*(w: World, owner: int32, kind: UnitKind,
     fromTile: tile,
     facingY: 1,
     hp: unitOf(owner, kind).hp,
+    mana: (if kind == ClericUnit: ClericMaxMana else: 0),
     state: UnitIdle,
     targetId: NoEntity,
     sourceId: NoEntity,
@@ -1136,6 +1189,23 @@ proc clearResearch(building: var Building) =
   building.researchTicks = 0
   building.researchTotal = 0
 
+proc refreshHallDeadline(w: World, player: int32) =
+  ## Called at hall mutations, so a loss/build/cancel uses the exact current tick.
+  if player < 0 or player >= w.players.len or w.players[player].defeated: return
+  for structure in w.buildings:
+    if structure.owner == player and structure.kind == TownHallBuilding and
+        structure.hp > 0 and structure.state != BuildingDying:
+      w.players[player].hallLossDeadline = 0
+      return
+  if w.players[player].hallLossDeadline == 0:
+    w.players[player].hallLossDeadline = w.tick + TownHallDefeatGraceTicks
+
+proc hallDefeatTicksRemaining*(w: World, player: int32): int32 =
+  ## Read-only warning value; pauses freeze because only simulation ticks count.
+  if player < 0 or player >= w.players.len or w.players[player].defeated or
+      w.players[player].hallLossDeadline == 0: return 0
+  max(0'i32, w.players[player].hallLossDeadline - w.tick)
+
 proc razeBuilding(w: World, index: int32) =
   ## Starts a structure's collapse and returns everything it was holding.
   let owner = w.buildings[index].owner
@@ -1166,6 +1236,8 @@ proc razeBuilding(w: World, index: int32) =
         w.units[unitIndex].clearOrder(true)
   w.releaseFootprint(w.buildings[index].origin, w.buildings[index].footprint)
   w.recomputeFoodCap(owner)
+  if w.buildings[index].kind == TownHallBuilding:
+    w.refreshHallDeadline(owner)
 
 proc damageEntity*(w: World, id, amount: int32, attacker = -1'i32) =
   ## Applies damage and starts a death when something runs out of health.
@@ -1193,13 +1265,15 @@ proc damageEntity*(w: World, id, amount: int32, attacker = -1'i32) =
       w.stats.add(int(attacker), StructuresMetric)
     w.razeBuilding(index)
 
-proc acquireTarget(w: World, unit: Unit): int32 =
-  ## Returns the closest visible enemy within sight, preferring units and
-  ## breaking ties by identifier so the choice is reproducible.
+proc acquireTarget(w: World, unit: Unit, defend = false): int32 =
+  ## Idle defenders prioritize units actively attacking/chasing them; otherwise
+  ## choose the closest visible hostile unit or building, with stable ID ties.
+  ## Threat intent is existing hashed state, not an unbounded damage history.
   result = NoEntity
   let
     sight = unitOf(unit.owner, unit.kind).sightTiles
   var best = int32.high
+  var defending = false
   for other in w.units:
     if not w.atWar(unit.owner, other.owner) or other.state == UnitDying or
         other.state == UnitInMine:
@@ -1207,11 +1281,14 @@ proc acquireTarget(w: World, unit: Unit): int32 =
     let distance = tileDistance(unit.tile, other.tile)
     if distance > sight or not w.visible(unit.owner, other.tile):
       continue
-    if distance < best or (distance == best and other.id < result):
+    let threat = defend and other.targetId == unit.id and
+      other.state in {UnitChasing, UnitAttacking}
+    if (threat and not defending) or (threat == defending and
+        (distance < best or (distance == best and other.id < result))):
+      defending = threat
       best = distance
       result = other.id
-  if result != NoEntity:
-    return
+  if defending: return
   for structure in w.buildings:
     if not w.atWar(unit.owner, structure.owner) or
       structure.state == BuildingDying:
@@ -1713,13 +1790,13 @@ proc handleMineArrival(w: World, index: int32) =
 
 ## Units
 
-proc tryAcquire(w: World, index: int32): bool =
+proc tryAcquire(w: World, index: int32, defend = false): bool =
   ## Starts a chase if a visible enemy is in sight. Returns whether one was.
   ## Scans are staggered by identifier so a full army does not search every
   ## tick.
   if (w.tick + w.units[index].id) mod AcquireStagger != 0:
     return false
-  let target = w.acquireTarget(w.units[index])
+  let target = w.acquireTarget(w.units[index], defend)
   if target == NoEntity:
     return false
   w.units[index].targetId = target
@@ -1730,7 +1807,7 @@ proc autoAcquire(w: World, index: int32) =
   ## Unassigned soldiers defend themselves; workers and direct moves stay put.
   if w.units[index].kind == PeonUnit or w.units[index].holdPosition:
     return
-  discard w.tryAcquire(index)
+  discard w.tryAcquire(index, defend = true)
 
 proc finishCombat(w: World, index: int32, failed: bool) =
   ## Resumes an attack-move destination after a fight, or returns to idle.
@@ -1781,6 +1858,8 @@ proc applySplash(w: World, origin: Tile2, amount, skipId, attacker: int32) =
 proc strikeTarget(w: World, index: int32, target: int32) =
   ## Rolls miss, then applies piercing plus armor-reduced basic, then splash.
   let stats = w.unitStats(w.units[index].owner, w.units[index].kind)
+  if stats.rangeTiles > 1:
+    w.revealRangedShot(w.units[index].id, target, w.units[index].tile, (1'i32, 1'i32))
   if stats.missPercent > 0 and w.rng.chance(stats.missPercent):
     return
   w.damageEntity(
@@ -1843,6 +1922,41 @@ proc handleCombat(w: World, index: int32) =
 
 proc startNextOrder(w: World, index: int32)
 
+proc advanceHealing(w: World, healer: Unit) =
+  ## Passive support never chases, clears orders, or changes the attack timer.
+  if healer.kind != ClericUnit or healer.hp <= 0 or
+      healer.state in {UnitDying, UnitInMine}: return
+  if healer.healCooldown > 0: dec healer.healCooldown
+  if healer.mana < ClericMaxMana:
+    inc healer.manaRegenTicks
+    if healer.manaRegenTicks >= ClericManaRegenTicks:
+      healer.mana = min(ClericMaxMana, healer.mana + 1)
+      healer.manaRegenTicks = 0
+  else:
+    healer.manaRegenTicks = 0
+  if healer.healCooldown > 0 or healer.mana < ClericHealManaCost: return
+  var patient: Unit
+  for candidate in w.units:
+    if candidate.hp <= 0 or candidate.state in {UnitDying, UnitInMine} or
+        candidate.kind == CatapultUnit or
+        (candidate.owner != healer.owner and
+          not w.diplomacy.sharesVision(healer.owner, candidate.owner)) or
+        chebyshev(healer.tile, candidate.tile) > ClericHealRange:
+      continue
+    let maximum = unitOf(candidate.owner, candidate.kind).hp
+    if candidate.hp >= maximum: continue
+    if patient == nil or
+        int64(candidate.hp) * unitOf(patient.owner, patient.kind).hp <
+          int64(patient.hp) * maximum or
+        (int64(candidate.hp) * unitOf(patient.owner, patient.kind).hp ==
+          int64(patient.hp) * maximum and candidate.id < patient.id):
+      patient = candidate
+  if patient != nil:
+    patient.hp = min(unitOf(patient.owner, patient.kind).hp,
+      patient.hp + ClericHealAmount)
+    healer.mana -= ClericHealManaCost
+    healer.healCooldown = ClericHealCooldown
+
 proc advanceUnit(w: World, index: int32) =
   ## Runs one unit for one tick.
   let unit = w.units[index]
@@ -1861,6 +1975,7 @@ proc advanceUnit(w: World, index: int32) =
     dec w.units[index].deathTicks
     return
 
+  w.advanceHealing(unit)
   inc w.units[index].animationTicks
   if w.units[index].cooldown > 0:
     dec w.units[index].cooldown
@@ -1900,9 +2015,9 @@ proc advanceUnit(w: World, index: int32) =
     if w.units[index].attackMove and w.tryAcquire(index):
       w.handleCombat(index)
     elif w.units[index].arrivedAt(w.units[index].goal):
-      let hold = w.units[index].holdPosition
+      # A completed Move is idle, not a permanent Hold. Queued successors
+      # start before idle acquisition on the next tick.
       w.units[index].clearOrder(false)
-      w.units[index].holdPosition = hold
       return
   of UnitToMine:
     let mine = w.buildingIndex(w.units[index].sourceId)
@@ -2064,6 +2179,8 @@ proc advanceBuilding(w: World, index: int32) =
           target = other.id
       if target != NoEntity:
         w.buildings[index].cooldown = stats.cooldownTicks
+        w.revealRangedShot(w.buildings[index].id, target,
+          w.buildings[index].origin, w.buildings[index].footprint)
         w.damageEntity(target, stats.damage, w.buildings[index].owner)
 
 ## Tech and placement
@@ -2420,6 +2537,7 @@ proc applyBuild*(w: World, player, peonId, kindValue, x, y: int32): bool =
       rally: NoTile
     )
 
+  if kind == TownHallBuilding: w.refreshHallDeadline(player)
   let site = w.buildingIndex(siteId)
   w.units[index].orderQueue.setLen(0)
   w.units[index].orderFailed = false
@@ -2487,21 +2605,25 @@ proc applyCancel*(w: World, player, entityId: int32): bool =
   if index < 0:
     return false
   if w.buildings[index].state == BuildingUnderConstruction:
-    let
-      stats = BuildingTable[w.buildings[index].kind]
-      remaining = w.buildings[index].buildTicks
-      total = w.buildings[index].buildTotal
-    ## Refund in proportion to the work not yet done, rounded down.
-    w.players[player].gold +=
-      int32(int64(stats.gold) * int64(remaining) div int64(total))
-    w.players[player].wood +=
-      int32(int64(stats.wood) * int64(remaining) div int64(total))
+    # Sites pay the fixed content cost once on creation; adopting one never
+    # pays again. Cancellation returns that full cost regardless of progress.
+    let stats = BuildingTable[w.buildings[index].kind]
+    w.players[player].gold += stats.gold
+    w.players[player].wood += stats.wood
     let builderIndex = w.activeBuilderFor(w.buildings[index])
     if builderIndex >= 0 and w.units[builderIndex].targetId == w.buildings[index].id:
       w.units[builderIndex].clearOrder(true)
     w.releaseFootprint(w.buildings[index].origin, w.buildings[index].footprint)
     w.buildings[index].state = BuildingDying
     w.buildings[index].deathTicks = 0
+    w.buildings[index].builderId = NoEntity
+    # The footprint is now open: retire all interior associations immediately,
+    # without cancelling a former builder's replacement order or FIFO.
+    for unit in w.units:
+      if unit.constructionSiteId == entityId:
+        unit.constructionSiteId = NoEntity
+    if w.buildings[index].kind == TownHallBuilding:
+      w.refreshHallDeadline(player)
     return true
 
   if w.buildings[index].researchTicks > 0:
@@ -2748,6 +2870,14 @@ proc hashWorld(w: World): uint64 =
   hash.addHashy(w.diplomacy)
   hash.addHashy(w.nextUnitId)
   hash.addHashy(w.nextBuildingId)
+  hash.addHashy(w.rangedReveals.len)
+  for reveal in w.rangedReveals:
+    hash.addHashy(reveal.sourceId)
+    hash.addHashy(reveal.recipient)
+    hash.addHashy(reveal.expiresTick)
+    hash.mixTile(reveal.origin)
+    hash.addHashy(reveal.footprint.width)
+    hash.addHashy(reveal.footprint.depth)
   for player in 0 ..< w.players.len:
     let side = w.players[player]
     for level in side.researchLevels:
@@ -2763,6 +2893,7 @@ proc hashWorld(w: World): uint64 =
     hash.addHashy(side.buildingsBuilt)
     hash.addHashy(side.buildingsLost)
     hash.addHashy(side.defeated)
+    hash.addHashy(side.hallLossDeadline)
     hash.addHashy(w.exploredCount[player])
   hash.addHashy(w.buildings.len)
   for structure in w.buildings:
@@ -2807,6 +2938,9 @@ proc hashWorld(w: World): uint64 =
     hash.addHashy(int32(unit.state.ord))
     hash.addHashy(unit.stateTicks)
     hash.addHashy(unit.cooldown)
+    hash.addHashy(unit.mana)
+    hash.addHashy(unit.manaRegenTicks)
+    hash.addHashy(unit.healCooldown)
     hash.addHashy(unit.targetId)
     hash.addHashy(unit.constructionSiteId)
     hash.addHashy(unit.sourceId)
@@ -2891,11 +3025,14 @@ proc score*(w: World, player: int32): int64 =
     (w.players[player].goldGathered + w.players[player].woodGathered) div 100
 
 proc checkVictory(w: World) =
-  ## A player is out once it has no structures and no peon left to raise one.
+  ## A living completed or unfinished Town Hall prevents elimination. Resolve
+  ## every expiry before choosing a winner, including simultaneous loss/draw.
   for player in 0'i32 ..< int32(w.players.len):
     if w.players[player].defeated:
       continue
-    if w.buildingCount(player) == 0 and w.peonCount(player) == 0:
+    w.refreshHallDeadline(player)
+    if w.players[player].hallLossDeadline > 0 and
+        w.tick >= w.players[player].hallLossDeadline:
       w.players[player].defeated = true
       w.diplomacy.eliminate(player)
   if w.over:
@@ -2913,16 +3050,8 @@ proc checkVictory(w: World) =
     return
   if w.tick >= w.maximumTicks:
     w.over = true
-    var best = int64.low
-    for player, side in w.players:
-      if side.defeated:
-        continue
-      let score = w.score(int32(player))
-      if score > best:
-        best = score
-        w.winner = int32(player)
-      elif score == best:
-        w.winner = -1
+    # Scores remain rankings, not victory. A solo sandbox still ends at its cap.
+    w.winner = if survivors == 1: survivor else: -1
 
 ## The tick
 ##
@@ -2975,8 +3104,12 @@ proc tickWorld*(w: World, decide: proc(w: World) {.closure.}) {.measure.} =
     return
   inc w.tick
   w.diplomacy.advance(w.tick)
-
-  if w.tick mod VisionTicks == 0:
+  var expiredReveal = false
+  for i in countdown(w.rangedReveals.high, 0):
+    if w.tick >= w.rangedReveals[i].expiresTick:
+      w.rangedReveals.delete(i)
+      expiredReveal = true
+  if expiredReveal or w.rangedReveals.len > 0 or w.tick mod VisionTicks == 0:
     profileBlock "vision":
       w.rebuildVision()
   if w.tick mod DecisionTicks == 0 and decide != nil:

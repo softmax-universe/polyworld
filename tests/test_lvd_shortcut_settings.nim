@@ -31,25 +31,23 @@ suite "LvD shortcut settings integration":
   test "native config roundtrip uses isolated app namespace":
     let app = "Polyworld LvD Shortcut Tests"
     var custom = DefaultShortcuts
-    check custom.setShortcut(BuildBarracksShortcut, "Q7") == ""
+    check custom.setShortcut(BuildBarracksShortcut, "7") == ""
     saveShortcuts(custom, app)
     check readShortcuts(app) == custom
     custom.resetShortcuts()
     saveShortcuts(custom, app)
     check readShortcuts(app) == DefaultShortcuts
-  test "sequence editor keeps old assignment on duplicate and commits complete input":
+  test "single-key editor keeps old assignment on duplicate and commits complete input":
     var editor: ShortcutEditor
     var bindings = DefaultShortcuts
     editor.beginEdit(BuildBarracksShortcut)
     check editor.editKey(bindings, 'T') == false
-    check editor.editKey(bindings, 'P') == false
     check editor.error.len > 0
     check bindings == DefaultShortcuts
     editor.beginEdit(BuildBarracksShortcut)
-    check editor.editKey(bindings, 'Q') == false
     check editor.editKey(bindings, '7') == true
-    check bindings[BuildBarracksShortcut] == "Q7"
+    check bindings[BuildBarracksShortcut] == "7"
     editor.beginEdit(TrainPeonShortcut)
     check editor.editKey(bindings, '\e') == false
     check not editor.active
-    check bindings[TrainPeonShortcut] == "TP"
+    check bindings[TrainPeonShortcut] == "P"

@@ -335,31 +335,21 @@ proc main() =
       check previousUnitPositions[worker] == unitWorldPoint(unit)
       check run.stateHash() == before
 
-    test "build menu stays open until escape or another menu":
+    test "single-key builds and chat isolation":
       fixture()
       shortcutState.resetShortcut()
       currentShortcuts = DefaultShortcuts
-      commandTab = 1
-      window.onButtonPress(KeyB)
-      check commandTab == 0
-      shortcutState.releaseShortcut('B')
       window.onButtonPress(KeyB)
       check pendingBuild == BarracksBuilding.ord.int32
       shortcutState.releaseShortcut('B')
-      window.onButtonPress(KeyT)
-      # The persistent build menu interprets T as Tower. Missing prerequisites
-      # keep the existing Barracks blueprint intact.
-      check commandTab == 0
-      check pendingBuild == BarracksBuilding.ord.int32
-      shortcutState.releaseShortcut('T')
       window.onButtonPress(KeyEscape)
+      check pendingBuild == -1
       window.onButtonPress(KeyEnter)
-      commandTab = 2
-      window.onButtonPress(KeyB)
-      window.onButtonPress(KeyT)
-      check commandTab == 2
+      window.onButtonPress(KeyF)
+      check pendingBuild == -1
+      resetHumanCommunication()
 
-    test "custom sequences retain training and standalone B T tab navigation":
+    test "custom single key trains without navigation":
       fixture()
       run.world = newWorld(generateMap(DefaultSeed), TickRate * 60)
       run.world.players[0].gold = 5000
@@ -373,30 +363,18 @@ proc main() =
       pendingBuild = -1
       shortcutState.resetShortcut()
       currentShortcuts = DefaultShortcuts
-      commandTab = 0
-      window.onButtonPress(KeyT)
-      shortcutState.releaseShortcut('T')
-      window.onButtonPress(KeyP)
-      shortcutState.releaseShortcut('P')
+      check currentShortcuts.setShortcut(TrainPeonShortcut, "7") == ""
+      window.onButtonPress(Key7)
+      shortcutState.releaseShortcut('7')
       run.flushPlayerCommands()
       require run.submissions.len == 1
       check run.submissions[0].kind == ActionTrain
       check run.submissions[0].first == PeonUnit.ord.int32
-      check commandTab == 1
-      for action in ShortcutAction:
-        currentShortcuts[action][0] = 'Q'
-      shortcutState.resetShortcut()
-      commandTab = 2
-      window.onButtonPress(KeyB)
-      check commandTab == 0
-      shortcutState.releaseShortcut('B')
-      window.onButtonPress(KeyT)
-      check commandTab == 1
-      shortcutState.releaseShortcut('T')
-      commandTab = 2
       window.state.buttonDown = {KeyLeftControl}
-      window.onButtonPress(KeyB)
-      check commandTab == 2
+      window.onButtonPress(Key7)
+      run.flushPlayerCommands()
+      check run.submissions.len == 1
+      window.state.buttonDown = {}
       currentShortcuts = DefaultShortcuts
 
   clickMarks.closeClickMarks()

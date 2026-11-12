@@ -6,7 +6,8 @@ import
   polyworld/[stats, metrics, actioncam, chrome, configs, gameuis, inputs, pathing, player, rtscameras,
     stackpanels, networks, rooms, roomclients],
   assets, content, sim, game, controls, layouts, symbols, maps, factions, tooltips, multiplayer,
-  hudpresentation, researchpresentation, rendervisibility
+  hudpresentation, researchpresentation, rendervisibility,
+  shortcutsettings, shortcutpresentation
 import humancommunication as communications
 
 const
@@ -23,21 +24,16 @@ const
   WellPad = 4.0'f32
   IconTint = rgbx(245, 230, 190, 255)
   ScoreIcons = ["tower", "kills", "deaths"]
-  CommandTabs = ["BUILD", "UNITS", "UPGRADES"]
   ViewIcons = ["previous_frame", "next_frame"]
   ResourceIcons = ["gold", "wood", "food"]
-  CommandTabIcons = ["build", "units", "research"]
   SelectionIcon = 48.0'f32
   GridBarH = 12.0'f32
   NeutralHealthColor = rgbx(180, 185, 192, 255)
   CostFill = rgbx(12, 14, 20, 200)
-  CommandTabH = 28.0'f32
-  CommandTabLift = 4.0'f32
 
 var
-  commandTab* = 0
-    ## Active command pane; graphics shortcuts share the HUD's tab state.
   commandHover: TooltipHover
+  tooltipShortcuts = DefaultShortcuts
   hudNetwork*: NetworkMatch
     ## Set for the lifetime of the current graphical network match.
 
@@ -518,7 +514,7 @@ proc drawSelectionBox*(
   if not active:
     return
   let current = window.mousePos.vec2
-  if (current - press).length <= 6.0'f32:
+  if (current - press).length < 10.0'f32:
     return
   let
     scale = max(sk.uiScale, 0.001'f32)
@@ -708,16 +704,18 @@ proc drawUi*(
     matchResultsVisible() or window.statsContains(sk.mousePos) or mouseOverDebugMenu(sk.mousePos)
   if tooltipsBlocked:
     resetHudTooltips()
-  # A research card exists only in the selected producer's live catalog.
+  let palette = run.world.contextualActions(commandPlayer(viewMode), selectedIds)
+  # Retire tooltips when their action leaves the selected catalog.
   if commandHover.target.kind != NoCommandTooltip:
     let target = commandHover.target
     let valid = target.player == commandPlayer(viewMode) and
       (case target.kind
-       of BuildingCommandTooltip: commandTab == 0
-       of UnitCommandTooltip: commandTab == 1
+       of BuildingCommandTooltip: target.building.shortcutAction in palette
+       of UnitCommandTooltip: target.unit.shortcutAction in palette
        of ResearchCommandTooltip:
-         commandTab == 2 and target.producer == primaryId and
-           target.research in run.world.researchKinds(target.player, primaryId)
+         target.producer in selectedIds and
+           target.research in run.world.researchKinds(target.player, target.producer)
+       of CancelCommandTooltip: CancelSiteShortcut in palette
        of NoCommandTooltip: false)
     if not valid:
       # Changing to another catalog is allowed to inherit warmth, but an
@@ -901,6 +899,7 @@ proc drawUi*(
     portraitOwner = -1'i32
     portraitTint = rgbx(255, 255, 255, 255)
     portraitWorker: Unit
+    portraitCleric: Unit
   if portraitId.isUnitId and run.world.hasUnit(portraitId):
     if not shownUnit(run.world.units[run.world.unitIndex(portraitId)], viewMode):
       portraitId = NoEntity
@@ -924,6 +923,7 @@ proc drawUi*(
     portraitName = unit.kind.unitName()
     portraitOwner = unit.owner
     if unit.kind == PeonUnit: portraitWorker = unit
+    if unit.kind == ClericUnit: portraitCleric = unit
   elif portraitId != NoEntity and run.world.hasBuilding(portraitId):
     let structure = run.world.buildings[
       run.world.buildingIndex(portraitId)
@@ -941,7 +941,9 @@ proc drawUi*(
     portraitName = players[portraitOwner].displayName(portraitOwner) &
       "'s " & portraitName
   let
-    selection = selectionPanel.selectionPanels(portraitWorker != nil)
+    selection =
+      if portraitCleric != nil: selectionPanel.selectionPanels(true)
+      else: selectionPanel.selectionPanels(portraitWorker != nil)
     selectPortrait = selection.portrait
     selectBar = selection.hp
     selectName = selection.name
@@ -968,11 +970,12 @@ proc drawUi*(
     "Small"
   )
   sk.drawWorkerCargo(selection.cargo, portraitWorker)
+  sk.drawClericMana(selection.cargo, portraitCleric)
   if selectedIds.len <= 1 and portraitId.isUnitId and
       run.world.hasUnit(portraitId):
     let unit = run.world.units[run.world.unitIndex(portraitId)]
     let statsOrigin = selection.details.origin +
-      (if portraitWorker != nil: vec2(0, 60) else: vec2(0))
+      (if portraitWorker != nil or portraitCleric != nil: vec2(0, 60) else: vec2(0))
     for i, line in run.world.selectedResearchStats(unit.owner, unit.kind):
       sk.drawLabel(line, statsOrigin + vec2(0, i.float32 * 26),
         vec2(selection.details.size.x, 24), rgbx(226, 230, 239, 255), "Small")
@@ -982,24 +985,31 @@ proc drawUi*(
   for id in selectedIds:
     if shown >= selection.units.len:
       break
-    if id == portraitId or not id.isUnitId or not run.world.hasUnit(id) or
-        not shownUnit(run.world.units[run.world.unitIndex(id)], viewMode):
-      continue
-    let
-      unit = run.world.units[run.world.unitIndex(id)]
-      slot = selection.units[shown]
-    sk.drawPortrait(
-      slot,
-      unitSymbolKey(unit.kind),
-      min(SelectionIcon, slot.size.x - WellPad * 2),
-      teamColors[unit.owner]
-    )
+    if id == portraitId: continue
+    let slot = selection.units[shown]
+    var key: string
+    var owner, hp, maximum: int32
+    if id.isUnitId and run.world.hasUnit(id):
+      let unit = run.world.units[run.world.unitIndex(id)]
+      if not shownUnit(unit, viewMode): continue
+      key = unitSymbolKey(unit.kind)
+      owner = unit.owner
+      hp = unit.hp
+      maximum = unitOf(owner, unit.kind).hp
+    elif id.isBuildingId and run.world.hasBuilding(id):
+      let structure = run.world.buildings[run.world.buildingIndex(id)]
+      if not shownBuilding(structure, viewMode): continue
+      key = buildingPortraitKey(max(structure.owner, 0), structure.kind)
+      owner = structure.owner
+      hp = structure.hp
+      maximum = max(structure.maxHp, 1)
+    else: continue
+    let tint = if owner >= 0: teamColors[owner] else: NeutralHealthColor
+    sk.drawPortrait(slot, key, min(SelectionIcon, slot.size.x - WellPad * 2), tint)
     sk.drawBar(
       slot.origin + vec2(WellPad, slot.size.y - GridBarH),
       vec2(min(SelectionIcon, slot.size.x - WellPad * 2), GridBarH),
-      unit.hp.float32,
-      unitOf(unit.owner, unit.kind).hp.float32,
-      teamColors[unit.owner]
+      hp.float32, maximum.float32, tint
     )
     if window.hudClicked(sk, slot):
       clickedId = id
@@ -1056,115 +1066,81 @@ proc drawUi*(
             rgbx(238, 216, 120, 255)
           )
 
+  if tooltipShortcuts != currentShortcuts:
+    resetHudTooltips()
+    tooltipShortcuts = currentShortcuts
   var
     hoveredTarget = NoTooltipTarget
     hoveredAnchor: GameUiPanel
     hoveredIcon = ""
     hoveredDetails: DetailTooltip
     hoveredTint = rgbx(255, 255, 255, 255)
-  for i, label in CommandTabs:
-    let
-      selected = commandTab == i
-      lift = if selected: CommandTabLift else: 0.0'f
-      tab = GameUiPanel(
-        origin: build.tabs[i].origin - vec2(0, lift),
-        size: build.tabs[i].size + vec2(0, lift)
-      )
-      over = sk.hovered(tab)
-      tint =
-        if selected: rgbx(235, 216, 154, 255)
-        elif over: rgbx(210, 214, 224, 255)
-        else: rgbx(150, 158, 172, 255)
-    sk.drawTab(tab, selected, over)
-    sk.drawSprite(
-      CommandTabIcons[i],
-      tab.origin + vec2(5, tab.size.y - CommandTabH + 6),
-      vec2(IconTiny),
-      tint
-    )
-    sk.drawLabel(
-      label,
-      tab.origin + vec2(22, 0),
-      tab.size - vec2(24, 0),
-      tint,
-      "Hud",
-      CenterAlign
-    )
-    if window.hudClicked(sk, tab):
-      commandTab = i
-  if commandTab == 0:
-    for index in 0 ..< build.slots.len:
-      let slot = build.slots[index]
-      if index <= BuildableHigh.ord:
-        let
-          kind = BuildingKind(index)
-          stats = BuildingTable[kind]
-          player = commandPlayer(viewMode)
-        sk.drawBuildPortrait(
-          slot,
-          buildingPortraitKey(player, kind),
-          run.world.canBuild(player, kind)
-        )
-        sk.drawSlotCosts(slot, stats.gold, stats.wood)
-        if options.playerSlot > 0 and
-            not run.replayMode and
-            window.hudClicked(sk, slot):
-          pendingBuild = int32(kind.ord)
-        if sk.hovered(slot):
-          hoveredTarget = buildingTooltipTarget(kind, player)
-          hoveredAnchor = slot
-          hoveredIcon = buildingPortraitKey(player, kind)
-  elif commandTab == 1:
-    for kind in UnitKind:
-      let
-        slot = build.slots[kind.ord]
-        player = commandPlayer(viewMode)
-        stats = unitOf(player, kind)
-      sk.drawTrainPortrait(
-        slot,
-        unitSymbolKey(kind),
-        teamColors[player],
-        canShowTrain(player, primaryId, kind),
-        run.world.trainingQueueCount(player, primaryId, kind)
-      )
+  let player = commandPlayer(viewMode)
+  var paletteIndex = 0
+  for action in palette:
+    let slot = build.slots[paletteIndex]
+    inc paletteIndex
+    if action <= BuildBlacksmithShortcut:
+      let kind = BuildingKind(action.ord)
+      let stats = BuildingTable[kind]
+      sk.drawBuildPortrait(slot, buildingPortraitKey(player, kind),
+        run.world.canBuild(player, kind))
+      sk.drawSlotCosts(slot, stats.gold, stats.wood)
+      if sk.hovered(slot):
+        hoveredTarget = buildingTooltipTarget(kind, player)
+        hoveredIcon = buildingPortraitKey(player, kind)
+        hoveredDetails = buildingDetails(kind, player)
+    elif action <= TrainSummonShortcut:
+      let kind = UnitKind(action.ord - TrainPeonShortcut.ord)
+      let stats = unitOf(player, kind)
+      sk.drawTrainPortrait(slot, unitSymbolKey(kind), teamColors[player],
+        run.world.selectedProducer(player, selectedIds, kind) != NoEntity,
+        run.world.selectedTrainingCount(player, selectedIds, kind))
       if sk.hovered(slot):
         sk.drawTrainCosts(slot, stats.gold, stats.wood)
-      if options.playerSlot > 0 and
-          not run.replayMode and
-          window.hudClicked(sk, slot):
-        let player = options.playerSlot - 1
-        if primaryId.isBuildingId and
-            run.world.buildingOwner(primaryId) == player:
-          queueTrain(player, primaryId, int32(kind.ord))
-      if sk.hovered(slot):
         hoveredTarget = unitTooltipTarget(kind, player)
-        hoveredAnchor = slot
         hoveredIcon = unitSymbolKey(kind)
         hoveredTint = teamColors[player]
-  else:
-    let player = commandPlayer(viewMode)
-    let kinds = run.world.researchKinds(player, primaryId)
-    let slots = researchPanels(build.contents)
-    if kinds.len == 0:
-      discard sk.drawText("Small", "Select your Blacksmith, Lumber Mill or " &
-        tooltipBuildingName(StablesBuilding, player) & " to research upgrades.",
-        build.contents.origin + vec2(8), rgbx(190, 196, 208, 255),
-        maxWidth = build.contents.size.x - 16, wordWrap = true)
-    for i, kind in kinds:
-      var card = run.world.researchCard(player, primaryId, kind)
+        hoveredDetails = unitDetails(kind, player)
+    elif action == CancelSiteShortcut:
+      sk.drawBuildPortrait(slot, "stop", true)
+      if sk.hovered(slot):
+        hoveredTarget = TooltipTarget(kind: CancelCommandTooltip, player: player)
+        hoveredIcon = "stop"
+        hoveredDetails.title = "Cancel construction"
+        hoveredDetails.subtitle = "Unfinished selected sites"
+        hoveredDetails.description = "Remove your selected unfinished buildings. Completed buildings are never demolished."
+        var gold, wood: int32
+        for id in selectedIds:
+          let index = run.world.buildingIndex(id)
+          if index < 0: continue
+          let b = run.world.buildings[index]
+          if b.owner != player or b.hp <= 0 or b.state != BuildingUnderConstruction: continue
+          let stats = BuildingTable[b.kind]
+          gold += stats.gold
+          wood += stats.wood
+        hoveredDetails.rows = @[("Gold refund", $gold), ("Wood refund", $wood)]
+        hoveredDetails.requirements = "Owned unfinished construction only. Refund is calculated when the command executes."
+    else:
+      let kind = ResearchKind(action.ord - ResearchArrowsShortcut.ord)
+      let producer = run.world.selectedResearchProducer(player, selectedIds, kind)
+      var card = run.world.researchCard(player, producer, kind)
       let temporaryIcon = not sk.atlas.entries.hasKey(card.icon)
-      if temporaryIcon:
-        card.icon = TemporaryResearchIcons[kind]
-      sk.drawResearchCard(slots[i], card, TickRate)
-      if sk.hovered(slots[i]):
+      if temporaryIcon: card.icon = TemporaryResearchIcons[kind]
+      sk.drawBuildPortrait(slot, card.icon, card.researchEnabled)
+      if sk.hovered(slot):
+        sk.drawTrainCosts(slot, card.gold, card.wood)
         hoveredTarget = TooltipTarget(kind: ResearchCommandTooltip,
-          research: kind, producer: primaryId, player: player)
-        hoveredAnchor = slots[i]
+          research: kind, producer: producer, player: player)
         hoveredIcon = card.icon
         hoveredDetails = researchDetails(kind, player, card, temporaryIcon)
-      if options.playerSlot > 0 and not run.replayMode and
-          card.researchEnabled and window.hudClicked(sk, slots[i]):
-        queueResearch(player, primaryId, kind)
+    sk.drawCommandKey(commandKeyPanel(slot, action > BuildBlacksmithShortcut),
+      currentShortcuts.commandKeyLabel(action))
+    if sk.hovered(slot):
+      hoveredAnchor = slot
+      hoveredDetails.subtitle.add " / Shortcut: " & currentShortcuts.shortcutRouteLabel(action)
+    if options.playerSlot > 0 and not run.replayMode and window.hudClicked(sk, slot):
+      discard run.world.performShortcut(options.playerSlot - 1, selectedIds, action)
 
   if playbackControlsVisible():
     transport.drawTransport(
@@ -1193,6 +1169,13 @@ proc drawUi*(
   discard sk.drawCommandTooltip(commandHover, hoveredTarget, hoveredAnchor,
     chrome.layout.size, getMonoTime().ticks.float64 / 1_000_000_000.0,
     hoveredIcon, hoveredTint, hoveredDetails)
+  let warning = run.world.hallDefeatWarning(if run.replayMode: 0'i32 else: options.playerSlot)
+  if warning.len > 0:
+    # Center below the resource ribbon, outside score/minimap/chat columns.
+    let size = vec2(350, 32)
+    let at = vec2((chrome.layout.size.x - size.x) / 2, 84)
+    sk.drawRect(at, size, rgbx(55, 20, 18, 245))
+    sk.drawLabel(warning, at, size, rgbx(255, 213, 143, 255), "Bold", CenterAlign)
   sk.drawHumanCommunication(window)
 
 proc drawStatsOverlay*(

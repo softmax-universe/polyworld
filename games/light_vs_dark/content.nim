@@ -228,7 +228,7 @@ const LightUnits: array[UnitKind, UnitStats] = [
     gold: 900, wood: 200, trainTicks: 600,
     hp: 120, armor: 0, piercing: 255, basic: 0, splash: 63,
     missPercent: 0, cooldownTicks: 192,
-    rangeTiles: 8, sightTiles: 8, stepTicks: SlowStepTicks, food: 1,
+    rangeTiles: 8, sightTiles: 10, stepTicks: SlowStepTicks, food: 1,
     trainedAt: BarracksBuilding,
     requires: {BlacksmithBuilding, LumberMillBuilding}
   ),
@@ -346,6 +346,16 @@ const BuildingTable*: array[BuildingKind, BuildingStats] = [
     requires: {}
   )
 ]
+
+## Cleric automatic support (same balance for both factions).
+const
+  ClericMaxMana* = 100'i32
+  ClericHealManaCost* = 5'i32
+  ClericHealAmount* = 8'i32
+  ClericHealRange* = 4'i32
+  ClericHealCooldown* = TickRate
+  ClericManaRegenTicks* = TickRate
+    ## One mana per second; integer remainder is authoritative state.
 
 ## Economy
 
@@ -473,7 +483,8 @@ proc contentHash*(): uint64 =
     RubbleTicks, OrthogonalCost, DiagonalCost, ShoveAfterTicks,
     SwapAfterTicks, RepathAfterTicks, AbandonAfterTicks,
     RepathCooldownTicks, ShortPathCooldownTicks, OccupiedTilePenalty,
-    AttackMissPercent
+    AttackMissPercent, ClericMaxMana, ClericHealManaCost, ClericHealAmount,
+    ClericHealRange, ClericHealCooldown, ClericManaRegenTicks
   ]:
     hash.addHashy(value)
   uint64(hash)

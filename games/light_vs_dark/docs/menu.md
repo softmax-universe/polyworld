@@ -42,9 +42,9 @@ Hover over Build or Units buttons for half a second to see their purpose, costs,
 - **Double-click a unit:** select all available owned units of that type; Shift adds them to the selection.
 - **S:** stop selected units and clear queued orders (X remains a cancel alias).
 - **Right-click:** contextual move, group attack, harvest, or resume an owned unfinished building.
-- **A then left-click:** attack-capable selected units target a clicked hostile unit, or attack-move to a world/minimap ground destination.
+- **Hold A with right-click:** attack-capable selected units target a clicked hostile unit, or attack-move to a world/minimap ground destination.
 - **Right-drag a curve:** preview individual formation positions; release to move each selected unit to its position.
-- **A then right-drag:** attack-move formation, shown in red instead of green.
+- **Hold A with right-drag:** attack-move formation, shown in red instead of green.
 - **Shift when issuing/releasing an order:** append it after the current order; ordinary replacement orders clear queued waypoints.
 - **Escape:** cancel an armed command or formation drag before opening the match menu.
 
@@ -54,26 +54,30 @@ Per-unit queues hold up to 32 pending orders. Queued harvest hands off after its
 
 `?server=wss://HOST/ws` chooses the relay without skipping Home. A `room` query additionally opens multiplayer and joins the invitation. Browser pages served over HTTPS require `wss://`.
 
-## Keyboard sequences
+## Contextual action keys
 
-**B** opens the persistent Build menu; the next **B** selects Barracks. **T** opens Units; **P** trains a Peon and **S** trains a Swordsman. There is no timeout, and commands leave their menu active until Escape, another menu, or a gameplay input owner cancels it. Unassigned keys fall through to ordinary controls. With eligible combat units selected, **A** (or your customized Attack Move binding) always arms attack movement instead of training an Archer; producer-only selections retain the Archer menu command.
+There are no Build/Units/Upgrades tabs or menu prefixes. Select a peon for build actions, a Town Hall for Peon training, a Barracks for its military units, or research buildings for their upgrades. Mixed selected producers show their combined actions; training chooses the least-loaded eligible producer including pending commands. Unavailable relevant actions remain faded with prerequisite/cost tooltips.
 
-Edit these under **Settings → Controls → Build / Units Menu Keys** (scroll below the ordinary bindings). Existing saved custom pairs are preserved unchanged: their first key opens a persistent command context and their second key invokes the command. Click a pair to edit both keys; duplicate pairs are rejected and edits save automatically. **Reset build / train** restores defaults.
+Each action uses one configured key:
 
-| Build | Keys | Train | Keys |
+| Build | Key | Train | Key |
 |---|---|---|---|
-| Town Hall | B H | Peon | T P |
-| Farm | B F | Swordsman | T S |
-| Barracks | B B | Archer | T A |
-| Lumber Mill | B L | Mage | T M |
-| Tower | B T | Knight | T K |
-| Stables | B S | Catapult | T C |
-| Church | B C | Cleric | T H |
-| Blacksmith | B K | Elemental | T E |
+| Town Hall | H | Peon | P |
+| Farm | F | Swordsman | S |
+| Barracks | B | Archer | A |
+| Lumber Mill | L | Mage | M |
+| Tower | T | Knight | K |
+| Stables | U | Catapult | C |
+| Church | C | Cleric | H |
+| Blacksmith | K | Elemental | E |
+
+Research: **Q** Keenflight Arrows, **W** Tempered Edges, **R** Runed Plating, **V** Windrunner Training. **X** cancels selected owned unfinished sites and refunds their full paid gold/wood; complete buildings are never demolished by this action. **S** remains Stop for unit selection, so Stables uses **U**. With attack-capable units selected, the configured Attack Move modifier outranks Archer on **A**, but affects only right-click/right-drag orders. Left-click and double-click selection are unaffected. Pointer travel below 10 screen pixels is a click; 10 or more is box selection, independent of HUD scale.
+
+Edit keys under **Settings → Controls → Contextual Action Keys**. Each edit captures one key and saves automatically. Worker and producer palettes may reuse keys; overlapping producer actions cannot. Legacy saved pairs migrate to their second key. On same-palette collisions (including worker S versus Stop), catalog order wins and the conflicting action gets its unclaimed default or first free letter/digit; settings explicitly reports the reassignment. **Reset action keys** restores defaults. Held keys never repeat commands, and chat/menu input suppresses gameplay.
+
+Losing the last Town Hall starts a 15-second simulation-tick defeat grace period, shown locally as **No Town Hall — defeat in Ns**. An owned living Town Hall construction site immediately cancels the warning and deadline. Spectators do not see another player's countdown.
 
 Elementals wear a grand laurel crown and their bodies use the owning faction's color.
-
-Build sequences require an eligible selected worker; training requires a selected compatible producer, resources, and supply. They use the same validated command path as clicking the HUD.
 
 ## Browser build
 

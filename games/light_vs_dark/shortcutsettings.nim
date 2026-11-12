@@ -1,4 +1,4 @@
-## LvD sequence editor and platform-neutral Windy configuration storage.
+## LvD single-key editor and platform-neutral Windy configuration storage.
 import silky, vmath, windy
 import polyworld/[chrome, inputs, menus]
 import shortcuts
@@ -18,7 +18,7 @@ var
 
 proc maskShortcutBindings*(bindings: InputBindings,
     consumed: set[Button]): InputBindings =
-  ## Keep sequence strokes from becoming camera/selection aliases in polling.
+  ## Keep action keys from becoming camera/selection aliases in polling.
   result = bindings
   for action in InputAction:
     for slot in 0 .. 1:
@@ -41,7 +41,9 @@ proc saveShortcuts*(bindings: ShortcutBindings, app = "Polyworld LvD") =
 
 proc loadLvdShortcuts*() =
   shortcutSettingsError = ""
-  try: currentShortcuts = readShortcuts()
+  try:
+    currentShortcuts = readShortcuts()
+    shortcutSettingsError = shortcutMigrationReport
   except CatchableError:
     currentShortcuts = DefaultShortcuts
     shortcutSettingsError = getCurrentExceptionMsg()
@@ -57,11 +59,10 @@ proc editKey*(editor: var ShortcutEditor, bindings: var ShortcutBindings,
     editor.draft = ""
     return false
   if key notin {'A'..'Z', '0'..'9'}: return false
-  editor.draft.add key
-  if editor.draft.len == 2:
-    editor.error = bindings.setShortcut(editor.action, editor.draft)
-    editor.active = false
-    result = editor.error.len == 0
+  editor.draft = $key
+  editor.error = bindings.setShortcut(editor.action, editor.draft)
+  editor.active = false
+  result = editor.error.len == 0
 
 proc endShortcutEditing*() =
   if shortcutEditor.active: bindingCapture = false
@@ -86,15 +87,15 @@ proc drawShortcutRows(sk: Silky, window: Window, origin: Vec2) =
         if not shortcutEditor.active:
           bindingCapture = false
           break
-  sk.drawLabel("BUILD / UNITS MENU KEYS", origin, vec2(720, 36),
+  sk.drawLabel("CONTEXTUAL ACTION KEYS", origin, vec2(720, 36),
     sk.theme.defaultTextColor)
-  sk.drawLabel("First key opens a menu; next keys choose commands. No timeout; Esc exits.",
+  sk.drawLabel("One key per action. Select a worker or producer to see its actions.",
     origin + vec2(0, 36), vec2(720, 36), sk.theme.defaultTextColor)
   let message =
-    if shortcutEditor.active: "Type both keys for " & shortcutLabel(shortcutEditor.action) & "; Esc cancels."
+    if shortcutEditor.active: "Type one key for " & shortcutLabel(shortcutEditor.action) & "; Esc cancels."
     elif shortcutSettingsError.len > 0: shortcutSettingsError
     elif shortcutEditor.error.len > 0: shortcutEditor.error
-    else: "Edit menu + command keys. Existing custom pairs are preserved."
+    else: "Keys may repeat between worker and producer palettes."
   sk.drawLabel(message, origin + vec2(0, 72), vec2(720, 36),
     sk.theme.defaultTextColor)
   for action in ShortcutAction:
@@ -104,8 +105,8 @@ proc drawShortcutRows(sk: Silky, window: Window, origin: Vec2) =
     let sequence = currentShortcuts[action]
     let label =
       if shortcutEditor.active and shortcutEditor.action == action:
-        (if shortcutEditor.draft.len == 0: "First key..." else: shortcutEditor.draft & " then ...")
-      else: $sequence[0] & "  " & $sequence[1]
+        "Press a key..."
+      else: sequence
     button label, not bindingCapture:
       shortcutEditor.beginEdit(action)
       captureHeld = {}
@@ -113,7 +114,7 @@ proc drawShortcutRows(sk: Silky, window: Window, origin: Vec2) =
         if window.buttonDown[held]: captureHeld.incl held
       bindingCapture = true
   sk.at = origin + vec2(420, 112 + (ShortcutAction.high.ord + 1).float32 * 38)
-  button "Reset build / train", not bindingCapture:
+  button "Reset action keys", not bindingCapture:
     currentShortcuts.resetShortcuts()
     shortcutEditor.error = ""
     persistCurrent()

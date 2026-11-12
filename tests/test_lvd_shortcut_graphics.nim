@@ -15,7 +15,7 @@ macro keyHandler(): untyped =
   error("missing production key handler")
 
 suite "LvD production shortcut routing":
-  test "BB builds, TP trains, combat A wins over TA, menus and Ctrl stay isolated":
+  test "single B/P actions, combat A wins over Archer, menus and Ctrl stay isolated":
     window = newWindow("LvD shortcuts", ivec2(1600, 1000), visible = false)
     defer:
       window.close()
@@ -39,34 +39,25 @@ suite "LvD production shortcut routing":
     inputBindings = LvdControlProfile.defaults
     bindingCapture = false
     selectedIds = @[run.world.units[0].id]
-    commandTab = 1
-    window.onButtonPress(KeyB)
-    check commandTab == 0
-    check pendingBuild == -1
-    window.onButtonPress(KeyB)
-    check pendingBuild == -1
-    shortcutState.releaseShortcut('B')
-    sleep(1400) # Former timeout must not close the actual production menu.
-    window.onButtonPress(MouseLeft)
     window.onButtonPress(KeyB)
     check pendingBuild == BarracksBuilding.ord
+    pendingBuild = -1
+    window.onButtonPress(KeyB)
+    check pendingBuild == -1 # repeat suppression
+    shortcutState.releaseShortcut('B')
+    window.onButtonPress(KeyF)
+    check pendingBuild == FarmBuilding.ord
     pendingBuild = -1
     shortcutState.resetShortcut()
     var hall = NoEntity
     for building in run.world.buildings:
       if building.owner == 0 and building.kind == TownHallBuilding: hall = building.id
     selectedIds = @[hall]
-    window.onButtonPress(KeyT)
-    check commandTab == 1
-    shortcutState.releaseShortcut('T')
-    sleep(1400)
     window.onButtonPress(KeyP)
     run.flushPlayerCommands()
     check run.world.buildings[run.world.buildingIndex(hall)].queueLength == 1
     shortcutState.resetShortcut()
     selectedIds = @[run.world.spawnUnit(0, SoldierUnit, tile2(30, 30))]
-    window.onButtonPress(KeyT)
-    shortcutState.releaseShortcut('T')
     window.onButtonPress(KeyA)
     check attackMoveArmed
     attackMoveArmed = false
@@ -79,8 +70,6 @@ suite "LvD production shortcut routing":
     matchMenu = HiddenMatchMenu
     shortcutState.resetShortcut()
     window.state.buttonDown = {KeyLeftSuper}
-    window.onButtonPress(KeyT)
-    shortcutState.releaseShortcut('T')
     window.state.buttonDown = {}
     window.onButtonPress(KeyP)
     run.flushPlayerCommands()
@@ -92,12 +81,10 @@ suite "LvD production shortcut routing":
     let worker = run.world.units[0].id
     let barracks = hall
     run.world.buildings[run.world.buildingIndex(hall)].kind = BarracksBuilding
-    selectedIds = @[barracks, soldier, worker]
+    selectedIds = @[barracks]
     for id in [soldier, worker]:
       require run.world.applyMove(0, id, 40, 40)
       require run.world.applyMove(0, id, 41, 40, append = true)
-    window.onButtonPress(KeyT)
-    shortcutState.releaseShortcut('T')
     window.onButtonPress(KeyS)
     run.flushPlayerCommands()
     check run.world.buildings[run.world.buildingIndex(barracks)].queueLength == 2
@@ -135,8 +122,6 @@ suite "LvD production shortcut routing":
       state: BuildingComplete, hp: 100)
     require run.world.canTrain(barracks, ArcherUnit)
     selectedIds = @[barracks]
-    window.onButtonPress(KeyT)
-    shortcutState.releaseShortcut('T')
     window.onButtonPress(KeyA)
     run.flushPlayerCommands()
     check not attackMoveArmed

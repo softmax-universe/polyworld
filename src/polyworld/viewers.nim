@@ -223,12 +223,12 @@ proc holdSplash*(
   ## Keeps the splash up until the hold time elapses.
   when defined(takeScreenshot) or defined(emscripten):
     drawSplash(sk, window, splash.name)
-    return
-  while epochTime() - splash.startedAt < seconds:
-    if window.closeRequested:
-      quit(0)
-    drawSplash(sk, window, splash.name)
-    sleep(10)
+  else:
+    while epochTime() - splash.startedAt < seconds:
+      if window.closeRequested:
+        quit(0)
+      drawSplash(sk, window, splash.name)
+      sleep(10)
 
 var
   presentDeadline = 0.0

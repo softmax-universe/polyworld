@@ -16,9 +16,10 @@ saved locally with Save and Back.
 | Abilities | Q, W, E, R |
 | Item slots beside abilities | F, G |
 | Shop | B |
-| Action camera | V |
-| Pause offline playback | Space |
-| Cancel targeting / game menu | Escape |
+| Action camera (watch / replay only) | V |
+| Follow own hero while held; release for free camera | Space |
+| Pause watch / replay playback | Space |
+| Cancel targeting / close shop / game menu | Escape |
 | Debug menu | F1 |
 | Fullscreen | F11 |
 | Pan camera | Arrow keys |
@@ -34,6 +35,20 @@ Z, X, and C perform mouse actions at the pointer's current position. Hold X
 and move the pointer to drag the camera. Hold A for repeated attack moves;
 releasing it leaves one attack move armed. Double-tap an item binding to
 self-use a potion or return home with a portal scroll.
+
+In human play, ordinary left-click only inspects a unit; it never attacks.
+Right-click moves your own hero or attacks a hostile target without changing
+that inspection. A followed by a ground click issues attack-move; an armed
+click on an enemy attacks it. Holding Space follows your own hero, regardless
+of the inspected unit; releasing Space immediately restores free camera.
+Space does not pause human matches or drafts. Clicking your own portrait
+recenters once rather than latching follow.
+
+Escape closes an open shop first, then a later Escape can open the game menu.
+Otherwise it cancels armed targeting before opening the menu. Cooldown
+abilities cannot enter targeting mode or queue a cast; ready aimed and self
+abilities retain their normal behavior. Chat, shop, draft and match menus
+own input before gameplay orders or camera gestures.
 
 Stop cancels movement, chasing, queued casts, and portal channeling. It does
 not disable automatic basic attacks. In multiplayer it follows the same

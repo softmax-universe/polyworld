@@ -1,4 +1,4 @@
-## Game-specific two-stroke shortcuts, independent of window/rendering code.
+## Persistent command-menu shortcuts, independent of window/rendering code.
 import std/[json, strutils]
 import content, controls, sim
 
@@ -13,7 +13,6 @@ type
   ShortcutBindings* = array[ShortcutAction, string]
   ShortcutState* = object
     prefix: char
-    started: float64
     held: set[char]
     consumedKeys: set[char]
   ShortcutMatch* = object
@@ -25,13 +24,11 @@ const DefaultShortcuts*: ShortcutBindings = [
   "TP", "TS", "TA", "TM", "TK", "TC", "TH", "TE"
 ]
 
-const ShortcutTimeout* = 1.25
-
 const ShortcutLabels*: array[ShortcutAction, string] = [
   "Build Town Hall", "Build Farm", "Build Barracks", "Build Lumber Mill",
   "Build Tower", "Build Stables", "Build Church", "Build Blacksmith",
   "Train Peon", "Train Swordsman", "Train Archer", "Train Mage",
-  "Train Knight", "Train Catapult", "Train Cleric", "Train Summon / Fire elemental"
+  "Train Knight", "Train Catapult", "Train Cleric", "Train Elemental"
 ]
 
 proc shortcutLabel*(action: ShortcutAction): string = ShortcutLabels[action]
@@ -131,26 +128,27 @@ proc pressShortcut*(state: var ShortcutState, bindings: ShortcutBindings,
     state.cancelShortcut()
     state.held.incl key
     return
-  if now - state.started > ShortcutTimeout or now < state.started:
-    state.cancelShortcut()
   if key in state.held:
     result.consumed = key in state.consumedKeys
     return
   state.held.incl key
+  if key == '\e':
+    result.consumed = state.prefix != '\0'
+    state.cancelShortcut()
+    return
   if state.prefix != '\0':
     let sequence = $state.prefix & $key
-    state.prefix = '\0'
-    result.consumed = true
-    state.consumedKeys.incl key
     for action in ShortcutAction:
       if bindings[action] == sequence:
         result.action = action.ord
-        return
-  else:
-    for sequence in bindings:
-      if sequence.len == 2 and sequence[0] == key:
-        state.prefix = key
-        state.started = now
         result.consumed = true
         state.consumedKeys.incl key
         return
+  # A recognized command leaves its menu open; an unrelated key falls through.
+  # Existing custom pairs retain both keys and gain the same persistent semantics.
+  for sequence in bindings:
+    if sequence.len == 2 and sequence[0] == key:
+      state.prefix = key
+      result.consumed = true
+      state.consumedKeys.incl key
+      return

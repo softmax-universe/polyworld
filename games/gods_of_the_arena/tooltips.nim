@@ -4,10 +4,11 @@ import
   std/strutils,
   pixie, silky, vmath,
   polyworld/[chrome, gameuis],
-  content, sim
+  content, sim, tooltiphover
+
+export tooltiphover
 
 const
-  TooltipDelay = 0.5
   TooltipGold = rgbx(247, 221, 143, 255)
   TooltipWhite = rgbx(236, 238, 244, 255)
   TooltipMuted = rgbx(166, 174, 190, 255)
@@ -16,6 +17,16 @@ type
   DetailTooltip* = object
     title*, icon*, subtitle*, description*: string
     rows*: seq[tuple[label, value: string]]
+
+  TooltipTarget* = object
+    ## Identity includes the owning hero, region and slot, not only content.
+    id*, key*: string
+    card*: DetailTooltip
+    anchor*: GameUiPanel
+  TooltipSession* = object
+    hover*: TooltipHover
+    current*: TooltipTarget
+    panel*: GameUiPanel
 
 var
   cachedAbility = -1
@@ -130,7 +141,14 @@ proc itemDetails*(item: Item): DetailTooltip =
   result.subtitle = if spec.kind == Consumable: "Consumable" else: "Equipment"
   result.rows.add ("Shop price", $spec.cost & " gold")
   if spec.kind == Equipment:
-    result.description = "Bonuses apply while held in your inventory."
+    result.description = "Passive in any inventory slot; no action slot needed."
+    if spec.damage > 0:
+      result.description.add " Bonus applies to basic attacks only, not abilities. " &
+        "Does not increase attack range or change attack type."
+    if item in [BattleAxe, SunsteelLongsword]:
+      result.rows.add ("Requires", "Melee heroes only")
+    elif item in [RuneCrossbow, RangerBow]:
+      result.rows.add ("Requires", "Ranged heroes only")
   elif item == PortalScroll:
     result.description = "Double-click or double-tap its key to return home. " &
       "Otherwise, teleport near a living allied tower. Distant aims " &
@@ -175,22 +193,69 @@ proc itemDetails*(item: Item): DetailTooltip =
   if spec.kind == Consumable:
     result.description.add " Consumes one from the stack."
 
-proc drawDetails(sk: Silky, card: DetailTooltip, anchor: GameUiPanel,
-    size: Vec2, key: string) =
-  ## Draws a large themed card above its icon, clamped inside the viewport.
-  if sk.mouseIdleTime < TooltipDelay:
-    return
+proc tooltipPanel*(card: DetailTooltip, anchor: GameUiPanel,
+    size: Vec2): GameUiPanel =
+  ## One geometry contract for drawing, hover retention and input blocking.
   let
     width = min(380.0'f, size.x - 16)
     rowCount = (card.rows.len + 1) div 2
     rowHeight = min(44.0'f, max(28.0'f,
       (size.y - 276) / max(rowCount, 1).float32))
     height = 252.0'f + rowCount.float32 * rowHeight
-    at = vec2(
-      clamp(anchor.origin.x + anchor.size.x / 2 - width / 2,
-        8.0'f, max(8.0'f, size.x - width - 8)),
-      max(8.0'f, anchor.origin.y - height - 10)
-    )
+  GameUiPanel(origin: vec2(
+    clamp(anchor.origin.x + anchor.size.x / 2 - width / 2,
+      8.0'f, max(8.0'f, size.x - width - 8)),
+    clamp(anchor.origin.y - height - 10, 8.0'f,
+      max(8.0'f, size.y - height - 8))), size: vec2(width, height))
+
+proc clearTooltip*(session: var TooltipSession) =
+  session = TooltipSession()
+
+proc tooltipContains*(session: TooltipSession, mouse: Vec2): bool =
+  session.hover.visible and session.panel.contains(mouse)
+
+proc updateTooltip*(session: var TooltipSession,
+    targets: openArray[TooltipTarget], mouse: Vec2, size: Vec2, now: float64) =
+  ## Update from ALL live anchors, including unhovered ones, once per HUD frame.
+  # Expiry must precede panel hit testing, or a stale panel can suppress the
+  # first frame on the next cold anchor and leave its collision map behind.
+  if session.hover.expire(now):
+    session.clearTooltip()
+  var live = false
+  for target in targets:
+    if target.id == session.current.id:
+      session.current = target
+      live = true
+      break
+  if not live:
+    session.clearTooltip()
+  if live:
+    session.panel = tooltipPanel(session.current.card, session.current.anchor, size)
+  var candidate: TooltipTarget
+  if not session.tooltipContains(mouse):
+    for target in targets:
+      if target.anchor.contains(mouse):
+        candidate = target
+        break
+  if candidate.id.len > 0:
+    session.current = candidate
+    session.panel = tooltipPanel(candidate.card, candidate.anchor, size)
+  discard session.hover.update(candidate.id, session.current.anchor,
+    session.panel, mouse, now)
+  if session.hover.target.len == 0:
+    session.clearTooltip()
+
+proc drawDetails(sk: Silky, card: DetailTooltip, anchor: GameUiPanel,
+    size: Vec2, key: string) =
+  ## Presentation only: visibility belongs to the target-stable session.
+  let
+    panel = tooltipPanel(card, anchor, size)
+    width = panel.size.x
+    height = panel.size.y
+    at = panel.origin
+    rowCount = (card.rows.len + 1) div 2
+    rowHeight = min(44.0'f, max(28.0'f,
+      (size.y - 276) / max(rowCount, 1).float32))
     body = at + vec2(16)
     textWidth = width - 32
   sk.pushLayer(PopupsLayer)
@@ -224,6 +289,13 @@ proc drawDetails(sk: Silky, card: DetailTooltip, anchor: GameUiPanel,
   )
   sk.popClipRect()
   sk.popLayer()
+
+proc drawTooltip*(sk: Silky, session: TooltipSession, size: Vec2) =
+  if session.hover.visible:
+    if session.tooltipContains(sk.mousePos):
+      sk.mouseConsumed = true
+    sk.drawDetails(session.current.card, session.current.anchor, size,
+      session.current.key)
 
 proc drawAbilityTooltip*(sk: Silky, ability: Ability, rank: int32,
     anchor: GameUiPanel, size: Vec2, key: string) =

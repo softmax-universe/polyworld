@@ -5,6 +5,7 @@ import
   bumpy, chroma, opengl, pixie, silky, vmath,
   assets, brushes, content, groves, landscapes, sim, game, maps, replays, ui, walls,
   aiming, cameras, controls, faces, lighting, spelleffects, multiplayer, homes, lobbies, cursors, pointers,
+  minimaporders, spectator, chats, chatinput, chatui, shops,
   polyworld/actioncam, polyworld/assets, polyworld/characters,
   polyworld/clickmarks, polyworld/fxshapes, polyworld/weapontrails,
   polyworld/chargen, polyworld/common, polyworld/pathing,
@@ -16,6 +17,9 @@ import
   polyworld/terrainsurfaces, polyworld/waters,
   polyworld/[displays, chrome, inputs, rtscameras, selectionoutlines, shapes, viewers,
     visions, worldbars, worldtexts, connections, roomclients, rooms, menus, networks]
+
+when defined(emscripten):
+  {.emit: "#include <emscripten.h>".}
 
 when defined(takeScreenshot):
   import std/os
@@ -265,6 +269,8 @@ proc runGraphics*(
 ): bool {.discardable.} =
   ## Runs one match on the existing window and releases match-owned resources.
   initializeGraphics()
+  clearHudTooltip()
+  defer: clearHudTooltip()
   # Loading polls window events, so retire the lobby before drawing the splash.
   window.cursor = Cursor(kind: ArrowCursor)
   window.onFrame = nil
@@ -282,6 +288,9 @@ proc runGraphics*(
     matchMenu = HiddenMatchMenu
     preferences = Preferences()
     saveError: string
+    chat: ChatEditor
+  let chatHooks = window.installChatInput(addr chat)
+  defer: window.restoreChatInput(chatHooks)
   try:
     preferences = readPreferences("Polyworld GotA")
   except CatchableError as error:
@@ -1221,17 +1230,45 @@ proc runGraphics*(
     transport = initPlayer(
       live = not run.replayMode,
       durationTicks = run.durationTicks(),
-      playing = not options.pauseOnStart,
-      speed = options.speed,
-      repeating = true
+      playing = run.world.phase == Drafting or network.isSpectator or not options.pauseOnStart,
+      speed = if network.isSpectator: 1'i32 else: options.speed,
+      repeating = not network.isSpectator
     )
+    spectatorStream = if network.isSpectator: newSpectatorStream(network) else: nil
+  transport.streamed = network.isSpectator
+  networkSpectator = network.isSpectator
 
   window.onButtonPress = proc(button: Button) =
     if bindingCapture:
       return
+    let wasTyping = chat.typing
+    if chat.handleChatButton(button, matchMenu == HiddenMatchMenu and
+        not shopOpen and network.canHumanChat):
+      if not wasTyping and chat.typing:
+        chat.team = window.buttonDown[KeyLeftShift] or window.buttonDown[KeyRightShift]
+      window.syncChatInput(chat)
+      selectionStarted = false
+      minimapPanning = false
+      panning = false
+      armedAbility = -1
+      armedItem = -1
+      attackMoveArmed = false
+      return
     if window.scaleKey(button, preferences, sk.uiScale, "Polyworld GotA"):
       return
+    if button == KeyEscape and shopOpen:
+      clearHudTooltip()
+      shopOpen = false
+      resetShopUi()
+      armedAbility = -1
+      armedItem = -1
+      attackMoveArmed = false
+      selectionStarted = false
+      minimapPanning = false
+      panning = false
+      return
     if MenuInput.matches(button):
+      clearHudTooltip()
       if quitToMenu:
         return
       if matchMenu == HiddenMatchMenu and
@@ -1251,9 +1288,14 @@ proc runGraphics*(
       return
     if matchMenu != HiddenMatchMenu:
       return
+    # Space is a held hero-camera gesture in human play, never a pause/menu key.
+    # Consume before configurable gameplay and chrome shortcuts.
+    if button == KeySpace and options.playerSlot > 0 and not run.replayMode:
+      return
     if options.playerSlot > 0 and not run.replayMode and
       run.world.phase != Drafting:
         if ShopInput.matches(button):
+          clearHudTooltip()
           shopOpen = not shopOpen
           armedAbility = -1
           armedItem = -1
@@ -1278,9 +1320,11 @@ proc runGraphics*(
       return
     if handleChromeKey(button):
       return
-    if PauseInput.matches(button) and network == nil:
+    if PauseInput.matches(button) and run.world.phase != Drafting and
+        (options.playerSlot <= 0 or run.replayMode or button != KeySpace) and
+        (network == nil or network.isSpectator):
       transport.togglePlay()
-    elif CameraInput.matches(button):
+    elif CameraInput.matches(button) and (options.playerSlot <= 0 or run.replayMode):
       actionCam.toggle(followSelection)
     elif ShadingInput.matches(button) and not defined(gotaTestRoom):
       scene.toggleShading()
@@ -1458,7 +1502,7 @@ proc runGraphics*(
     if not isSelected(id):
       selectedIds.add id
     primaryId = id
-    followSelection = true
+    followSelection = not playerMode()
     actionCam.takeManual()
     if selectedIds.len > 1:
       groupCameraScale = 1.0'f32
@@ -1658,8 +1702,13 @@ proc runGraphics*(
   if playerMode():
     cameraTarget = playerHeroFrame()
 
-  proc updateCamera(dt: float32) =
+  proc updateCamera(dt: float32, inputFocused = window.focused) =
     ## Applies fixed-north RTS pan, zoom, and selection following.
+    if chat.blocksGameplay or not inputFocused or bindingCapture:
+      selectionStarted = false
+      minimapPanning = false
+      panning = false
+      return
     pruneSelection()
     syncViewMode()
     if matchMenu != HiddenMatchMenu or shopOpen or run.world.phase == Drafting:
@@ -1669,13 +1718,17 @@ proc runGraphics*(
     if focusPlayerHero:
       focusPlayerHero = false
       startCameraEase(cameraEase, cameraTarget)
-    updateMinimapCamera(
-      window,
-      sk.mousePos,
-      cameraTarget,
-      minimapPanning,
-      followSelection
-    )
+    if playerMode() and (attackMoveArmed or
+        (window.actionDown(AttackMoveInput) and not window.actionDown(ControlInput))):
+      minimapPanning = false
+    else:
+      updateMinimapCamera(
+        window,
+        sk.mousePos,
+        cameraTarget,
+        minimapPanning,
+        followSelection
+      )
     if minimapPanning:
       actionCam.takeManual()
       cancelCameraEase(cameraEase)
@@ -1717,7 +1770,12 @@ proc runGraphics*(
           5.0'f32,
           DefaultCameraDistance
         )
-      if panning:
+      if window.buttonDown[KeySpace]:
+        cancelCameraEase(cameraEase)
+        minimapPanning = false
+        followSelection = false
+        cameraTarget = playerHeroFrame()
+      elif panning:
         cancelCameraEase(cameraEase)
         let panSpeed = cameraDistance * 0.0015
         cameraTarget.x -= delta.x * panSpeed
@@ -1856,7 +1914,6 @@ proc runGraphics*(
       queueAttackMove(heroId, mapX, mapY)
     else:
       queueWalkTo(heroId, mapX, mapY)
-    selectEntity(heroId)
 
   proc holdingAttackMove(): bool =
     ## Keeps attack-move armed while its binding is held without Control.
@@ -1907,13 +1964,12 @@ proc runGraphics*(
           attackMoveArmed = false
           continue
         attackMoveArmed = false
-        if not activatePlayerAbility(
+        discard activatePlayerAbility(
           run.world, hero.id, slot.int32
-        ):
-          selectEntity(hero.id)
+        )
 
   proc updateWorldSelection(viewProjection: Mat4) =
-    ## Selects a clicked world unit, or attacks it in player mode.
+    ## Inspects a clicked unit; only armed attack-move issues an attack.
     if playerMode() and (armedAbility >= 0 or armedItem >= 0):
       return
     if not window.mouseReleased(MouseLeft):
@@ -1929,30 +1985,52 @@ proc runGraphics*(
         let heroId = playerHeroId()
         if picked != 0 and objectTeam(picked) != objectTeam(heroId):
           queueAttackTarget(heroId, picked)
-          selectEntity(heroId)
         else:
           issueGroundOrder(viewProjection, true)
         attackMoveArmed = holdingAttackMove()
       elif picked != 0:
         selectEntity(picked, selectionAdditive)
-        if playerMode() and objectTeam(picked) != objectTeam(playerHeroId()):
-          queueAttackTarget(playerHeroId(), picked)
       elif not selectionAdditive:
         clearSelection()
     selectionStarted = false
 
-  proc updatePlayerOrder(viewProjection: Mat4) =
+  proc updatePlayerOrder(viewProjection: Mat4, inputFocused = window.focused) =
     ## Confirms aimed casts and submits right-click orders on mouse-down.
-    if not playerMode() or matchMenu != HiddenMatchMenu or shopOpen or
+    if not inputFocused or bindingCapture or chat.blocksGameplay or
+      not playerMode() or matchMenu != HiddenMatchMenu or shopOpen or
       run.world.phase == Drafting:
         return
+    var minimapPoint: Vec2
+    let minimapAction = minimapOrder(
+      window.mousePressed(MouseRight), window.mousePressed(MouseLeft),
+      attackMoveArmed, armedAbility >= 0 or armedItem >= 0
+    )
+    if minimapAction != NoMinimapOrder and
+        window.minimapAim(sk.mousePos, minimapPoint):
+      let
+        heroId = playerHeroId()
+        hero = run.world.heroById(heroId)
+      if hero.id == 0 or hero.hp <= 0 or hero.state == Dying:
+        return
+      let
+        destination = minimapDestination(minimapPoint)
+        center = minimapMarker(destination, 0)
+        marker = minimapMarker(destination, surfaceHeight(center.x, center.z))
+      if minimapAction == MinimapAttackMove:
+        queueAttackMove(heroId, destination.x, destination.y)
+        attackMarks.emitClickMark(marker)
+      else:
+        queueWalkTo(heroId, destination.x, destination.y)
+        clickMarks.emitClickMark(marker)
+      selectionStarted = false
+      attackMoveArmed = holdingAttackMove()
+      return
     let leftCast = (armedAbility >= 0 or armedItem >= 0) and
       window.mouseReleased(MouseLeft) and selectionStarted
     if leftCast:
       selectionStarted = false
     elif not window.mousePressed(MouseRight):
       return
-    var minimapPoint: Vec2
     if armedItem >= 0 and
       run.world.heroById(playerHeroId()).inventory[armedItem] == PortalScroll and
       window.minimapAim(sk.mousePos, minimapPoint):
@@ -1979,7 +2057,6 @@ proc runGraphics*(
         else:
           false
       picked = pickActionTarget(viewProjection, healing)
-    selectEntity(heroId)
     if armedItem >= 0:
       if run.world.heroById(heroId).inventory[armedItem] != PortalScroll:
         let target = run.world.heroById(picked)
@@ -2004,7 +2081,6 @@ proc runGraphics*(
       )
       armedItem = -1
       attackMoveArmed = false
-      selectEntity(heroId)
       return
     if armedAbility >= 0:
       if aimError notin {NoActionError, ActionOutOfRange}:
@@ -2039,7 +2115,6 @@ proc runGraphics*(
         )
       armedAbility = -1
       attackMoveArmed = false
-      selectEntity(heroId)
       return
     if picked != 0 and objectTeam(picked) != objectTeam(heroId):
       queueAttackTarget(heroId, picked)
@@ -2142,64 +2217,6 @@ proc runGraphics*(
       ring[i].y = groundHeight(ring[i].x, ring[i].z) +
         groundOffset(ring[i].x, ring[i].z) + 0.14'f
     worldShapes.addPolyline(ring, color, 0.04'f)
-
-  proc drawAimBanner() =
-    ## Identifies the armed spell or item and explains how to cast it.
-    if not playerMode() or matchMenu != HiddenMatchMenu or shopOpen or
-      run.world.phase == Drafting or
-      (armedAbility < 0 and armedItem < 0):
-        return
-    let
-      width = min(800.0'f, window.size.x.float32 / sk.uiScale - 32)
-      at = vec2((window.size.x.float32 / sk.uiScale - width) / 2, 146)
-    var
-      title: string
-      detail: string
-    if armedItem >= 0:
-      let item = run.world.heroById(playerHeroId()).inventory[armedItem]
-      if item == PortalScroll:
-        title = "Portal scroll - Tower landing area"
-        detail = "Click near an allied tower. Double-click the icon or tap its key twice to return home. Esc to cancel."
-      else:
-        title = item.itemSpec.name & " - Allied hero"
-        detail = "Click yourself or a nearby ally. Double-click the icon or tap its key twice for self. Esc to cancel."
-    elif armedAbility >= 0:
-      let
-        hero = run.world.heroById(playerHeroId())
-        ability = heroAbility(hero.class, HeroAbilitySlot(armedAbility))
-        spec = ability.abilitySpec(
-          hero.abilityLevels[HeroAbilitySlot(armedAbility)]
-        )
-      title = spec.name & " - "
-      case spec.casting
-      of SelfCast:
-        title.add "Self"
-      of MeleeCast:
-        title.add "Melee target"
-      of ProjectileCast:
-        title.add "Projectile path"
-      of AreaCast:
-        case spec.area.shape
-        of CircleFootprint: title.add "Ground area"
-        of RingFootprint: title.add "Ring area"
-        of SectorFootprint: title.add "Directional cone"
-        of LineFootprint, CapsuleFootprint: title.add "Directional path"
-        of CrossFootprint: title.add "Cross area"
-      detail =
-        if aimError == ActionOutOfRange:
-          "Click to walk into range, then cast. Esc to cancel."
-        elif aimError != NoActionError: aimError.actionErrorMessage()
-        else: "Left or right-click to cast. Esc to cancel."
-    sk.lobbyPanel(at, vec2(width, 100))
-    sk.drawLabel(
-      title, at + vec2(12, 6), vec2(width - 24, 52),
-      sk.theme.defaultTextColor, "H1", CenterAlign
-    )
-    sk.drawLabel(
-      detail, at + vec2(12, 58), vec2(width - 24, 32),
-      if aimError == NoActionError: rgbx(175, 212, 224, 255)
-      else: rgbx(255, 130, 130, 255), "Default", CenterAlign
-    )
 
   proc cameraView(): Mat4 =
     ## Updates the camera eye and enforces the human player's zoom limit.
@@ -2308,6 +2325,8 @@ proc runGraphics*(
     captureUnitPositions()
     if network == nil:
       advanceGame()
+    elif spectatorStream != nil:
+      spectatorStream.advance()
     else:
       network.applyPacket(packet)
     for i, hero in run.world.heroes:
@@ -2341,7 +2360,10 @@ proc runGraphics*(
         break
       checkpointIndex = i
     let checkpoint = replayCheckpoints[checkpointIndex]
-    run.world.restore(checkpoint.world)
+    if spectatorStream != nil:
+      spectatorStream.restoreTo(targetTick)
+    else:
+      run.world.restore(checkpoint.world)
     if run.recorder != nil and run.replayPlayer != nil:
       run.replayPlayer.data = run.recorder.data
     run.replayPlayer.syncCursor(uint32(run.world.tick))
@@ -2356,7 +2378,7 @@ proc runGraphics*(
     animationAlpha = 0
     for god in gods.mitems:
       god.animTime = 0
-    while int32(run.world.tick) < targetTick:
+    while spectatorStream == nil and int32(run.world.tick) < targetTick:
       advanceGame()
       if int(run.world.tick) mod SeekCheckpointTicks == 0 or
           int32(run.world.tick) == transport.timelineEnd:
@@ -2451,6 +2473,15 @@ proc runGraphics*(
     # Exclude loading and the requested simulation seek from frame captures.
     startTrace()
   window.onFrame = proc() =
+    let previousCapture = bindingCapture
+    let chatCapture = chat.blocksGameplay
+    bindingCapture = bindingCapture or chat.blocksGameplay
+    defer:
+      if chatCapture: bindingCapture = previousCapture
+      chat.finishChatFrame()
+    let chatText = chat.takeChatText()
+    if chatText.len > 0:
+      discard network.sendHumanChat(chatText, chat.team)
     window.updateCursorConfinement()
     when ProfileWarmupFrames > 0 and ActiveTracePath.len > 0:
       if profileWarmup == ProfileWarmupFrames:
@@ -2460,8 +2491,8 @@ proc runGraphics*(
       let dt = frameDelta(lastFrameTime)
       viewingDt = viewingClock.viewingDelta(window)
       viewingSeeking = transport.targetTick >= 0 or transport.restoreTick >= 0
-      if (network == nil and not transport.playing) or viewingSeeking or
-        (network != nil and network.client.snapshot.phase != rooms.Playing):
+      if ((network == nil or network.isSpectator) and not transport.playing) or viewingSeeking or
+        (network != nil and not network.isSpectator and network.client.snapshot.phase != rooms.Playing):
         viewingDt = 0
       if cameraSeekSerial != transport.seekSerial:
         actionCam.resetDirector(transport.automaticSeek)
@@ -2476,9 +2507,13 @@ proc runGraphics*(
         else: int32(run.replayPlayer.data.hashes.len)
       transport.durationTicks = run.durationTicks()
       transport.sync(int32(run.world.tick), recorded, run.finished())
-      if network != nil:
+      run.world.keepDraftPlaying(transport)
+      if network != nil and not network.isSpectator:
         connection.stats.tickRate = int(TickRate)
         connection.pump()
+        if network.returnedToLobby():
+          leaveMatch = true
+          return
         if quitToMenu:
           if network.client.snapshot.room.len == 0:
             leaveMatch = true
@@ -2507,11 +2542,19 @@ proc runGraphics*(
         connection.pump()
         transport.sync(run.world.tick, run.world.tick, run.finished())
       else:
+        if spectatorStream != nil:
+          connection.pump()
+          spectatorStream.receive()
+          transport.sync(run.world.tick, spectatorStream.receivedEnd, run.finished())
+          if quitToMenu and network.client.snapshot.room.len == 0:
+            leaveMatch = true
         let restoreTick = transport.takeRestore()
         if restoreTick >= 0:
           restoreTo(restoreTick)
           transport.durationTicks = run.durationTicks()
-          transport.sync(int32(run.world.tick), recorded, run.finished())
+          transport.sync(int32(run.world.tick),
+            if spectatorStream != nil: spectatorStream.receivedEnd else: recorded, run.finished())
+        run.world.keepDraftPlaying(transport)
         feedGotaActions(observeTick = true)
         transport.startFrame(dt, TickRate)
         let frameStart = epochTime()
@@ -2527,15 +2570,16 @@ proc runGraphics*(
             run.historyPlayback = transport.inHistory
             advanceRenderedSimulation()
             let recordedNow =
-              if defined(gotaTestRoom): run.world.tick
+              if spectatorStream != nil: spectatorStream.receivedEnd
+              elif defined(gotaTestRoom): run.world.tick
               elif run.recorder != nil: int32(run.recorder.data.hashes.len)
               else: int32(run.replayPlayer.data.hashes.len)
             transport.durationTicks = run.durationTicks()
             transport.sync(int32(run.world.tick), recordedNow, run.finished())
-      let active = if network == nil: simulationActive(transport)
+      let active = if network == nil or network.isSpectator: simulationActive(transport)
                    else: not network.finished and
                      network.client.snapshot.phase == rooms.Playing
-      if network != nil:
+      if network != nil and not network.isSpectator:
         if connection.stats.smoothPlayback and connection.playback.started:
           networkElapsed = connection.playback.elapsed(
             networkTime(), int(TickRate)
@@ -2583,16 +2627,17 @@ proc runGraphics*(
         barCameraRight = normalize(cross(cameraForward, vec3(0, 1, 0)))
         barCameraUp = normalize(cross(barCameraRight, cameraForward))
 
-      if playerMode() and matchMenu == HiddenMatchMenu and not shopOpen and
+      if not chat.blocksGameplay and playerMode() and matchMenu == HiddenMatchMenu and not shopOpen and
         run.world.phase != Drafting and
         (holdingAttackMove() or window.actionReleased(AttackMoveInput)) and
         not window.actionDown(ControlInput):
           attackMoveArmed = true
-      updatePlayerSpells()
-      previewGroundClick(viewProjection)
-      updateWorldSelection(viewProjection)
-      updateAim(viewProjection)
-      updatePlayerOrder(viewProjection)
+      if not chat.blocksGameplay:
+        updatePlayerSpells()
+        previewGroundClick(viewProjection)
+        updateWorldSelection(viewProjection)
+        updateAim(viewProjection)
+        updatePlayerOrder(viewProjection)
       if armedAbility < 0:
         aimVisible = false
 
@@ -2945,8 +2990,8 @@ proc runGraphics*(
           elif matchMenu == MatchSettings:
             menuOrigin = sk.beginOverlay(window, vec2(768, 488)) + vec2(24)
           else:
-            let panel = sk.beginOverlay(window, vec2(480, 500))
-            sk.lobbyPanel(panel, vec2(480, 500))
+            let panel = sk.beginOverlay(window, vec2(480, 620))
+            sk.lobbyPanel(panel, vec2(480, 620))
             menuOrigin = panel + vec2(32)
             sk.drawLabel(
               "Game Menu", menuOrigin, vec2(416, 40),
@@ -2985,44 +3030,6 @@ proc runGraphics*(
                 particles.clearParticles()
                 cameraTarget = vec3(0)
                 renderAlpha = 1
-          drawAimBanner()
-          let width = window.size.x.float32 / sk.uiScale
-          if matchMenu == HiddenMatchMenu and (network == nil or
-            network.client.snapshot.phase in {rooms.Ended, Desynced}):
-              if sk.menuButton(window,
-                if defined(gotaTestRoom): "Exit test room"
-                elif network == nil: "Return to menu" else: "Return to lobby",
-                vec2(width - 190, 8), 180):
-                leaveMatch = true
-              if run.recorder != nil and sk.menuButton(window, "Save replay",
-                vec2(width - 380, 8), 180,
-                run.world.tick == run.recorder.data.hashes.len):
-                  try:
-                    run.sampleMetrics(true)
-                    run.recorder.data.metrics = run.history.replayMetrics()
-                    saveReplayFile(run.recorder.data.encodeReplay())
-                    saveError = ""
-                  except CatchableError as error:
-                    saveError = error.msg
-          if network != nil:
-            var ownsSeat = false
-            for seat in network.client.snapshot.seats:
-              if seat.owner == network.client.participant:
-                ownsSeat = true
-            if matchMenu == HiddenMatchMenu and not ownsSeat and
-              sk.menuButton(window, "Leave match",
-              vec2(width - 190, 48), 180):
-                network.client.send(RoomMessage(kind: LeaveRoom))
-                leaveMatch = true
-            var status = network.client.status
-            if network.client.error.len > 0:
-              status = network.client.error
-            if status.len == 0:
-              status = "Multiplayer / tick " & $run.world.tick
-            sk.menuLabel(status, vec2(20, window.size.y.float32 / sk.uiScale - 42),
-              width - 40, MenuAccent)
-          if saveError.len > 0:
-            sk.menuLabel(saveError, vec2(20, 45), width - 40, MenuAccent)
           if matchMenu != HiddenMatchMenu:
             let origin = menuOrigin
             try:
@@ -3037,7 +3044,7 @@ proc runGraphics*(
                   matchMenu = PauseMenu
               else:
                 let
-                  paused = if network == nil: not transport.playing
+                  paused = if network == nil or network.isSpectator: not transport.playing
                            else: network.client.snapshot.flag
                   activeMatch = network == nil or
                     network.client.snapshot.phase in {rooms.Playing, Waiting}
@@ -3055,8 +3062,9 @@ proc runGraphics*(
                 if sk.lobbyButton(
                   if paused: "Resume match" else: "Pause match",
                   origin + vec2(0, 144), 416,
-                  enabled = controller and activeMatch):
-                    if network == nil:
+                  enabled = run.world.phase != Drafting and
+                    ((controller and activeMatch) or network.isSpectator)):
+                    if network == nil or network.isSpectator:
                       transport.togglePlay()
                     else:
                       network.client.send(RoomMessage(
@@ -3065,8 +3073,25 @@ proc runGraphics*(
                       ))
                 if sk.lobbyButton("Settings", origin + vec2(0, 200), 416):
                   matchMenu = MatchSettings
+                if sk.lobbyButton("Save replay", origin + vec2(0, 256), 416,
+                  enabled = run.recorder != nil and
+                    run.world.tick == run.recorder.data.hashes.len):
+                      run.sampleMetrics(true)
+                      run.recorder.data.metrics = run.history.replayMetrics()
+                      saveReplayFile(run.recorder.data.encodeReplay())
+                      saveError = ""
+                if sk.lobbyButton(
+                  if network == nil: "Return to menu"
+                  elif not activeMatch: "Return to lobby" else: "Leave match",
+                  origin + vec2(0, 312), 416,
+                  enabled = network == nil or not controller or not activeMatch):
+                    if network == nil or not activeMatch:
+                      leaveMatch = true
+                    elif network.isSpectator:
+                      network.client.send(RoomMessage(kind: LeaveRoom))
+                      quitToMenu = true
                 if sk.lobbyButton("Quit to main menu",
-                  origin + vec2(0, 256), 416):
+                  origin + vec2(0, 368), 416):
                     quitToMenu = true
                     if network == nil:
                       leaveMatch = true
@@ -3080,17 +3105,18 @@ proc runGraphics*(
                     if controller and activeMatch:
                       "Quitting ends the match for everyone."
                     else:
-                      "Only players can pause the match.",
-                    origin + vec2(0, 320), 416, sk.theme.disabledTextColor)
+                      "Playback controls affect only your view.",
+                    origin + vec2(0, 432), 416, sk.theme.disabledTextColor)
                   sk.menuLabel(network.client.status,
-                    origin + vec2(0, 352), 416, sk.theme.disabledTextColor)
+                    origin + vec2(0, 464), 416, sk.theme.disabledTextColor)
                 else:
-                  sk.menuLabel("Use Pause match to stop the game.",
-                    origin + vec2(0, 320), 416, sk.theme.disabledTextColor)
+                  sk.menuLabel(if run.world.phase == Drafting:
+                    "Drafting cannot be paused." else: "Use Pause match to stop the game.",
+                    origin + vec2(0, 432), 416, sk.theme.disabledTextColor)
             except CatchableError as error:
               saveError = error.msg
             if saveError.len > 0:
-              sk.menuLabel(saveError, origin + vec2(0, 400), 416, MenuAccent)
+              sk.menuLabel(saveError, origin + vec2(0, 528), 416, MenuAccent)
           when defined(waterPanel):
             # A developer window for the lakes' look; F4 shows and hides it.
             if window.actionPressed(WaterPanelInput):
@@ -3140,9 +3166,14 @@ proc runGraphics*(
               h1text("Shoreline fade")
               slider("lakeFadeDistance", "Fade distance", water.fadeDistance, 0, 6)
               slider("lakeFadeCurve", "Fade curve", water.fadeCurve, 0.1, 5)
+          if matchMenu == HiddenMatchMenu:
+            sk.drawHumanChat(window.size.vec2 / sk.uiScale, chat,
+              network.visibleHumanChat(), network.canHumanChat)
           sk.endUi()
+          window.syncChatInput(chat)
           if matchMenu == HiddenMatchMenu:
             drawStatsOverlay(sk, window)
+          window.syncChatInput(chat)
       when defined(takeScreenshot) and ActiveTracePath.len == 0:
         captureScreenshot(
           window,
@@ -3155,6 +3186,17 @@ proc runGraphics*(
         reportDirectorFrame(
           actionCam, transport, cameraDistance, int32(run.hashCheck.mismatches)
         )
+        when defined(emscripten):
+          let bufferedTick = transport.recordedTicks
+          let playing = transport.playing
+          let playbackSpeed = transport.speed
+          {.emit: """
+          EM_ASM({
+            Module.polyworldBufferedTick = $0;
+            Module.polyworldPlaying = !!$1;
+            Module.polyworldPlaybackSpeed = $2;
+          }, `bufferedTick`, `playing`, `playbackSpeed`);
+          """.}
         reportReplayFrame(run.world.tick, int32(run.hashCheck.mismatches))
     if noteProfileFrame():
       when not defined(emscripten):
@@ -3163,6 +3205,8 @@ proc runGraphics*(
   while not window.closeRequested and not leaveMatch:
     if network != nil:
       connection.pump()
+      if network.returnedToLobby():
+        break
     pollEvents()
     when not defined(emscripten):
       window.updateWindowSettings()

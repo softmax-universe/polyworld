@@ -62,9 +62,23 @@ remain only in the running client's memory.
 
 Each participant may own several seats. A participant can bring only bots
 and watch them play. Each bot runs solely in its owner's client. Remote seats
-have no VM. Roster or settings changes invalidate readiness. All seats must
-have an owner and all controlling clients must load the same setup before
-Start succeeds. Spectators may join after the match starts.
+have no VM. Startup policy depends on the adapter: GotA uses a host-prepared
+hash and sparse seats; Galcon protocol 2+ and LvD protocol 3+ use automatic
+revision-bound preparation, independently of cosmetic Ready. Older policies
+retain their readiness gates, and older LvD requires a dense roster. At least
+one seat must be occupied and all controllers must be connected. Spectators
+may join after the match starts. See the packet reference for details.
+
+Rooms exist only while at least one participant is connected. Controllers,
+bot-only seat owners and seatless spectators all count as people watching;
+bot seats do not independently keep a room alive. The last departure,
+disconnect or 15-second inactivity timeout deletes the room in every phase,
+including paused, completed and desynced matches. Its listing, history, queued
+commands and membership are removed. The old invite cannot join it, and a
+reconnect token can restore the participant identity but never the deleted room.
+An authenticated replacement of an existing socket is continuous presence.
+The relay cannot distinguish an automated protocol participant from a person;
+any connected participant keeps the room alive.
 
 ## Timeline and mandatory hash checks
 
@@ -74,8 +88,10 @@ including empty packets. GotA uses 24 Hz. Every client applies the same packet
 exactly once and never advances without a packet. The server checks seat
 ownership and envelope bounds. Each game checks its own payload semantics.
 
-Hash checking cannot be disabled. All controlling clients must agree before
-startup. During play, clients report a hash every simulated second. The first
+Hash checking cannot be disabled. Galcon and LvD automatic preparation
+compares current-revision controller hashes before startup. GotA instead starts
+from the host's prepared hash; peers validate and report tick zero. During play,
+clients report a hash every simulated second. The first
 report for a match/tick establishes its historical hash; subsequent reports
 compare against that same checkpoint. Missing or late hashes never delay ticks.
 A differing hash stops the match and reports the tick and hash values. The first
@@ -83,7 +99,8 @@ controller completion ends tick production; later final reports are compared
 asynchronously too. Historical checkpoints remain available to late clients. GotA's network digest includes
 its immutable game configuration and its normal replay state digest.
 
-Slow or disconnected controllers do not pause the room. Reconnection restores
+While another participant remains connected, slow or disconnected controllers
+do not pause the room. Reconnection restores
 the same participant, seats, unacknowledged command sequences and local VMs.
 The returning client replays missing packets while the room keeps running. Outstanding hash and completion
 reports are retransmitted. This supports connection interruptions while the
@@ -108,9 +125,8 @@ Normal game replays record executed action packets using the existing exact
 replay format. Playback does not need the relay, bot source, weights or VM
 memory. Use Save replay after a multiplayer match to save it natively or
 download it in the browser. There are no historical replay compatibility
-branches. The outer protocol is version 3 and the GotA command protocol is version 1;
-gameplay rules and replay
-format remain unchanged by this transport addition.
+branches. The outer protocol is version 4 and the GotA command protocol is
+version 2; action replay files do not contain human chat messages.
 
 ## Escape menu and pause
 
@@ -138,10 +154,11 @@ by receipt acknowledgements. Incoming
 traffic is limited to 256 KiB per second per identified client. Catch-up sends
 16 ticks per batch. Clients more than 16 ticks behind pull history instead of
 receiving unbounded live ticks; they never pause production.
-Inactive connections are closed after 15 seconds and can reconnect. There is
-no timeout that removes a disconnected controller from an active match.
+Inactive connections are closed after 15 seconds and can reconnect. Disconnected
+controllers retain membership only while another connected participant keeps
+the room alive; there is no separate controller-removal timeout.
 
-The first release has no accounts, chat, ranked matchmaking, cold recovery,
+The relay has no accounts, shared chat opcode, ranked matchmaking, cold recovery,
 late players taking seats or authoritative anti-cheat. Restarting the relay
 ends its rooms. Deployment to Softmax is separate from this implementation.
 

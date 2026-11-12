@@ -1,6 +1,6 @@
 # Gameserver packets
 
-Outer protocol **3**. [GotA payloads](../games/gods_of_the_arena/packets.md) · [Hosting](gameserver.md).
+Outer protocol **4**. [GotA payloads](../games/gods_of_the_arena/packets.md) · [Hosting](gameserver.md).
 
 One binary WebSocket message per packet at `/ws`. Fields are in wire order,
 little endian, without padding. `string` and `seq[T]` have a `uint32` length
@@ -13,7 +13,7 @@ Every packet starts with this header; the packet tables list only its body.
 | Field | Nim wire type | Carries / rules |
 | --- | --- | --- |
 | `magic` | `array[4, char]` | PWRM. |
-| `version` | `uint32` | Exactly 3. |
+| `version` | `uint32` | Exactly 4. |
 | `kind` | `uint32` | Packet ID below. |
 | `delivery` | `uint64` | Server delivery counter per connection, starting at 1; clients send 0. |
 | `match` | `uint32` | Match generation within room; starts at 0, increments on start. |
@@ -205,9 +205,9 @@ Claim an empty lobby seat or rename your own seat.
 
 ## 9. ReleaseSeat — Client → server
 
-Release your lobby seat; an already empty seat is accepted. In Galcon only,
-the host may also release a foreign bot seat (seat name is not `Human`),
-without removing its participant or their other seats.
+Release your lobby seat; an already empty seat is accepted. In Galcon, GotA,
+and LvD, the host may also release a foreign bot seat (seat name is not
+`Human`), without removing its participant or their other seats.
 
 | Field | Nim wire type | Carries / rules |
 | --- | --- | --- |
@@ -226,13 +226,21 @@ confirmation for the current revision; newcomers are never auto-readied.
 
 ## 11. StartMatch — Client → server
 
-Owner starts once all controllers are connected, ready for the current revision
-and hash-matched, with at least one controller. Galcon may leave potential seats
-empty; other adapters retain the dense-roster requirement.
+Owner-only start, with at least one occupied seat and all controllers connected.
+GotA accepts a sparse roster without any
+Ready clicks: the host automatically prepares the current authoritative snapshot
+and supplies its initial hash. Each peer prepares on BeginMatch, checks the exact
+revision and initial hash before applying ticks, and reports tick zero against the
+relay's immutable checkpoint. Missing reports do not gate the shared clock; a
+mismatch still desyncs the room. Galcon protocol 2+ and LvD protocol 3+ use
+automatic revision-bound preparation and can defer a host start until proofs
+arrive, independently of cosmetic Ready. Legacy policies retain their existing
+Ready gates; legacy LvD requires every seat to be occupied.
 
-| Body | Size |
-| --- | --- |
-| None; header only | 64 bytes total |
+| Field | Nim wire type | Carries / rules |
+| --- | --- | --- |
+| `revision` | `uint32` | Required current room revision for GotA; ignored by legacy startup policies. |
+| `hash` | `uint64` | Host-prepared initial hash for GotA; ignored by legacy startup policies. |
 
 ## 12. BeginMatch — Server → client
 
@@ -394,15 +402,26 @@ A controller pauses or resumes the current match; spectators cannot.
 
 Uses the same body and owner/lobby validation as ConfigureRoom. When tick rate
 and opaque payload are unchanged, preserves controlling participants' ready
-intent while incrementing revision. For Galcon JSON setups, a change only to
-integer `players` matching `number` is also roster-only. Other payload changes
-invalidate readiness. Every controller must confirm the resulting revision
-before StartMatch. Name-only changes use the same operation; preserve visibility
-from the Lobby RoomState flag.
+intent while incrementing revision. A Galcon JSON change only to integer
+`players` matching `number`, or an LvD JSON roster resize that preserves the
+surviving player entries and appends only empty names, is also roster-only.
+Other payload changes invalidate readiness. Name-only changes use the same
+operation; preserve visibility from the Lobby RoomState flag. Revision-bound
+proofs must be refreshed where required by the adapter's startup policy.
 
 Spectator membership changes publish snapshots without changing setup revision.
 Seat changes and controller renames require new revision-bound proofs even when
 ready intent is retained.
+
+## 31. Prepared — Client → server
+
+Like Ready, carries `revision` and `hash`, but confirms preparation without
+changing cosmetic ready status. Only a controller in the lobby may send it.
+
+## 32. ReadyStatus — Client → server
+
+Changes the sending controller's cosmetic ready status without confirming a
+setup or hash. The body is one `uint32` flag, 0 or 1.
 
 ## Shared rules
 
@@ -412,13 +431,13 @@ ready intent is retained.
 | Match validation | SubmitCommand, AppliedTick, Catchup, ReportHash, FinishMatch, AbortMatch and PauseMatch require the current header match ID. |
 | Delivery | Consecutive per socket; resets on reconnect. Pre-identification failures can use delivery 0. |
 | Commands | Sequence spans all seats of one participant and survives reconnect. Gaps, zero or altered retransmissions fail. |
-| Hash verification | Startup readiness must agree. During play, first report sets the checkpoint; later reports for the same match/tick compare asynchronously. Missing hashes do not pause; mismatches stop visibly. No state repair. |
+| Hash verification | Startup policies verify preparation as described above. During play, first report sets the checkpoint; later reports for the same match/tick compare asynchronously. Missing hashes do not pause; mismatches stop visibly. No state repair. |
 | Spectator hashes | Compared with retained checkpoints; mismatch stops the room, but absent spectator reports do not block it. |
 | Disconnect / lag | Missing or lagging controllers do not pause production. Reconnect retains seats; slow clients pull bounded catch-up batches. |
 | Explicit pause | Already-emitted ticks still execute. Pending commands stay on the next tick. Resume resets the clock deadline; no time catch-up burst. |
 | Quit | Live controller sends AbortMatch then LeaveRoom. Spectator sends LeaveRoom. No simulated winner is invented. |
 | Recovery | Same live client reconnects with its private token and VMs intact. Browser reload/process restart recovery is unsupported. |
-| Room IDs / tokens | 48 lowercase hex characters from 24 random bytes; unlisted room ID grants access, reconnect token stays private. |
+| Room IDs / tokens | New room IDs are six uppercase alphanumeric characters; unlisted IDs grant access. Reconnect tokens are 48 lowercase hex characters from 24 random bytes and stay private. |
 | Validation | Truncation, invalid enums/flags, oversized counts and trailing bytes fail. Display names reject blank/control characters; UTF-8 is not independently checked. |
 | History | Kept until ReturnLobby or last participant leaves; server restart loses it. Includes opaque commands, never bot programs or weights. |
 | Versions | Exact only. Incompatible outer layout changes bump RoomProtocolVersion; game payload and gameplay versions are separate. |

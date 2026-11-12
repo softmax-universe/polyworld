@@ -1,11 +1,12 @@
 ## Gods of the Arena Silky HUD.
 
 import
-  std/[strformat, strutils, times],
+  std/[strformat, strutils, times, monotimes],
   chroma, pixie, silky, vmath, windy,
   polyworld/[stats, metrics, actioncam, chrome, configs, gameuis, inputs, pathing, player, rtscameras,
     stackpanels, profiles, networks],
-  assets, content, sim, game, controls, layouts, shops, maps, events, drafts, cameras, tooltips
+  assets, content, sim, game, controls, layouts, shops, maps, events, drafts, cameras, tooltips,
+  deathhud
 
 const
   ## Icons draw at power-of-two sizes so the 128 and 256 px source art
@@ -71,11 +72,18 @@ type
     charges: array[HeroAbilitySlot, int32]
     recharges: array[HeroAbilitySlot, int32]
 
+proc ribbonCounts(): array[Team, int] =
+  ## Occupancy is independent of stable lobby slots and packed hero indices.
+  for hero in run.world.heroes:
+    inc result[hero.team]
+
 proc placeChrome(layout: GameUiLayout): HudChrome =
   ## Places every textured HUD panel in one layout space.
+  let counts = ribbonCounts()
   result.layout = layout
-  result.score = layout.scorePanel()
-  result.heroes = layout.panel(GameUiRegion.TopCenter, PanelHeroes)
+  result.heroes = layout.panel(GameUiRegion.TopCenter,
+    heroRibbonSize(counts[RedTeam], counts[BlueTeam]))
+  result.score = layout.scorePanel(result.heroes.size)
   result.clock = layout.panel(GameUiRegion.TopRight, PanelClock)
   result.minimap = layout.panel(GameUiRegion.BottomLeft, PanelMinimap)
   result.details = layout.panel(GameUiRegion.BottomCenter, PanelDetails)
@@ -84,12 +92,57 @@ proc placeChrome(layout: GameUiLayout): HudChrome =
     PanelInventory
   )
 
+var networkSpectator* = false
+
+proc deathHudPanel(chrome: HudChrome): GameUiPanel =
+  ## A passive compact plate below the ribbon, never a battlefield overlay.
+  result.size = vec2(260, 60)
+  result.origin = vec2(floor((chrome.layout.size.x - result.size.x) / 2),
+    chrome.heroes.origin.y + chrome.heroes.size.y + 10)
+
+proc drawDeathHud(sk: Silky, chrome: HudChrome) =
+  ## Ownership is independent of selection/camera; ticks remain authoritative.
+  let text = deathHudText(run.world, options.playerSlot, run.replayMode,
+    spectator = networkSpectator)
+  if text.len == 0:
+    return
+  let panel = deathHudPanel(chrome)
+  sk.draw9Patch("window.9patch", sk.theme.windowPatch, panel.origin, panel.size)
+  sk.drawLabel(text, panel.origin + vec2(12, 4), panel.size - vec2(24, 8),
+    sk.theme.defaultTextColor, "H1", CenterAlign)
+
+proc localHudHeroId*(): int32 =
+  ## playerSlot is one-based packed order, never a stable lobby seat.
+  if run != nil and run.world != nil and not run.replayMode and
+      not networkSpectator and options.playerSlot > 0 and
+      options.playerSlot <= run.world.heroes.len:
+    let hero = run.world.heroes[options.playerSlot - 1]
+    if hero != nil:
+      return hero.id
+
+proc hudDetailId(primaryId: int32, actionCam: ActionCam): int32 =
+  ## Inspection and the spectator director never replace a human's own HUD.
+  let own = localHudHeroId()
+  if own != 0: own
+  elif actionCam.enabled and actionCam.locked: actionCam.lockId
+  else: primaryId
+
+proc transportAvailable*(): bool =
+  not defined(gotaTestRoom) and run != nil and run.world != nil and
+    run.world.phase != Drafting and localHudHeroId() == 0 and
+    (not run.networked or networkSpectator)
+
+proc keepDraftPlaying*(world: World, transport: var Player) =
+  ## Draft deadlines always advance, including paused startup and rewind.
+  if world.phase == Drafting:
+    transport.playing = true
+
 proc currentLayout*(window: Window): GameUiLayout =
   ## Reserves timeline space only when the transport controls are visible.
   initGameUiLayout(
     vec2(window.size.x.float32, window.size.y.float32) /
       gameUiScale(window),
-    if run.networked or defined(gotaTestRoom): 0.0'f else: TransportHeight
+    if transportAvailable(): TransportHeight else: 0.0'f
   )
 
 var
@@ -100,6 +153,14 @@ var
   fittedNames: seq[string]
   fittedNameWidth = -1.0'f
   showCreepWaypoints* = false
+  hudTooltip: TooltipSession
+  tooltipGame: Game
+  tooltipSelection: int32
+  tooltipSize: Vec2
+
+proc clearHudTooltip*() =
+  ## Menus and match lifecycle owners call this when the HUD is suspended.
+  hudTooltip.clearTooltip()
 
 proc currentMetrics(slot: int, complete: bool): MetricRow =
   ## Combines authoritative totals with live or original replay telemetry.
@@ -159,7 +220,10 @@ proc statsContains(window: Window, mouse: Vec2): bool =
 
 proc hudClicked(window: Window, sk: Silky, panel: GameUiPanel): bool =
   ## Keeps covered HUD controls from receiving an overlay click.
-  not window.statsContains(sk.mousePos) and chrome.clicked(window, sk, panel)
+  not window.statsContains(sk.mousePos) and
+    not hudTooltip.tooltipContains(sk.mousePos) and
+    (localHudHeroId() == 0 or window.buttonPressed[MouseLeft]) and
+    chrome.clicked(window, sk, panel)
 
 proc drawBuyback(
     sk: Silky,
@@ -227,6 +291,14 @@ proc currentChrome(window: Window): HudChrome =
   ## Places every textured HUD panel for the current window.
   placeChrome(currentLayout(window))
 
+proc inspectionPanel*(window: Window): GameUiPanel =
+  ## One shared passive inspection rectangle, clear of ribbon and death plate.
+  let chrome = currentChrome(window)
+  result = chrome.layout.inspectionPanel(chrome.score, chrome.heroes)
+
+proc mouseOverInspection*(window: Window, mouse: Vec2,
+    primaryId: int32, viewMode = 0'i32): bool
+
 proc mouseOverUi*(
     window: Window,
     mouse: Vec2,
@@ -238,10 +310,13 @@ proc mouseOverUi*(
       mouse.y >= 94 and mouse.y < 398:
         return true
   if run.world.phase == Drafting or shopOpen or
-    window.statsContains(mouse) or mouseOverDebugMenu(mouse):
+    window.statsContains(mouse) or mouseOverDebugMenu(mouse) or
+    hudTooltip.tooltipContains(mouse):
       return true
   let chrome = currentChrome(window)
-  if primaryId == 0:
+  if mouseOverInspection(window, mouse, primaryId):
+    return true
+  if primaryId == 0 and localHudHeroId() == 0:
     result = mouseOverPanels(
       mouse,
       chrome.layout,
@@ -351,8 +426,10 @@ proc isPicked(id: int32, selectedIds: openArray[int32]): bool =
 
 proc selectedUnit(id: int32, viewMode: int32): SelectedUnit {.measure.} =
   ## Builds the current flat view of one selectable world object.
+  if run == nil or run.world == nil or id == 0:
+    return
   for hero in run.world.heroes:
-    if hero.id == id:
+    if hero != nil and hero.id == id:
       if not visibleInView(viewMode, hero.team, hero.position):
         return SelectedUnit()
       let
@@ -502,6 +579,54 @@ proc selectedUnit(id: int32, viewMode: int32): SelectedUnit {.measure.} =
         level: 1
       )
 
+proc hudSelection(primaryId: int32, actionCam: ActionCam,
+    viewMode: int32): SelectedUnit =
+  ## Own hero is always available; external spectator filters apply only to watches.
+  selectedUnit(hudDetailId(primaryId, actionCam),
+    if localHudHeroId() != 0: 0'i32 else: viewMode)
+
+type InspectionInfo = object
+  id: int32
+  name, title, hp, mana: string
+
+proc inspectionInfo(primaryId, viewMode: int32): InspectionInfo =
+  ## Passive inspection is human-only and never overrides current human sight.
+  let own = localHudHeroId()
+  if own == 0 or primaryId == 0 or primaryId == own:
+    return
+  let mode = run.world.heroes[options.playerSlot - 1].team.ord.int32 + 1
+  let unit = selectedUnit(primaryId, mode)
+  if unit.id == 0 or unit.hp <= 0 or unit.status in ["Respawning", "Dying", "Fallen"]:
+    return
+  result.id = unit.id
+  result.name = unit.classLabel
+  result.title = unit.callsign
+  if unit.kind == SelectedHero:
+    let slot = run.world.heroIndex(unit.id)
+    if slot in 0 ..< run.config.players.len:
+      result.name = run.config.players[slot].displayName(slot)
+    result.title.add "  Lv " & $unit.level
+  result.hp = &"HP {int(unit.hp)} / {int(unit.maxHp)}"
+  if unit.maxMana > 0:
+    result.mana = &"Mana {int(unit.mana)} / {int(unit.maxMana)}"
+
+proc mouseOverInspection*(window: Window, mouse: Vec2,
+    primaryId: int32, viewMode = 0'i32): bool =
+  inspectionInfo(primaryId, viewMode).id != 0 and
+    window.inspectionPanel().contains(mouse)
+
+proc drawInspection(sk: Silky, window: Window, primaryId, viewMode: int32) =
+  let info = inspectionInfo(primaryId, viewMode)
+  if info.id == 0:
+    return
+  let panel = window.inspectionPanel()
+  sk.draw9Patch("window.9patch", sk.theme.windowPatch, panel.origin, panel.size)
+  for i, text in [info.name, info.title, info.hp, info.mana]:
+    if text.len > 0:
+      sk.drawLabel(sk.fittedLabel(text, panel.size.x - 24, "Small"),
+        panel.origin + vec2(12, 8 + i.float32 * 25),
+        vec2(panel.size.x - 24, 24), sk.theme.defaultTextColor, "Small")
+
 proc selectHeroCard(
     primaryId: var int32,
     selectedIds: var seq[int32],
@@ -516,6 +641,11 @@ proc selectHeroCard(
       found = true
       break
   if not found:
+    return
+  if localHudHeroId() != 0:
+    primaryId = id
+    selectedIds = @[id]
+    followSelection = false
     return
   if not additive:
     selectedIds.setLen(0)
@@ -540,7 +670,8 @@ proc minimapMap(panel: GameUiPanel): GameUiPanel =
 proc minimapAim*(window: Window, mouse: Vec2, point: var Vec2): bool =
   ## Resolves a map destination when the pointer is inside the minimap.
   let area = currentChrome(window).minimap.minimapMap()
-  if window.statsContains(mouse) or not area.contains(mouse):
+  if window.statsContains(mouse) or hudTooltip.tooltipContains(mouse) or
+      not area.contains(mouse):
     return false
   point = minimapWorldPoint(mouse, area.origin, area.size, mapHalfSize())
   true
@@ -553,7 +684,7 @@ proc updateMinimapCamera*(
     followSelection: var bool
 ) =
   ## Moves the free camera while the primary button drags on the minimap.
-  if window.statsContains(mouse):
+  if window.statsContains(mouse) or hudTooltip.tooltipContains(mouse):
     minimapPanning = false
     return
   let
@@ -749,8 +880,11 @@ proc drawScoreRow(
     )
 
 proc heroCardIndex(hero: Hero): int =
-  ## Returns one hero's slot in the two stacked team groups.
-  int(clamp(hero.slot, 0, 4)) + (if hero.team == RedTeam: 0 else: 5)
+  ## Rank occupied stable seats within each team, never reserve missing seats.
+  result = if hero.team == RedTeam: 0 else: 5
+  for other in run.world.heroes:
+    if other.team == hero.team and other.slot < hero.slot:
+      inc result
 
 proc drawHeroPortrait(
     sk: Silky,
@@ -787,9 +921,7 @@ proc drawHeroPortrait(
       hero.id,
       window.actionDown(ShiftInput)
     )
-    if options.playerSlot > 0 and
-        not run.replayMode and
-        hero.id == run.world.heroes[options.playerSlot - 1].id:
+    if localHudHeroId() != 0 and hero.id == localHudHeroId():
       focusPlayerHero = true
 
 proc drawHeroMeters(
@@ -894,14 +1026,17 @@ proc drawUi*(
 ) {.measure.} =
   ## Draws every Silky HUD panel for the current frame.
   if run.world.phase == Drafting:
+    hudTooltip.clearTooltip()
     sk.drawDraft(window, currentLayout(window).size, transport.playing)
-    if not run.networked and not defined(gotaTestRoom):
+    if transportAvailable():
       transport.drawTransport(
         sk, window, currentLayout(window).transportPanel, actionCam,
         followSelection, addr statsState.toggled
       )
     return
-  if shopOpen and options.playerSlot > 0 and not run.replayMode:
+  if shopOpen and localHudHeroId() != 0:
+    # Shop cards already show their full descriptions inline; no hover route.
+    hudTooltip.clearTooltip()
     sk.drawShop(window, run.world, run.world.heroes[options.playerSlot - 1],
       currentLayout(window).size, transport.playing)
     return
@@ -912,7 +1047,8 @@ proc drawUi*(
     scorePanel = sk.beginFrame(chrome.score)
     scoreSlots = scorePanel.scorePanels()
     heroesPanel = sk.beginFrame(chrome.heroes)
-    heroes = heroesPanel.heroPanels()
+    counts = ribbonCounts()
+    heroes = heroesPanel.heroPanels(counts[RedTeam], counts[BlueTeam])
     clockPanel = sk.beginFrame(chrome.clock)
     clock = clockPanel.clockPanels()
     minimapPanel = sk.beginFrame(chrome.minimap)
@@ -920,17 +1056,24 @@ proc drawUi*(
     inventory = inventoryPanel.inventoryPanels()
     details = chrome.details.detailsPanels()
     hudTime = currentHudTime()
-  let detailId =
-    if actionCam.enabled and actionCam.locked: actionCam.lockId
-    else: primaryId
-  var selection = selectedUnit(detailId, viewMode)
+  sk.drawDeathHud(chrome)
+  sk.drawInspection(window, primaryId, viewMode)
+  let detailId = hudDetailId(primaryId, actionCam)
+  var selection = hudSelection(primaryId, actionCam, viewMode)
+  if tooltipGame != run or tooltipSelection != detailId or
+      tooltipSize != chrome.layout.size:
+    hudTooltip.clearTooltip()
+    tooltipGame = run
+    tooltipSelection = detailId
+    tooltipSize = chrome.layout.size
+  if hudTooltip.tooltipContains(sk.mousePos):
+    sk.mouseConsumed = true
   let
     basic = GameUiPanel(
       origin: details.portrait.origin + vec2(0, 158), size: vec2(40)
     )
-    controlsHero = options.playerSlot > 0 and not run.replayMode and
-      selection.kind == SelectedHero and
-      selection.id == run.world.heroes[options.playerSlot - 1].id
+    controlsHero = localHudHeroId() != 0 and
+      selection.kind == SelectedHero and selection.id == localHudHeroId()
     attackClicked = controlsHero and selection.hp > 0 and
       window.hudClicked(sk, basic)
   if (window.mousePressed(MouseLeft) or window.mousePressed(MouseRight)) and
@@ -969,7 +1112,10 @@ proc drawUi*(
       actionCam,
       focusPlayerHero
     )
-  let nameWidth = heroes[0].name.size.x
+  let nameWidth =
+    if run.world.heroes.len > 0:
+      heroes[run.world.heroes[0].heroCardIndex].name.size.x
+    else: 0.0'f
   if fittedNameWidth != nameWidth:
     fittedNameWidth = nameWidth
     for slot in 0 ..< playerNames.len:
@@ -985,10 +1131,11 @@ proc drawUi*(
       CenterAlign
     )
     sk.drawHeroMeters(panel, hero)
+  let versus = heroesPanel.heroVersusPanel(counts[RedTeam])
   sk.drawLabel(
     "vs",
-    heroesPanel.origin + vec2(532, 57),
-    vec2(26, 28),
+    versus.origin,
+    versus.size,
     rgbx(166, 174, 190, 255),
     "HeroVersus"
   )
@@ -1118,9 +1265,7 @@ proc drawUi*(
       sk.drawWellImage(portrait, glyph, teamColor, iconSize = IconLarge)
     if window.hudClicked(sk, portrait) and
         selection.kind == SelectedHero and
-        options.playerSlot > 0 and
-        not run.replayMode and
-        selection.id == run.world.heroes[options.playerSlot - 1].id:
+        localHudHeroId() != 0 and selection.id == localHudHeroId():
       actionCam.takeManual()
       focusPlayerHero = true
     if selection.kind == SelectedHero:
@@ -1172,8 +1317,7 @@ proc drawUi*(
         sk.drawCooldownSweep(
           well, remaining, if empty: spec.rechargeTicks else: spec.cooldownTicks
         )
-        if options.playerSlot > 0 and not run.replayMode and
-          selection.id == run.world.heroes[options.playerSlot - 1].id:
+        if localHudHeroId() != 0 and selection.id == localHudHeroId():
             let
               hero = run.world.heroes[options.playerSlot - 1]
               upgrade = GameUiPanel(
@@ -1219,13 +1363,8 @@ proc drawUi*(
               epochTime(),
               window.buttonPressed[DoubleClick]
             )
-  let playerHero =
-    options.playerSlot > 0 and not run.replayMode
-  let playerHeroId =
-    if playerHero:
-      run.world.heroes[options.playerSlot - 1].id
-    else:
-      0'i32
+  let playerHeroId = localHudHeroId()
+  let playerHero = playerHeroId != 0
   if playerHero:
     sk.drawTab(inventory.shop, hovered = sk.hovered(inventory.shop))
     sk.drawSprite("shop", inventory.shop.origin + vec2(6, 6), vec2(16))
@@ -1235,9 +1374,7 @@ proc drawUi*(
       shopOpen = true
       armedAbility = -1
       armedItem = -1
-  let inventoryHero =
-    if playerHero: selectedUnit(playerHeroId, viewMode)
-    else: selection
+  let inventoryHero = selection
   for slot in 0 ..< InventorySlots:
     let
       slotPanel = inventory.slots[slot]
@@ -1424,8 +1561,7 @@ proc drawUi*(
             "Small",
             CenterAlign
           )
-        if options.playerSlot > 0 and not run.replayMode and
-          selection.id == run.world.heroes[options.playerSlot - 1].id:
+        if localHudHeroId() != 0 and selection.id == localHudHeroId():
             let hero = run.world.heroes[options.playerSlot - 1]
             if hero.abilityLevelError(slot) == NoActionError:
               let upgrade = GameUiPanel(
@@ -1528,7 +1664,7 @@ proc drawUi*(
       run.hashCheck.error
     )
 
-  if not run.networked and not defined(gotaTestRoom):
+  if transportAvailable():
     transport.drawTransport(
       sk,
       window,
@@ -1555,40 +1691,42 @@ proc drawUi*(
       hudScratch.add "Marching"
   sk.drawDebugMenu(window, addr showCreepWaypoints, hudScratch, networkStats)
   statsState.syncDirector(actionCam, statsTable, window.tabHeld)
-  if not window.statsContains(sk.mousePos) and
-    not mouseOverDebugMenu(sk.mousePos):
-      if controlsHero and sk.hovered(basic) and sk.mouseIdleTime >= 0.5:
-        let previousStyle = sk.textStyle
-        sk.textStyle = "Small"
-        sk.tooltipAnchor = rect(basic.origin, basic.size)
-        tooltip("Attack move (" & AttackMoveInput.actionLabel & ")")
-        sk.textStyle = previousStyle
-      if selection.kind == SelectedHero and selection.id != 0:
-        for slot in HeroAbilitySlot:
-          let well = details.abilities[slot.ord]
-          if sk.hovered(well):
-            sk.drawAbilityTooltip(
-              selection.abilities[slot],
-              selection.abilityLevels[slot],
-              well,
-              chrome.layout.size,
-              AbilityInputs[slot.ord].actionLabel
-            )
-        for slot in 0 .. 1:
-          let
-            well = details.abilities[slot + 4]
-            item = selection.inventory[slot]
-          if item != NoItem and sk.hovered(well):
-            sk.drawItemTooltip(item, well, chrome.layout.size,
-              AbilityInputs[slot + 4].actionLabel)
-      if inventoryHero.id != 0:
-        for slot in 0 ..< InventorySlots:
-          let
-            well = inventory.slots[slot]
-            item = inventoryHero.inventory[slot]
-          if item != NoItem and sk.hovered(well):
-            sk.drawItemTooltip(item, well, chrome.layout.size,
-              if slot < 2: AbilityInputs[slot + 4].actionLabel else: "")
+  if shopOpen or window.statsContains(sk.mousePos) or
+      mouseOverDebugMenu(sk.mousePos):
+    hudTooltip.clearTooltip()
+  else:
+    var targets: seq[TooltipTarget]
+    if controlsHero:
+      targets.add TooltipTarget(id: "attack:" & $selection.id,
+        card: DetailTooltip(title: "Attack move", icon: "attack",
+          description: "Attack move (" & AttackMoveInput.actionLabel & ")"),
+        anchor: basic, key: AttackMoveInput.actionLabel)
+    if selection.kind == SelectedHero and selection.id != 0:
+      for slot in HeroAbilitySlot:
+        let ability = selection.abilities[slot]
+        targets.add TooltipTarget(
+          id: "ability:" & $selection.id & ":" & $slot.ord & ":" & $ability.ord,
+          card: abilityDetails(ability, selection.abilityLevels[slot]),
+          anchor: details.abilities[slot.ord],
+          key: AbilityInputs[slot.ord].actionLabel)
+      for slot in 0 .. 1:
+        let item = selection.inventory[slot]
+        if item != NoItem:
+          targets.add TooltipTarget(
+            id: "detail-item:" & $selection.id & ":" & $slot & ":" & $item.ord,
+            card: itemDetails(item), anchor: details.abilities[slot + 4],
+            key: AbilityInputs[slot + 4].actionLabel)
+    if inventoryHero.id != 0:
+      for slot in 0 ..< InventorySlots:
+        let item = inventoryHero.inventory[slot]
+        if item != NoItem:
+          targets.add TooltipTarget(
+            id: "inventory:" & $inventoryHero.id & ":" & $slot & ":" & $item.ord,
+            card: itemDetails(item), anchor: inventory.slots[slot],
+            key: if slot < 2: AbilityInputs[slot + 4].actionLabel else: "")
+    hudTooltip.updateTooltip(targets, sk.mousePos, chrome.layout.size,
+      getMonoTime().ticks.float64 / 1_000_000_000.0)
+    sk.drawTooltip(hudTooltip, chrome.layout.size)
 
 proc drawStatsOverlay*(sk: Silky, window: Window) {.measure.} =
   ## Presents readable statistics above the HUD at every window width.

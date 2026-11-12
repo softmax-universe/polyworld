@@ -84,6 +84,7 @@ import
   ../games/light_vs_dark/tests/test_replays as TestLvdReplays,
   ../games/light_vs_dark/tests/test_sim as TestLvdSim,
   test_llms,
+  test_llm_reuse,
   test_mailboxes,
   test_chats,
   test_llm_hosts,

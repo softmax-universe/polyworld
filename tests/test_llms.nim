@@ -556,6 +556,8 @@ end if
   let
     first = newLlmClient(0, config)
     second = newLlmClient(1, config)
+  # Distinct origins keep PIPEWAIT connection reuse out of the barrier test.
+  second.config.baseUrl = "http://localhost:" & $port
   first.beginTick(10)
   second.beginTick(10)
   let

@@ -11,23 +11,58 @@ const
   DefaultOracleModel* = "typesafe/jev-1.13"
 
 when NativeRequests:
-  import curly
+  import std/locks, curly
 
-  type LlmConnection = object
-    curl: Curly
-    inFlight: bool
+  type
+    LlmReply = ref LlmReplyObj
+    LlmReplyObj = object
+      complete: bool
+      status, headerBytes: int
+      body, failure: string
+    LlmConnection = object
+      reply: LlmReply
+      inFlight: bool
+
+  # Curly recommends one client for the process lifetime. Logical clients
+  # retain their reply slots until completion, including after a timeout.
+  let transport = newCurly()
+  var transportLock: Lock
+  initLock(transportLock)
+
+  proc receive(connection: var LlmConnection): bool {.raises: [].} =
+    ## Routes completed HTTP replies to their originating logical clients.
+    withLock transportLock:
+      while true:
+        var completed = transport.pollForResponse()
+        if completed.isNone:
+          break
+        var received = move(completed.get())
+        var address: uint
+        try:
+          address = parseUInt(received.response.request.tag)
+        except ValueError:
+          raise newException(AssertionDefect, "Invalid native LLM reply tag")
+        # The tag is Curly's local request metadata, never provider output.
+        # The connection owns this slot until its reply has been consumed.
+        let reply = cast[ptr LlmReplyObj](address)
+        reply.status = received.response.code
+        for (name, value) in received.response.headers:
+          reply.headerBytes += name.len + value.len + 4
+        reply.body = move(received.response.body)
+        reply.failure = move(received.error)
+        reply.complete = true
+      result = connection.reply != nil and connection.reply.complete
 
   proc close(connection: var LlmConnection) {.raises: [].} =
-    ## Drains the outstanding request before releasing Curly's worker.
-    if connection.curl != nil:
-      if connection.inFlight:
-        discard connection.curl.waitForResponse()
-      connection.curl.close()
-      connection.curl = nil
-      connection.inFlight = false
+    ## Drains this client's request while retaining the process HTTP worker.
+    if connection.inFlight:
+      while not connection.receive():
+        sleep(1)
+    connection.reply = nil
+    connection.inFlight = false
 
   proc `=destroy`(connection: var LlmConnection) =
-    ## Releases the HTTP worker when its player is destroyed.
+    ## Releases the player's reply only after the native request finishes.
     connection.close()
 
 type
@@ -163,7 +198,7 @@ proc newLlmClient*(slot: int): LlmClient =
   result.oracle.enabled = getEnv("COGAME_ORACLE").toLowerAscii != "off"
 
 proc close*(client: LlmClient) {.raises: [].} =
-  ## Waits for outstanding HTTP work, releases Curly, and forgets answers.
+  ## Waits for this client's HTTP work and forgets its answers.
   if client == nil:
     return
   when NativeRequests:
@@ -207,25 +242,22 @@ proc beginTick*(client: LlmClient, tick: int32) =
     if not client.connection.inFlight:
       return
     var
-      completed = client.connection.curl.pollForResponse()
       status: int32
       body, failure: string
-    if completed.isSome:
+    if client.connection.receive():
       client.connection.inFlight = false
+      let received = client.connection.reply
+      client.connection.reply = nil
       if client.pending == 0:
         return
-      var received = move(completed.get())
-      status = int32(received.response.code)
-      failure = move(received.error)
-      var headerBytes = 0
-      for (name, value) in received.response.headers:
-        headerBytes += name.len + value.len + 4
-      if received.response.body.len > MaxResponseBytes:
+      status = int32(received.status)
+      failure = move(received.failure)
+      if received.body.len > MaxResponseBytes:
         failure = "LLM response exceeds the byte limit"
-      elif headerBytes > MaxHeaderBytes:
+      elif received.headerBytes > MaxHeaderBytes:
         failure = "LLM response headers exceed the byte limit"
       else:
-        body = move(received.response.body)
+        body = move(received.body)
       if (getMonoTime() - client.started).inMilliseconds >=
         client.config.timeoutMs:
           failure = "LLM request timed out"
@@ -273,15 +305,15 @@ proc ask*(client: LlmClient, verb, path, body: string): int32 =
   when NativeRequests:
     if client.config.timeoutMs <= 0:
       raise newException(LlmError, "LLM timeout must be positive")
-    if client.connection.curl == nil:
-      client.connection.curl = newCurly(maxInFlight = 1)
     client.started = getMonoTime()
-    client.connection.curl.startRequest(
+    client.connection.reply = LlmReply()
+    transport.startRequest(
       verb,
       client.config.baseUrl & path,
       headers = headers,
       body = body,
-      timeout = max(1, (client.config.timeoutMs + 999) div 1000)
+      timeout = max(1, (client.config.timeoutMs + 999) div 1000),
+      tag = $cast[uint](client.connection.reply)
     )
     client.connection.inFlight = true
   inc client.nextId

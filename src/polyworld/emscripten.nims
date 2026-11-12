@@ -3,25 +3,26 @@
 import
   std/[hashes, os, strformat, strutils]
 
-proc setupEmscripten*(gameDir: string, game = "") =
-  ## Configures the wasm backend and writes the bundle next to the game.
+proc setupEmscripten*(gameDir: string, game = "", engineDir = "", dataDir = "", outputDir = "") =
+  ## engineDir, dataDir and outputDir default to the in-repo layout, so games inside the engine
+  ## repo are unchanged.
   when defined(emscripten):
     let
-      repoDir = gameDir / ".." / ".."
-      dataDir = getEnv("POLYWORLD_ART", repoDir / ".." / "polyworld_art")
-      outputDir = gameDir / "emscripten"
+      repoDir = (if engineDir.len > 0: engineDir else: gameDir / ".." / "..")
+      data = (if dataDir.len > 0: dataDir else: getEnv("POLYWORLD_ART", repoDir / ".." / "polyworld_art"))
+      output = (if outputDir.len > 0: outputDir else: gameDir / "emscripten")
       shellTemplate = repoDir / "src" / "polyworld" /
         (if defined(replayViewer): "replay.html" else: "emscripten.html")
-      shellFile = outputDir / "shell.html"
+      shellFile = output / "shell.html"
     let preJs =
       if defined(replayViewer):
         ""
       else:
         "--pre-js " & repoDir / "src" / "polyworld" / "webinputs.js"
-    var preload = "--preload-file " & quoteShell(dataDir & "@/polyworld_art")
+    var preload = "--preload-file " & quoteShell(data & "@/polyworld_art")
     var logo = ""
-    if not dirExists(outputDir):
-      mkDir(outputDir)
+    if not dirExists(output):
+      mkDir(output)
     if game.len > 0:
       let
         variant = if defined(webPng): "png" else: "ktx2"
@@ -34,10 +35,10 @@ proc setupEmscripten*(gameDir: string, game = "") =
         " --nimcache:" & quoteShell(cache / "nimcache") &
         " -o:" & quoteShell(packer) & " " &
         quoteShell(gameDir / "pack_assets.nim")
-      exec quoteShell(packer) & " " & quoteShell(dataDir) &
+      exec quoteShell(packer) & " " & quoteShell(data) &
         " " & quoteShell(cache)
       let
-        logoFile = outputDir / "loading-logo.png"
+        logoFile = output / "loading-logo.png"
         logoData = readFile(cache / "loading-logo.png")
       if not fileExists(logoFile) or readFile(logoFile) != logoData:
         writeFile(logoFile, logoData)
@@ -60,7 +61,7 @@ proc setupEmscripten*(gameDir: string, game = "") =
     let shell = readFile(shellTemplate).replace("<!-- GAME_LOGO -->", logo)
     if not fileExists(shellFile) or readFile(shellFile) != shell:
       writeFile(shellFile, shell)
-    switch("nimcache", outputDir / "tmp")
+    switch("nimcache", output / "tmp")
     switch("threads", "off")
     --os:linux
     --cpu:wasm32
@@ -89,7 +90,7 @@ proc setupEmscripten*(gameDir: string, game = "") =
     switch(
       "passL",
       (&"""
-      -o {outputDir / projectName()}.html
+      -o {output / projectName()}.html
       {preload}
       {preJs}
       --shell-file {shellFile}
@@ -108,4 +109,4 @@ proc setupEmscripten*(gameDir: string, game = "") =
     if paramStr(1) == "run" or paramStr(1) == "r":
       setCommand("c")
       echo "To run the Emscripten build, use:"
-      echo "emrun " & outputDir / (projectName() & ".html")
+      echo "emrun " & output / (projectName() & ".html")

@@ -1,5 +1,11 @@
 import windy
 
+when defined(linux):
+  from windy/platforms/linux/x11/xlib import nil
+
+  proc XCloseDisplay(display: xlib.Display): cint
+    {.cdecl, dynlib: xlib.libX11, importc, discardable.}
+
 type
   WindowMode* = enum
     Windowed = "Windowed"
@@ -88,15 +94,23 @@ when not defined(emscripten):
 
   proc windowSizeLimit*(window: Window): IVec2 =
     ## Leaves room for window decorations and the desktop on the current screen.
-    let screens = getScreens()
-    if screens.len == 0:
-      return window.size
-    var screen = screens[0]
-    for candidate in screens:
-      if window.pos.x >= candidate.left and window.pos.x < candidate.right:
-        screen = candidate
-        break
-    ((screen.size.vec2 - vec2(80, 140)) * window.contentScale).ivec2
+    when defined(linux):
+      # X11 root dimensions are already pixels, including any desktop scaling.
+      let display = xlib.XOpenDisplay(nil)
+      if display == nil:
+        raise newException(WindyError, "Unable to open the X11 display")
+      defer: XCloseDisplay(display)
+      xlib.screen(display, xlib.defaultScreen(display)).size - ivec2(80, 140)
+    else:
+      let screens = getScreens()
+      if screens.len == 0:
+        return window.size
+      var screen = screens[0]
+      for candidate in screens:
+        if window.pos.x >= candidate.left and window.pos.x < candidate.right:
+          screen = candidate
+          break
+      ((screen.size.vec2 - vec2(80, 140)) * window.contentScale).ivec2
 
   proc updateWindowSettings*(window: Window) =
     ## Applies queued OS changes outside drawing and waits for fullscreen.

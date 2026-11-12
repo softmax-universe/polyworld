@@ -41,7 +41,7 @@ for seed in [0, 1, 42, 1049, 89_271]:
   doAssert map.ground.tiles == same.ground.tiles
   doAssert map.blocked == same.blocked
   doAssert map.relief == same.relief
-  doAssert map.landmarks.len == 6
+  doAssert map.landmarks.len == 13
   var trees, stream: int
   for i, tile in map.ground.tiles:
     doAssert tile.impassable == map.blocked[i]

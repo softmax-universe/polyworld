@@ -4,9 +4,13 @@ import
   ../[brains, common]
 
 const
-  Observation = """{"creature":{"x":0,"z":0,"food":0,"energy":90},
-    "landmarks":[{"id":"village","x":8,"z":2},
-    {"id":"berries","x":-7,"z":5}],"village_food":0}"""
+  Observation = """{"x":0,"z":0,"energy":90,"cargo":{},
+    "places":[{"id":"village","name":"Willow hall","x":8,"z":2},
+    {"id":"berries","name":"Wild berry patch","x":-7,"z":5}],
+    "households":[{"id":"mason_hut","name":"Mason's hut",
+    "integrity":45,"stock":{"stone":0,"oak":0}}],
+    "villagers":[{"id":"eli","name":"Eli","hunger":70,
+    "activity":"Gathering stone"}]}"""
   Lesson = "I gather wild berries when helping hungry villagers."
   Explanation = "I can't find a way across the river from here."
   InventedLesson = "I should always swim across rivers."
@@ -148,10 +152,14 @@ block:
   doAssert parsed.lessons == @[Lesson]
   for invalid in [
     action("teleport", "village"),
+    action("order", "ada"),
+    action("repair", "mason_hut"),
     action("move", "missing"),
     action("move", "", 32, 0),
     action("move", "", 0, -32),
     action("gather", "village"),
+    action("gather", "miller_hut"),
+    action("gather", "ada"),
     action("give", "farm"),
     action("rest", "river"),
     action("eat", "berries")
@@ -183,6 +191,31 @@ block:
   except MonsterError:
     rejected = true
   doAssert rejected
+
+echo "Testing resource sources and individual delivery targets"
+block:
+  for source in ["berries", "farm", "fish", "pine", "oak", "stone"]:
+    var reply = answer()
+    reply["actions"] = %*[action("move", source), action("gather", source)]
+    let parsed = parseReply($reply)
+    doAssert parsed.actions.len == 2
+    doAssert parsed.actions[0].kind == MoveAction
+    doAssert parsed.actions[1].kind == GatherAction
+    doAssert parsed.actions[1].target == source
+  for recipient in [
+    "village", "hall", "miller_hut", "weaver_hut", "mason_hut",
+    "ada", "ben", "clara", "dara", "eli", "finn"
+  ]:
+    var reply = answer()
+    reply["actions"] = %*[
+      action("gather", "stone"), action("move", recipient),
+      action("give", recipient)
+    ]
+    let parsed = parseReply($reply)
+    doAssert parsed.actions.len == 3
+    doAssert parsed.actions[1].kind == MoveAction
+    doAssert parsed.actions[2].kind == GiveAction
+    doAssert parsed.actions[2].target == recipient
 
 echo "Testing the direct OpenAI endpoint remains narrowly allowed"
 block:
@@ -337,6 +370,10 @@ block:
   doAssert request["text"]["format"]["strict"].getBool()
   doAssert not request["store"].getBool()
   doAssert first.contains("Always gather wild food")
+  let context = request["input"].elems[^1]["content"].getStr()
+  doAssert context.contains(Observation)
+  doAssert context.contains("Mason's hut")
+  doAssert context.contains("Gathering stone")
 
   brain.addEvent("Moss gathered six berries.")
   doAssert brain.submit("What should you do next?", Observation)

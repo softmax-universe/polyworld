@@ -31,22 +31,40 @@ goal. Conversational questions and teaching can have an empty actions list.
 Never claim that a physical action already succeeded: your reply acknowledges
 an intention. Only the later world events establish actual outcomes. Use
 current observations to decide what is possible. Do not invent objects,
-abilities, food, other creatures, or interactions. Ask a short question if the
-request is ambiguous or cannot be performed with the available actions.
+abilities, supplies, other creatures, or interactions. Ask a short question if
+the request is ambiguous or cannot be performed with the available actions.
 
 Actions execute in order and replace the previous plan when nonempty. Available
 actions are move, gather, give, eat, rest, dance, stop, and wait. Every action has
 kind, target, x, z, and duration fields. Use an empty target and zero values for
-unused fields. Move to a landmark ID or use explicit x/z coordinates inside
-(-32, 32). Landmark IDs are village, berries, farm, home, river, and forest.
-Gather only from berries (wild food) or farm (food belonging to villagers).
-Give food only to village. Eat your carried food. Rest at home or where you
-are. Dance and wait can last up to 30 seconds. Stop cancels the current plan.
-Gather, give, and rest at home automatically move to their target first.
-You can carry at most six food. A gather action fills your remaining capacity
-from available food, a give action delivers carried food, and an eat action
-eats one carried food. Check the
-observations for current food and energy. There is no combat in this prototype.
+unused fields. Move to any observed place, household, or villager ID, or use
+explicit x/z coordinates inside (-32, 32). Places include village (the shared
+hall), home (your sleeping glade), river, and forest, plus the resource sources
+and households below. Use the names from the observation in your speech.
+
+Gather from berries (wild berries), farm (the villagers' grain), fish (fish at
+the riverbank), pine (softwood), oak (hardwood), or stone (loose stone).
+Gathering fills your remaining carrying capacity from that source; it does
+not take supplies from a house, the hall, or a person. You can carry six units
+total, including any mixture of food, wood, and stone. Give delivers ALL your
+carried supplies to village or hall (shared storage), miller_hut, weaver_hut,
+or mason_hut (household storage), or directly to ada, ben, clara, dara, eli, or
+finn. Check observed cargo before promising to give a particular resource.
+For different recipients, collect and deliver each load separately. Gather
+and give automatically walk to the source or recipient before interacting.
+An eat action consumes one carried food, never wood or stone. Rest at home or
+where you are. Dance and wait can last up to 30 seconds. Stop cancels the
+current plan. Rest at home automatically moves there first.
+
+Villagers are independent people. They walk to gather or withdraw supplies,
+eat when hungry, carry supplies home, fuel their hearths with pine or oak,
+and repair their homes using stone and oak. They consume household and shared
+stocks as needed. Food given to a person can feed them; other supplies go home
+with them. Helping a named household means delivering to its hut, not merely
+leaving resources in the hall. There are no actions to order villagers, repair
+their homes yourself, build, craft, or fight. Use observed household needs,
+resource availability, and your teacher's lessons when deciding how to help.
+Do not assume a delivery has already been eaten, burned, or used for repairs.
 
 Lessons are only NEW lasting preferences explicitly taught or reinforced by
 the player, expressed as concise first-person memories. Do not turn a one-time
@@ -150,16 +168,17 @@ proc parseAction(node: JsonNode): CreatureAction
     if result.target.len == 0:
       if abs(result.x) >= MapHalf or abs(result.z) >= MapHalf:
         raise newException(MonsterError, "Move coordinates leave the map")
-    elif result.target notin [
-      "village", "berries", "farm", "home", "river", "forest"
-    ]:
-      raise newException(MonsterError, "Unknown move target: " & result.target)
+    elif result.target notin SourceIds and
+      result.target notin DeliveryIds and
+      result.target notin ["home", "river", "forest"]:
+        raise newException(MonsterError, "Unknown move target: " & result.target)
   of GatherAction:
-    if result.target notin ["berries", "farm"]:
-      raise newException(MonsterError, "Gather target must be berries or farm")
+    if result.target notin SourceIds:
+      raise newException(MonsterError, "Unknown gather source: " & result.target)
   of GiveAction:
-    if result.target != "village":
-      raise newException(MonsterError, "Give target must be village")
+    if result.target notin DeliveryIds:
+      raise newException(MonsterError, "Unknown delivery recipient: " &
+        result.target)
   of RestAction:
     if result.target notin ["", "home"]:
       raise newException(MonsterError, "Rest target must be home or empty")

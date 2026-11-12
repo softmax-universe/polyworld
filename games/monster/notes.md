@@ -25,8 +25,27 @@ Try this sequence:
 The model returns a short reply, physical actions, and any new lasting lessons.
 The simulation validates the actions and reports their actual results back to
 the conversation. Moss can move, gather, give, eat, rest, dance, stop, and wait.
-Gathering at the farm takes food belonging to the villagers. Gathering at the
-berry patch takes wild food. There is no combat or village economy yet.
+Moss can carry six supplies at once. Gather wild berries, grain from the
+villagers' farm, fish at the stream bank, fallen pine or oak wood, and loose
+stone. Gathering at the farm takes food belonging to the villagers. Food and
+fallen wood replenish over time, while loose stone is finite.
+
+Deliver to the village hall for communal storage, a particular hut for its
+household, or a named villager for personal help. A delivery transfers all of
+Moss's cargo. Food feeds people, pine and oak fuel their hearths, and stone
+with oak repairs damaged homes. Villagers carry their own supplies and use
+the hall when they need something. They choose their own work; conversation
+controls only Moss.
+
+Six villagers share three homes: Ada and Ben at Miller's hut, Clara and Dara
+at Weaver's hut, and Eli and Finn at Mason's hut. They walk to supplies, bring
+them home, eat, refuel their hearths, and repair damage. They rest when their
+needs are met. Their names, current work, household needs, and supplies are
+visible in the world and side panels.
+
+Try `Bring fish to Ada`, `Bring pine wood to Weaver's hut`, or
+`Take stone and oak to Mason's hut so they can repair it`. Ask Moss about
+the village to get an account of the current needs. There is no combat yet.
 
 When an action fails, Moss receives its actual result and explains the problem
 in conversation. Blocked routes and unavailable resources stay in its memory
@@ -55,7 +74,9 @@ data directory under `polyworld/monster/<seed>`. Use `--save-dir:PATH` for a
 separate creature. `--seed:N` selects a seeded landscape and a separate default
 save. Full conversation is retained up to the explicit memory and request
 limits. Reaching a limit displays an error. Sleep does not compact memory yet.
-Unfinished physical orders stop when a saved game is reopened.
+Unfinished creature orders stop when a saved game is reopened. Villagers
+choose new work from their saved needs and supplies. Existing food-only
+saves migrate automatically; conversation and lessons are preserved.
 
 Validation:
 

@@ -2,7 +2,7 @@ import
   std/[strutils, times, unicode],
   bumpy, chroma, pixie, silky, vmath,
   polyworld/gameuis,
-  common
+  common, resources
 
 when defined(silkyTesting):
   import silky/testwindow
@@ -31,7 +31,7 @@ type
     historyHeights: seq[float32]
     localError: string
   ChatLayout = object
-    panel, history, input, send, focus: GameUiPanel
+    panel, history, input, send, focus, stats, village: GameUiPanel
 
 proc initChatUi*(): ChatUi {.raises: [].} =
   ## Begins with the creature's conversation ready for typing.
@@ -79,9 +79,14 @@ proc layout(size: Vec2): ChatLayout {.raises: [].} =
     origin: origin + vec2(width - 96, height - 66),
     size: vec2(78, 44)
   )
-  result.focus = GameUiPanel(
-    origin: vec2(size.x - 172, 126), size: vec2(152, 30)
+  result.stats = GameUiPanel(
+    origin: vec2(size.x - 320, 20), size: vec2(300, 126)
   )
+  result.focus = GameUiPanel(
+    origin: vec2(size.x - 172, 158), size: vec2(152, 30)
+  )
+  if size.x >= 960 and result.panel.origin.y >= 430:
+    result.village = GameUiPanel(origin: vec2(20, 20), size: vec2(286, 390))
 
 proc mouseOverUi*(ui: ChatUi, window: Window): bool =
   ## Prevents camera gestures from stealing conversation and button input.
@@ -89,7 +94,8 @@ proc mouseOverUi*(ui: ChatUi, window: Window): bool =
     scale = max(0.1'f, ui.scale)
     boxes = layout(window.size.vec2 / scale)
     mouse = window.mousePos.vec2 / scale
-  boxes.panel.contains(mouse) or boxes.focus.contains(mouse)
+  boxes.panel.contains(mouse) or boxes.focus.contains(mouse) or
+    boxes.stats.contains(mouse) or boxes.village.contains(mouse)
 
 proc previousRune(text: string, cursor: int): int {.raises: [].} =
   ## Moves to the previous UTF-8 boundary without cutting a character.
@@ -391,6 +397,37 @@ proc drawHistory(
       vec2(2, thumb), rgbx(160, 160, 160, 160)
     )
 
+proc drawVillage(sk: Silky, panel: GameUiPanel, world: World) =
+  ## Shows communal supplies, household needs, and residents' current work.
+  if panel.size.x <= 0:
+    return
+  sk.plate(panel)
+  let origin = panel.origin + vec2(14, 10)
+  sk.drawLabel("VILLAGE HALL", origin, vec2(258, 18), Ink, "Small")
+  let supplies = [
+    "Berries " & $world.stock[BerriesResource] & "   Grain " &
+      $world.stock[GrainResource] & "   Fish " & $world.stock[FishResource],
+    "Pine " & $world.stock[SoftwoodResource] & "   Oak " &
+      $world.stock[HardwoodResource] & "   Stone " & $world.stock[StoneResource]
+  ]
+  for i, text in supplies:
+    sk.drawLabel(text, origin + vec2(0, (25 + i * 22).float32),
+      vec2(258, 20), Ink, "Small")
+  var y = 80'f
+  for household in world.households:
+    sk.drawLabel(household.name, origin + vec2(0, y),
+      vec2(258, 18), Ink, "Small")
+    sk.drawLabel("Food " & $household.stock.foodTotal() &
+      "   Warmth " & $int(household.fuel) & "%   Home " &
+      $int(household.integrity) & "%", origin + vec2(0, y + 18),
+      vec2(258, 18), Ink, "Small")
+    y += 42
+  y += 8
+  for villager in world.villagers:
+    sk.drawLabel(villager.name & ": " & villager.activity,
+      origin + vec2(0, y), vec2(258, 20), Ink, "Small")
+    y += 23
+
 proc drawUi*(
   sk: Silky,
   window: Window,
@@ -412,18 +449,19 @@ proc drawUi*(
       ui.typing = true
       ui.cursor = ui.input.len
       ui.selected = false
-  let stats = GameUiPanel(
-    origin: vec2(size.x - 280, 20), size: vec2(260, 94)
-  )
+  let stats = boxes.stats
   sk.plate(stats)
   sk.drawLabel("YOUR CREATURE", stats.origin + vec2(16, 10),
-    vec2(228, 18), Ink, "Small")
+    vec2(268, 18), Ink, "Small")
   sk.drawLabel("Energy " & $int(world.creature.energy) & "%",
-    stats.origin + vec2(16, 31), vec2(112, 24), Ink)
-  sk.drawLabel("Carrying " & $world.creature.food & "/6",
-    stats.origin + vec2(133, 31), vec2(112, 24), Ink)
-  sk.drawLabel("Village food: " & $world.villageFood,
-    stats.origin + vec2(16, 59), vec2(228, 22), Ink)
+    stats.origin + vec2(16, 31), vec2(128, 24), Ink)
+  sk.drawLabel("Carrying " & $world.creature.cargo.total() & "/6",
+    stats.origin + vec2(151, 31), vec2(133, 24), Ink)
+  sk.drawLabel(world.creature.cargo.inventoryText(),
+    stats.origin + vec2(16, 61), vec2(268, 20), Ink, "Small")
+  sk.drawLabel(world.status,
+    stats.origin + vec2(16, 91), vec2(268, 20), Ink, "Small")
+  sk.drawVillage(boxes.village, world)
   if sk.button(window, boxes.focus, "Find my creature"):
     ui.focusRequested = true
   sk.plate(boxes.panel)

@@ -1,5 +1,5 @@
 import
-  silky, silky/testwindow,
+  silky, silky/testwindow, vmath,
   ../[common, ui]
 
 when not defined(silkyTesting):
@@ -87,7 +87,7 @@ block scaledInput:
   harness.window.installInput(addr chat)
   discard frame(harness, chat)
   chat.restoreInput("Walk to the village")
-  harness.window.moveMouse(2560 - 250, 282)
+  harness.window.moveMouse(2560 - 250, 346)
   doAssert chat.mouseOverUi(harness.window),
     "The scaled creature-focus button blocks camera gestures."
   harness.window.pressButton(MouseLeft)
@@ -102,8 +102,26 @@ block scaledInput:
   doAssert frame(harness, chat) == "Walk to the village",
     "The scaled Send button receives clicks at framebuffer coordinates."
   harness.window.releaseButton(MouseLeft)
-  harness.window.moveMouse(40, 700)
+  harness.window.moveMouse(40, 900)
   doAssert not chat.mouseOverUi(harness.window),
     "World gestures remain available outside scaled panels."
 
 echo "Monster scaled layout and click tests passed."
+
+block resourcePanels:
+  var
+    harness = newTestHarness(SilkyAtlas(), 1280, 800)
+    chat = initChatUi()
+  harness.window.moveMouse(40, 250)
+  doAssert chat.mouseOverUi(harness.window),
+    "The resource panel blocks camera gestures behind its text."
+  harness.window.moveMouse(1100, 80)
+  doAssert chat.mouseOverUi(harness.window),
+    "The creature inventory blocks camera gestures behind its text."
+  harness.window.size = ivec2(640, 480)
+  harness.window.moveMouse(40, 200)
+  doAssert not chat.mouseOverUi(harness.window),
+    "Narrow layouts leave world space clear of the ancillary village panel."
+  discard frame(harness, chat)
+
+echo "Monster resource panel layout tests passed."

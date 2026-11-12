@@ -1,7 +1,7 @@
 import
   std/[os, strutils, tempfiles],
   vmath,
-  ../[common, sim]
+  ../[common, sim, resources]
 
 proc fixture(): World =
   ## Creates a small traversable world for deterministic action checks.
@@ -43,20 +43,20 @@ block:
     CreatureAction(kind: GiveAction, target: "village")
   ])
   world.finish()
-  doAssert world.berryFood == 18
-  doAssert world.farmFood == 12
-  doAssert world.villageFood == 6
-  doAssert world.creature.food == 0
+  doAssert world.sources[world.sourceIndex("berries")].amount == 18
+  doAssert world.sources[world.sourceIndex("farm")].amount == 12
+  doAssert world.stock.foodTotal() == 6
+  doAssert world.creature.cargo[BerriesResource] == 0
 
 block:
   var world = fixture()
   world.instruct(@[CreatureAction(kind: GatherAction, target: "farm")])
   world.finish()
-  doAssert world.farmFood == 6
-  doAssert world.events[^1] == "Took 6 food from the villagers' farm."
+  doAssert world.sources[world.sourceIndex("farm")].amount == 6
+  doAssert world.events[^1].contains("6 grain")
   world.instruct(@[CreatureAction(kind: EatAction)])
   world.finish()
-  doAssert world.creature.food == 5
+  doAssert world.creature.cargo[GrainResource] == 5
 
 block:
   var world = fixture()
@@ -113,8 +113,8 @@ block:
   var restored = fixture()
   restored.restoreWorld(path)
   doAssert restored.creature.position == world.creature.position
-  doAssert restored.creature.food == 6
-  doAssert restored.berryFood == 18
+  doAssert restored.creature.cargo[BerriesResource] == 6
+  doAssert restored.sources[restored.sourceIndex("berries")].amount == 18
   doAssert not restored.active
   writeFile(path, "{broken")
   var rejected = false
@@ -145,24 +145,24 @@ block:
 
 for (action, food, berries, reason) in [
   (CreatureAction(kind: GatherAction, target: "berries"), 0, 0,
-    "no food left at berries"),
+    "no berries left at"),
   (CreatureAction(kind: GatherAction, target: "berries"), 6, 24,
     "capacity is full"),
   (CreatureAction(kind: GiveAction, target: "village"), 0, 24,
-    "no food to give"),
+    "no supplies to give"),
   (CreatureAction(kind: EatAction), 0, 24, "no food to eat")
 ]:
   var world = fixture()
-  world.creature.food = food
-  world.berryFood = berries
+  world.creature.cargo[BerriesResource] = food
+  world.sources[world.sourceIndex("berries")].amount = berries
   world.instruct(@[action, CreatureAction(kind: DanceAction)])
   world.finish()
   doAssert world.actions.len == 0 and not world.active
   doAssert world.events.len == 0
   doAssert world.problems.len == 1
   doAssert world.problems[0].contains(reason)
-  doAssert world.creature.food == food
-  doAssert world.berryFood == berries
-  doAssert world.villageFood == 0
+  doAssert world.creature.cargo[BerriesResource] == food
+  doAssert world.sources[world.sourceIndex("berries")].amount == berries
+  doAssert world.stock.foodTotal() == 0
 
 echo "Monster simulation passed"

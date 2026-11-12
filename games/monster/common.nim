@@ -9,6 +9,13 @@ const
   MaxActions* = 12
   MaxMessages* = 256
   MaxLessons* = 64
+  CarryLimit* = 6
+  VillagerCarryLimit* = 2
+  SourceIds* = ["berries", "farm", "fish", "pine", "oak", "stone"]
+  HouseholdIds* = ["miller_hut", "weaver_hut", "mason_hut"]
+  VillagerIds* = ["ada", "ben", "clara", "dara", "eli", "finn"]
+  DeliveryIds* = ["village", "hall", "miller_hut", "weaver_hut",
+    "mason_hut", "ada", "ben", "clara", "dara", "eli", "finn"]
 
 type
   MonsterError* = object of CatchableError
@@ -31,7 +38,7 @@ type
     lessons*: seq[string]
   LandmarkKind* = enum
     VillageLandmark, BerryLandmark, FarmLandmark, HomeLandmark,
-    RiverLandmark, ForestLandmark
+    RiverLandmark, ForestLandmark, ResourceLandmark, HouseholdLandmark
   Landmark* = object
     id*, name*: string
     kind*: LandmarkKind
@@ -47,11 +54,43 @@ type
     blocked*: seq[bool]
     landmarks*: seq[Landmark]
     props*: seq[Scenery]
+  ResourceKind* = enum
+    BerriesResource, GrainResource, FishResource, SoftwoodResource,
+    HardwoodResource, StoneResource
+  Inventory* = array[ResourceKind, int]
+  ResourceSource* = object
+    id*, name*: string
+    position*: Vec2
+    resource*: ResourceKind
+    amount*, capacity*: int
+    elapsed*: float32
+  Household* = object
+    id*, name*: string
+    position*: Vec2
+    stock*: Inventory
+    integrity*, fuel*: float32
+  VillagerTask* = enum
+    IdleTask, GatherTask, WithdrawTask, DeliverTask, EatTask,
+    RefuelTask, RepairTask
+  Villager* = object
+    id*, name*: string
+    home*: int
+    position*: Vec2
+    facing*: float32
+    moving*: bool
+    cargo*: Inventory
+    hunger*: float32
+    activity*, target*: string
+    task*: VillagerTask
+    resource*: ResourceKind
+    path*: seq[Vec2]
+    waypoint*: int
+    elapsed*, retry*: float32
   Creature* = object
     position*: Vec2
     facing*: float32
     moving*: bool
-    food*: int
+    cargo*: Inventory
     energy*: float32
   World* = object
     map*: MonsterMap
@@ -63,7 +102,10 @@ type
     path*: seq[Vec2]
     waypoint*: int
     elapsed*: float32
-    villageFood*, berryFood*, farmFood*: int
+    stock*: Inventory
+    sources*: seq[ResourceSource]
+    households*: seq[Household]
+    villagers*: seq[Villager]
     status*: string
     events*: seq[string]
     problems*: seq[string]

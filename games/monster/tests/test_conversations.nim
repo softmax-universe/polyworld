@@ -2,7 +2,7 @@ import
   std/[json, monotimes, net, os, strutils, tempfiles, times],
   vmath,
   polyworld/llms,
-  ../[brains, common, conversations, sim]
+  ../[brains, common, conversations, resources, sim]
 
 const Explanation = "I can't find a way across the river from here."
 
@@ -58,6 +58,13 @@ proc serve() {.thread.} =
         response(Explanation, newJArray())
       elif current.contains("conversation-only"):
         response("I'm listening.", newJArray())
+      elif current.contains("resource-delivery"):
+        response("I'll bring some stone to the village hall.", %*[
+          {"kind": "gather", "target": "stone", "x": 0,
+            "z": 0, "duration": 0},
+          {"kind": "give", "target": "hall", "x": 0,
+            "z": 0, "duration": 0}
+        ])
       else:
         response("I'll try to cross the river.", %*[{
           "kind": "move", "target": "",
@@ -182,6 +189,51 @@ block:
     doAssert brain.messages.len == 4
     doAssert not brain.pending and not brain.explanationPending
     doAssert not world.active and world.actions.len == 0
+
+  block resourceDelivery:
+    var world = newWorld(MonsterMap(
+      seed: 42,
+      blocked: newSeq[bool](MapSize * MapSize),
+      landmarks: @[
+        Landmark(id: "home", name: "Sleeping glade",
+          position: vec2(-6.5'f, 0.5'f)),
+        Landmark(id: "village", name: "Willow village hall",
+          position: vec2(0.5'f, 6.5'f)),
+        Landmark(id: "stone", name: "Loose stone",
+          position: vec2(6.5'f, 0.5'f))
+      ]
+    ))
+    let
+      brain = fixtureBrain()
+      source = world.sourceIndex("stone")
+      originalStock = world.stock[StoneResource]
+      deadline = getMonoTime() + initDuration(seconds = 5)
+    doAssert source >= 0
+    let originalStone = world.sources[source].amount
+    defer:
+      brain.close()
+    doAssert world.speak(brain, "resource-delivery: bring stone to the hall")
+    while true:
+      world.frame(brain)
+      doAssert brain.failure.len == 0, brain.failure
+      if not brain.pending and not brain.explanationPending and
+        not world.active and world.actions.len == 0:
+          break
+      doAssert getMonoTime() < deadline, "resource delivery did not settle"
+      sleep(2)
+    doAssert world.creature.cargo.total() == 0
+    doAssert world.stock[StoneResource] == originalStock + CarryLimit
+    doAssert world.sources[source].amount == originalStone - CarryLimit
+    doAssert world.creature.position == vec2(0.5'f, 6.5'f)
+    doAssert requests.peek() == 1
+    let request = receiveRequest()
+    doAssert request.contains("Loose stone")
+    var deliveryRecorded = false
+    for message in brain.messages:
+      if message.role == EventMessage and message.text.contains("stone") and
+        message.text.contains("hall"):
+          deliveryRecorded = true
+    doAssert deliveryRecorded, "The model must receive the actual delivery."
 
   block serviceFailure:
     var world = fixture(true)

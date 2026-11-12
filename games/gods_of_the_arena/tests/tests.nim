@@ -13,6 +13,8 @@ import
   test_content,
   test_tooltips,
   test_controls,
+  test_shop_backend,
+  test_shop_network,
   test_human_chat,
   test_human_chat_network,
   test_human_chat_graphics,

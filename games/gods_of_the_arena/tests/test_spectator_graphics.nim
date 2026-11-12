@@ -8,7 +8,7 @@ doAssert "spectatorStream.advance()" in graphics
 doAssert "transport.streamed = network.isSpectator" in graphics
 doAssert "if network != nil and not network.isSpectator:" in graphics
 doAssert "transportAvailable()" in ui
-let main = graphics.split("          drawAimBanner()", 1)[1].split("          if matchMenu != HiddenMatchMenu:", 1)[0]
+let main = graphics.split("          if matchMenu == HiddenMatchMenu:\n            drawUi(", 1)[1].split("          if matchMenu != HiddenMatchMenu:", 1)[0]
 doAssert "menuButton" notin main, "No main-screen leave/save buttons"
 doAssert "network.client.status" notin main, "Status belongs in Esc, not over minimap"
 echo "Spectator graphics routing and uncluttered HUD passed"

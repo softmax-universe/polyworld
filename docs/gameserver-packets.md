@@ -439,13 +439,13 @@ social-only flag independently of its host-prepared StartMatch.
 | Match validation | SubmitCommand, AppliedTick, Catchup, ReportHash, FinishMatch, AbortMatch and PauseMatch require the current header match ID. |
 | Delivery | Consecutive per socket; resets on reconnect. Pre-identification failures can use delivery 0. |
 | Commands | Sequence spans all seats of one participant and survives reconnect. Gaps, zero or altered retransmissions fail. |
-| Hash verification | Startup readiness must agree. During play, first report sets the checkpoint; later reports for the same match/tick compare asynchronously. Missing hashes do not pause; mismatches stop visibly. No state repair. |
+| Hash verification | Startup policies verify preparation as described above. During play, first report sets the checkpoint; later reports for the same match/tick compare asynchronously. Missing hashes do not pause; mismatches stop visibly. No state repair. |
 | Spectator hashes | Compared with retained checkpoints; mismatch stops the room, but absent spectator reports do not block it. |
 | Disconnect / lag | Missing or lagging controllers do not pause production. Reconnect retains seats; slow clients pull bounded catch-up batches. |
 | Explicit pause | Already-emitted ticks still execute. Pending commands stay on the next tick. Resume resets the clock deadline; no time catch-up burst. |
 | Quit | Live controller sends AbortMatch then LeaveRoom. Spectator sends LeaveRoom. No simulated winner is invented. |
 | Recovery | Same live client reconnects with its private token and VMs intact. Browser reload/process restart recovery is unsupported. |
-| Room IDs / tokens | 48 lowercase hex characters from 24 random bytes; unlisted room ID grants access, reconnect token stays private. |
+| Room IDs / tokens | New room IDs are six uppercase alphanumeric characters; unlisted IDs grant access. Reconnect tokens are 48 lowercase hex characters from 24 random bytes and stay private. |
 | Validation | Truncation, invalid enums/flags, oversized counts and trailing bytes fail. Display names reject blank/control characters; UTF-8 is not independently checked. |
 | History | Kept until ReturnLobby or last participant leaves; server restart loses it. Includes opaque commands, never bot programs or weights. |
 | Versions | Exact only. Incompatible outer layout changes bump RoomProtocolVersion; game payload and gameplay versions are separate. |

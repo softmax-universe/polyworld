@@ -65,7 +65,8 @@ and watch them play. Each bot runs solely in its owner's client. Remote seats
 have no VM. Startup policy depends on the adapter: GotA uses a host-prepared
 hash and sparse seats; Galcon protocol 2+ and LvD protocol 3+ use automatic
 revision-bound preparation, independently of cosmetic Ready. Older policies
-retain their readiness gates, and older LvD requires a dense roster. Spectators
+retain their readiness gates, and older LvD requires a dense roster. At least
+one seat must be occupied and all controllers must be connected. Spectators
 may join after the match starts. See the packet reference for details.
 
 Rooms exist only while at least one participant is connected. Controllers,
@@ -124,9 +125,8 @@ Normal game replays record executed action packets using the existing exact
 replay format. Playback does not need the relay, bot source, weights or VM
 memory. Use Save replay after a multiplayer match to save it natively or
 download it in the browser. There are no historical replay compatibility
-branches. The outer protocol is version 3 and the GotA command protocol is version 1;
-gameplay rules and replay
-format remain unchanged by this transport addition.
+branches. The outer protocol is version 4 and the GotA command protocol is
+version 3; action replay files do not contain human chat messages.
 
 ## Escape menu and pause
 
@@ -158,7 +158,7 @@ Inactive connections are closed after 15 seconds and can reconnect. Disconnected
 controllers retain membership only while another connected participant keeps
 the room alive; there is no separate controller-removal timeout.
 
-The first release has no accounts, chat, ranked matchmaking, cold recovery,
+The relay has no accounts, shared chat opcode, ranked matchmaking, cold recovery,
 late players taking seats or authoritative anti-cheat. Restarting the relay
 ends its rooms. Deployment to Softmax is separate from this implementation.
 

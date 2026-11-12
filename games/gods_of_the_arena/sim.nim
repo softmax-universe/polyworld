@@ -1290,8 +1290,9 @@ proc refreshHeroStats*(
   hero.maxHp = heroMaxHp(hero.class, hero.level) + bonus.maxHp
   hero.maxMana = heroMaxMana(hero.class, hero.level) + bonus.maxMana
   if previousMaxHp == 0 or (hero.hp > 0 and hero.state != Dying):
-    hero.hp += hero.maxHp - previousMaxHp
-  hero.mana += hero.maxMana - previousMaxMana
+    hero.hp = max(1'i32, hero.hp + hero.maxHp - previousMaxHp)
+  if hero.state != Dying and hero.hp > 0:
+    hero.mana = max(0'i32, hero.mana + hero.maxMana - previousMaxMana)
   if hero.hp > hero.maxHp:
     hero.hp = hero.maxHp
   if hero.mana > hero.maxMana:
@@ -2152,8 +2153,10 @@ proc inOwnSpawn*(hero: Hero): bool =
     (if hero.team == RedTeam: RedSpawn else: BlueSpawn)
 
 proc canShop*(hero: Hero): bool =
-  ## Allows purchases only on the living hero's own keep or spawn floor.
-  if hero.hp <= 0 or hero.state == Dying:
+  ## Dead heroes shop remotely; living heroes need their own keep or spawn.
+  if hero.state == Dying:
+    return true
+  if hero.hp <= 0:
     return false
   let area = hero.heroBaseArea
   if hero.team == RedTeam:
@@ -3089,15 +3092,20 @@ proc purchaseError(world: World, heroId, itemId: int32): ActionError =
   if world.phase == Drafting:
     return ActionDrafting
   let index = heroIndex(world, heroId)
-  if index < 0 or world.heroes[index].state == Dying:
+  if index < 0:
     return ActionNotAlive
-  if world.heroes[index].hp <= 0:
-    return ActionNotAlive
+  if world.gameOver:
+    return ActionMatchEnded
   let item = itemFromId(itemId)
   if item == NoItem:
     return ActionUnknownItem
   if not world.heroes[index].canShop:
     return ActionOutsideKeep
+  let style = world.heroes[index].class.heroSpec.attackStyle
+  if item in [BattleAxe, SunsteelLongsword] and style != MeleeAttack:
+    return ActionMeleeOnly
+  if item in [RuneCrossbow, RangerBow] and style != RangedAttack:
+    return ActionRangedOnly
   let spec = item.itemSpec
   if world.heroes[index].gold < spec.cost:
     return ActionInsufficientGold
@@ -3205,6 +3213,69 @@ proc applyBuyItem*(world: World, heroId, itemId: int32): bool =
       beforeGold, hero.gold, -spec.cost)
   hero.refreshHeroStats(world, EquipmentChange, itemId)
   world.finishAction(heroId, ActionBuyItem, 0, itemId, 0, NoActionError)
+
+proc sellError(world: World, heroId, slot: int32): ActionError =
+  ## All gates precede any inventory, stat or gold mutation.
+  if world.phase == Drafting: return ActionDrafting
+  if world.gameOver: return ActionMatchEnded
+  let index = world.heroIndex(heroId)
+  if index < 0: return ActionTargetUnavailable
+  if slot < 0 or slot >= InventorySlots: return ActionInvalidSlot
+  let hero = world.heroes[index]
+  if not hero.canShop: return ActionOutsideKeep
+  if hero.inventory[slot] == NoItem or hero.itemCounts[slot] <= 0:
+    return ActionEmptySlot
+  NoActionError
+
+proc sellReason*(world: World, heroId, slot: int32): string =
+  ## Formats the authoritative whole-stack sale validator.
+  world.sellError(heroId, slot).actionErrorMessage()
+
+proc sellPrice*(world: World, heroId, slot: int32): int32 =
+  ## Entire stack refunds floor(cost * count / 2); never a per-unit round-up.
+  if world.sellError(heroId, slot) != NoActionError: return 0
+  let hero = world.heroes[world.heroIndex(heroId)]
+  int32(int64(hero.inventory[slot].itemSpec.cost) * hero.itemCounts[slot] div 2)
+
+proc applySellItem*(world: World, heroId, slot: int32): bool =
+  ## Removes one complete stack and refunds half its declared purchase cost.
+  let error = world.sellError(heroId, slot)
+  if error != NoActionError:
+    return world.finishAction(heroId, ActionSellItem, slot, 0, 0, error)
+  let
+    hero = world.heroes[world.heroIndex(heroId)]
+    item = hero.inventory[slot]
+    refund = world.sellPrice(heroId, slot)
+  hero.inventory[slot] = NoItem
+  hero.itemCounts[slot] = 0
+  # Keep resource-family cooldowns, active recovery and portal channels intact.
+  hero.gold = int32(min(int64(int32.high), int64(hero.gold) + refund))
+  hero.refreshHeroStats(world, EquipmentChange, item.ord.int32)
+  world.finishAction(heroId, ActionSellItem, slot, 0, 0, NoActionError)
+
+proc swapItemsError(world: World, heroId, fromSlot, toSlot: int32): ActionError =
+  if world.phase == Drafting: return ActionDrafting
+  if world.gameOver: return ActionMatchEnded
+  let index = world.heroIndex(heroId)
+  if index < 0: return ActionTargetUnavailable
+  if fromSlot < 0 or fromSlot >= InventorySlots or
+    toSlot < 0 or toSlot >= InventorySlots: return ActionInvalidSlot
+  if fromSlot != toSlot and world.heroes[index].inventory[fromSlot] == NoItem:
+    return ActionEmptySlot
+  NoActionError
+
+proc swapItemsReason*(world: World, heroId, fromSlot, toSlot: int32): string =
+  ## Reordering is legal alive or dead anywhere; only the inventory is changed.
+  world.swapItemsError(heroId, fromSlot, toSlot).actionErrorMessage()
+
+proc applySwapItems*(world: World, heroId, fromSlot, toSlot: int32): bool =
+  let error = world.swapItemsError(heroId, fromSlot, toSlot)
+  if error == NoActionError and fromSlot != toSlot:
+    let hero = world.heroes[world.heroIndex(heroId)]
+    swap(hero.inventory[fromSlot], hero.inventory[toSlot])
+    swap(hero.itemCounts[fromSlot], hero.itemCounts[toSlot])
+    # Cooldowns are resource-family state, not slot state: do not reset them.
+  world.finishAction(heroId, ActionSwapItems, fromSlot, toSlot, 0, error)
 
 proc footmanAttackTicks*(clip: int): int32 =
   ## Returns the deterministic footman attack duration in ticks.
@@ -5233,6 +5304,10 @@ proc applyReplayAction*(world: World, action: ReplayAction): bool {.discardable.
     applyAttackTarget(world, action.heroId, action.first)
   of ActionBuyItem:
     applyBuyItem(world, action.heroId, action.first)
+  of ActionSellItem:
+    applySellItem(world, action.heroId, action.slot)
+  of ActionSwapItems:
+    applySwapItems(world, action.heroId, action.slot, action.first)
   of ActionBuyback:
     applyBuyback(world, action.heroId)
   of ActionUseItem:

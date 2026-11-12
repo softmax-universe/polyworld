@@ -99,6 +99,13 @@ proc scorePanel*(layout: GameUiLayout,
   if result.overlaps(heroes, 48):
     result.origin.y = heroes.origin.y + heroes.size.y + 48
 
+proc inspectionPanel*(layout: GameUiLayout,
+    score, heroes: GameUiPanel): GameUiPanel =
+  ## Keep inspection on the left, below both top plates; death stays centered.
+  GameUiPanel(origin: vec2(score.origin.x,
+    max(score.origin.y + score.size.y,
+      heroes.origin.y + heroes.size.y) + 12), size: vec2(298, 116))
+
 proc clockPanels*(panel: GameUiPanel): ClockPanels =
   ## Stacks the clock's icon and caption above its centered time.
   var rows = panel.stack(TopToBottom, vec2(4, 12))

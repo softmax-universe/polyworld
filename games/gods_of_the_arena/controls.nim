@@ -20,6 +20,8 @@ type
     CommandLevelAbility
     CommandBuyback
     CommandStop
+    CommandSell
+    CommandSwap
 
   PlayerCommand = object
     kind: PlayerCommandKind
@@ -82,6 +84,15 @@ proc queueBuyItem*(heroId, itemId: int32) =
     heroId: heroId,
     first: itemId
   )
+
+proc queueSellItem*(heroId, slot: int32) =
+  ## Queues a whole-stack sale; never mutates inventory before authority.
+  pending.add PlayerCommand(kind: CommandSell, heroId: heroId, slot: slot)
+
+proc queueSwapItems*(heroId, fromSlot, toSlot: int32) =
+  ## Exchanges full stacks, or moves into an empty slot, on the decision tick.
+  pending.add PlayerCommand(kind: CommandSwap, heroId: heroId,
+    slot: fromSlot, first: toSlot)
 
 proc queueUseItem*(heroId, slot: int32, targetId = 0'i32) =
   ## Queues inventory use on self or an explicitly selected allied hero.
@@ -165,7 +176,7 @@ proc activatePlayerAbility*(
     world: World,
     heroId, slotId: int32
 ): bool =
-  ## Casts self abilities immediately and arms all aimed abilities.
+  ## Casts self abilities immediately and arms ready aimed abilities.
   let hero = world.heroById(heroId)
   if hero.id == 0 or hero.hp <= 0 or hero.state == Dying or
     slotId < 0 or slotId > HeroAbilitySlot.high.ord:
@@ -173,6 +184,8 @@ proc activatePlayerAbility*(
   let spec = heroAbility(hero.class, HeroAbilitySlot(slotId)).abilitySpec
   armedAbility = -1
   armedItem = -1
+  if hero.cooldowns[HeroAbilitySlot(slotId)] > 0:
+    return false
   if hero.abilityLevels[HeroAbilitySlot(slotId)] == 0:
     queueCastTarget(heroId, slotId, heroId)
     return true
@@ -186,7 +199,8 @@ proc action(command: PlayerCommand, tick: int32): ReplayAction =
   const Kinds: array[PlayerCommandKind, uint8] = [
     ActionDraft, ActionWalkTo, ActionAttackTarget, ActionAttackMove,
     ActionBuyItem, ActionUseItem, ActionUseItemAt, ActionCastTarget,
-    ActionCastPoint, ActionLevelAbility, ActionBuyback, ActionStop
+    ActionCastPoint, ActionLevelAbility, ActionBuyback, ActionStop, ActionSellItem,
+    ActionSwapItems
   ]
   ReplayAction(
     tick: uint32(tick), heroId: command.heroId, kind: Kinds[command.kind],

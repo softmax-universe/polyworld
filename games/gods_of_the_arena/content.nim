@@ -658,7 +658,7 @@ const
     ),
     ItemSpec(
       name: "Sunsteel Longsword", icon: "sunsteel_longsword",
-      kind: Equipment, cost: 150, damage: 10
+      kind: Equipment, cost: 130, damage: 10
     ),
     ItemSpec(
       name: "Ranger Bow", icon: "ranger_bow",
@@ -678,7 +678,7 @@ const
     ),
     ItemSpec(
       name: "Battle Axe", icon: "battle_axe",
-      kind: Equipment, cost: 180, damage: 14
+      kind: Equipment, cost: 160, damage: 14
     ),
     ItemSpec(
       name: "Rune Crossbow", icon: "rune_crossbow",

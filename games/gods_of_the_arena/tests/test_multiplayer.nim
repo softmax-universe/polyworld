@@ -68,6 +68,29 @@ proc advanceClients() =
       if session.game.world.tick == tick:
         doAssert session.game.stateHash == sessions[0].game.stateHash
 
+proc assertDisconnectedControllerRejected() =
+  ## GotA cosmetic readiness must not bypass the connected-controller gate.
+  let r = Relay()
+  for c in 1 .. 2:
+    r.receive(c, RoomMessage(kind: Hello, identity: gotaIdentity(),
+      name: "Controller " & $c), 0)
+  r.receive(1, RoomMessage(kind: CreateRoom, name: "Connectivity test",
+    number: 2, tickRate: 24), 0)
+  let room = r.rooms[0]
+  r.receive(2, RoomMessage(kind: JoinRoom, room: room.id), 0)
+  r.receive(1, RoomMessage(kind: ClaimSeat, seat: 0, name: "Human"), 0)
+  r.receive(2, RoomMessage(kind: ClaimSeat, seat: 1, name: "Human"), 0)
+  r.disconnect(2)
+  var rejected = false
+  try:
+    r.receive(1, RoomMessage(kind: StartMatch, revision: room.revision,
+      hash: 42), 0)
+  except RoomsError:
+    rejected = true
+  doAssert rejected and room.phase == Lobby
+
+assertDisconnectedControllerRejected()
+
 echo "Testing distributed GotA policies and packet-only advancement"
 let
   first = addClient()

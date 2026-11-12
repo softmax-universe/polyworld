@@ -141,7 +141,14 @@ proc itemDetails*(item: Item): DetailTooltip =
   result.subtitle = if spec.kind == Consumable: "Consumable" else: "Equipment"
   result.rows.add ("Shop price", $spec.cost & " gold")
   if spec.kind == Equipment:
-    result.description = "Bonuses apply while held in your inventory."
+    result.description = "Passive in any inventory slot; no action slot needed."
+    if spec.damage > 0:
+      result.description.add " Bonus applies to basic attacks only, not abilities. " &
+        "Does not increase attack range or change attack type."
+    if item in [BattleAxe, SunsteelLongsword]:
+      result.rows.add ("Requires", "Melee heroes only")
+    elif item in [RuneCrossbow, RangerBow]:
+      result.rows.add ("Requires", "Ranged heroes only")
   elif item == PortalScroll:
     result.description = "Double-click or double-tap its key to return home. " &
       "Otherwise, teleport near a living allied tower. Distant aims " &

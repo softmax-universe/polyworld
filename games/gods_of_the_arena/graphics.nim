@@ -5,7 +5,7 @@ import
   bumpy, chroma, opengl, pixie, silky, vmath,
   assets, brushes, content, groves, landscapes, sim, game, maps, replays, ui, walls,
   aiming, cameras, controls, faces, lighting, spelleffects, multiplayer, homes, lobbies, cursors, pointers,
-  minimaporders, spectator, chats, chatinput, chatui,
+  minimaporders, spectator, chats, chatinput, chatui, shops,
   polyworld/actioncam, polyworld/assets, polyworld/characters,
   polyworld/clickmarks, polyworld/fxshapes, polyworld/weapontrails,
   polyworld/chargen, polyworld/common, polyworld/pathing,
@@ -1256,6 +1256,17 @@ proc runGraphics*(
       return
     if window.scaleKey(button, preferences, sk.uiScale, "Polyworld GotA"):
       return
+    if button == KeyEscape and shopOpen:
+      clearHudTooltip()
+      shopOpen = false
+      resetShopUi()
+      armedAbility = -1
+      armedItem = -1
+      attackMoveArmed = false
+      selectionStarted = false
+      minimapPanning = false
+      panning = false
+      return
     if MenuInput.matches(button):
       clearHudTooltip()
       if quitToMenu:
@@ -1276,6 +1287,10 @@ proc runGraphics*(
       attackMoveArmed = false
       return
     if matchMenu != HiddenMatchMenu:
+      return
+    # Space is a held hero-camera gesture in human play, never a pause/menu key.
+    # Consume before configurable gameplay and chrome shortcuts.
+    if button == KeySpace and options.playerSlot > 0 and not run.replayMode:
       return
     if options.playerSlot > 0 and not run.replayMode and
       run.world.phase != Drafting:
@@ -1306,9 +1321,10 @@ proc runGraphics*(
     if handleChromeKey(button):
       return
     if PauseInput.matches(button) and run.world.phase != Drafting and
+        (options.playerSlot <= 0 or run.replayMode or button != KeySpace) and
         (network == nil or network.isSpectator):
       transport.togglePlay()
-    elif CameraInput.matches(button):
+    elif CameraInput.matches(button) and (options.playerSlot <= 0 or run.replayMode):
       actionCam.toggle(followSelection)
     elif ShadingInput.matches(button) and not defined(gotaTestRoom):
       scene.toggleShading()
@@ -1486,7 +1502,7 @@ proc runGraphics*(
     if not isSelected(id):
       selectedIds.add id
     primaryId = id
-    followSelection = true
+    followSelection = not playerMode()
     actionCam.takeManual()
     if selectedIds.len > 1:
       groupCameraScale = 1.0'f32
@@ -1686,9 +1702,9 @@ proc runGraphics*(
   if playerMode():
     cameraTarget = playerHeroFrame()
 
-  proc updateCamera(dt: float32) =
+  proc updateCamera(dt: float32, inputFocused = window.focused) =
     ## Applies fixed-north RTS pan, zoom, and selection following.
-    if chat.blocksGameplay:
+    if chat.blocksGameplay or not inputFocused or bindingCapture:
       selectionStarted = false
       minimapPanning = false
       panning = false
@@ -1754,7 +1770,12 @@ proc runGraphics*(
           5.0'f32,
           DefaultCameraDistance
         )
-      if panning:
+      if window.buttonDown[KeySpace]:
+        cancelCameraEase(cameraEase)
+        minimapPanning = false
+        followSelection = false
+        cameraTarget = playerHeroFrame()
+      elif panning:
         cancelCameraEase(cameraEase)
         let panSpeed = cameraDistance * 0.0015
         cameraTarget.x -= delta.x * panSpeed
@@ -1893,7 +1914,6 @@ proc runGraphics*(
       queueAttackMove(heroId, mapX, mapY)
     else:
       queueWalkTo(heroId, mapX, mapY)
-    selectEntity(heroId)
 
   proc holdingAttackMove(): bool =
     ## Keeps attack-move armed while its binding is held without Control.
@@ -1944,13 +1964,12 @@ proc runGraphics*(
           attackMoveArmed = false
           continue
         attackMoveArmed = false
-        if not activatePlayerAbility(
+        discard activatePlayerAbility(
           run.world, hero.id, slot.int32
-        ):
-          selectEntity(hero.id)
+        )
 
   proc updateWorldSelection(viewProjection: Mat4) =
-    ## Selects a clicked world unit, or attacks it in player mode.
+    ## Inspects a clicked unit; only armed attack-move issues an attack.
     if playerMode() and (armedAbility >= 0 or armedItem >= 0):
       return
     if not window.mouseReleased(MouseLeft):
@@ -1966,21 +1985,19 @@ proc runGraphics*(
         let heroId = playerHeroId()
         if picked != 0 and objectTeam(picked) != objectTeam(heroId):
           queueAttackTarget(heroId, picked)
-          selectEntity(heroId)
         else:
           issueGroundOrder(viewProjection, true)
         attackMoveArmed = holdingAttackMove()
       elif picked != 0:
         selectEntity(picked, selectionAdditive)
-        if playerMode() and objectTeam(picked) != objectTeam(playerHeroId()):
-          queueAttackTarget(playerHeroId(), picked)
       elif not selectionAdditive:
         clearSelection()
     selectionStarted = false
 
-  proc updatePlayerOrder(viewProjection: Mat4) =
+  proc updatePlayerOrder(viewProjection: Mat4, inputFocused = window.focused) =
     ## Confirms aimed casts and submits right-click orders on mouse-down.
-    if not playerMode() or matchMenu != HiddenMatchMenu or shopOpen or
+    if not inputFocused or bindingCapture or chat.blocksGameplay or
+      not playerMode() or matchMenu != HiddenMatchMenu or shopOpen or
       run.world.phase == Drafting:
         return
     var minimapPoint: Vec2
@@ -2005,7 +2022,6 @@ proc runGraphics*(
       else:
         queueWalkTo(heroId, destination.x, destination.y)
         clickMarks.emitClickMark(marker)
-      selectEntity(heroId)
       selectionStarted = false
       attackMoveArmed = holdingAttackMove()
       return
@@ -2041,7 +2057,6 @@ proc runGraphics*(
         else:
           false
       picked = pickActionTarget(viewProjection, healing)
-    selectEntity(heroId)
     if armedItem >= 0:
       if run.world.heroById(heroId).inventory[armedItem] != PortalScroll:
         let target = run.world.heroById(picked)
@@ -2066,7 +2081,6 @@ proc runGraphics*(
       )
       armedItem = -1
       attackMoveArmed = false
-      selectEntity(heroId)
       return
     if armedAbility >= 0:
       if aimError notin {NoActionError, ActionOutOfRange}:
@@ -2101,7 +2115,6 @@ proc runGraphics*(
         )
       armedAbility = -1
       attackMoveArmed = false
-      selectEntity(heroId)
       return
     if picked != 0 and objectTeam(picked) != objectTeam(heroId):
       queueAttackTarget(heroId, picked)
@@ -2204,64 +2217,6 @@ proc runGraphics*(
       ring[i].y = groundHeight(ring[i].x, ring[i].z) +
         groundOffset(ring[i].x, ring[i].z) + 0.14'f
     worldShapes.addPolyline(ring, color, 0.04'f)
-
-  proc drawAimBanner() =
-    ## Identifies the armed spell or item and explains how to cast it.
-    if not playerMode() or matchMenu != HiddenMatchMenu or shopOpen or
-      run.world.phase == Drafting or
-      (armedAbility < 0 and armedItem < 0):
-        return
-    let
-      width = min(800.0'f, window.size.x.float32 / sk.uiScale - 32)
-      at = vec2((window.size.x.float32 / sk.uiScale - width) / 2, 146)
-    var
-      title: string
-      detail: string
-    if armedItem >= 0:
-      let item = run.world.heroById(playerHeroId()).inventory[armedItem]
-      if item == PortalScroll:
-        title = "Portal scroll - Tower landing area"
-        detail = "Click near an allied tower. Double-click the icon or tap its key twice to return home. Esc to cancel."
-      else:
-        title = item.itemSpec.name & " - Allied hero"
-        detail = "Click yourself or a nearby ally. Double-click the icon or tap its key twice for self. Esc to cancel."
-    elif armedAbility >= 0:
-      let
-        hero = run.world.heroById(playerHeroId())
-        ability = heroAbility(hero.class, HeroAbilitySlot(armedAbility))
-        spec = ability.abilitySpec(
-          hero.abilityLevels[HeroAbilitySlot(armedAbility)]
-        )
-      title = spec.name & " - "
-      case spec.casting
-      of SelfCast:
-        title.add "Self"
-      of MeleeCast:
-        title.add "Melee target"
-      of ProjectileCast:
-        title.add "Projectile path"
-      of AreaCast:
-        case spec.area.shape
-        of CircleFootprint: title.add "Ground area"
-        of RingFootprint: title.add "Ring area"
-        of SectorFootprint: title.add "Directional cone"
-        of LineFootprint, CapsuleFootprint: title.add "Directional path"
-        of CrossFootprint: title.add "Cross area"
-      detail =
-        if aimError == ActionOutOfRange:
-          "Click to walk into range, then cast. Esc to cancel."
-        elif aimError != NoActionError: aimError.actionErrorMessage()
-        else: "Left or right-click to cast. Esc to cancel."
-    sk.lobbyPanel(at, vec2(width, 100))
-    sk.drawLabel(
-      title, at + vec2(12, 6), vec2(width - 24, 52),
-      sk.theme.defaultTextColor, "H1", CenterAlign
-    )
-    sk.drawLabel(
-      detail, at + vec2(12, 58), vec2(width - 24, 32),
-      if aimError == NoActionError: rgbx(175, 212, 224, 255)
-      else: rgbx(255, 130, 130, 255), "Default", CenterAlign
-    )
 
   proc cameraView(): Mat4 =
     ## Updates the camera eye and enforces the human player's zoom limit.
@@ -3075,7 +3030,6 @@ proc runGraphics*(
                 particles.clearParticles()
                 cameraTarget = vec3(0)
                 renderAlpha = 1
-          drawAimBanner()
           if matchMenu != HiddenMatchMenu:
             let origin = menuOrigin
             try:

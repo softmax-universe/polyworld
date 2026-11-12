@@ -3,7 +3,7 @@ import
   polyworld/[rooms, roomclients, tapes, metrics, mailboxes, bodies, hashes, menus],
   bots, chats, content, controls, maps, presets, replays, sim
 
-const GotaNetworkProtocol* = 2'u32
+const GotaNetworkProtocol* = 3'u32
 
 type NetworkMatch* = ref object
   client*: RoomClient
@@ -126,7 +126,7 @@ proc decodeSubmission*(bytes: string): GameSubmission =
     if actionKind notin [uint32(ActionWalkTo), ActionAttackTarget,
       ActionBuyItem, ActionUseItem, ActionAttackMove, ActionCastTarget,
       ActionCastPoint, ActionUseItemAt, ActionLevelAbility, ActionBuyback,
-      ActionDraft, ActionStop]:
+      ActionDraft, ActionStop, ActionSellItem, ActionSwapItems]:
         reject("Unknown GotA action")
     result.action.kind = uint8(actionKind)
     result.action.slot = cast[int32](reader.get32())

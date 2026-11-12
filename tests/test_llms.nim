@@ -138,6 +138,7 @@ block:
   doAssert llmConfig().baseUrl == "https://openrouter.ai/api"
   for endpoint in [
     "https://openrouter.ai/api", "https://OPENROUTER.AI:443/api/",
+    "https://api.openai.com", "https://API.OPENAI.COM:443/",
     "http://localhost:9100", "https://localhost:9100/api",
     "http://127.0.0.1:12345", "http://[::1]:9100"
   ]:
@@ -154,6 +155,8 @@ block:
   delEnv("COWORLD_LLM_MODEL")
   for endpoint in [
     "https://example.com/api", "https://openrouter.ai.evil.test/api",
+    "https://api.openai.com.evil.test", "http://api.openai.com",
+    "https://api.openai.com:8443", "https://api.openai.com/v1",
     "https://evilopenrouter.ai/api", "https://localhost.evil.test",
     "http://openrouter.ai/api", "https://openrouter.ai:8443/api",
     "https://openrouter.ai/other", "https://user@openrouter.ai/api",

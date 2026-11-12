@@ -159,13 +159,14 @@ proc initGameWindow*(
     atlasPath: string,
     size = DefaultWindowSize,
     vsync = true,
-    msaa = msaaDisabled
+    msaa = msaaDisabled,
+    visible = true
 ): (Window, Silky) =
   ## Creates the viewer and GL context, keeping screenshot captures hidden.
   let window = newWindow(
     title,
     size,
-    visible = not defined(takeScreenshot),
+    visible = visible and not defined(takeScreenshot),
     vsync = vsync,
     msaa = msaa
   )

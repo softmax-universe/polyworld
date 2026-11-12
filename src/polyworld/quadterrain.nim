@@ -890,6 +890,7 @@ proc compileProgram(vertexSource, fragmentSource: string): GLuint =
 
 var
   ambientTexture: GLuint
+  ambientFallbackTexture: GLuint
   ambientOrigin: Vec2
   ambientSpan = vec2(1)
   environmentHighlight = ToonPalettes[0].highlight
@@ -923,7 +924,21 @@ proc setEnvUniforms(loc: EnvLocations) =
   glUniform4f(loc.bounds, ambientOrigin.x, ambientOrigin.y,
     ambientSpan.x, ambientSpan.y)
   glActiveTexture(GL_TEXTURE9)
-  glBindTexture(GL_TEXTURE_2D, ambientTexture)
+  if ambientTexture == 0:
+    # Disabled samplers still require a complete texture on macOS OpenGL.
+    if ambientFallbackTexture == 0:
+      glGenTextures(1, ambientFallbackTexture.addr)
+      glBindTexture(GL_TEXTURE_2D, ambientFallbackTexture)
+      var pixel = [255'u8, 255, 255, 255]
+      glTexImage2D(
+        GL_TEXTURE_2D, 0, GL_RGBA8.GLint, 1, 1, 0,
+        GL_RGBA, GL_UNSIGNED_BYTE, pixel[0].addr
+      )
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST.GLint)
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST.GLint)
+    glBindTexture(GL_TEXTURE_2D, ambientFallbackTexture)
+  else:
+    glBindTexture(GL_TEXTURE_2D, ambientTexture)
   glUniform1i(loc.ambient, 9)
   glActiveTexture(GL_TEXTURE0)
 
@@ -2417,6 +2432,9 @@ proc clearAmbientOcclusion*() =
   if ambientTexture != 0:
     glDeleteTextures(1, ambientTexture.addr)
     ambientTexture = 0
+  if ambientFallbackTexture != 0:
+    glDeleteTextures(1, ambientFallbackTexture.addr)
+    ambientFallbackTexture = 0
 
 proc uploadGroundMask*(values: openArray[uint8], size: int) =
   ## Uploads a square two-channel coverage mask (stone, dirt) the terrain

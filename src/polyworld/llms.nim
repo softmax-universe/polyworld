@@ -92,7 +92,7 @@ proc environmentInt(name: string, fallback, maximum: int): int =
     raise newException(LlmError, name & " is outside the supported range")
 
 proc validateBaseUrl(baseUrl: string) {.raises: [LlmError].} =
-  ## Allows the production OpenRouter root and explicit loopback endpoints.
+  ## Allows the production inference roots and explicit loopback endpoints.
   if baseUrl.len == 0:
     return
   if baseUrl.find({'\x00' .. '\x20', '\x7f', '\\', '@', '%', '?', '#'}) >= 0:
@@ -106,15 +106,21 @@ proc validateBaseUrl(baseUrl: string) {.raises: [LlmError].} =
     hostname = url.hostname.toLowerAscii()
     scheme = url.scheme.toLowerAscii()
     local = hostname in ["localhost", "127.0.0.1", "::1"]
+    root = url.path.strip(
+      leading = false,
+      trailing = true,
+      chars = {'/'}
+    )
+    production = scheme == "https" and url.port in ["", "443"] and
+      ((hostname == "openrouter.ai" and root == "/api") or
+      (hostname == "api.openai.com" and root == ""))
   if url.username.len > 0 or url.password.len > 0 or
     scheme notin ["http", "https"]:
       raise newException(LlmError, "Invalid host LLM base URL")
-  if not local and not (hostname == "openrouter.ai" and scheme == "https" and
-    url.port in ["", "443"] and url.path.strip(leading = false, trailing = true,
-      chars = {'/'}) == "/api"):
-      raise newException(LlmError,
-        "LLM base URL must be https://openrouter.ai/api or localhost, " &
-        "127.0.0.1, or [::1]")
+  if not local and not production:
+    raise newException(LlmError,
+      "LLM base URL must be https://openrouter.ai/api, " &
+      "https://api.openai.com, localhost, 127.0.0.1, or [::1]")
   if url.port.len > 0:
     try:
       if parseInt(url.port) notin 1 .. 65535:
@@ -431,13 +437,13 @@ proc addFunctions*(client: LlmClient, host: var Host) =
     block:
       let binding: NumericHostProc = proc(arguments: openArray[Value]): Value =
         ## Runs one LLM operation with values from this BASIC runtime.
-        template text(index: int): string {.inject.} =
+        template text(index: int): string {.inject, used.} =
           ## Reads a BASIC string argument.
           client.runtime.getString(arguments[index])
-        template integer(index: int): int32 {.inject.} =
+        template integer(index: int): int32 {.inject, used.} =
           ## Reads an integer argument, rejecting fractional values.
           arguments[index].asInt()
-        template output(text: string): Value {.inject.} =
+        template output(text: string): Value {.inject, used.} =
           ## Copies a string result into BASIC storage.
           client.runtime.putString(text)
         var value {.inject.}: Value

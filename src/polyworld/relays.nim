@@ -707,13 +707,14 @@ proc receive*(
         if room.identity.game == "light_vs_dark" and not lvdAutomatic:
           reject("Every game seat must have an owner")
         continue
-      if hostPrepared:
-        # Peers validate BeginMatch and report tick zero independently.
-        first = false
-        continue
       let controller = relay.guest(seat.owner)
       if controller == nil or controller.connection == 0:
         reject("Every controlling client must be connected")
+      if hostPrepared:
+        # Peers validate BeginMatch independently and report tick zero against
+        # this immutable checkpoint; cosmetic readiness is never consulted.
+        first = false
+        continue
       if not automaticPreparation and not controller.ready:
         reject("Every controlling client must load the setup and be ready")
       if controller.readyRevision != room.revision:

@@ -69,7 +69,7 @@ relay.send(2, RoomMessage(kind: LeaveRoom))
 doAssert relay.guest(host).ready
 relay.expectError(1, RoomMessage(kind: StartMatch))
 relay.send(1, RoomMessage(kind: Ready, revision: sparse.revision, hash: 3))
-relay.send(1, RoomMessage(kind: StartMatch))
+relay.send(1, RoomMessage(kind: StartMatch, revision: sparse.revision, hash: 3))
 doAssert sparse.phase == Playing, "Empty slots must not block sparse start"
 relay.send(1, RoomMessage(kind: AbortMatch, match: sparse.match, detail: "done"))
 relay.send(1, RoomMessage(kind: ReturnLobby))
@@ -115,7 +115,7 @@ block:
   galconRelay.send(1, RoomMessage(kind: StartMatch))
   doAssert room.phase == Desynced, "Sparse controllers still require hash consensus"
 
-# LvD still requires full occupancy.
+# Legacy LvD protocol 1 still requires full occupancy (packed seats use 3).
 for game in ["light_vs_dark"]:
   let denseRelay = Relay()
   discard denseRelay.connect(1, game)

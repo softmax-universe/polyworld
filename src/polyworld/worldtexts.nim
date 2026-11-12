@@ -94,7 +94,8 @@ proc addText*(
     renderer: var WorldBarRenderer,
     text: WorldText,
     anchor: Vec3,
-    color = rgbx(242, 243, 247, 255)
+    color = rgbx(242, 243, 247, 255),
+    background = rgbx(5, 7, 10, 210)
 ) =
   ## Adds a text billboard and its backplate to the scene's bar batch.
   if text.glyphs.len == 0:
@@ -104,7 +105,7 @@ proc addText*(
     anchor,
     vec2(-text.size.x * 0.5'f - Padding, -Padding),
     text.size + vec2(Padding * 2),
-    rgbx(5, 7, 10, 210)
+    background
   )
   for glyph in text.glyphs:
     renderer.addBillboardQuad(

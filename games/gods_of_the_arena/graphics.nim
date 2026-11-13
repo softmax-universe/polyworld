@@ -148,6 +148,43 @@ proc renderPoint(position: WorldPoint): Vec3 =
   )
   result.y += groundOffset(result.x, result.z)
 
+type PreparationGatePlacement* = object
+  position*: Vec3
+  team*: Team
+
+proc preparationGatePlacements*(game: Game, viewMode: int32): seq[PreparationGatePlacement] =
+  ## Presentation mirrors the exact dynamic occupied tiles; never changes them.
+  if not game.world.preparationGatesClosed:
+    return
+  for tile in game.map.preparationGates:
+    var point = tileCenter(tile.layer, tile.x, tile.z)
+    point.y += groundOffset(point.x, point.z)
+    let position = WorldPoint(x: int32(point.x * WorldScale.float32),
+      y: int32(point.y * WorldScale.float32), z: int32(point.z * WorldScale.float32))
+    if viewMode != 0 and not game.world.visible(Team(viewMode - 1), position):
+      continue
+    var team = RedTeam
+    let red = game.map.layout.spawns[RedTeam.ord]
+    let blue = game.map.layout.spawns[BlueTeam.ord]
+    if lengthSq(point.xz - vec2(blue.x.float32, blue.z.float32) / PathUnitsPerTile.float32) <
+        lengthSq(point.xz - vec2(red.x.float32, red.z.float32) / PathUnitsPerTile.float32):
+      team = BlueTeam
+    result.add PreparationGatePlacement(position: point, team: team)
+
+proc drawPreparationGates*(packs: array[Team, PropPack],
+    gates: openArray[PreparationGatePlacement], viewProjection: Mat4,
+    sunDepth = false) =
+  ## Reuse the existing solid fort pillar as a contiguous tile-width barrier.
+  ## The same retained placements feed main, shadow and water reflection passes.
+  for gate in gates:
+    let pack = packs[gate.team]
+    let size = pack.propSize("pillar")
+    let scale = 1.04'f / min(size.x, size.z)
+    if sunDepth:
+      pack.drawPropSunDepth("pillar", gate.position, 0, scale)
+    else:
+      pack.drawProp("pillar", gate.position, 0, scale, viewProjection)
+
 proc renderFacing(value: Heading): float32 =
   ## Converts an integer heading to the renderer's angular convention.
   arctan2(value.x.float32, value.z.float32)
@@ -2649,6 +2686,7 @@ proc runGraphics*(
         setEnvironmentPalette(scene.toon)
 
         visibleBuildings.setLen(0)
+        let visiblePreparationGates = run.preparationGatePlacements(viewMode)
         for i, tower in run.world.buildings:
           if tower.hp > 0 and visibleInView(tower.team, tower.position):
             visibleBuildings.add i
@@ -2751,6 +2789,8 @@ proc runGraphics*(
         profileBlock "Shadow pass":
           sunDepthPasses(window.size):
             drawTerrainSunDepth()
+            towerPacks.drawPreparationGates(visiblePreparationGates, viewProjection,
+              sunDepth = true)
             for index in visibleBuildings:
               let tower {.cursor.} = run.world.buildings[index]
               towerPacks[tower.team].drawPropSunDepth(
@@ -2776,6 +2816,7 @@ proc runGraphics*(
             terrainEdgeWorld = run.world
             terrainEdgeRevision = run.world.navigationRevision
           drawTerrain(viewProjection, showTiles)
+          towerPacks.drawPreparationGates(visiblePreparationGates, viewProjection)
           for index in visibleBuildings:
             let tower {.cursor.} = run.world.buildings[index]
             towerPacks[tower.team].drawProp(
@@ -2835,6 +2876,8 @@ proc runGraphics*(
                 scene.toon.groundColor
               )
               drawTerrain(mirroredViewProjection, false)
+              towerPacks.drawPreparationGates(visiblePreparationGates,
+                mirroredViewProjection)
               for index in visibleBuildings:
                 let tower {.cursor.} = run.world.buildings[index]
                 towerPacks[tower.team].drawProp(

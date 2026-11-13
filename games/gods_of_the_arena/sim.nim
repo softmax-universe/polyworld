@@ -309,6 +309,8 @@ type
     forts*: array[2, Fort]
     buildings*: seq[Building]
     occupancy*: seq[seq[int16]]
+    preparationGates*: seq[PathTile]
+    preparationGatesClosed*: bool
     navigationRevision*: int32
     pathCache: Table[PathCacheKey, seq[PathTile]]
     pathCacheRevision: int32
@@ -333,6 +335,8 @@ type
     draftTurn*: int
     draftTicks*: int32
     draftTurnTicks*: int32
+    preparationTicks*: int32
+      ## Elapsed live opening ticks after the final pick; capped at 30 seconds.
     heroTurnTicks*: int32
     heroTurnStart*: int
     teamHeroKills*: array[2, int]
@@ -1728,6 +1732,10 @@ proc knownWalkable*(world: World, team: Team, layer, x, z: int): bool =
   ## Reports static terrain and remembered occupancy without fog information leaks.
   if not isWalkable(layer, x, z):
     return false
+  if world.preparationGatesClosed:
+    for tile in world.preparationGates:
+      if tile.layer == layer and tile.x == x and tile.z == z:
+        return false
   for buildingSlot in 0 ..< world.buildings.len:
     let building {.cursor.} = world.buildings[buildingSlot]
     if not building.knownAlive[team]:
@@ -2865,7 +2873,7 @@ proc portalLanding*(
         towerId = SpawnPortalAnchor
         return true
     return false
-  if anchorId == SpawnPortalAnchor:
+  if anchorId == SpawnPortalAnchor or world.preparationGatesClosed:
     return false
   let orientation = if team == RedTeam: -1'i64 else: 1'i64
   var best = (int64.high, int64.high, int64.high,
@@ -4045,8 +4053,13 @@ proc applyBuyback*(world: World, heroId: int32): bool =
   world.finishAction(heroId, ActionBuyback, 0, 0, 0, NoActionError)
 
 proc battleTick*(world: World): int32 {.raises: [].} =
-  ## Excludes drafting from the elapsed battle clock.
-  world.tick - world.draftTicks
+  ## Excludes drafting and the live opening from the battle duration budget.
+  world.tick - world.draftTicks - world.preparationTicks
+
+proc preparationTicksLeft*(world: World): int32 {.raises: [].} =
+  ## Public countdown API; draft picks and non-draft fixtures report zero.
+  if world.drafting and world.phase == Playing:
+    result = max(PreparationTicks - world.preparationTicks, 0)
 
 proc finished*(game: Game): bool =
   ## Ends a battle on victory or after its full configured battle duration.
@@ -4063,11 +4076,13 @@ proc outcome*(world: World): string =
     "time_limit"
 
 proc durationTicks*(game: Game): int32 =
-  ## Includes the remaining pick deadlines before the full battle budget.
+  ## Includes draft deadlines and the live opening before the battle budget.
   if game.replayMode:
     return game.replayData.hashes.len.int32
   let world = game.world
   result = game.config.maxTicks + world.draftTicks
+  if world.drafting:
+    result += PreparationTicks
   if world.phase == Drafting:
     result += (world.draftOrder.len - world.draftTurn).int32 *
       DraftPickTicks - world.draftTurnTicks
@@ -4114,6 +4129,11 @@ proc heroAvailable*(world: World, classId: int32, heroId = 0'i32): bool =
 proc initDraft(world: World) =
   ## Alternates teams, preserving each team's original spawn order.
   world.drafting = true
+  world.preparationGatesClosed = true
+  for tile in world.preparationGates:
+    inc world.occupancy[tile.layer][int(tile.z) * layers[tile.layer].width +
+      int(tile.x)]
+  inc world.navigationRevision
   world.phase = Drafting
   var
     team = Team(world.rng.below(2))
@@ -5766,6 +5786,8 @@ proc stateHash*(game: Game): uint64 =
   hash.addHashy(world.draftTurn)
   hash.addHashy(world.draftTicks)
   hash.addHashy(world.draftTurnTicks)
+  hash.addHashy(world.preparationTicks)
+  hash.addHashy(world.preparationGatesClosed)
   hash.addHashy(world.draftOrder.len)
   for index in world.draftOrder:
     hash.addHashy(index)
@@ -6033,11 +6055,25 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
     return
 
   when not defined(gotaTestRoom):
-    dec world.spawnTimerTicks
-    if world.spawnTimerTicks <= 0:
-      world.spawnTimerTicks += world.spawnIntervalTicks
-      profileBlock "spawnWave":
-        spawnWave(world)
+    let preparing = world.preparationTicksLeft() > 0
+    if preparing:
+      inc world.preparationTicks
+      if world.preparationTicksLeft() == 0:
+        world.preparationGatesClosed = false
+        for tile in world.preparationGates:
+          dec world.occupancy[tile.layer][int(tile.z) *
+            layers[tile.layer].width + int(tile.x)]
+        inc world.navigationRevision
+    if not preparing or world.preparationTicksLeft() == 0:
+      if not preparing:
+        dec world.spawnTimerTicks
+      if world.spawnTimerTicks <= 0:
+        if preparing:
+          world.spawnTimerTicks = world.spawnIntervalTicks
+        else:
+          world.spawnTimerTicks += world.spawnIntervalTicks
+        profileBlock "spawnWave":
+          spawnWave(world)
 
   world.tick = world.tick +% 1
   world.collectingHits = true
@@ -6309,6 +6345,7 @@ proc newGame*(
       draftMode:
         if replayMode: replayData.header.setup.draftMode else: draftMode,
       forts: startingForts(map),
+      preparationGates: map.preparationGates,
       nextFootmanId: FirstFootmanId,
       winner: RedTeam,
       scriptObjects: [newSeqOfCap[WorldObject](256),

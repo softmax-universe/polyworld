@@ -18,8 +18,7 @@ proc drawHumanChat*(sk: Silky, viewport: Vec2, chat: ChatEditor,
   sk.drawRect(origin, vec2(width, height), rgbx(12, 16, 23, 205))
   for row in 0 ..< rows:
     let message = messages[messages.len - rows + row]
-    let scope = if message.team: "[Team] " else: "[All] "
-    sk.drawLabel(scope & message.sender & ": " & message.text,
+    sk.drawLabel(message.chatDisplayText(),
       origin + vec2(8, row.float32 * 25), vec2(width - 16, 25),
       rgbx(228, 233, 242, 255))
   if chat.typing and allowed:

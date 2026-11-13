@@ -15,7 +15,7 @@ const
   ReplayFormatVersion* = 6'u16
   ## This client supports only this gameplay version. Bump it when rules change.
   ## Older replays use their archived client; never add compatibility branches.
-  ReplayGameVersion* = 78'u16
+  ReplayGameVersion* = 79'u16
   ActionWalkTo* = 1'u8
   ActionAttackTarget* = 2'u8
   ActionBuyItem* = 3'u8
@@ -50,7 +50,7 @@ type
     gridTiles*: uint16
     spawnIntervalTicks*: uint32
     maximumTicks*: uint32
-      ## Battle ticks only; drafting has a separate per-player deadline.
+      ## Battle ticks only; draft deadlines and opening preparation are separate.
     heroes*: seq[ReplayHero]
     drafting*: bool
     draftMode*: DraftMode
@@ -236,10 +236,11 @@ proc recordBuyback*(
   )
 
 proc maximumReplayTicks(setup: Setup): uint64 =
-  ## Bounds the tape by battle time plus every possible pick deadline.
+  ## Bounds the tape by battle time, all pick deadlines, and preparation.
   result = setup.maximumTicks.uint64
   if setup.drafting:
-    result += setup.heroes.len.uint64 * DraftPickTicks.uint64
+    result += setup.heroes.len.uint64 * DraftPickTicks.uint64 +
+      PreparationTicks.uint64
 
 proc recordHash*(recorder: ReplayRecorder, hash: uint64) =
   ## Appends the canonical simulation hash for one completed tick.

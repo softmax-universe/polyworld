@@ -73,8 +73,13 @@ for size in [
   let shop = gota.shopPanels(layout.size)
   checkPanels(shop.panel, [shop.heading, shop.catalog, shop.footer])
   checkPanels(shop.catalog, shop.cards)
-  doAssert shop.cards[0].size.x >= (if shop.compact: 230 else: 280)
-  doAssert shop.cards[0].size.y >= (if shop.compact: 140 else: 160)
+  # The catalogue now uses compact icon/name/price cells plus a dedicated
+  # retained-details gutter, not the old full-description cards.
+  doAssert shop.tooltipGutter.size.x >= 380
+  for card in shop.cards:
+    doAssert card.size.x >= 72 and card.size.y >= 88
+    doAssert not card.overlaps(shop.tooltipGutter)
+    doAssert card.inside(layout.size)
   checkHud(layout, [
     gota.scorePanel(layout),
     layout.panel(GameUiRegion.TopCenter, gota.PanelHeroes),

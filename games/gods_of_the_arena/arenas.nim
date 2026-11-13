@@ -42,6 +42,8 @@ type
     baseAreas*: seq[BaseArea]
     mainRoads*: seq[bool]
       ## Visual lane classification, including their ramp segments.
+    preparationGates*: seq[PathTile]
+      ## Walkable outer-base boundary cells; closed through dynamic occupancy.
 
 proc arenaKind*(kind: uint32): uint32 {.raises: [].} =
   ## Resolves faction-specific materials to the game's terrain categories.
@@ -312,6 +314,28 @@ proc buildArena*(config: MapConfig): ArenaData =
       heights[i] += cmp(changes[i], 0'i32).int16
       changes[i] = 0
   result.baseAreas.setLen(count)
+  for index, tile in grid.cells:
+    if not tile.passable or tile.terrain notin
+        {grids.CastleGround, grids.KeepGround, grids.SpawnGround}:
+      continue
+    let x = index mod resolution
+    let z = index div resolution
+    for dz in -1 .. 1:
+      for dx in -1 .. 1:
+        let nx = x + dx
+        let nz = z + dz
+        if nx < 0 or nz < 0 or nx >= resolution or nz >= resolution:
+          continue
+        let neighbor = grid.cells[nz * resolution + nx]
+        if neighbor.passable and neighbor.terrain notin
+            {grids.CastleGround, grids.KeepGround, grids.SpawnGround}:
+          result.preparationGates.add PathTile(layer: 0,
+            x: x.int32, z: z.int32)
+          break
+      if result.preparationGates.len > 0 and
+          result.preparationGates[^1].x == x and
+          result.preparationGates[^1].z == z:
+        break
   for index, tile in grid.cells:
     if tile.passable:
       case tile.terrain

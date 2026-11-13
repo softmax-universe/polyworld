@@ -19,7 +19,13 @@ type
     sender*: string
     text*: string
     team*: bool
+    system*: bool ## Only game-owned authoritative events, never human submissions.
     senderTeam*: int
+
+proc chatDisplayText*(message: HumanChatMessage): string =
+  if message.system: "[System] " & message.text
+  else: (if message.team: "[Team] " else: "[All] ") &
+    message.sender & ": " & message.text
 
 proc printable(rune: Rune): bool =
   ## Exclude controls, surrogates, noncharacters and invisible bidi overrides.

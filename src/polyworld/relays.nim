@@ -1,6 +1,7 @@
 import
   std/[strutils, sysrand, times, json],
-  rooms
+  rooms,
+  ../../games/gods_of_the_arena/relaynotice
 
 const
   MaxRooms* = 64
@@ -65,6 +66,7 @@ type
     retainedNotice: RoomMessage ## At most one typed notice per match.
     deadline*: float64
     detail*, pausedBy: string
+    gotaNotice: RelayNotice
   Outgoing* = object
     connection*: int
     bytes*: string
@@ -758,6 +760,9 @@ proc receive*(
         return
     if first:
       reject("At least one controlling client is required")
+    let gotaNotice = initRelayNotice(room.identity, room.payload,
+      room.tickRate, room.seats)
+    room.gotaNotice = gotaNotice
     room.galconStartPending = false
     room.lvdStartPending = false
     room.initialHash = initialHash
@@ -794,6 +799,8 @@ proc receive*(
       message.seat >= uint32(room.seats.len) or
       room.seats[message.seat].owner != guest.id:
         reject("Command seat is not owned by this participant")
+    if room.identity.supportsRelayNotice() and message.payload.reservedNoticePayload():
+      reject("GotA system notices are reserved for the server")
     if message.sequence == 0 or
       message.sequence > uint64(guest.receipts.len) + 1:
         reject("Command sequence must be consecutive")
@@ -808,7 +815,8 @@ proc receive*(
       return
     if room.phase notin {Playing, Waiting}:
       reject("New commands require an active match")
-    if room.pending.len >= MaxCommandsPerTick or
+    let commandLimit = MaxCommandsPerTick - ord(room.identity.supportsRelayNotice())
+    if room.pending.len >= commandLimit or
       room.pendingBytes + message.payload.len + 32 > MaxWireBytes div 2:
         relay.stop(room, "Pending command limit exhausted")
         return
@@ -989,10 +997,16 @@ proc advance*(relay: Relay, now: float64) =
         relay.stop(room, "Match history limit exhausted")
         continue
     inc room.tick
-    let packet = RoomMessage(
+    var packet = RoomMessage(
       kind: TickPacket, match: room.match, tick: room.tick,
       commands: room.pending
     )
+    if room.gotaNotice.advanceNotice(room.tick, room.pending):
+      if packet.commands.len >= MaxCommandsPerTick:
+        relay.stop(room, "No command capacity for scheduled server notice")
+        continue
+      packet.commands.add Command(participant: 0, seat: ServerNoticeSeat,
+        sequence: 1, payload: noticePayload())
     let bytes = packet.encode()
     room.history.add bytes
     room.historyBytes += bytes.len + room.pendingBytes

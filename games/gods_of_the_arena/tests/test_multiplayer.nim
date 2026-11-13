@@ -168,7 +168,7 @@ for session in sessions:
   session.client.events.setLen(0)
 exchange()
 var disconnectedTick = 0'u32
-for iteration in 0 ..< 600:
+for iteration in 0 ..< 600 + PreparationTicks:
   now += 1.0 / 23
   if iteration mod 60 == 0:
     for client in clients:

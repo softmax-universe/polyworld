@@ -1,9 +1,11 @@
 import
   jsony,
   polyworld/[rooms, roomclients, tapes, metrics, mailboxes, bodies, hashes, menus],
-  bots, chats, content, controls, maps, presets, replays, sim
+  bots, chats, content, controls, maps, presets, replays, sim, relaynotice
 
-const GotaNetworkProtocol* = 3'u32
+const GotaNetworkProtocol* = NoticeProtocol
+static: doAssert uint32(ReplayGameVersion) == NoticeGameplay,
+  "Review the game-owned relay draft clock when changing GotA gameplay"
 
 type NetworkMatch* = ref object
   client*: RoomClient
@@ -16,6 +18,7 @@ type NetworkMatch* = ref object
   heroSeats: seq[int]
   decisionTick: int32 = -1
   humanChat*: seq[HumanChatMessage]
+  noticeDelivered: bool
 
 proc networkHash*(game: Game): uint64 =
   ## Includes immutable configuration alongside the normal replay state hash.
@@ -282,7 +285,13 @@ proc applyPacket*(session: NetworkMatch, packet: RoomMessage, localPlayback = fa
       reject("GotA received an unexpected simulation tick")
   # Validate the entire packet before applying any part of it.
   var submissions: seq[GameSubmission]
+  var serverNotice = false
   for command in packet.commands:
+    if command.participant == 0 or command.seat == ServerNoticeSeat:
+      if not command.validNotice() or serverNotice:
+        reject("Invalid GotA server notice")
+      serverNotice = true
+      continue
     if command.seat >= uint32(session.seats.len) or
       session.seats[command.seat].owner != command.participant:
         reject("Command participant does not own this seat")
@@ -327,6 +336,13 @@ proc applyPacket*(session: NetworkMatch, packet: RoomMessage, localPlayback = fa
   game.tickWorld(nil)
   if uint32(game.world.tick) != packet.tick:
     reject("GotA failed to execute the authoritative tick")
+  # Only the recorded server command emits a system notice. Retain this latch
+  # outside rewindable worlds even after bounded display history evicts it.
+  if serverNotice and not session.noticeDelivered:
+    session.noticeDelivered = true
+    session.humanChat.appendHumanChat(HumanChatMessage(
+      tick: packet.tick, ordinal: -1, system: true,
+      text: ThreeMinuteNotice))
   for outcome in game.actionResults:
     if localPlayback:
       continue

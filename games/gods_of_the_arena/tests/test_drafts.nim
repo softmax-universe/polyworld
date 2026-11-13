@@ -142,6 +142,7 @@ block:
   doAssert world.draftHeroId() == 0
   doAssert not world.applyDraft(hero.id, 0)
   doAssert hero.lastActionError == ActionNotDrafting
+  for i in 0 ..< PreparationTicks: game.tickWorld(nil)
   game.tickWorld(nil)
   doAssert world.battleTick() == 1
   doAssert world.footmen.len > 0
@@ -303,7 +304,7 @@ block:
   game.recorder = initReplayRecorder(game.currentSetup(battleTicks.uint32),
     game.map.preset)
   doAssert world.draftTicksLeft() == DraftPickTicks
-  doAssert game.durationTicks() == battleTicks + DraftPickTicks * 10
+  doAssert game.durationTicks() == battleTicks + DraftPickTicks * 10 + PreparationTicks
   for i in 1 ..< DraftPickTicks:
     game.tickWorld(nil)
   doAssert world.draftTurn == 0 and not hero.drafted
@@ -329,6 +330,9 @@ block:
   for hero in world.heroes:
     doAssert hero.drafted and hero.class notin classes
     classes.incl hero.class
+  for i in 0 ..< PreparationTicks:
+    game.tickWorld(proc() = game.runBotDecisions())
+    doAssert world.battleTick() == 0 and not game.finished()
   for i in 1 ..< battleTicks:
     game.tickWorld(proc() =
       ## Keeps normal decision ordering with no controllers installed.
@@ -353,7 +357,7 @@ block:
     data = decodeReplay(encodeReplay(game.recorder.data))
     replay = newGame(game.map, 240, 0, true, data)
   doAssert data.config.maxTicks == battleTicks
-  doAssert data.hashes.len == battleTicks + 10 * DraftPickTicks
+  doAssert data.hashes.len == battleTicks + 10 * DraftPickTicks + PreparationTicks
   doAssert data.actions.len == 0
   replay.historyPlayback = true
   replay.replayPlayer = initReplayPlayer(data)
@@ -395,7 +399,8 @@ block:
   doAssert hero.class == Warlock and game.world.draftTurn == 1
   doAssert game.world.rng == rng
   doAssert game.world.draftTicksLeft() == DraftPickTicks
-  doAssert game.durationTicks() == game.config.maxTicks + 10 * DraftPickTicks
+  doAssert game.durationTicks() ==
+    game.config.maxTicks + 10 * DraftPickTicks + PreparationTicks
 
 echo "Testing an idle human times out and the bots finish drafting"
 block:
@@ -423,7 +428,8 @@ block:
     )
   doAssert game.world.draftTicks < 2 * DraftPickTicks
   doAssert game.world.battleTick() == 0
-  doAssert game.durationTicks() == game.config.maxTicks + game.world.draftTicks
+  doAssert game.durationTicks() ==
+    game.config.maxTicks + game.world.draftTicks + PreparationTicks
 
 echo "Testing team mirrors and unrestricted duplicates"
 for mode in [TeamDraft, OpenDraft]:

@@ -1,7 +1,7 @@
 ## Two real human controllers: binary RoomClient -> Relay -> controls -> sim.
 import jsony
 import polyworld/[rooms, roomclients, relays, tapes]
-import ../[controls, game, maps, multiplayer, replays, sim]
+import ../[content, controls, game, maps, multiplayer, replays, sim]
 
 proc scenario(hostSeat, guestSeat: int) =
   var relay = Relay()
@@ -79,7 +79,14 @@ proc scenario(hostSeat, guestSeat: int) =
     exchange()
     inc ticks
     doAssert sessions[0].game.stateHash() == sessions[1].game.stateHash()
-    doAssert ticks < 100, "Draft timer froze"
+    let world = sessions[0].game.world
+    if world.phase == Playing and world.preparationTicksLeft() > 0:
+      doAssert world.preparationGatesClosed
+      for creep in world.footmen:
+        doAssert creep.camp > 0, "Network prep cannot spawn lane waves early"
+    elif world.phase == Playing:
+      doAssert not world.preparationGatesClosed
+    doAssert ticks < 100 + PreparationTicks, "Draft/preparation timer froze"
   doAssert picks == [1, 1]
   doAssert sessions[0].game.world.battleTick() == 48
   let data = decodeReplay(encodeReplay(sessions[0].game.recorder.data))

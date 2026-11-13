@@ -44,7 +44,7 @@ for client in clients:
   for i, player in session.game.recorder.data.config.players:
     doAssert player.name == names[i]
   doAssert session.game.recorder.data.config.toJson().fromJson(GameConfig).players == session.game.recorder.data.config.players
-  client.send(RoomMessage(kind: Ready, revision: session.revision, hash: session.game.networkHash()))
+  client.send(RoomMessage(kind: PreparedDuration, durationTicks: uint32(session.game.maximumTicks), revision: session.revision, hash: session.game.networkHash()))
 exchange()
 doAssert sessions[0].game.networkHash() == sessions[1].game.networkHash()
 clients[0].send(RoomMessage(kind: StartMatch))

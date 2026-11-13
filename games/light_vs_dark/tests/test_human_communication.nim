@@ -44,7 +44,7 @@ exchange()
 let sessions = [prepareNetworkMatch(clients[0], ["", "", ""]),
   prepareNetworkMatch(clients[1], ["", "", ""])]
 for i, session in sessions:
-  clients[i].send(RoomMessage(kind: Ready, revision: session.revision,
+  clients[i].send(RoomMessage(kind: PreparedDuration, durationTicks: uint32(session.game.maximumTicks), revision: session.revision,
     hash: session.game.networkHash()))
   exchange()
 clients[0].send(RoomMessage(kind: StartMatch))

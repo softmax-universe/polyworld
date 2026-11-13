@@ -24,6 +24,8 @@ type
     timing*: PacketTiming
     receiptPending*: bool
     lastHash, finalHash: RoomMessage
+    retainedNotice: RoomMessage
+    noticeShown: bool
 
 proc send*(client: RoomClient, message: RoomMessage) =
   ## Adds a bounded control operation to the transport outbox.
@@ -134,12 +136,16 @@ proc accept*(client: RoomClient, bytes: string) =
       client.catchupPending = false
       client.lastHash = RoomMessage()
       client.finalHash = RoomMessage()
+      client.retainedNotice = RoomMessage()
+      client.noticeShown = false
   of BeginMatch:
     if client.began and client.match == message.match:
       client.requestHistory()
     else:
       client.match = message.match
       client.began = true
+      client.retainedNotice = RoomMessage()
+      client.noticeShown = false
       client.applied = 0
       client.serverTick = 0
       client.sequence = 0
@@ -197,12 +203,32 @@ proc accept*(client: RoomClient, bytes: string) =
     client.status = message.detail
     if message.phase == Desynced:
       client.error = message.detail
+  of ServerNotice:
+    # Only accept from the relay transport, never the player command stream.
+    if not client.began or message.match != client.match or
+        message.noticeId != 1 or message.tick == 0:
+      reject("Invalid server notice identity")
+    var notice = message
+    notice.delivery = 0
+    notice.timing = PacketTiming()
+    if client.retainedNotice.kind == ServerNotice:
+      if notice != client.retainedNotice: reject("Immutable server notice changed")
+    else:
+      client.retainedNotice = notice
   of Failure:
     client.error = message.detail
   of Keepalive:
     discard
   else:
     reject("Unexpected server message")
+
+proc takeNotice*(client: RoomClient, notice: var RoomMessage): bool =
+  ## Retain one immutable match/ID across reconnect, expose only after apply.
+  if client.retainedNotice.kind == ServerNotice and not client.noticeShown and
+      client.applied >= client.retainedNotice.tick:
+    notice = client.retainedNotice
+    client.noticeShown = true
+    return true
 
 proc takeTick*(client: RoomClient, packet: var RoomMessage): bool =
   ## Returns only the next authoritative tick, without advancing the cursor.

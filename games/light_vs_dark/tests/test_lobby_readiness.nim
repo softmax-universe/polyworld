@@ -49,7 +49,8 @@ proc lobby(): Fixture =
 
 proc manualReady(client: RoomClient, sources: openArray[string]): NetworkMatch =
   result = prepareNetworkMatch(client, sources)
-  client.send(RoomMessage(kind: Ready, revision: result.revision,
+  client.send(RoomMessage(kind: ReadyStatus, flag: true))
+  client.send(RoomMessage(kind: PreparedDuration, durationTicks: uint32(result.game.maximumTicks), revision: result.revision,
     hash: result.game.networkHash()))
 
 suite "LvD retained readiness":
@@ -65,7 +66,7 @@ suite "LvD retained readiness":
     require prepared != nil
     check revision == host.snapshot.revision
     f.exchange()
-    check f.relay.guest(host.participant).ready
+    check not f.relay.guest(host.participant).ready
 
   test "roster resize retains readiness intent without treating it as map settings":
     let f = lobby()
@@ -99,7 +100,7 @@ suite "LvD retained readiness":
       check prepared == original
       check prepared.game.networkHash() == hash
       check revision == confirmedRevision
-      check f.relay.guest(host.participant).ready
+      check not f.relay.guest(host.participant).ready
 
 
   test "ResizeRoom cannot disguise map or surviving player changes as roster only":
@@ -164,7 +165,7 @@ suite "LvD retained readiness":
     check prepared.game.networkHash() != oldHash
     require host.outgoing.len == 1
     let confirmation = decode(host.outgoing[0])
-    check confirmation.kind == Ready
+    check confirmation.kind == PreparedDuration
     check confirmation.revision == host.snapshot.revision
     check confirmation.hash == prepared.game.networkHash()
     for frame in 0 ..< 5:

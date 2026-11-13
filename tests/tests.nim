@@ -111,6 +111,7 @@ import
   test_visions,
   test_worldtexts,
   test_rooms,
+  test_match_notices,
   test_room_codes,
   test_room_cleanup,
   test_relay_async_hashes,

@@ -185,6 +185,10 @@ proc humanCommunicationRelease*(button: Button) =
 
 proc observeHumanCommunication*(session: NetworkMatch, packet: RoomMessage) =
   commState.observeHumanPacket(session, packet)
+  commState.observeServerNotices(session)
+
+proc observeServerCommunication*(session: NetworkMatch) =
+  commState.observeServerNotices(session)
 
 proc humanCommunicationRune*(rune: Rune): bool =
   commState.chatRune(rune)
@@ -265,6 +269,12 @@ proc returnToMatchLobby*(network: NetworkMatch): bool =
 proc currentStatsOptions*(): StatsOptions =
   ## Use the simulation's existing end-score, never a presentation formula.
   result.individualPlayers = true
+  let remaining = max(0'i64, int64(run.maximumTicks) - int64(run.world.tick))
+  let seconds = (remaining + int64(TickRate) - 1) div int64(TickRate)
+  let minutes = seconds div 60
+  let remainder = seconds mod 60
+  result.statusText = "Time remaining: " & (if minutes < 10: "0" else: "") &
+    $minutes & ":" & (if remainder < 10: "0" else: "") & $remainder
   for slot in 0 ..< run.world.players.len:
     result.scores.add run.world.score(int32(slot))
   if matchResultsVisible():
@@ -280,7 +290,8 @@ proc resultsLayout*(layout: GameUiLayout, table: StatsTable):
   ## Match the shared card's reserved headline and readable scale exactly.
   result.viewport = layout
   let slots = statsLayout(layout, table,
-    StatsOptions(headline: "Results", individualPlayers: true))
+    StatsOptions(headline: "Results", statusText: currentStatsOptions().statusText,
+      individualPlayers: true))
   result.headline = slots.headline
   result.panel = slots.panel
 
@@ -307,8 +318,7 @@ proc communicationButtonPanel(window: Window): GameUiPanel =
   GameUiPanel(origin: vec2(12, 202), size: vec2(min(180'f32, layout.size.x - 24), 30))
 
 proc drawHumanCommunication(sk: Silky, window: Window) =
-  if run == nil or run.replayMode or options.playerSlot <= 0 or
-      matchResultsVisible(): return
+  if run == nil or run.replayMode or matchResultsVisible(): return
   let
     layout = currentLayout(window)
     player = options.playerSlot - 1
@@ -325,10 +335,10 @@ proc drawHumanCommunication(sk: Silky, window: Window) =
       window.buttonPressed[MouseLeft] and panel.contains(sk.mousePos)
   var pending = 0
   for other in 0'i32 ..< int32(run.world.players.len):
-    if other == player: continue
+    if player < 0 or other == player: continue
     let relation = run.world.diplomacy.relation(player, other)
     if relation.offer != NoOffer and relation.sender == other: inc pending
-  if button("Diplomacy" & (if pending > 0: " (" & $pending & ")" else: ""),
+  if player >= 0 and button("Diplomacy" & (if pending > 0: " (" & $pending & ")" else: ""),
       communicationButtonPanel(window)):
     commState.diplomacyOpen = not commState.diplomacyOpen
     commState.typing = false
@@ -341,12 +351,14 @@ proc drawHumanCommunication(sk: Silky, window: Window) =
   for row in 0 ..< shown:
     let line = commState.feed[commState.feed.len - shown + row]
     sk.drawLabel(sk.fittedLabel(line.name & ": " & line.text, feedWidth - 12, "Small"),
-      feedOrigin + vec2(6, float32(row * 23)), vec2(feedWidth - 12, 23), ink, "Small")
+      feedOrigin + vec2(6, float32(row * 23)), vec2(feedWidth - 12, 23),
+      (if line.serverNotice: rgbx(235,196,95,255) else: ink), "Small")
   let prompt = if commState.typing: "> " & commState.draft & "|"
-    else: "Enter: chat to all players"
+    elif player >= 0: "Enter: chat to all players"
+    else: "Spectating"
   sk.drawLabel(sk.fittedLabel(prompt, feedWidth - 12, "Small"),
     feedOrigin + vec2(6, float32(shown * 23)), vec2(feedWidth - 12, 30), muted, "Small")
-  if not commState.diplomacyOpen: return
+  if player < 0 or not commState.diplomacyOpen: return
   let
     width = min(660'f32, layout.size.x - 24)
     rows = max(1, min(6, int((layout.size.y - 148) / 92)))

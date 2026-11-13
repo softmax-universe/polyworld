@@ -189,7 +189,7 @@ block controlQueueSubmitsWithoutLocalMutation:
   try: old.validate()
   except ReplayError: rejected = true
   doAssert rejected
-  doAssert LvdNetworkProtocol == 3
+  doAssert LvdNetworkProtocol == 4
 
 block eligibilityAndPlayerWideLocks:
   let w = laboratory()

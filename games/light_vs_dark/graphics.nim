@@ -1824,6 +1824,7 @@ proc runGraphics*(network: NetworkMatch = nil,
         except RoomsError as error:
           network.abort(error.msg)
         connection.pump()
+        observeServerCommunication(network)
         transport.sync(run.world.tick, run.world.tick, run.world.over)
       else:
         let restoreTick = transport.takeRestore()

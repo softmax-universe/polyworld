@@ -19,7 +19,10 @@ type
     ConfigureRoom, ClaimSeat, ReleaseSeat, Ready, StartMatch, BeginMatch,
     SubmitCommand, CommandAck, TickPacket, AppliedTick, Catchup, CaughtUp,
     ReportHash, MatchStatus, LeaveRoom, KickParticipant, ReturnLobby,
-    FinishMatch, Received, Keepalive, Failure, AbortMatch, PauseMatch, ResizeRoom, Prepared, ReadyStatus
+    FinishMatch, Received, Keepalive, Failure, AbortMatch, PauseMatch, ResizeRoom, Prepared, ReadyStatus,
+    PreparedDuration, ServerNotice
+  ServerNoticeCode* = enum
+    ThreeMinutesRemain
   GameIdentity* = object
     game*: string
     gameplay*, protocol*: uint32
@@ -49,6 +52,8 @@ type
     room*, name*, token*, payload*, detail*: string
     participant*, seat*, revision*, match*, tick*, number*, tickRate*: uint32
     sequence*, hash*: uint64
+    durationTicks*, noticeId*: uint32
+    noticeCode*: ServerNoticeCode
     flag*: bool
     phase*: RoomPhase
     participants*: seq[Participant]
@@ -197,6 +202,14 @@ proc encode*(message: RoomMessage): string =
   of Ready, Prepared, StartMatch:
     result.put32(message.revision)
     result.put64(message.hash)
+  of PreparedDuration:
+    result.put32(message.revision)
+    result.put64(message.hash)
+    result.put32(message.durationTicks)
+  of ServerNotice:
+    result.put32(message.noticeId)
+    result.put32(message.tick)
+    result.put32(uint32(message.noticeCode))
   of BeginMatch:
     result.put32(message.revision)
     result.put64(message.hash)
@@ -323,6 +336,16 @@ proc decode*(bytes: string): RoomMessage =
   of Ready, Prepared, StartMatch:
     result.revision = reader.get32()
     result.hash = reader.get64()
+  of PreparedDuration:
+    result.revision = reader.get32()
+    result.hash = reader.get64()
+    result.durationTicks = reader.get32()
+  of ServerNotice:
+    result.noticeId = reader.get32()
+    result.tick = reader.get32()
+    let code = reader.get32()
+    if code > uint32(ServerNoticeCode.high): reject("Unknown server notice code")
+    result.noticeCode = ServerNoticeCode(code)
   of BeginMatch:
     result.revision = reader.get32()
     result.hash = reader.get64()

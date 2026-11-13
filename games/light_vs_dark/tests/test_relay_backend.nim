@@ -54,7 +54,7 @@ for client in clients:
     if i != 0 and seat.owner == client.participant: sources[i] = source
   let session = prepareNetworkMatch(client, sources)
   sessions.add session
-  client.send(RoomMessage(kind: Ready, revision: session.revision,
+  client.send(RoomMessage(kind: PreparedDuration, durationTicks: uint32(session.game.maximumTicks), revision: session.revision,
     hash: session.game.networkHash()))
 exchange()
 clients[0].send(RoomMessage(kind: StartMatch))

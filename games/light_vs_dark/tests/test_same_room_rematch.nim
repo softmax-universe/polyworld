@@ -303,7 +303,7 @@ suite "LvD reusable same room":
     let revision = f.clients[0].snapshot.revision
     let wrongHash = f.sessions[0].game.networkHash() xor 1'u64
     f.clients[0].send(RoomMessage(kind: StartMatch))
-    f.clients[1].send(RoomMessage(kind: Ready, revision: revision, hash: wrongHash))
+    f.clients[1].send(RoomMessage(kind: PreparedDuration, durationTicks: uint32(f.sessions[0].game.maximumTicks), revision: revision, hash: wrongHash))
     f.exchange()
     for client in f.clients:
       check client.snapshot.phase == Desynced

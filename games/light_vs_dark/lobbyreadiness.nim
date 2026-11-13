@@ -1,4 +1,4 @@
-## Ready packets confirm preparation, independently of the cosmetic UI toggle.
+## Duration-bearing preparation is independent of the cosmetic UI toggle.
 import polyworld/[rooms, roomclients], multiplayer
 
 type ReadyRefresh* = object
@@ -47,8 +47,8 @@ proc refreshRetainedReady*(state: var ReadyRefresh, client: RoomClient,
   if not ownsSeat: return
   state.attemptedRevision = snapshot.revision
   let refreshed = prepareNetworkMatch(client, sources)
-  client.send(RoomMessage(kind: Ready, revision: snapshot.revision,
-    hash: refreshed.game.networkHash()))
+  client.send(RoomMessage(kind: PreparedDuration, revision: snapshot.revision,
+    hash: refreshed.game.networkHash(), durationTicks: uint32(refreshed.game.maximumTicks)))
   prepared = refreshed
   preparedRevision = snapshot.revision
   result = true

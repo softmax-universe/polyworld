@@ -1,6 +1,6 @@
 ## Presentation-only human communication. Never drains simulation mailboxes.
 import std/unicode
-import polyworld/[mailboxes, rooms, tapes, configs]
+import polyworld/[mailboxes, rooms, roomclients, tapes, configs]
 import bots, sim, multiplayer, diplomacies
 export diplomacies
 
@@ -9,6 +9,7 @@ const MaxHumanChatLines* = 100
 type
   HumanChatLine* = object
     player*: int32
+    serverNotice*: bool
     name*, text*: string
   HumanCommunication* = object
     typing*, diplomacyOpen*, blockedFrame*: bool
@@ -30,6 +31,17 @@ proc addLine(state: var HumanCommunication, game: Game, sender: int32, text: str
   if state.feed.len >= MaxHumanChatLines: state.feed.delete(0)
   state.feed.add HumanChatLine(player: sender,
     name: game.config.players[sender].displayName(int(sender)), text: text)
+
+proc observeServerNotices*(state: var HumanCommunication, session: NetworkMatch) =
+  ## Only RoomClient relay notices, never player-authored chat or replay tapes.
+  if session == nil or session.client == nil: return
+  var notice: RoomMessage
+  if session.client.takeNotice(notice):
+    if state.feed.len >= MaxHumanChatLines: state.feed.delete(0)
+    case notice.noticeCode
+    of ThreeMinutesRemain:
+      state.feed.add HumanChatLine(player: -1, name: "Server",
+        text: "3 minutes remain", serverNotice: true)
 
 proc chatRune*(state: var HumanCommunication, rune: Rune): bool =
   if not state.typing: return false

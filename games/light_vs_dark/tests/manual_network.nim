@@ -96,7 +96,7 @@ proc main() =
           require(session.game.brains[seat] != nil and
             session.game.brains[1 - seat] == nil, "Only the owned private policy may run")
           revision = client.snapshot.revision
-          client.send(RoomMessage(kind: Ready, revision: revision,
+          client.send(RoomMessage(kind: PreparedDuration, durationTicks: uint32(session.game.maximumTicks), revision: revision,
             hash: session.game.networkHash()))
           startRequested = false
           echo "READY revision=", revision, " localBrain=", seat,

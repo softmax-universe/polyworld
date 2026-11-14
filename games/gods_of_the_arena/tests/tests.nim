@@ -3,6 +3,7 @@
 {.warning[UnusedImport]: off.}
 import
   test_abilities,
+  test_audio,
   test_andre,
   test_attacks,
   test_base,

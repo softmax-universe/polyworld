@@ -1,7 +1,7 @@
 import
   std/os,
   jsony,
-  polyworld/[assets, chargen, common, terrainsurfaces],
+  polyworld/[assets, chargen, common, terrainsurfaces, soundassets],
   polyworld/chargen/teamcolors,
   content, factions
 
@@ -198,6 +198,7 @@ proc generatedCharacterAssets*(): seq[Asset] =
 proc browserAssets*(): seq[Asset] =
   ## Declares every presentation asset reachable by either faction.
   result = hudAssets(LogoPath)
+  result.add soundAssets()
   for name in MenuImages:
     result.add fileAsset(MenuRoot & name & ".png")
   for path in ["LICENSE", "licenses/lvd.md",

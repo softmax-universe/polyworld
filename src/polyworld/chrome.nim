@@ -2,8 +2,10 @@
 
 import
   std/[math, strutils, times, unicode],
-  chroma, pixie, silky, vmath, windy,
-  gameuis, inputs, profiles, quadterrain, rtscameras, networks
+  bumpy, chroma, pixie, silky, vmath, windy,
+  daycycles, gameuis, inputs, profiles, quadterrain, rtscameras, networks, sounds
+
+export daycycles
 
 const
   PanelAccent* = rgbx(83, 91, 108, 255)
@@ -29,8 +31,6 @@ const
   UiCrispSteps* = [0.25'f32, 0.5'f32, 1.0'f32, 2.0'f32, 4.0'f32]
   HudReferenceSize* = vec2(1920, 1080)
   HudDoubleScaleSize = HudReferenceSize * 2.0'f * 0.8'f
-  HudDaySeconds* = 300'i32
-    ## Wall-clock seconds in one in-game day. A 20 minute match is four days.
   DebugWindowTitle* = "Debug"
   DebugWindowOrigin* = vec2(360, 32)
   DebugWindowSize* = vec2(460, 380)
@@ -276,39 +276,6 @@ proc writeClock*(s: var string, hour, minute: int) =
   s.add ':'
   s.addPad2(minute)
 
-proc hudDayTicks*(tickRate: int32): int32 =
-  ## Ticks in one in-game day at this simulation rate.
-  tickRate * HudDaySeconds
-
-proc clockMinutes(tick, tickRate: int32): int =
-  ## Absolute spectator minutes since 8:00 on day 1.
-  8 * 60 + int(tick) * 24 * 60 div int(hudDayTicks(tickRate))
-
-proc clockHour*(tick, tickRate: int32): float32 =
-  ## The accelerated spectator clock in hours, 0 ..< 24 with a fraction.
-  float32(clockMinutes(tick, tickRate) mod (24 * 60)) / 60
-
-proc clockHour*(tick: float32, tickRate: int32): float32 =
-  ## The same accelerated clock from a fractional tick (whole ticks plus
-  ## the frame's sub-tick blend), continuous instead of stepping once per
-  ## whole game minute — the sun and its shadows glide with it.
-  var minutes =
-    8.0'f32 * 60.0'f32 +
-    tick * 24.0'f32 * 60.0'f32 / float32(hudDayTicks(tickRate))
-  minutes = minutes - float32(24 * 60) * floor(minutes / float32(24 * 60))
-  minutes / 60.0'f32
-
-proc hudClock*(
-    tick, tickRate: int32
-): tuple[day, hour, minute: int] =
-  ## Converts simulation ticks into day, hour, and minute.
-  let
-    totalMinutes = clockMinutes(tick, tickRate)
-    minuteOfDay = totalMinutes mod (24 * 60)
-  result.day = totalMinutes div (24 * 60) + 1
-  result.hour = minuteOfDay div 60
-  result.minute = minuteOfDay mod 60
-
 proc formatAmount*(value: int): string =
   ## Writes a thousands-separated count into the shared HUD scratch.
   writeAmount(hudScratch, value)
@@ -462,6 +429,16 @@ proc drawSlot*(
       "slot.9patch"
   sk.draw9Patch(name, SlotPatch, panel.origin, panel.size)
 
+proc hoverSound*(sk: Silky, panel: GameUiPanel, enabled = true) =
+  ## Plays a quiet cue on pointer entry, without repeating during hover or drag.
+  if not enabled or sk.mouseConsumed or sk.buttonDown[MouseLeft] or
+      sk.mouseDelta == vec2(0):
+    return
+  let previous = sk.mousePos - sk.mouseDelta
+  if panel.contains(sk.mousePos) and sk.mousePos.overlaps(sk.clipRect) and
+      not (panel.contains(previous) and previous.overlaps(sk.clipRect)):
+    playSound(HoverSound)
+
 proc drawTab*(
     sk: Silky,
     panel: GameUiPanel,
@@ -469,6 +446,7 @@ proc drawTab*(
     hovered = false
 ) =
   ## Draws one theme tab 9-patch.
+  sk.hoverSound(panel, hovered)
   let name =
     if selected:
       "panel.tab.selected.9patch"

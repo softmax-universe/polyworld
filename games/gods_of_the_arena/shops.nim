@@ -3,7 +3,7 @@
 import
   std/monotimes,
   pixie, silky, vmath, windy,
-  polyworld/[chrome, gameuis, stackpanels],
+  polyworld/[chrome, gameuis, sounds, stackpanels],
   content, controls, layouts, sim, game, shopinteractions, shopcatalog, tooltips
 
 export shopcatalog
@@ -50,12 +50,16 @@ proc resetShopUi*() =
   sessionHero = 0
 
 proc closeShop*() =
+  ## Closes the shop and retires any captured inventory gesture.
+  if shopOpen:
+    playSound(CancelSound)
   shopOpen = false
   resetShopUi()
 
 proc consumeShopEscape*(): bool =
   ## First Esc dismisses context/drag; next Esc closes the shop.
   if sellSlot >= 0 or gestures.draggingShopSlot() >= 0:
+    playSound(CancelSound)
     sellSlot = -1
     gestures.resetShopGesture()
     return true
@@ -143,6 +147,7 @@ proc drawShop*(sk: Silky, window: Window, world: World, hero: Hero,
   if purchaseReceipt.serial != receiptSerial:
     receiptSerial = purchaseReceipt.serial
     if purchaseReceipt.heroId == hero.id and waitingItem != NoItem:
+      playSound(if purchaseReceipt.accepted: PurchaseSound else: ErrorSound)
       feedback =
         if purchaseReceipt.accepted:
           "Bought " & waitingItem.itemSpec.name & "."
@@ -198,6 +203,7 @@ proc drawShop*(sk: Silky, window: Window, world: World, hero: Hero,
   sk.mouseConsumed = true
   case gesture.kind
   of ShopContextGesture:
+    playSound(SelectSound)
     shopTooltip.clearTooltip()
     sellSlot = gesture.source
     sellItem = hero.inventory[sellSlot]
@@ -210,7 +216,10 @@ proc drawShop*(sk: Silky, window: Window, world: World, hero: Hero,
     if world.swapItemsReason(hero.id, gesture.source.int32,
         gesture.target.int32).len == 0:
       queueSwapItems(hero.id, gesture.source.int32, gesture.target.int32)
+      playSound(ClickSound)
       feedback = "Inventory move queued."
+    else:
+      playSound(ErrorSound)
   of ShopClickGesture:
     if gesture.target == CloseTarget:
       closeShop()
@@ -220,7 +229,10 @@ proc drawShop*(sk: Silky, window: Window, world: World, hero: Hero,
           hero.itemCounts[sellSlot] == sellCount and
           world.sellReason(hero.id, sellSlot.int32).len == 0:
         queueSellItem(hero.id, sellSlot.int32)
+        playSound(ClickSound)
         feedback = "Sale queued."
+      else:
+        playSound(ErrorSound)
       sellSlot = -1
     elif gesture.target >= CatalogTarget and waitingItem == NoItem:
       let index = gesture.target - CatalogTarget
@@ -228,9 +240,12 @@ proc drawShop*(sk: Silky, window: Window, world: World, hero: Hero,
         let item = catalog[index]
         if world.purchaseReason(hero.id, item.ord.int32).len == 0:
           queueBuyItem(hero.id, item.ord.int32)
+          playSound(ClickSound)
           waitingItem = item
           receiptSerial = purchaseReceipt.serial
           feedback = "Buying " & item.itemSpec.name & "..."
+        else:
+          playSound(ErrorSound)
   of ShopNoGesture: discard
   sk.drawSprite("gold", wallet.origin + vec2(0, 16), vec2(32))
   sk.drawLabel($hero.gold & " gold", wallet.origin + vec2(44, 0),

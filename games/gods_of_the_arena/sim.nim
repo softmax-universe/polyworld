@@ -580,7 +580,8 @@ const
   BlueFortId = 2'i32
   FirstHeroId* = 100'i32
   FirstFootmanId = 1000'i32
-  UnitCap = 120 * CreepsPerBarracks
+  UnitCap* = 120 * CreepsPerBarracks
+    ## Maximum lane-creep population, including lingering corpses.
   CorpseLingerTicks = 60'i32
   FootmanDeathTicks* = 24'i32
   HeroDeathTicks* = 24'i32

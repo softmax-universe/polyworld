@@ -9,9 +9,9 @@ without preventing the game from running.
 Native playback uses the system OpenAL framework on macOS, OpenAL on Linux,
 and Slappy's `soft_oal.dll` beside the game executable on Windows. Linux
 builds need the OpenAL development package, such as `libopenal-dev` on
-Debian and Ubuntu. Both lockfiles pin the reusable voices and macOS replay fix
-in [Slappy PR #26](https://github.com/treeform/slappy/pull/26), which includes
-the lifecycle fixes in [Slappy PR #25](https://github.com/treeform/slappy/pull/25).
+Debian and Ubuntu. Both lockfiles pin the merged `master` revision from
+[Slappy PR #27](https://github.com/treeform/slappy/pull/27), including reusable
+voices, lifecycle and macOS replay fixes, PCM loading, and gain fades.
 
 Only recordings referenced by `src/polyworld/soundassets.nim` belong in the
 sibling `polyworld_art/sounds` checkout. Keep recordings in their original

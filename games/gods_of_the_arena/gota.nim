@@ -15,7 +15,9 @@ when defined(headless):
       outcome: run.world.outcome()
     ), run.world.totalXp())
 else:
-  import windy, polyworld/[menus, sounds], game, graphics, frontend, pointers
+  import
+    windy, polyworld/[menus, sounds],
+    assets, game, graphics, frontend, pointers
   initializeOptions()
   configureSoundLaunch(options.soundMuted, options.soundOverride)
   try:
@@ -24,7 +26,7 @@ else:
       false, preferences.mainVolume,
       preferences.fxVolume, preferences.uiVolume, preferences.musicVolume
     )
-    initSounds()
+    initSounds(GotaMusicPath)
     if playerNameOverride.len > 0:
       preferences.name = playerNameOverride
       preferences.savePreferences("Polyworld GotA")

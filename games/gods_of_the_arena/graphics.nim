@@ -2518,6 +2518,7 @@ proc runGraphics*(
     # Exclude loading and the requested simulation seek from frame captures.
     startTrace()
   window.onFrame = proc() =
+    updateSounds()
     let previousCapture = bindingCapture
     let chatCapture = chat.blocksGameplay
     bindingCapture = bindingCapture or chat.blocksGameplay

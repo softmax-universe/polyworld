@@ -129,6 +129,15 @@ records source metadata, hashes and conversion details. LvD's asset declarations
 include both files in normal and replay WASM bundles. The original WAV stays in
 Downloads.
 
+Gota starts "The Celtic Storm" at application startup and keeps it looping
+through menus, matches and replay seeks on the same independent music channel.
+Its soundtrack is `polyworld_art/music/gota/the-celtic-storm.ogg`, bundled with
+the adjacent provenance JSON in the WASM assets. The complete 3:39 stereo
+48 kHz WAV was converted to OGG Vorbis quality 5, reducing 42,130,948 bytes to
+4,089,962 bytes. Settings > Sound > Music controls its volume immediately;
+Master also applies. Browsers unlock playback after the first input gesture
+and use the saved volume levels.
+
 Run the focused checks from the Polyworld repository root:
 
 ```sh

@@ -1,7 +1,8 @@
 import
   std/[os, random, strutils, uri],
   bumpy, chroma, jsony, silky, vmath, windy,
-  polyworld/[displays, chrome, connections, menus, roomclients, rooms, policies, viewers],
+  polyworld/[displays, chrome, connections, menus, roomclients, rooms, policies,
+    sounds, viewers],
   content, controls, game, graphics, homes, lobbies, multiplayer, playernames, pointers, presets, replays
 
 const AppName = "Polyworld GotA"
@@ -207,6 +208,7 @@ proc runFrontend*() =
       )
     window.onFrame = proc() =
       ## Draws this lifecycle state without constructing a hidden match.
+      updateSounds()
       window.updateCursorConfinement(preferences.edgeScrolling)
       let needsPlayerName = not eligiblePlayerName(preferences.name)
       if editingPlayer or (page == MultiplayerMenu and needsPlayerName):

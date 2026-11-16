@@ -1,0 +1,491 @@
+0ms Installed actual Gota confinement trace
+1636ms FRAME requested=(origin: (x: 0.0, y: 945.0), size: (width: 1512.0, height: 37.0)) display=false window=5093296480 frame=(origin: (x: 0.0, y: 945.0), size: (width: 1512.0, height: 37.0)) visible=false key=false active=false mask=0 server=missing(10888) view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 37.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 74.0)) animating=false
+1638ms FRAME requested=(origin: (x: 0.0, y: 945.0), size: (width: 1512.0, height: 37.0)) display=false window=5093364656 frame=(origin: (x: 0.0, y: 945.0), size: (width: 1512.0, height: 37.0)) visible=false key=false active=false mask=0 server=missing(10889) view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 37.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 74.0)) animating=false
+1638ms FRAME requested=(origin: (x: 0.0, y: 945.0), size: (width: 1512.0, height: 37.0)) display=false window=5092114240 frame=(origin: (x: 0.0, y: 945.0), size: (width: 1512.0, height: 37.0)) visible=false key=false active=false mask=0 server=missing(10890) view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 37.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 74.0)) animating=false
+1638ms FRAME requested=(origin: (x: 0.0, y: 945.0), size: (width: 1512.0, height: 37.0)) display=false window=5073212208 frame=(origin: (x: 0.0, y: 945.0), size: (width: 1512.0, height: 37.0)) visible=false key=false active=false mask=0 server=missing(10891) view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 37.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 74.0)) animating=false
+1692ms FRAME requested=(origin: (x: 0.0, y: -81.0), size: (width: 960.0, height: 568.0)) display=true window=5094420736 frame=(origin: (x: 0.0, y: -81.0), size: (width: 960.0, height: 568.0)) visible=false key=false active=false mask=15 server=missing(10892) view=(origin: (x: 0.0, y: 0.0), size: (width: 960.0, height: 540.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 1920.0, height: 1080.0)) animating=false
+1758ms FRAME requested=(origin: (x: 0.0, y: 0.0), size: (width: 500.0, height: 500.0)) display=true window=5093338352 frame=(origin: (x: 0.0, y: 0.0), size: (width: 500.0, height: 500.0)) visible=false key=false active=true mask=32768 server=missing(10894) view=(origin: (x: 0.0, y: 0.0), size: (width: 500.0, height: 500.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 1000.0, height: 1000.0)) animating=false
+2129ms FRAME requested=(origin: (x: 276.0, y: 207.0), size: (width: 960.0, height: 540.0)) display=false window=5094420736 frame=(origin: (x: 276.0, y: 207.0), size: (width: 960.0, height: 540.0)) visible=true key=true active=true mask=4 server=(276,207,960,568) onscreen=1 layer=0 view=(origin: (x: 0.0, y: 0.0), size: (width: 960.0, height: 540.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 1920.0, height: 1080.0)) animating=false
+2130ms FRAME requested=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) display=true window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(276,207,960,568) onscreen=1 layer=0 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+2131ms FRAME requested=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) display=false window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(276,207,960,568) onscreen=1 layer=0 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+2260ms RECT before requested=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+2260ms SHAPE before cgs=5093603952 size=(width: 1512.0, height: 982.0) requested=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) event=(origin: (x: inf, y: inf), size: (width: 0.0, height: 0.0)) activation=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) opaque=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) resize=(origin: (x: inf, y: inf), size: (width: 0.0, height: 0.0))
+2260ms SHAPE after cgs=5093603952 size=(width: 1512.0, height: 982.0) stored=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0))
+2260ms RECT after requested=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+2260ms Attached physical mouse observer
+2261ms RECT before requested=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+2261ms SHAPE before cgs=5093603952 size=(width: 1512.0, height: 982.0) requested=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) event=(origin: (x: inf, y: inf), size: (width: 0.0, height: 0.0)) activation=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) opaque=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) resize=(origin: (x: inf, y: inf), size: (width: 0.0, height: 0.0))
+2261ms SHAPE after cgs=5093603952 size=(width: 1512.0, height: 982.0) stored=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0))
+2261ms RECT after requested=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+2263ms FRAME requested=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) display=false window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+2960ms MOVE stage=0 events=1 mouse=ivec2(584, 598) native=(x: 291.73046875, y: 683.12109375) size=ivec2(3024, 1964) key=true active=true
+2977ms PHYSICAL movement started; repair stages in4/8/12/16sec
+3077ms MOVE stage=0 events=17 mouse=ivec2(1592, 1190) native=(x: 796.47265625, y: 386.76953125) size=ivec2(3024, 1964) key=true active=true
+3277ms SNAPSHOT window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+3277ms SNAPSHOT cgs=5093603952 size=(width: 1512.0, height: 982.0) clip=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) event=(origin: (x: inf, y: inf), size: (width: 0.0, height: 0.0)) activation=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) opaque=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0))
+3344ms MOVE stage=0 events=29 mouse=ivec2(2026, 1692) native=(x: 1012.5078125, y: 135.5625) size=ivec2(3024, 1964) key=true active=true
+3460ms MOVE stage=0 events=43 mouse=ivec2(3010, 1874) native=(x: 1511.984375, y: 24.3125) size=ivec2(3024, 1964) key=true active=true
+3561ms MOVE stage=0 events=52 mouse=ivec2(3024, 1964) native=(x: 1511.984375, y: 0.015625) size=ivec2(3024, 1964) key=true active=true
+3662ms MOVE stage=0 events=60 mouse=ivec2(3024, 1964) native=(x: 1511.984375, y: 0.015625) size=ivec2(3024, 1964) key=true active=true
+3944ms MOVE stage=0 events=66 mouse=ivec2(3024, 1964) native=(x: 1511.984375, y: 0.48046875) size=ivec2(3024, 1964) key=true active=true
+4060ms MOVE stage=0 events=73 mouse=ivec2(3024, 1784) native=(x: 1511.984375, y: 89.6171875) size=ivec2(3024, 1964) key=true active=true
+4177ms MOVE stage=0 events=81 mouse=ivec2(3024, 1668) native=(x: 1511.984375, y: 148.24609375) size=ivec2(3024, 1964) key=true active=true
+4294ms MOVE stage=0 events=88 mouse=ivec2(3024, 1560) native=(x: 1511.984375, y: 202.16796875) size=ivec2(3024, 1964) key=true active=true
+4510ms MOVE stage=0 events=91 mouse=ivec2(3022, 1476) native=(x: 1510.91015625, y: 243.61328125) size=ivec2(3024, 1964) key=true active=true
+4627ms MOVE stage=0 events=105 mouse=ivec2(2974, 122) native=(x: 1487.14453125, y: 921.4921875) size=ivec2(3024, 1964) key=true active=true
+4826ms MOVE stage=0 events=109 mouse=ivec2(2986, 84) native=(x: 1492.87890625, y: 940.20703125) size=ivec2(3024, 1964) key=true active=true
+4927ms MOVE stage=0 events=121 mouse=ivec2(3024, 0) native=(x: 1511.984375, y: 982.0) size=ivec2(3024, 1964) key=true active=true
+5160ms MOVE stage=0 events=127 mouse=ivec2(2994, 0) native=(x: 1496.90625, y: 982.0) size=ivec2(3024, 1964) key=true active=true
+5277ms MOVE stage=0 events=141 mouse=ivec2(582, 178) native=(x: 291.2421875, y: 892.8984375) size=ivec2(3024, 1964) key=true active=true
+5494ms MOVE stage=0 events=143 mouse=ivec2(512, 146) native=(x: 255.53125, y: 908.63671875) size=ivec2(3024, 1964) key=true active=true
+5610ms MOVE stage=0 events=157 mouse=ivec2(0, 150) native=(x: 0.0, y: 906.84375) size=ivec2(3024, 1964) key=true active=true
+5710ms MOVE stage=0 events=169 mouse=ivec2(0, 710) native=(x: 0.0, y: 626.67578125) size=ivec2(3024, 1964) key=true active=true
+5810ms MOVE stage=0 events=181 mouse=ivec2(292, 1092) native=(x: 146.0, y: 436.17578125) size=ivec2(3024, 1964) key=true active=true
+5992ms MOVE stage=0 events=183 mouse=ivec2(292, 1104) native=(x: 146.0, y: 430.046875) size=ivec2(3024, 1964) key=true active=true
+6093ms MOVE stage=0 events=195 mouse=ivec2(500, 1964) native=(x: 249.9296875, y: 0.015625) size=ivec2(3024, 1964) key=true active=true
+6294ms MOVE stage=0 events=199 mouse=ivec2(544, 1962) native=(x: 271.74609375, y: 1.4453125) size=ivec2(3024, 1964) key=true active=true
+6410ms MOVE stage=0 events=213 mouse=ivec2(958, 1830) native=(x: 478.82421875, y: 67.3046875) size=ivec2(3024, 1964) key=true active=true
+6510ms MOVE stage=0 events=225 mouse=ivec2(1010, 1884) native=(x: 505.203125, y: 39.9921875) size=ivec2(3024, 1964) key=true active=true
+6627ms MOVE stage=0 events=239 mouse=ivec2(1266, 1518) native=(x: 632.84765625, y: 223.48046875) size=ivec2(3024, 1964) key=true active=true
+6727ms MOVE stage=0 events=251 mouse=ivec2(1656, 1964) native=(x: 828.2265625, y: 0.015625) size=ivec2(3024, 1964) key=true active=true
+6844ms MOVE stage=0 events=267 mouse=ivec2(1050, 1364) native=(x: 524.6015625, y: 299.67578125) size=ivec2(3024, 1964) key=true active=true
+6960ms MOVE stage=0 events=281 mouse=ivec2(1578, 824) native=(x: 788.70703125, y: 569.80078125) size=ivec2(3024, 1964) key=true active=true
+6994ms STAGE 1 begin window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+6994ms RECT before requested=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+6994ms SHAPE before cgs=5093603952 size=(width: 1512.0, height: 982.0) requested=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) event=(origin: (x: inf, y: inf), size: (width: 0.0, height: 0.0)) activation=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) opaque=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) resize=(origin: (x: inf, y: inf), size: (width: 0.0, height: 0.0))
+6994ms SHAPE after cgs=5093603952 size=(width: 1512.0, height: 982.0) stored=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0))
+6994ms RECT after requested=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+6994ms RECT before requested=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+6994ms SHAPE before cgs=5093603952 size=(width: 1512.0, height: 982.0) requested=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) event=(origin: (x: inf, y: inf), size: (width: 0.0, height: 0.0)) activation=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) opaque=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) resize=(origin: (x: inf, y: inf), size: (width: 0.0, height: 0.0))
+6994ms SHAPE after cgs=5093603952 size=(width: 1512.0, height: 982.0) stored=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0))
+6994ms RECT after requested=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+6994ms STAGE 1 end window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+7060ms MOVE stage=1 events=295 mouse=ivec2(1812, 1318) native=(x: 906.49609375, y: 323.44921875) size=ivec2(3024, 1964) key=true active=true
+7310ms MOVE stage=1 events=305 mouse=ivec2(1640, 1552) native=(x: 820.2421875, y: 205.89453125) size=ivec2(3024, 1964) key=true active=true
+7426ms MOVE stage=1 events=319 mouse=ivec2(2292, 1326) native=(x: 1145.734375, y: 319.046875) size=ivec2(3024, 1964) key=true active=true
+7527ms MOVE stage=1 events=333 mouse=ivec2(2648, 918) native=(x: 1324.3125, y: 523.01171875) size=ivec2(3024, 1964) key=true active=true
+7643ms MOVE stage=1 events=347 mouse=ivec2(2684, 1142) native=(x: 1342.47265625, y: 410.984375) size=ivec2(3024, 1964) key=true active=true
+7760ms MOVE stage=1 events=361 mouse=ivec2(2606, 1964) native=(x: 1303.42578125, y: 0.015625) size=ivec2(3024, 1964) key=true active=true
+7877ms MOVE stage=1 events=375 mouse=ivec2(2822, 1130) native=(x: 1411.75, y: 442.0390625) size=ivec2(3024, 1964) key=true active=true
+8110ms MOVE stage=1 events=389 mouse=ivec2(2842, 684) native=(x: 1420.3515625, y: 639.72265625) size=ivec2(3024, 1964) key=true active=true
+8227ms MOVE stage=1 events=403 mouse=ivec2(3024, 648) native=(x: 1511.984375, y: 658.25390625) size=ivec2(3024, 1964) key=true active=true
+8327ms MOVE stage=1 events=417 mouse=ivec2(3024, 494) native=(x: 1511.984375, y: 763.51953125) size=ivec2(3024, 1964) key=true active=true
+8427ms MOVE stage=1 events=431 mouse=ivec2(2990, 0) native=(x: 1494.72265625, y: 982.0) size=ivec2(3024, 1964) key=true active=true
+8660ms MOVE stage=1 events=435 mouse=ivec2(2978, 0) native=(x: 1489.01953125, y: 982.0) size=ivec2(3024, 1964) key=true active=true
+8760ms MOVE stage=1 events=447 mouse=ivec2(2936, 0) native=(x: 1466.14453125, y: 982.0) size=ivec2(3024, 1964) key=true active=true
+9077ms MOVE stage=1 events=455 mouse=ivec2(2932, 0) native=(x: 1466.3828125, y: 982.0) size=ivec2(3024, 1964) key=true active=true
+9193ms MOVE stage=1 events=469 mouse=ivec2(3024, 0) native=(x: 1511.984375, y: 982.0) size=ivec2(3024, 1964) key=true active=true
+9394ms MOVE stage=1 events=473 mouse=ivec2(3022, 0) native=(x: 1510.80078125, y: 982.0) size=ivec2(3024, 1964) key=true active=true
+9510ms MOVE stage=1 events=487 mouse=ivec2(776, 0) native=(x: 387.73828125, y: 982.0) size=ivec2(3024, 1964) key=true active=true
+9727ms MOVE stage=1 events=493 mouse=ivec2(610, 24) native=(x: 304.96484375, y: 970.25) size=ivec2(3024, 1964) key=true active=true
+9827ms MOVE stage=1 events=505 mouse=ivec2(0, 0) native=(x: 0.0, y: 982.0) size=ivec2(3024, 1964) key=true active=true
+9927ms MOVE stage=1 events=519 mouse=ivec2(0, 16) native=(x: 0.0, y: 973.62109375) size=ivec2(3024, 1964) key=true active=true
+10044ms MOVE stage=1 events=533 mouse=ivec2(46, 66) native=(x: 22.64453125, y: 949.09765625) size=ivec2(3024, 1964) key=true active=true
+10160ms MOVE stage=1 events=549 mouse=ivec2(1082, 8) native=(x: 540.51953125, y: 977.55078125) size=ivec2(3024, 1964) key=true active=true
+10260ms MOVE stage=1 events=561 mouse=ivec2(1382, 52) native=(x: 690.59765625, y: 956.2421875) size=ivec2(3024, 1964) key=true active=true
+10377ms MOVE stage=1 events=575 mouse=ivec2(1546, 44) native=(x: 773.13671875, y: 960.3515625) size=ivec2(3024, 1964) key=true active=true
+10477ms MOVE stage=1 events=587 mouse=ivec2(1578, 0) native=(x: 788.67578125, y: 982.0) size=ivec2(3024, 1964) key=true active=true
+10843ms MOVE stage=1 events=591 mouse=ivec2(1574, 4) native=(x: 787.265625, y: 979.92578125) size=ivec2(3024, 1964) key=true active=true
+10943ms MOVE stage=1 events=603 mouse=ivec2(1538, 172) native=(x: 769.046875, y: 895.64453125) size=ivec2(3024, 1964) key=true active=true
+10994ms STAGE 2 begin window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+10994ms RECT before requested=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+10994ms SHAPE before cgs=5093603952 size=(width: 1512.0, height: 982.0) requested=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) event=(origin: (x: inf, y: inf), size: (width: 0.0, height: 0.0)) activation=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) opaque=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) resize=(origin: (x: inf, y: inf), size: (width: 0.0, height: 0.0))
+10994ms SHAPE after cgs=5093603952 size=(width: 1512.0, height: 982.0) stored=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0))
+10994ms RECT after requested=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+10994ms RECT before requested=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+10994ms SHAPE before cgs=5093603952 size=(width: 1512.0, height: 982.0) requested=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) event=(origin: (x: inf, y: inf), size: (width: 0.0, height: 0.0)) activation=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) opaque=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) resize=(origin: (x: inf, y: inf), size: (width: 0.0, height: 0.0))
+10994ms SHAPE after cgs=5093603952 size=(width: 1512.0, height: 982.0) stored=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0))
+10995ms RECT after requested=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+10995ms STAGE 2 end window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+11044ms MOVE stage=2 events=617 mouse=ivec2(1470, 732) native=(x: 735.03125, y: 616.26171875) size=ivec2(3024, 1964) key=true active=true
+11293ms MOVE stage=2 events=627 mouse=ivec2(1472, 936) native=(x: 736.09375, y: 514.328125) size=ivec2(3024, 1964) key=true active=true
+11393ms MOVE stage=2 events=639 mouse=ivec2(1416, 1606) native=(x: 708.23828125, y: 179.48046875) size=ivec2(3024, 1964) key=true active=true
+11494ms MOVE stage=2 events=651 mouse=ivec2(1428, 1964) native=(x: 714.33984375, y: 0.015625) size=ivec2(3024, 1964) key=true active=true
+11594ms MOVE stage=2 events=663 mouse=ivec2(1436, 1964) native=(x: 717.57421875, y: 0.015625) size=ivec2(3024, 1964) key=true active=true
+11710ms MOVE stage=2 events=677 mouse=ivec2(1446, 1720) native=(x: 723.2734375, y: 122.3125) size=ivec2(3024, 1964) key=true active=true
+11827ms MOVE stage=2 events=691 mouse=ivec2(1494, 1190) native=(x: 746.94140625, y: 386.921875) size=ivec2(3024, 1964) key=true active=true
+11927ms MOVE stage=2 events=703 mouse=ivec2(1494, 802) native=(x: 746.94140625, y: 580.75390625) size=ivec2(3024, 1964) key=true active=true
+12027ms MOVE stage=2 events=715 mouse=ivec2(1486, 808) native=(x: 742.578125, y: 577.51171875) size=ivec2(3024, 1964) key=true active=true
+12143ms MOVE stage=2 events=731 mouse=ivec2(1400, 1180) native=(x: 699.59765625, y: 391.5625) size=ivec2(3024, 1964) key=true active=true
+12244ms MOVE stage=2 events=743 mouse=ivec2(1390, 1342) native=(x: 694.8203125, y: 311.22265625) size=ivec2(3024, 1964) key=true active=true
+12344ms MOVE stage=2 events=757 mouse=ivec2(1456, 1188) native=(x: 727.6640625, y: 388.2109375) size=ivec2(3024, 1964) key=true active=true
+12460ms MOVE stage=2 events=771 mouse=ivec2(1540, 1050) native=(x: 769.671875, y: 457.33984375) size=ivec2(3024, 1964) key=true active=true
+12576ms MOVE stage=2 events=787 mouse=ivec2(1480, 1408) native=(x: 739.86328125, y: 277.62890625) size=ivec2(3024, 1964) key=true active=true
+12676ms MOVE stage=2 events=799 mouse=ivec2(1526, 1022) native=(x: 763.1953125, y: 470.8046875) size=ivec2(3024, 1964) key=true active=true
+12793ms MOVE stage=2 events=813 mouse=ivec2(1470, 1336) native=(x: 735.0390625, y: 314.328125) size=ivec2(3024, 1964) key=true active=true
+12893ms MOVE stage=2 events=825 mouse=ivec2(1428, 850) native=(x: 714.45703125, y: 556.546875) size=ivec2(3024, 1964) key=true active=true
+12994ms MOVE stage=2 events=837 mouse=ivec2(1650, 1004) native=(x: 825.15625, y: 480.30859375) size=ivec2(3024, 1964) key=true active=true
+13110ms MOVE stage=2 events=851 mouse=ivec2(1184, 1188) native=(x: 591.70703125, y: 387.671875) size=ivec2(3024, 1964) key=true active=true
+13227ms MOVE stage=2 events=867 mouse=ivec2(1374, 1036) native=(x: 686.6171875, y: 463.93359375) size=ivec2(3024, 1964) key=true active=true
+13344ms MOVE stage=2 events=881 mouse=ivec2(1432, 1074) native=(x: 715.58984375, y: 445.2578125) size=ivec2(3024, 1964) key=true active=true
+13444ms MOVE stage=2 events=893 mouse=ivec2(1472, 1260) native=(x: 736.3828125, y: 351.58203125) size=ivec2(3024, 1964) key=true active=true
+13544ms MOVE stage=2 events=905 mouse=ivec2(1488, 1398) native=(x: 744.15234375, y: 283.359375) size=ivec2(3024, 1964) key=true active=true
+13661ms MOVE stage=2 events=919 mouse=ivec2(1488, 1406) native=(x: 743.890625, y: 279.40234375) size=ivec2(3024, 1964) key=true active=true
+13776ms MOVE stage=2 events=925 mouse=ivec2(1506, 1374) native=(x: 753.171875, y: 294.9765625) size=ivec2(3024, 1964) key=true active=true
+13877ms MOVE stage=2 events=939 mouse=ivec2(1562, 1040) native=(x: 781.1015625, y: 462.4609375) size=ivec2(3024, 1964) key=true active=true
+13993ms MOVE stage=2 events=953 mouse=ivec2(1564, 862) native=(x: 782.09375, y: 551.0234375) size=ivec2(3024, 1964) key=true active=true
+14110ms MOVE stage=2 events=967 mouse=ivec2(1496, 860) native=(x: 748.0546875, y: 551.94921875) size=ivec2(3024, 1964) key=true active=true
+14210ms MOVE stage=2 events=979 mouse=ivec2(956, 1132) native=(x: 477.61328125, y: 416.13671875) size=ivec2(3024, 1964) key=true active=true
+14310ms MOVE stage=2 events=991 mouse=ivec2(810, 1222) native=(x: 404.8359375, y: 371.15234375) size=ivec2(3024, 1964) key=true active=true
+14427ms MOVE stage=2 events=1003 mouse=ivec2(824, 1230) native=(x: 411.515625, y: 366.82421875) size=ivec2(3024, 1964) key=true active=true
+14527ms MOVE stage=2 events=1015 mouse=ivec2(1182, 1212) native=(x: 591.19921875, y: 375.60546875) size=ivec2(3024, 1964) key=true active=true
+14643ms MOVE stage=2 events=1029 mouse=ivec2(1346, 1222) native=(x: 673.125, y: 370.98046875) size=ivec2(3024, 1964) key=true active=true
+14743ms MOVE stage=2 events=1041 mouse=ivec2(1412, 1158) native=(x: 708.16015625, y: 406.7421875) size=ivec2(3024, 1964) key=true active=true
+14861ms MOVE stage=2 events=1057 mouse=ivec2(1460, 1076) native=(x: 729.5703125, y: 444.046875) size=ivec2(3024, 1964) key=true active=true
+14977ms MOVE stage=2 events=1071 mouse=ivec2(1484, 1048) native=(x: 741.62109375, y: 458.20703125) size=ivec2(3024, 1964) key=true active=true
+14994ms STAGE 3 begin window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+14994ms RECT before requested=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+14994ms SHAPE before cgs=5093603952 size=(width: 1512.0, height: 982.0) requested=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) event=(origin: (x: inf, y: inf), size: (width: 0.0, height: 0.0)) activation=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) opaque=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) resize=(origin: (x: inf, y: inf), size: (width: 0.0, height: 0.0))
+14994ms SHAPE after cgs=5093603952 size=(width: 1512.0, height: 982.0) stored=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0))
+14995ms RECT after requested=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+14995ms RECT before requested=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+14995ms SHAPE before cgs=5093603952 size=(width: 1512.0, height: 982.0) requested=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) event=(origin: (x: inf, y: inf), size: (width: 0.0, height: 0.0)) activation=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) opaque=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) resize=(origin: (x: inf, y: inf), size: (width: 0.0, height: 0.0))
+14995ms SHAPE after cgs=5093603952 size=(width: 1512.0, height: 982.0) stored=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0))
+14995ms RECT after requested=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+14995ms STAGE 3 end window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+15094ms MOVE stage=3 events=1085 mouse=ivec2(1496, 1036) native=(x: 748.4296875, y: 463.9453125) size=ivec2(3024, 1964) key=true active=true
+15210ms MOVE stage=3 events=1091 mouse=ivec2(1498, 1036) native=(x: 749.41015625, y: 463.6875) size=ivec2(3024, 1964) key=true active=true
+15493ms MOVE stage=3 events=1099 mouse=ivec2(1502, 1040) native=(x: 751.32421875, y: 462.34375) size=ivec2(3024, 1964) key=true active=true
+15743ms MOVE stage=3 events=1101 mouse=ivec2(1500, 1040) native=(x: 750.39453125, y: 462.34375) size=ivec2(3024, 1964) key=true active=true
+15843ms MOVE stage=3 events=1113 mouse=ivec2(1296, 1022) native=(x: 639.2578125, y: 474.78125) size=ivec2(3024, 1964) key=true active=true
+15960ms MOVE stage=3 events=1129 mouse=ivec2(1346, 846) native=(x: 673.4140625, y: 558.94140625) size=ivec2(3024, 1964) key=true active=true
+16060ms MOVE stage=3 events=1141 mouse=ivec2(1552, 1522) native=(x: 776.26953125, y: 220.6875) size=ivec2(3024, 1964) key=true active=true
+16176ms MOVE stage=3 events=1155 mouse=ivec2(1082, 1740) native=(x: 540.6484375, y: 111.6171875) size=ivec2(3024, 1964) key=true active=true
+16443ms MOVE stage=3 events=1167 mouse=ivec2(988, 1746) native=(x: 493.5859375, y: 109.04296875) size=ivec2(3024, 1964) key=true active=true
+16543ms MOVE stage=3 events=1181 mouse=ivec2(906, 1858) native=(x: 452.796875, y: 52.8828125) size=ivec2(3024, 1964) key=true active=true
+16660ms MOVE stage=3 events=1195 mouse=ivec2(888, 1876) native=(x: 443.5859375, y: 44.4921875) size=ivec2(3024, 1964) key=true active=true
+16760ms MOVE stage=3 events=1207 mouse=ivec2(854, 1898) native=(x: 426.5234375, y: 33.375) size=ivec2(3024, 1964) key=true active=true
+17311ms MOVE stage=3 events=1211 mouse=ivec2(846, 1902) native=(x: 423.1953125, y: 31.1640625) size=ivec2(3024, 1964) key=true active=true
+17660ms MOVE stage=3 events=1213 mouse=ivec2(852, 1890) native=(x: 426.24609375, y: 37.09765625) size=ivec2(3024, 1964) key=true active=true
+17760ms MOVE stage=3 events=1225 mouse=ivec2(1206, 1524) native=(x: 603.0078125, y: 219.83203125) size=ivec2(3024, 1964) key=true active=true
+17877ms MOVE stage=3 events=1241 mouse=ivec2(1628, 1122) native=(x: 813.515625, y: 421.28515625) size=ivec2(3024, 1964) key=true active=true
+17993ms MOVE stage=3 events=1255 mouse=ivec2(1670, 1058) native=(x: 835.23046875, y: 452.92578125) size=ivec2(3024, 1964) key=true active=true
+18093ms MOVE stage=3 events=1263 mouse=ivec2(1590, 1130) native=(x: 794.76171875, y: 417.30859375) size=ivec2(3024, 1964) key=true active=true
+18194ms MOVE stage=3 events=1275 mouse=ivec2(1450, 1222) native=(x: 724.5546875, y: 371.23828125) size=ivec2(3024, 1964) key=true active=true
+18527ms MOVE stage=3 events=1287 mouse=ivec2(1438, 1214) native=(x: 719.0703125, y: 374.6328125) size=ivec2(3024, 1964) key=true active=true
+18643ms MOVE stage=3 events=1301 mouse=ivec2(1456, 1126) native=(x: 727.73828125, y: 418.9140625) size=ivec2(3024, 1964) key=true active=true
+18760ms MOVE stage=3 events=1315 mouse=ivec2(1462, 1106) native=(x: 731.0390625, y: 428.58984375) size=ivec2(3024, 1964) key=true active=true
+18860ms MOVE stage=3 events=1327 mouse=ivec2(1466, 1094) native=(x: 733.375, y: 434.51953125) size=ivec2(3024, 1964) key=true active=true
+18960ms MOVE stage=3 events=1339 mouse=ivec2(1474, 1076) native=(x: 736.6484375, y: 443.87890625) size=ivec2(3024, 1964) key=true active=true
+18995ms STAGE 4 begin window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+18996ms RECT before requested=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=false key=false active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+18996ms SHAPE before cgs=5093603952 size=(width: 1512.0, height: 982.0) requested=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) event=(origin: (x: inf, y: inf), size: (width: 0.0, height: 0.0)) activation=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) opaque=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) resize=(origin: (x: inf, y: inf), size: (width: 0.0, height: 0.0))
+18996ms SHAPE after cgs=5093603952 size=(width: 1512.0, height: 982.0) stored=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0))
+18996ms RECT after requested=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=false key=false active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+18998ms FRAME requested=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) display=false window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+18999ms RECT before requested=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+18999ms SHAPE before cgs=5093603952 size=(width: 1512.0, height: 982.0) requested=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) event=(origin: (x: inf, y: inf), size: (width: 0.0, height: 0.0)) activation=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) opaque=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) resize=(origin: (x: inf, y: inf), size: (width: 0.0, height: 0.0))
+18999ms SHAPE after cgs=5093603952 size=(width: 1512.0, height: 982.0) stored=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0))
+18999ms RECT after requested=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+18999ms RECT before requested=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+18999ms SHAPE before cgs=5093603952 size=(width: 1512.0, height: 982.0) requested=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) event=(origin: (x: inf, y: inf), size: (width: 0.0, height: 0.0)) activation=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) opaque=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) resize=(origin: (x: inf, y: inf), size: (width: 0.0, height: 0.0))
+18999ms SHAPE after cgs=5093603952 size=(width: 1512.0, height: 982.0) stored=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0))
+18999ms RECT after requested=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+18999ms STAGE 4 end window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+19008ms RECT before requested=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+19008ms SHAPE before cgs=5093603952 size=(width: 1512.0, height: 982.0) requested=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) event=(origin: (x: inf, y: inf), size: (width: 0.0, height: 0.0)) activation=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) opaque=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) resize=(origin: (x: inf, y: inf), size: (width: 0.0, height: 0.0))
+19008ms SHAPE after cgs=5093603952 size=(width: 1512.0, height: 982.0) stored=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0))
+19008ms RECT after requested=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+19008ms RECT before requested=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+19008ms SHAPE before cgs=5093603952 size=(width: 1512.0, height: 982.0) requested=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) event=(origin: (x: inf, y: inf), size: (width: 0.0, height: 0.0)) activation=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) opaque=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) resize=(origin: (x: inf, y: inf), size: (width: 0.0, height: 0.0))
+19008ms SHAPE after cgs=5093603952 size=(width: 1512.0, height: 982.0) stored=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0))
+19008ms RECT after requested=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+19077ms MOVE stage=4 events=1357 mouse=ivec2(1480, 1060) native=(x: 740.15234375, y: 452.1875) size=ivec2(3024, 1964) key=true active=true
+19227ms MOVE stage=4 events=1361 mouse=ivec2(1480, 1060) native=(x: 740.39453125, y: 452.1875) size=ivec2(3024, 1964) key=true active=true
+19510ms MOVE stage=4 events=1363 mouse=ivec2(1474, 1064) native=(x: 736.5234375, y: 450.37890625) size=ivec2(3024, 1964) key=true active=true
+19627ms MOVE stage=4 events=1377 mouse=ivec2(1154, 1374) native=(x: 577.3515625, y: 295.30078125) size=ivec2(3024, 1964) key=true active=true
+19727ms MOVE stage=4 events=1389 mouse=ivec2(1190, 1576) native=(x: 594.81640625, y: 194.46484375) size=ivec2(3024, 1964) key=true active=true
+20026ms MOVE stage=4 events=1403 mouse=ivec2(2160, 1796) native=(x: 1079.94921875, y: 84.49609375) size=ivec2(3024, 1964) key=true active=true
+20127ms MOVE stage=4 events=1417 mouse=ivec2(2206, 1754) native=(x: 1103.3515625, y: 104.65625) size=ivec2(3024, 1964) key=true active=true
+20227ms MOVE stage=4 events=1429 mouse=ivec2(2226, 1796) native=(x: 1113.05078125, y: 83.96484375) size=ivec2(3024, 1964) key=true active=true
+20327ms MOVE stage=4 events=1443 mouse=ivec2(2204, 1846) native=(x: 1101.83984375, y: 59.4375) size=ivec2(3024, 1964) key=true active=true
+20427ms MOVE stage=4 events=1455 mouse=ivec2(2190, 1872) native=(x: 1095.32421875, y: 46.05859375) size=ivec2(3024, 1964) key=true active=true
+20661ms MOVE stage=4 events=1471 mouse=ivec2(2182, 1892) native=(x: 1090.69921875, y: 36.27734375) size=ivec2(3024, 1964) key=true active=true
+22342ms MOVE stage=4 events=1473 mouse=ivec2(1504, 1060) native=(x: 751.67578125, y: 451.65625) size=ivec2(3024, 1964) key=true active=true
+23160ms MOVE stage=4 events=1491 mouse=ivec2(1482, 982) native=(x: 740.57421875, y: 491.33984375) size=ivec2(3024, 1964) key=true active=true
+23263ms MOVE stage=4 events=1509 mouse=ivec2(1528, 954) native=(x: 764.31640625, y: 504.96875) size=ivec2(3024, 1964) key=true active=true
+23374ms MOVE stage=4 events=1529 mouse=ivec2(1420, 1052) native=(x: 710.09765625, y: 456.43359375) size=ivec2(3024, 1964) key=true active=true
+23476ms MOVE stage=4 events=1547 mouse=ivec2(1536, 950) native=(x: 768.08984375, y: 507.30078125) size=ivec2(3024, 1964) key=true active=true
+23578ms MOVE stage=4 events=1565 mouse=ivec2(1486, 1116) native=(x: 742.8046875, y: 424.16015625) size=ivec2(3024, 1964) key=true active=true
+23681ms MOVE stage=4 events=1583 mouse=ivec2(1514, 996) native=(x: 756.85546875, y: 483.625) size=ivec2(3024, 1964) key=true active=true
+23904ms MOVE stage=4 events=1601 mouse=ivec2(1486, 948) native=(x: 743.48046875, y: 508.26171875) size=ivec2(3024, 1964) key=true active=true
+24471ms MOVE stage=4 events=1607 mouse=ivec2(1476, 948) native=(x: 738.47265625, y: 508.26171875) size=ivec2(3024, 1964) key=true active=true
+24587ms MOVE stage=4 events=1621 mouse=ivec2(932, 838) native=(x: 465.640625, y: 563.2265625) size=ivec2(3024, 1964) key=true active=true
+24720ms MOVE stage=4 events=1633 mouse=ivec2(868, 824) native=(x: 434.36328125, y: 570.4609375) size=ivec2(3024, 1964) key=true active=true
+24904ms MOVE stage=4 events=1635 mouse=ivec2(872, 824) native=(x: 436.265625, y: 570.4609375) size=ivec2(3024, 1964) key=true active=true
+25021ms MOVE stage=4 events=1649 mouse=ivec2(1972, 1302) native=(x: 985.71875, y: 331.43359375) size=ivec2(3024, 1964) key=true active=true
+25137ms MOVE stage=4 events=1665 mouse=ivec2(2098, 1370) native=(x: 1048.9609375, y: 296.73828125) size=ivec2(3024, 1964) key=true active=true
+25238ms MOVE stage=4 events=1677 mouse=ivec2(2092, 1384) native=(x: 1045.74609375, y: 289.58203125) size=ivec2(3024, 1964) key=true active=true
+25388ms MOVE stage=4 events=1691 mouse=ivec2(2078, 1410) native=(x: 1039.30078125, y: 276.75) size=ivec2(3024, 1964) key=true active=true
+25787ms MOVE stage=4 events=1693 mouse=ivec2(2050, 1400) native=(x: 1025.1875, y: 281.68359375) size=ivec2(3024, 1964) key=true active=true
+25904ms MOVE stage=4 events=1707 mouse=ivec2(1560, 904) native=(x: 780.2578125, y: 530.015625) size=ivec2(3024, 1964) key=true active=true
+26004ms MOVE stage=4 events=1719 mouse=ivec2(1856, 750) native=(x: 928.4609375, y: 606.5546875) size=ivec2(3024, 1964) key=true active=true
+26121ms MOVE stage=4 events=1733 mouse=ivec2(1524, 940) native=(x: 761.52734375, y: 511.80078125) size=ivec2(3024, 1964) key=true active=true
+26321ms MOVE stage=4 events=1743 mouse=ivec2(1398, 846) native=(x: 698.54296875, y: 558.7265625) size=ivec2(3024, 1964) key=true active=true
+26436ms MOVE stage=4 events=1757 mouse=ivec2(824, 772) native=(x: 411.94921875, y: 595.98828125) size=ivec2(3024, 1964) key=true active=true
+26637ms MOVE stage=4 events=1766 mouse=ivec2(786, 770) native=(x: 393.08203125, y: 596.58203125) size=ivec2(3024, 1964) key=true active=true
+26820ms MOVE stage=4 events=1767 mouse=ivec2(784, 760) native=(x: 391.63671875, y: 601.84375) size=ivec2(3024, 1964) key=true active=true
+26921ms MOVE stage=4 events=1779 mouse=ivec2(934, 0) native=(x: 466.6953125, y: 982.0) size=ivec2(3024, 1964) key=true active=true
+27237ms MOVE stage=4 events=1781 mouse=ivec2(900, 48) native=(x: 449.77734375, y: 957.65625) size=ivec2(3024, 1964) key=true active=true
+27671ms MOVE stage=4 events=1797 mouse=ivec2(2, 1604) native=(x: 0.9296875, y: 179.98828125) size=ivec2(3024, 1964) key=true active=true
+27787ms MOVE stage=4 events=1811 mouse=ivec2(746, 1964) native=(x: 373.1640625, y: 0.015625) size=ivec2(3024, 1964) key=true active=true
+28070ms MOVE stage=4 events=1817 mouse=ivec2(814, 1956) native=(x: 406.75390625, y: 3.6953125) size=ivec2(3024, 1964) key=true active=true
+28171ms MOVE stage=4 events=1829 mouse=ivec2(2058, 1396) native=(x: 1127.78125, y: 283.5546875) size=ivec2(3024, 1964) key=true active=true
+28471ms MOVE stage=4 events=1843 mouse=ivec2(2964, 1576) native=(x: 1482.46484375, y: 194.10546875) size=ivec2(3024, 1964) key=true active=true
+28587ms MOVE stage=4 events=1857 mouse=ivec2(3024, 1516) native=(x: 1511.984375, y: 224.03515625) size=ivec2(3024, 1964) key=true active=true
+28704ms MOVE stage=4 events=1869 mouse=ivec2(3024, 1510) native=(x: 1511.984375, y: 227.0390625) size=ivec2(3024, 1964) key=true active=true
+28820ms MOVE stage=4 events=1883 mouse=ivec2(2054, 1964) native=(x: 1027.390625, y: 0.015625) size=ivec2(3024, 1964) key=true active=true
+28921ms MOVE stage=4 events=1895 mouse=ivec2(2028, 1964) native=(x: 1013.63671875, y: 0.015625) size=ivec2(3024, 1964) key=true active=true
+29121ms MOVE stage=4 events=1905 mouse=ivec2(2030, 1962) native=(x: 1014.5078125, y: 0.76171875) size=ivec2(3024, 1964) key=true active=true
+29237ms MOVE stage=4 events=1919 mouse=ivec2(1418, 1100) native=(x: 709.33203125, y: 431.90234375) size=ivec2(3024, 1964) key=true active=true
+29337ms MOVE stage=4 events=1931 mouse=ivec2(1904, 292) native=(x: 951.64453125, y: 835.58984375) size=ivec2(3024, 1964) key=true active=true
+29454ms MOVE stage=4 events=1945 mouse=ivec2(1714, 1190) native=(x: 856.78515625, y: 386.54296875) size=ivec2(3024, 1964) key=true active=true
+29554ms MOVE stage=4 events=1957 mouse=ivec2(1578, 608) native=(x: 789.328125, y: 677.65234375) size=ivec2(3024, 1964) key=true active=true
+29671ms MOVE stage=4 events=1971 mouse=ivec2(1810, 1044) native=(x: 904.59375, y: 460.4921875) size=ivec2(3024, 1964) key=true active=true
+29904ms MOVE stage=4 events=1981 mouse=ivec2(1362, 1182) native=(x: 681.125, y: 391.2109375) size=ivec2(3024, 1964) key=true active=true
+30004ms MOVE stage=4 events=1993 mouse=ivec2(940, 0) native=(x: 470.41796875, y: 982.0) size=ivec2(3024, 1964) key=true active=true
+30104ms MOVE stage=4 events=2005 mouse=ivec2(1768, 242) native=(x: 884.01953125, y: 860.80859375) size=ivec2(3024, 1964) key=true active=true
+30220ms MOVE stage=4 events=2021 mouse=ivec2(1018, 1294) native=(x: 509.16015625, y: 334.8515625) size=ivec2(3024, 1964) key=true active=true
+30320ms MOVE stage=4 events=2033 mouse=ivec2(78, 1094) native=(x: 39.19921875, y: 434.5234375) size=ivec2(3024, 1964) key=true active=true
+30437ms MOVE stage=4 events=2047 mouse=ivec2(832, 568) native=(x: 415.96484375, y: 698.4921875) size=ivec2(3024, 1964) key=true active=true
+30537ms MOVE stage=4 events=2059 mouse=ivec2(0, 1266) native=(x: 0.0, y: 348.7734375) size=ivec2(3024, 1964) key=true active=true
+31120ms MOVE stage=4 events=2065 mouse=ivec2(0, 1436) native=(x: 0.0, y: 264.2109375) size=ivec2(3024, 1964) key=true active=true
+31237ms MOVE stage=4 events=2079 mouse=ivec2(0, 1964) native=(x: 0.0, y: 0.015625) size=ivec2(3024, 1964) key=true active=true
+31887ms MOVE stage=4 events=2087 mouse=ivec2(4, 1964) native=(x: 1.62890625, y: 0.015625) size=ivec2(3024, 1964) key=true active=true
+32004ms MOVE stage=4 events=2101 mouse=ivec2(2226, 1964) native=(x: 1113.19921875, y: 0.015625) size=ivec2(3024, 1964) key=true active=true
+32253ms MOVE stage=4 events=2109 mouse=ivec2(2488, 1962) native=(x: 1243.9765625, y: 0.5546875) size=ivec2(3024, 1964) key=true active=true
+32354ms MOVE stage=4 events=2121 mouse=ivec2(508, 508) native=(x: 1511.984375, y: 0.015625) size=ivec2(3024, 1964) key=true active=true
+32470ms MOVE stage=4 events=2134 mouse=ivec2(3024, 1960) native=(x: 1511.984375, y: 2.484375) size=ivec2(3024, 1964) key=true active=true
+32570ms MOVE stage=4 events=2141 mouse=ivec2(3024, 1828) native=(x: 1511.984375, y: 67.8046875) size=ivec2(3024, 1964) key=true active=true
+32820ms MOVE stage=4 events=2147 mouse=ivec2(3024, 1730) native=(x: 1511.984375, y: 117.359375) size=ivec2(3024, 1964) key=true active=true
+32937ms MOVE stage=4 events=2161 mouse=ivec2(3024, 458) native=(x: 1511.984375, y: 752.7109375) size=ivec2(3024, 1964) key=true active=true
+33154ms MOVE stage=4 events=2171 mouse=ivec2(3004, 182) native=(x: 1502.1171875, y: 891.2578125) size=ivec2(3024, 1964) key=true active=true
+33271ms MOVE stage=4 events=2185 mouse=ivec2(2150, 0) native=(x: 1052.57421875, y: 982.0) size=ivec2(3024, 1964) key=true active=true
+33571ms MOVE stage=4 events=2199 mouse=ivec2(2050, 0) native=(x: 1024.81640625, y: 982.0) size=ivec2(3024, 1964) key=true active=true
+33686ms MOVE stage=4 events=2213 mouse=ivec2(2052, 0) native=(x: 1025.6328125, y: 982.0) size=ivec2(3024, 1964) key=true active=true
+33788ms MOVE stage=4 events=2225 mouse=ivec2(2058, 0) native=(x: 1029.0859375, y: 982.0) size=ivec2(3024, 1964) key=true active=true
+33888ms MOVE stage=4 events=2237 mouse=ivec2(2062, 0) native=(x: 1031.04296875, y: 982.0) size=ivec2(3024, 1964) key=true active=true
+34003ms MOVE stage=4 events=2247 mouse=ivec2(2004, 40) native=(x: 1001.72265625, y: 961.78125) size=ivec2(3024, 1964) key=true active=true
+34104ms MOVE stage=4 events=2259 mouse=ivec2(1272, 870) native=(x: 636.09375, y: 546.56640625) size=ivec2(3024, 1964) key=true active=true
+34404ms MOVE stage=4 events=2267 mouse=ivec2(1170, 1008) native=(x: 585.37109375, y: 477.81640625) size=ivec2(3024, 1964) key=true active=true
+34603ms MOVE stage=4 events=2269 mouse=ivec2(1170, 1008) native=(x: 585.37109375, y: 477.81640625) size=ivec2(3024, 1964) key=true active=true
+34704ms MOVE stage=4 events=2270 mouse=ivec2(1170, 1008) native=(x: 585.37109375, y: 477.81640625) size=ivec2(3024, 1964) key=true active=true
+34870ms MOVE stage=4 events=2272 mouse=ivec2(1170, 1008) native=(x: 585.37109375, y: 477.81640625) size=ivec2(3024, 1964) key=true active=true
+35021ms MOVE stage=4 events=2274 mouse=ivec2(1170, 1008) native=(x: 585.37109375, y: 477.81640625) size=ivec2(3024, 1964) key=true active=true
+35170ms MOVE stage=4 events=2275 mouse=ivec2(1158, 1008) native=(x: 578.66015625, y: 477.81640625) size=ivec2(3024, 1964) key=true active=true
+35271ms MOVE stage=4 events=2287 mouse=ivec2(868, 1002) native=(x: 433.921875, y: 481.40625) size=ivec2(3024, 1964) key=true active=true
+35420ms MOVE stage=4 events=2292 mouse=ivec2(858, 1000) native=(x: 428.8359375, y: 481.91796875) size=ivec2(3024, 1964) key=true active=true
+35604ms MOVE stage=4 events=2294 mouse=ivec2(858, 1000) native=(x: 428.8359375, y: 481.91796875) size=ivec2(3024, 1964) key=true active=true
+35771ms MOVE stage=4 events=2295 mouse=ivec2(860, 1000) native=(x: 430.46875, y: 481.91796875) size=ivec2(3024, 1964) key=true active=true
+35887ms MOVE stage=4 events=2309 mouse=ivec2(1364, 992) native=(x: 681.56640625, y: 486.09765625) size=ivec2(3024, 1964) key=true active=true
+36037ms MOVE stage=4 events=2311 mouse=ivec2(1364, 992) native=(x: 681.56640625, y: 486.09765625) size=ivec2(3024, 1964) key=true active=true
+36137ms MOVE stage=4 events=2312 mouse=ivec2(1364, 992) native=(x: 681.56640625, y: 485.8671875) size=ivec2(3024, 1964) key=true active=true
+36287ms MOVE stage=4 events=2315 mouse=ivec2(1364, 992) native=(x: 682.03125, y: 486.3359375) size=ivec2(3024, 1964) key=true active=true
+36404ms MOVE stage=4 events=2331 mouse=ivec2(2076, 592) native=(x: 1038.01953125, y: 685.859375) size=ivec2(3024, 1964) key=true active=true
+36554ms MOVE stage=4 events=2335 mouse=ivec2(2114, 564) native=(x: 1056.6171875, y: 699.8125) size=ivec2(3024, 1964) key=true active=true
+36654ms MOVE stage=4 events=2336 mouse=ivec2(2114, 564) native=(x: 1056.6171875, y: 699.8125) size=ivec2(3024, 1964) key=true active=true
+36804ms MOVE stage=4 events=2337 mouse=ivec2(2096, 566) native=(x: 1035.16796875, y: 694.90234375) size=ivec2(3024, 1964) key=true active=true
+36904ms MOVE stage=4 events=2351 mouse=ivec2(1170, 914) native=(x: 584.671875, y: 525.03515625) size=ivec2(3024, 1964) key=true active=true
+37070ms MOVE stage=4 events=2363 mouse=ivec2(1064, 988) native=(x: 531.953125, y: 488.28125) size=ivec2(3024, 1964) key=true active=true
+37254ms MOVE stage=4 events=2365 mouse=ivec2(1036, 988) native=(x: 518.296875, y: 488.28125) size=ivec2(3024, 1964) key=true active=true
+37370ms MOVE stage=4 events=2381 mouse=ivec2(0, 1278) native=(x: 0.0, y: 343.3984375) size=ivec2(3024, 1964) key=true active=true
+37504ms MOVE stage=4 events=2383 mouse=ivec2(0, 1278) native=(x: 0.23046875, y: 343.3984375) size=ivec2(3024, 1964) key=true active=true
+37620ms MOVE stage=4 events=2397 mouse=ivec2(188, 1386) native=(x: 93.64453125, y: 288.828125) size=ivec2(3024, 1964) key=true active=true
+37737ms MOVE stage=4 events=2411 mouse=ivec2(1050, 1964) native=(x: 524.81640625, y: 0.015625) size=ivec2(3024, 1964) key=true active=true
+37838ms MOVE stage=4 events=2423 mouse=ivec2(1104, 1964) native=(x: 552.18359375, y: 0.015625) size=ivec2(3024, 1964) key=true active=true
+37971ms MOVE stage=4 events=2431 mouse=ivec2(1106, 1958) native=(x: 552.95703125, y: 2.828125) size=ivec2(3024, 1964) key=true active=true
+38153ms MOVE stage=4 events=2435 mouse=ivec2(1128, 1904) native=(x: 581.00390625, y: 43.7109375) size=ivec2(3024, 1964) key=true active=true
+38253ms MOVE stage=4 events=2449 mouse=ivec2(3024, 1920) native=(x: 1511.984375, y: 21.98046875) size=ivec2(3024, 1964) key=true active=true
+38355ms MOVE stage=4 events=2457 mouse=ivec2(3024, 1964) native=(x: 1511.984375, y: 0.015625) size=ivec2(3024, 1964) key=true active=true
+38538ms MOVE stage=4 events=2461 mouse=ivec2(3024, 1954) native=(x: 1511.984375, y: 5.48828125) size=ivec2(3024, 1964) key=true active=true
+38638ms MOVE stage=4 events=2471 mouse=ivec2(3012, 814) native=(x: 1505.66015625, y: 574.9765625) size=ivec2(3024, 1964) key=true active=true
+38871ms MOVE stage=4 events=2479 mouse=ivec2(3024, 200) native=(x: 1511.984375, y: 894.40625) size=ivec2(3024, 1964) key=true active=true
+38987ms MOVE stage=4 events=2495 mouse=ivec2(3024, 0) native=(x: 1511.984375, y: 982.0) size=ivec2(3024, 1964) key=true active=true
+39087ms MOVE stage=4 events=2507 mouse=ivec2(3010, 0) native=(x: 1504.91015625, y: 982.0) size=ivec2(3024, 1964) key=true active=true
+39371ms MOVE stage=4 events=2521 mouse=ivec2(2278, 130) native=(x: 1138.62109375, y: 916.6171875) size=ivec2(3024, 1964) key=true active=true
+39487ms MOVE stage=4 events=2537 mouse=ivec2(1418, 0) native=(x: 708.734375, y: 982.0) size=ivec2(3024, 1964) key=true active=true
+39687ms MOVE stage=4 events=2547 mouse=ivec2(1388, 0) native=(x: 693.80859375, y: 982.0) size=ivec2(3024, 1964) key=true active=true
+39804ms MOVE stage=4 events=2561 mouse=ivec2(0, 702) native=(x: 0.0, y: 630.6484375) size=ivec2(3024, 1964) key=true active=true
+40038ms MOVE stage=4 events=2569 mouse=ivec2(0, 996) native=(x: 0.0, y: 484.38671875) size=ivec2(3024, 1964) key=true active=true
+40154ms MOVE stage=4 events=2583 mouse=ivec2(0, 1468) native=(x: 0.0, y: 247.984375) size=ivec2(3024, 1964) key=true active=true
+40254ms MOVE stage=4 events=2595 mouse=ivec2(0, 1562) native=(x: 0.0, y: 201.0703125) size=ivec2(3024, 1964) key=true active=true
+40371ms MOVE stage=4 events=2609 mouse=ivec2(706, 1270) native=(x: 352.71875, y: 347.4921875) size=ivec2(3024, 1964) key=true active=true
+40487ms MOVE stage=4 events=2623 mouse=ivec2(1378, 1506) native=(x: 689.375, y: 228.921875) size=ivec2(3024, 1964) key=true active=true
+40588ms MOVE stage=4 events=2637 mouse=ivec2(582, 1694) native=(x: 290.57421875, y: 134.953125) size=ivec2(3024, 1964) key=true active=true
+40704ms MOVE stage=4 events=2651 mouse=ivec2(458, 576) native=(x: 228.9140625, y: 694.23828125) size=ivec2(3024, 1964) key=true active=true
+40820ms MOVE stage=4 events=2665 mouse=ivec2(2314, 496) native=(x: 1156.51953125, y: 733.56640625) size=ivec2(3024, 1964) key=true active=true
+40920ms MOVE stage=4 events=2677 mouse=ivec2(2684, 1502) native=(x: 1342.3984375, y: 230.953125) size=ivec2(3024, 1964) key=true active=true
+41021ms MOVE stage=4 events=2691 mouse=ivec2(2216, 1964) native=(x: 1108.1875, y: 0.015625) size=ivec2(3024, 1964) key=true active=true
+41121ms MOVE stage=4 events=2705 mouse=ivec2(1040, 1848) native=(x: 519.69140625, y: 57.640625) size=ivec2(3024, 1964) key=true active=true
+41221ms MOVE stage=4 events=2717 mouse=ivec2(398, 1444) native=(x: 199.1328125, y: 259.63671875) size=ivec2(3024, 1964) key=true active=true
+41337ms MOVE stage=4 events=2731 mouse=ivec2(298, 1246) native=(x: 149.42578125, y: 358.95703125) size=ivec2(3024, 1964) key=true active=true
+41437ms MOVE stage=4 events=2743 mouse=ivec2(462, 1020) native=(x: 231.47265625, y: 472.0234375) size=ivec2(3024, 1964) key=true active=true
+41770ms MOVE stage=4 events=2759 mouse=ivec2(942, 860) native=(x: 470.51171875, y: 551.625) size=ivec2(3024, 1964) key=true active=true
+41887ms MOVE stage=4 events=2760 mouse=ivec2(942, 860) native=(x: 470.51171875, y: 551.625) size=ivec2(3024, 1964) key=true active=true
+42087ms MOVE stage=4 events=2761 mouse=ivec2(944, 860) native=(x: 471.671875, y: 551.859375) size=ivec2(3024, 1964) key=true active=true
+42204ms MOVE stage=4 events=2775 mouse=ivec2(1454, 912) native=(x: 727.3828125, y: 525.51171875) size=ivec2(3024, 1964) key=true active=true
+42420ms MOVE stage=4 events=2784 mouse=ivec2(1510, 954) native=(x: 754.71484375, y: 504.5234375) size=ivec2(3024, 1964) key=true active=true
+42604ms MOVE stage=4 events=2785 mouse=ivec2(1504, 954) native=(x: 751.50390625, y: 504.5234375) size=ivec2(3024, 1964) key=true active=true
+42704ms MOVE stage=4 events=2797 mouse=ivec2(0, 750) native=(x: 0.0, y: 607.43359375) size=ivec2(3024, 1964) key=true active=true
+43554ms MOVE stage=4 events=2803 mouse=ivec2(2, 770) native=(x: 1.390625, y: 597.1796875) size=ivec2(3024, 1964) key=true active=true
+43670ms MOVE stage=4 events=2817 mouse=ivec2(448, 728) native=(x: 223.8125, y: 618.37890625) size=ivec2(3024, 1964) key=true active=true
+43787ms MOVE stage=4 events=2825 mouse=ivec2(536, 696) native=(x: 267.96484375, y: 634.3984375) size=ivec2(3024, 1964) key=true active=true
+43888ms MOVE stage=4 events=2826 mouse=ivec2(536, 696) native=(x: 267.96484375, y: 634.3984375) size=ivec2(3024, 1964) key=true active=true
+44021ms MOVE stage=4 events=2827 mouse=ivec2(536, 694) native=(x: 267.96484375, y: 634.6328125) size=ivec2(3024, 1964) key=true active=true
+44137ms MOVE stage=4 events=2843 mouse=ivec2(174, 366) native=(x: 86.77734375, y: 799.13671875) size=ivec2(3024, 1964) key=true active=true
+44237ms MOVE stage=4 events=2855 mouse=ivec2(0, 214) native=(x: 0.06640625, y: 875.23046875) size=ivec2(3024, 1964) key=true active=true
+44353ms MOVE stage=4 events=2869 mouse=ivec2(0, 166) native=(x: 0.0, y: 899.0546875) size=ivec2(3024, 1964) key=true active=true
+44604ms MOVE stage=4 events=2873 mouse=ivec2(0, 148) native=(x: 0.0, y: 908.078125) size=ivec2(3024, 1964) key=true active=true
+44704ms MOVE stage=4 events=2885 mouse=ivec2(0, 0) native=(x: 0.0, y: 982.0) size=ivec2(3024, 1964) key=true active=true
+44821ms MOVE stage=4 events=2899 mouse=ivec2(0, 0) native=(x: 0.0, y: 982.0) size=ivec2(3024, 1964) key=true active=true
+45171ms MOVE stage=4 events=2907 mouse=ivec2(0, 30) native=(x: 0.0, y: 967.1796875) size=ivec2(3024, 1964) key=true active=true
+45287ms MOVE stage=4 events=2923 mouse=ivec2(0, 980) native=(x: 0.0, y: 491.7734375) size=ivec2(3024, 1964) key=true active=true
+45504ms MOVE stage=4 events=2933 mouse=ivec2(2, 1162) native=(x: 0.703125, y: 400.9765625) size=ivec2(3024, 1964) key=true active=true
+45604ms MOVE stage=4 events=2945 mouse=ivec2(118, 1226) native=(x: 59.2578125, y: 368.95703125) size=ivec2(3024, 1964) key=true active=true
+45721ms MOVE stage=4 events=2959 mouse=ivec2(238, 1350) native=(x: 119.05859375, y: 307.16796875) size=ivec2(3024, 1964) key=true active=true
+45970ms MOVE stage=4 events=2967 mouse=ivec2(308, 1414) native=(x: 153.6015625, y: 274.87890625) size=ivec2(3024, 1964) key=true active=true
+46104ms MOVE stage=4 events=2968 mouse=ivec2(308, 1414) native=(x: 153.6015625, y: 274.87890625) size=ivec2(3024, 1964) key=true active=true
+46237ms MOVE stage=4 events=2969 mouse=ivec2(280, 1414) native=(x: 139.8515625, y: 274.87890625) size=ivec2(3024, 1964) key=true active=true
+46337ms MOVE stage=4 events=2981 mouse=ivec2(0, 1504) native=(x: 0.0, y: 226.90625) size=ivec2(3024, 1964) key=true active=true
+46437ms MOVE stage=4 events=2993 mouse=ivec2(0, 1538) native=(x: 0.0, y: 213.203125) size=ivec2(3024, 1964) key=true active=true
+46604ms MOVE stage=4 events=3001 mouse=ivec2(0, 1538) native=(x: 0.0, y: 213.203125) size=ivec2(3024, 1964) key=true active=true
+46737ms MOVE stage=4 events=3005 mouse=ivec2(0, 1538) native=(x: 0.0, y: 213.203125) size=ivec2(3024, 1964) key=true active=true
+46887ms MOVE stage=4 events=3011 mouse=ivec2(0, 1540) native=(x: 0.0, y: 212.49609375) size=ivec2(3024, 1964) key=true active=true
+47104ms MOVE stage=4 events=3013 mouse=ivec2(0, 1564) native=(x: 0.0, y: 199.765625) size=ivec2(3024, 1964) key=true active=true
+47204ms MOVE stage=4 events=3025 mouse=ivec2(0, 1964) native=(x: 0.0, y: 0.015625) size=ivec2(3024, 1964) key=true active=true
+47321ms MOVE stage=4 events=3039 mouse=ivec2(0, 1964) native=(x: 0.0, y: 0.015625) size=ivec2(3024, 1964) key=true active=true
+47437ms MOVE stage=4 events=3053 mouse=ivec2(0, 1964) native=(x: 0.0, y: 0.015625) size=ivec2(3024, 1964) key=true active=true
+47554ms MOVE stage=4 events=3063 mouse=ivec2(0, 1964) native=(x: 0.0, y: 0.015625) size=ivec2(3024, 1964) key=true active=true
+47671ms MOVE stage=4 events=3073 mouse=ivec2(300, 1646) native=(x: 149.87109375, y: 158.68359375) size=ivec2(3024, 1964) key=true active=true
+47771ms MOVE stage=4 events=3085 mouse=ivec2(810, 1144) native=(x: 404.78515625, y: 410.37109375) size=ivec2(3024, 1964) key=true active=true
+48004ms MOVE stage=4 events=3096 mouse=ivec2(870, 1118) native=(x: 435.0859375, y: 423.3515625) size=ivec2(3024, 1964) key=true active=true
+48154ms MOVE stage=4 events=3098 mouse=ivec2(870, 1118) native=(x: 435.0859375, y: 423.3515625) size=ivec2(3024, 1964) key=true active=true
+48320ms MOVE stage=4 events=3100 mouse=ivec2(870, 1118) native=(x: 435.0859375, y: 423.3515625) size=ivec2(3024, 1964) key=true active=true
+48537ms MOVE stage=4 events=3101 mouse=ivec2(872, 1118) native=(x: 436.24609375, y: 423.3515625) size=ivec2(3024, 1964) key=true active=true
+48637ms MOVE stage=4 events=3113 mouse=ivec2(1372, 1168) native=(x: 685.65234375, y: 398.13671875) size=ivec2(3024, 1964) key=true active=true
+48820ms MOVE stage=4 events=3120 mouse=ivec2(1406, 1170) native=(x: 702.8359375, y: 397.4921875) size=ivec2(3024, 1964) key=true active=true
+48971ms MOVE stage=4 events=3121 mouse=ivec2(1400, 1162) native=(x: 697.83984375, y: 404.35546875) size=ivec2(3024, 1964) key=true active=true
+49121ms MOVE stage=4 events=3135 mouse=ivec2(1202, 938) native=(x: 600.640625, y: 512.71484375) size=ivec2(3024, 1964) key=true active=true
+49237ms MOVE stage=4 events=3136 mouse=ivec2(1202, 938) native=(x: 600.640625, y: 512.71484375) size=ivec2(3024, 1964) key=true active=true
+49387ms MOVE stage=4 events=3137 mouse=ivec2(1200, 938) native=(x: 599.94140625, y: 512.71484375) size=ivec2(3024, 1964) key=true active=true
+49488ms MOVE stage=4 events=3151 mouse=ivec2(0, 1266) native=(x: 0.0, y: 348.9921875) size=ivec2(3024, 1964) key=true active=true
+50820ms MOVE stage=4 events=3157 mouse=ivec2(10, 1366) native=(x: 5.015625, y: 298.52734375) size=ivec2(3024, 1964) key=true active=true
+50920ms MOVE stage=4 events=3169 mouse=ivec2(622, 1314) native=(x: 310.80078125, y: 324.97265625) size=ivec2(3024, 1964) key=true active=true
+51121ms MOVE stage=4 events=3178 mouse=ivec2(698, 1310) native=(x: 348.52734375, y: 326.765625) size=ivec2(3024, 1964) key=true active=true
+51270ms MOVE stage=4 events=3179 mouse=ivec2(698, 1298) native=(x: 348.52734375, y: 333.3671875) size=ivec2(3024, 1964) key=true active=true
+51371ms MOVE stage=4 events=3191 mouse=ivec2(688, 1006) native=(x: 343.6171875, y: 479.32421875) size=ivec2(3024, 1964) key=true active=true
+51504ms MOVE stage=4 events=3194 mouse=ivec2(688, 1006) native=(x: 343.6171875, y: 479.32421875) size=ivec2(3024, 1964) key=true active=true
+51671ms MOVE stage=4 events=3195 mouse=ivec2(686, 1006) native=(x: 342.91796875, y: 479.32421875) size=ivec2(3024, 1964) key=true active=true
+51787ms MOVE stage=4 events=3209 mouse=ivec2(442, 866) native=(x: 220.921875, y: 549.4609375) size=ivec2(3024, 1964) key=true active=true
+51887ms MOVE stage=4 events=3223 mouse=ivec2(342, 778) native=(x: 170.85546875, y: 593.15234375) size=ivec2(3024, 1964) key=true active=true
+52103ms MOVE stage=4 events=3230 mouse=ivec2(330, 776) native=(x: 165.14453125, y: 591.2734375) size=ivec2(3024, 1964) key=true active=true
+52770ms MOVE stage=4 events=3233 mouse=ivec2(330, 782) native=(x: 165.14453125, y: 591.2734375) size=ivec2(3024, 1964) key=true active=true
+52887ms MOVE stage=4 events=3234 mouse=ivec2(330, 782) native=(x: 165.14453125, y: 591.2734375) size=ivec2(3024, 1964) key=true active=true
+53053ms MOVE stage=4 events=3235 mouse=ivec2(344, 784) native=(x: 171.6171875, y: 590.2578125) size=ivec2(3024, 1964) key=true active=true
+53553ms MOVE stage=4 events=3245 mouse=ivec2(504, 936) native=(x: 252.29296875, y: 513.828125) size=ivec2(3024, 1964) key=true active=true
+53654ms MOVE stage=4 events=3257 mouse=ivec2(178, 1596) native=(x: 89.47265625, y: 184.24609375) size=ivec2(3024, 1964) key=true active=true
+53770ms MOVE stage=4 events=3271 mouse=ivec2(110, 1826) native=(x: 55.0703125, y: 68.890625) size=ivec2(3024, 1964) key=true active=true
+53870ms MOVE stage=4 events=3283 mouse=ivec2(104, 1842) native=(x: 51.7109375, y: 61.29296875) size=ivec2(3024, 1964) key=true active=true
+53987ms MOVE stage=4 events=3293 mouse=ivec2(130, 1798) native=(x: 64.83984375, y: 82.7421875) size=ivec2(3024, 1964) key=true active=true
+54087ms MOVE stage=4 events=3305 mouse=ivec2(158, 1748) native=(x: 79.2265625, y: 107.73046875) size=ivec2(3024, 1964) key=true active=true
+54187ms MOVE stage=4 events=3311 mouse=ivec2(164, 1738) native=(x: 81.9765625, y: 112.88671875) size=ivec2(3024, 1964) key=true active=true
+54487ms MOVE stage=4 events=3312 mouse=ivec2(162, 1738) native=(x: 81.45703125, y: 112.88671875) size=ivec2(3024, 1964) key=true active=true
+54604ms MOVE stage=4 events=3319 mouse=ivec2(148, 1732) native=(x: 73.57421875, y: 115.875) size=ivec2(3024, 1964) key=true active=true
+54704ms MOVE stage=4 events=3325 mouse=ivec2(116, 1718) native=(x: 57.671875, y: 123.15234375) size=ivec2(3024, 1964) key=true active=true
+54904ms MOVE stage=4 events=3329 mouse=ivec2(118, 1702) native=(x: 59.0390625, y: 130.52734375) size=ivec2(3024, 1964) key=true active=true
+55021ms MOVE stage=4 events=3343 mouse=ivec2(1290, 1440) native=(x: 644.96875, y: 261.73828125) size=ivec2(3024, 1964) key=true active=true
+55303ms MOVE stage=4 events=3347 mouse=ivec2(1354, 1434) native=(x: 677.4296875, y: 265.359375) size=ivec2(3024, 1964) key=true active=true
+55403ms MOVE stage=4 events=3359 mouse=ivec2(844, 1282) native=(x: 422.42578125, y: 340.60546875) size=ivec2(3024, 1964) key=true active=true
+55504ms MOVE stage=4 events=3373 mouse=ivec2(264, 1604) native=(x: 132.078125, y: 180.26953125) size=ivec2(3024, 1964) key=true active=true
+55687ms MOVE stage=4 events=3377 mouse=ivec2(262, 1636) native=(x: 131.25, y: 163.88671875) size=ivec2(3024, 1964) key=true active=true
+55804ms MOVE stage=4 events=3391 mouse=ivec2(140, 1696) native=(x: 70.3046875, y: 133.54296875) size=ivec2(3024, 1964) key=true active=true
+55920ms MOVE stage=4 events=3405 mouse=ivec2(104, 1728) native=(x: 51.95703125, y: 117.73828125) size=ivec2(3024, 1964) key=true active=true
+56037ms MOVE stage=4 events=3407 mouse=ivec2(104, 1728) native=(x: 51.95703125, y: 117.73828125) size=ivec2(3024, 1964) key=true active=true
+56154ms MOVE stage=4 events=3408 mouse=ivec2(104, 1728) native=(x: 52.18359375, y: 117.73828125) size=ivec2(3024, 1964) key=true active=true
+56270ms MOVE stage=4 events=3415 mouse=ivec2(136, 1736) native=(x: 68.12890625, y: 114.234375) size=ivec2(3024, 1964) key=true active=true
+56371ms MOVE stage=4 events=3420 mouse=ivec2(142, 1742) native=(x: 71.0546875, y: 111.24609375) size=ivec2(3024, 1964) key=true active=true
+56487ms MOVE stage=4 events=3427 mouse=ivec2(154, 1762) native=(x: 77.08984375, y: 101.38671875) size=ivec2(3024, 1964) key=true active=true
+56604ms MOVE stage=4 events=3434 mouse=ivec2(156, 1772) native=(x: 77.53515625, y: 96.1796875) size=ivec2(3024, 1964) key=true active=true
+56704ms MOVE stage=4 events=3439 mouse=ivec2(156, 1778) native=(x: 77.89453125, y: 92.54296875) size=ivec2(3024, 1964) key=true active=true
+56837ms MOVE stage=4 events=3441 mouse=ivec2(156, 1780) native=(x: 78.0078125, y: 92.1875) size=ivec2(3024, 1964) key=true active=true
+57270ms MOVE stage=4 events=3442 mouse=ivec2(156, 1778) native=(x: 78.12109375, y: 92.5234375) size=ivec2(3024, 1964) key=true active=true
+57370ms MOVE stage=4 events=3448 mouse=ivec2(156, 1772) native=(x: 78.12109375, y: 95.859375) size=ivec2(3024, 1964) key=true active=true
+57487ms MOVE stage=4 events=3455 mouse=ivec2(152, 1758) native=(x: 75.83984375, y: 103.328125) size=ivec2(3024, 1964) key=true active=true
+57587ms MOVE stage=4 events=3458 mouse=ivec2(152, 1756) native=(x: 75.60546875, y: 103.81640625) size=ivec2(3024, 1964) key=true active=true
+57687ms MOVE stage=4 events=3464 mouse=ivec2(146, 1744) native=(x: 72.78515625, y: 110.421875) size=ivec2(3024, 1964) key=true active=true
+57820ms MOVE stage=4 events=3471 mouse=ivec2(138, 1734) native=(x: 69.44140625, y: 115.25390625) size=ivec2(3024, 1964) key=true active=true
+58137ms MOVE stage=4 events=3474 mouse=ivec2(138, 1734) native=(x: 68.95703125, y: 115.2578125) size=ivec2(3024, 1964) key=true active=true
+58237ms MOVE stage=4 events=3480 mouse=ivec2(136, 1740) native=(x: 68.16015625, y: 112.47265625) size=ivec2(3024, 1964) key=true active=true
+58337ms MOVE stage=4 events=3486 mouse=ivec2(120, 1744) native=(x: 59.625, y: 109.6171875) size=ivec2(3024, 1964) key=true active=true
+58587ms MOVE stage=4 events=3492 mouse=ivec2(108, 1746) native=(x: 54.4609375, y: 108.6796875) size=ivec2(3024, 1964) key=true active=true
+58687ms MOVE stage=4 events=3497 mouse=ivec2(112, 1744) native=(x: 55.83984375, y: 110.34765625) size=ivec2(3024, 1964) key=true active=true
+58803ms MOVE stage=4 events=3504 mouse=ivec2(116, 1742) native=(x: 58.0859375, y: 111.12890625) size=ivec2(3024, 1964) key=true active=true
+58954ms MOVE stage=4 events=3509 mouse=ivec2(118, 1742) native=(x: 59.27734375, y: 111.12890625) size=ivec2(3024, 1964) key=true active=true
+59054ms MOVE stage=4 events=3513 mouse=ivec2(122, 1742) native=(x: 61.453125, y: 110.92578125) size=ivec2(3024, 1964) key=true active=true
+59170ms MOVE stage=4 events=3519 mouse=ivec2(126, 1744) native=(x: 63.328125, y: 109.89453125) size=ivec2(3024, 1964) key=true active=true
+59287ms MOVE stage=4 events=3521 mouse=ivec2(128, 1744) native=(x: 63.8046875, y: 109.89453125) size=ivec2(3024, 1964) key=true active=true
+59403ms MOVE stage=4 events=3528 mouse=ivec2(134, 1748) native=(x: 66.78515625, y: 107.78125) size=ivec2(3024, 1964) key=true active=true
+59570ms MOVE stage=4 events=3532 mouse=ivec2(134, 1750) native=(x: 66.79296875, y: 106.984375) size=ivec2(3024, 1964) key=true active=true
+59720ms MOVE stage=4 events=3533 mouse=ivec2(138, 1740) native=(x: 69.33203125, y: 112.5) size=ivec2(3024, 1964) key=true active=true
+59820ms MOVE stage=4 events=3545 mouse=ivec2(696, 1210) native=(x: 347.8125, y: 376.73046875) size=ivec2(3024, 1964) key=true active=true
+60021ms MOVE stage=4 events=3551 mouse=ivec2(934, 1098) native=(x: 467.30078125, y: 432.62890625) size=ivec2(3024, 1964) key=true active=true
+60137ms MOVE stage=4 events=3552 mouse=ivec2(934, 1098) native=(x: 467.30078125, y: 432.62890625) size=ivec2(3024, 1964) key=true active=true
+60303ms MOVE stage=4 events=3553 mouse=ivec2(926, 1114) native=(x: 462.5, y: 424.5390625) size=ivec2(3024, 1964) key=true active=true
+60404ms MOVE stage=4 events=3565 mouse=ivec2(786, 1398) native=(x: 392.625, y: 282.77734375) size=ivec2(3024, 1964) key=true active=true
+60587ms MOVE stage=4 events=3570 mouse=ivec2(768, 1436) native=(x: 384.0234375, y: 263.55859375) size=ivec2(3024, 1964) key=true active=true
+60854ms MOVE stage=4 events=3571 mouse=ivec2(768, 1436) native=(x: 384.0234375, y: 263.55859375) size=ivec2(3024, 1964) key=true active=true
+60970ms MOVE stage=4 events=3572 mouse=ivec2(768, 1436) native=(x: 384.0234375, y: 263.55859375) size=ivec2(3024, 1964) key=true active=true
+61637ms MOVE stage=4 events=3573 mouse=ivec2(772, 1436) native=(x: 386.09765625, y: 263.55859375) size=ivec2(3024, 1964) key=true active=true
+61737ms MOVE stage=4 events=3585 mouse=ivec2(814, 1436) native=(x: 406.65625, y: 264.328125) size=ivec2(3024, 1964) key=true active=true
+61853ms MOVE stage=4 events=3595 mouse=ivec2(810, 1446) native=(x: 404.85546875, y: 259.453125) size=ivec2(3024, 1964) key=true active=true
+62054ms MOVE stage=4 events=3598 mouse=ivec2(810, 1446) native=(x: 404.85546875, y: 259.453125) size=ivec2(3024, 1964) key=true active=true
+66520ms MOVE stage=4 events=3599 mouse=ivec2(812, 1446) native=(x: 406.46875, y: 259.453125) size=ivec2(3024, 1964) key=true active=true
+66620ms MOVE stage=4 events=3611 mouse=ivec2(1560, 1728) native=(x: 780.2421875, y: 117.58203125) size=ivec2(3024, 1964) key=true active=true
+66854ms MOVE stage=4 events=3615 mouse=ivec2(1570, 1738) native=(x: 784.81640625, y: 113.35546875) size=ivec2(3024, 1964) key=true active=true
+66971ms MOVE stage=4 events=3629 mouse=ivec2(1582, 1836) native=(x: 790.8828125, y: 64.15234375) size=ivec2(3024, 1964) key=true active=true
+67071ms MOVE stage=4 events=3641 mouse=ivec2(1594, 1868) native=(x: 797.15234375, y: 47.75) size=ivec2(3024, 1964) key=true active=true
+67187ms MOVE stage=4 events=3655 mouse=ivec2(1608, 1872) native=(x: 803.88671875, y: 46.06640625) size=ivec2(3024, 1964) key=true active=true
+67303ms MOVE stage=4 events=3667 mouse=ivec2(1612, 1874) native=(x: 806.30078125, y: 44.7890625) size=ivec2(3024, 1964) key=true active=true
+67404ms MOVE stage=4 events=3679 mouse=ivec2(1618, 1876) native=(x: 808.86328125, y: 43.7578125) size=ivec2(3024, 1964) key=true active=true
+67587ms MOVE stage=4 events=3684 mouse=ivec2(1618, 1876) native=(x: 808.86328125, y: 43.51953125) size=ivec2(3024, 1964) key=true active=true
+67787ms MOVE stage=4 events=3685 mouse=ivec2(1618, 1874) native=(x: 808.86328125, y: 45.12109375) size=ivec2(3024, 1964) key=true active=true
+67887ms MOVE stage=4 events=3697 mouse=ivec2(1576, 1548) native=(x: 788.1484375, y: 207.83203125) size=ivec2(3024, 1964) key=true active=true
+68052ms MOVE stage=4 events=3709 mouse=ivec2(1570, 1454) native=(x: 785.01171875, y: 254.859375) size=ivec2(3024, 1964) key=true active=true
+68153ms MOVE stage=4 events=3721 mouse=ivec2(1568, 1508) native=(x: 783.81640625, y: 228.4453125) size=ivec2(3024, 1964) key=true active=true
+68254ms MOVE stage=4 events=3733 mouse=ivec2(1570, 1618) native=(x: 785.24609375, y: 172.8046875) size=ivec2(3024, 1964) key=true active=true
+68354ms MOVE stage=4 events=3745 mouse=ivec2(1630, 1776) native=(x: 814.76953125, y: 93.6796875) size=ivec2(3024, 1964) key=true active=true
+68454ms MOVE stage=4 events=3757 mouse=ivec2(1632, 1810) native=(x: 815.87109375, y: 76.67578125) size=ivec2(3024, 1964) key=true active=true
+68554ms MOVE stage=4 events=3769 mouse=ivec2(1642, 1834) native=(x: 820.81640625, y: 64.73828125) size=ivec2(3024, 1964) key=true active=true
+68654ms MOVE stage=4 events=3781 mouse=ivec2(1656, 1842) native=(x: 827.76953125, y: 61.03125) size=ivec2(3024, 1964) key=true active=true
+68771ms MOVE stage=4 events=3789 mouse=ivec2(1640, 1816) native=(x: 819.98828125, y: 73.6953125) size=ivec2(3024, 1964) key=true active=true
+68871ms MOVE stage=4 events=3801 mouse=ivec2(1580, 1716) native=(x: 790.36328125, y: 123.76171875) size=ivec2(3024, 1964) key=true active=true
+68987ms MOVE stage=4 events=3815 mouse=ivec2(1578, 1684) native=(x: 789.359375, y: 140.10546875) size=ivec2(3024, 1964) key=true active=true
+69103ms MOVE stage=4 events=3829 mouse=ivec2(1578, 1642) native=(x: 788.5078125, y: 161.2265625) size=ivec2(3024, 1964) key=true active=true
+69221ms MOVE stage=4 events=3843 mouse=ivec2(1590, 1616) native=(x: 794.796875, y: 173.8046875) size=ivec2(3024, 1964) key=true active=true
+69438ms MOVE stage=4 events=3857 mouse=ivec2(1618, 1588) native=(x: 808.5703125, y: 188.234375) size=ivec2(3024, 1964) key=true active=true
+69570ms MOVE stage=4 events=3859 mouse=ivec2(1616, 1580) native=(x: 808.14453125, y: 191.921875) size=ivec2(3024, 1964) key=true active=true
+69687ms MOVE stage=4 events=3873 mouse=ivec2(1570, 1290) native=(x: 784.83203125, y: 336.90234375) size=ivec2(3024, 1964) key=true active=true
+69837ms MOVE stage=4 events=3882 mouse=ivec2(1566, 1270) native=(x: 782.94921875, y: 347.4609375) size=ivec2(3024, 1964) key=true active=true
+85687ms MOVE stage=4 events=3883 mouse=ivec2(1558, 1262) native=(x: 779.0234375, y: 350.69140625) size=ivec2(3024, 1964) key=true active=true
+85804ms MOVE stage=4 events=3899 mouse=ivec2(1278, 1224) native=(x: 638.6328125, y: 369.63671875) size=ivec2(3024, 1964) key=true active=true
+85920ms MOVE stage=4 events=3913 mouse=ivec2(1096, 1208) native=(x: 548.4375, y: 378.0234375) size=ivec2(3024, 1964) key=true active=true
+86020ms MOVE stage=4 events=3925 mouse=ivec2(1076, 1198) native=(x: 538.0390625, y: 383.12109375) size=ivec2(3024, 1964) key=true active=true
+86137ms MOVE stage=4 events=3939 mouse=ivec2(1018, 1222) native=(x: 509.11328125, y: 371.43359375) size=ivec2(3024, 1964) key=true active=true
+86237ms MOVE stage=4 events=3951 mouse=ivec2(974, 1236) native=(x: 487.48046875, y: 363.66796875) size=ivec2(3024, 1964) key=true active=true
+86603ms MOVE stage=4 events=3959 mouse=ivec2(970, 1236) native=(x: 484.8203125, y: 363.66796875) size=ivec2(3024, 1964) key=true active=true
+86721ms MOVE stage=4 events=3977 mouse=ivec2(942, 1234) native=(x: 471.25390625, y: 365.359375) size=ivec2(3024, 1964) key=true active=true
+86837ms MOVE stage=4 events=3991 mouse=ivec2(1030, 1112) native=(x: 515.04296875, y: 426.046875) size=ivec2(3024, 1964) key=true active=true
+87088ms MOVE stage=4 events=4005 mouse=ivec2(1420, 738) native=(x: 710.41796875, y: 613.03125) size=ivec2(3024, 1964) key=true active=true
+88454ms MOVE stage=4 events=4007 mouse=ivec2(1420, 740) native=(x: 710.41796875, y: 612.109375) size=ivec2(3024, 1964) key=true active=true
+88570ms MOVE stage=4 events=4021 mouse=ivec2(1472, 848) native=(x: 735.66796875, y: 558.47265625) size=ivec2(3024, 1964) key=true active=true
+88670ms MOVE stage=4 events=4033 mouse=ivec2(1482, 906) native=(x: 741.34375, y: 529.09375) size=ivec2(3024, 1964) key=true active=true
+88770ms MOVE stage=4 events=4045 mouse=ivec2(1488, 1014) native=(x: 743.85546875, y: 474.796875) size=ivec2(3024, 1964) key=true active=true
+88870ms MOVE stage=4 events=4059 mouse=ivec2(1476, 1088) native=(x: 737.7890625, y: 438.2578125) size=ivec2(3024, 1964) key=true active=true
+88970ms MOVE stage=4 events=4071 mouse=ivec2(1472, 1100) native=(x: 736.0546875, y: 431.9296875) size=ivec2(3024, 1964) key=true active=true
+89087ms MOVE stage=4 events=4085 mouse=ivec2(1470, 1116) native=(x: 734.6640625, y: 424.4609375) size=ivec2(3024, 1964) key=true active=true
+89287ms MOVE stage=4 events=4097 mouse=ivec2(1466, 1130) native=(x: 733.1640625, y: 416.921875) size=ivec2(3024, 1964) key=true active=true
+89870ms MOVE stage=4 events=4099 mouse=ivec2(1466, 1130) native=(x: 733.1640625, y: 416.69140625) size=ivec2(3024, 1964) key=true active=true
+89987ms MOVE stage=4 events=4115 mouse=ivec2(1488, 1284) native=(x: 744.3515625, y: 339.60546875) size=ivec2(3024, 1964) key=true active=true
+90004ms SNAPSHOT window=5094420736 frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) visible=true key=true active=true mask=4 server=(0,0,1512,982) onscreen=1 layer=25 view=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) animating=false
+90004ms SNAPSHOT cgs=5093603952 size=(width: 1512.0, height: 982.0) clip=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) event=(origin: (x: inf, y: inf), size: (width: 0.0, height: 0.0)) activation=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) opaque=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0))
+90004ms Automatic trace timeout

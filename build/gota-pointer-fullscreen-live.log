@@ -1,0 +1,95 @@
+Hint: used config file '/Users/me/.nimby/nim/config/nim.cfg' [Conf]
+Hint: used config file '/Users/me/.nimby/nim/config/config.nims' [Conf]
+Hint: used config file '/Users/me/p/nim.cfg' [Conf]
+Hint: used config file '/Users/me/p/polyworld/config.nims' [Conf]
+..................................................................................................................................................................................................................................
+/Users/me/p/windy/src/windy/platforms/macos/platform.nim(14, 9) Hint: Using OpenGL backend [User]
+.........................
+/Users/me/p/polyworld/games/gods_of_the_arena/pointers.nim(2, 3) Hint: duplicate import of 'windy'; previous import here: /Users/me/p/polyworld/build/gota_pointer_fullscreen_check.nim(1, 25) [DuplicateModuleImport]
+...
+/Users/me/p/polyworld/build/gota_pointer_fullscreen_check.nim(1, 13) Warning: imported and not used: 'os' [UnusedImport]
+CC: system/exceptions.nim
+CC: std/private/digitsutils.nim
+CC: std/assertions.nim
+CC: std/private/dragonbox.nim
+CC: std/formatfloat.nim
+CC: system/dollars.nim
+CC: std/syncio.nim
+CC: system.nim
+CC: bitops.nim
+CC: math.nim
+CC: unicode.nim
+CC: strutils.nim
+CC: std/oserrors.nim
+CC: posix.nim
+CC: options.nim
+CC: times.nim
+CC: std/cmdline.nim
+CC: tables.nim
+CC: pixie/common.nim
+CC: pixie/simd/neon.nim
+CC: pixie/internal.nim
+CC: pixie/fontformats/opentype.nim
+CC: zippy/common.nim
+CC: zippy/internal.nim
+CC: zippy/bitstreams.nim
+CC: pixie/fileformats/jpeg.nim
+CC: zippy/adler32_simd.nim
+CC: zippy/adler32.nim
+CC: zippy/crc32_simd.nim
+CC: zippy/crc.nim
+CC: zippy/lz77.nim
+CC: zippy/snappy.nim
+CC: heapqueue.nim
+CC: zippy/deflate.nim
+CC: zippy/inflate.nim
+CC: std/sysrand.nim
+CC: zippy.nim
+CC: crunchy/common.nim
+CC: crunchy/adler32_simd.nim
+CC: crunchy/adler32.nim
+CC: crunchy/crc32_simd.nim
+CC: crunchy/crc32.nim
+CC: pixie/fileformats/png.nim
+CC: windy/common.nim
+CC: cpuinfo.nim
+CC: deques.nim
+CC: windy/platforms/macos/utils.nim
+CC: std/monotimes.nim
+CC: random.nim
+CC: windy/internal.nim
+CC: windy/platforms/macos/objc.nim
+CC: dynlib.nim
+CC: opengl.nim
+CC: windy/platforms/macos/macdefs.nim
+CC: asyncfutures.nim
+CC: asyncstreams.nim
+CC: nativesockets.nim
+CC: selectors.nim
+CC: asyncdispatch.nim
+CC: asyncnet.nim
+CC: httpcore.nim
+CC: httpclient.nim
+CC: ws.nim
+CC: windy/http.nim
+CC: windy/platforms/macos/platform.nim
+CC: polyworld/displays.nim
+CC: polyworld/inputs.nim
+CC: polyworld/rtscameras.nim
+CC: gota_pointer_fullscreen_check.nim
+Hint:  [Link]
+Hint: mm: orc; threads: on; opt: speed; options: -d:release
+155529 lines; 2.802s; 420.754MiB peakmem; proj: /Users/me/p/polyworld/build/gota_pointer_fullscreen_check.nim; out: /Users/me/p/polyworld/build/gota_pointer_fullscreen_check [SuccessX]
+Hint: /Users/me/p/polyworld/build/gota_pointer_fullscreen_check [Exec]
+2026-11-14 14:48:03.587 gota_pointer_fullscreen_check[15628:1673127] +[IMKClient subclass]: chose IMKClient_Modern
+2026-11-14 14:48:03.587 gota_pointer_fullscreen_check[15628:1673127] +[IMKInputSession subclass]: chose IMKInputSession_Modern
+Entering fullscreen with Off
+Leaving fullscreen with Off
+PASS native fullscreen round trip: Off
+Entering fullscreen with Fullscreen only
+Leaving fullscreen with Fullscreen only
+PASS native fullscreen round trip: Fullscreen only
+Entering fullscreen with Always
+Leaving fullscreen with Always
+PASS native fullscreen round trip: Always
+PASS real fullscreen entry/exit, cursor confinement and window controls

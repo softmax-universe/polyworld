@@ -1,0 +1,19 @@
+Hint: used config file '/Users/me/.nimby/nim/config/nim.cfg' [Conf]
+Hint: used config file '/Users/me/.nimby/nim/config/config.nims' [Conf]
+Hint: used config file '/Users/me/p/nim.cfg' [Conf]
+Hint: used config file '/Users/me/p/polyworld/config.nims' [Conf]
+...................................................................................................................................................................................................................................
+/Users/me/p/windy/src/windy/platforms/macos/platform.nim(14, 9) Hint: Using OpenGL backend [User]
+........................
+/Users/me/p/polyworld/games/gods_of_the_arena/pointers.nim(2, 3) Hint: duplicate import of 'windy'; previous import here: /Users/me/p/polyworld/build/gota_pointer_probe.nim(2, 8) [DuplicateModuleImport]
+...
+/Users/me/p/windy/src/windy/platforms/macos/objc.nim(159, 14) Hint: 'addProtocol' is declared but not used [XDeclaredButNotUsed]
+CC: std/objectdollar.nim
+CC: system.nim
+CC: strformat.nim
+CC: windy/platforms/macos/objc.nim
+CC: windy/platforms/macos/platform.nim
+CC: gota_pointer_probe.nim
+Hint:  [Link]
+Hint: mm: orc; threads: on; opt: speed; options: -d:release
+155434 lines; 2.883s; 420.984MiB peakmem; proj: /Users/me/p/polyworld/build/gota_pointer_probe.nim; out: /Users/me/p/polyworld/build/GotaPointerProbe.app/Contents/MacOS/gota_pointer_probe [SuccessX]

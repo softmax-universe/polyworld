@@ -1,0 +1,95 @@
+(lldb) target create "build/inspect_window_confinement"
+Current executable set to '/Users/me/p/polyworld/build/inspect_window_confinement' (arm64).
+(lldb) breakpoint set --name main
+Breakpoint 1: 26 locations.
+(lldb) run
+Process 25371 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 1.1
+    frame #0: 0x0000000100003c08 inspect_window_confinement`main
+inspect_window_confinement`main:
+->  0x100003c08 <+0>:  sub    sp, sp, #0xd0
+    0x100003c0c <+4>:  stp    x29, x30, [sp, #0xc0]
+    0x100003c10 <+8>:  add    x29, sp, #0xc0
+    0x100003c14 <+12>: adrp   x8, 1
+Target 0: (inspect_window_confinement) stopped.
+Process 25371 launched: '/Users/me/p/polyworld/build/inspect_window_confinement' (arm64)
+(lldb) disassemble --name "-[NSWindow _cgsWindow]"
+AppKit`-[NSWindow _cgsWindow]:
+    0x19fdce5d4 <+0>:   pacibsp 
+    0x19fdce5d8 <+4>:   sub    sp, sp, #0xb0
+    0x19fdce5dc <+8>:   stp    x20, x19, [sp, #0x90]
+    0x19fdce5e0 <+12>:  stp    x29, x30, [sp, #0xa0]
+    0x19fdce5e4 <+16>:  add    x29, sp, #0xa0
+    0x19fdce5e8 <+20>:  adrp   x8, 374726
+    0x19fdce5ec <+24>:  ldr    x8, [x8, #0x378]
+    0x19fdce5f0 <+28>:  ldr    x8, [x8]
+    0x19fdce5f4 <+32>:  stur   x8, [x29, #-0x18]
+    0x19fdce5f8 <+36>:  cbz    x0, 0x19fdce624           ; <+80>
+    0x19fdce5fc <+40>:  adrp   x8, 390243
+    0x19fdce600 <+44>:  ldrsw  x8, [x8, #0x9b8]
+    0x19fdce604 <+48>:  ldr    x8, [x0, x8]
+    0x19fdce608 <+52>:  adrp   x9, 390243
+    0x19fdce60c <+56>:  ldrsw  x9, [x9, #0xa00]
+    0x19fdce610 <+60>:  ldr    x9, [x0, x9]
+    0x19fdce614 <+64>:  ldr    x0, [x9, #0x2f8]
+    0x19fdce618 <+68>:  cmp    x8, #0x1
+    0x19fdce61c <+72>:  ccmp   x0, #0x0, #0x0, ge
+    0x19fdce620 <+76>:  b.eq   0x19fdce64c               ; <+120>
+    0x19fdce624 <+80>:  ldur   x8, [x29, #-0x18]
+    0x19fdce628 <+84>:  adrp   x9, 374726
+    0x19fdce62c <+88>:  ldr    x9, [x9, #0x378]
+    0x19fdce630 <+92>:  ldr    x9, [x9]
+    0x19fdce634 <+96>:  cmp    x9, x8
+    0x19fdce638 <+100>: b.ne   0x19fdce6d8               ; <+260>
+    0x19fdce63c <+104>: ldp    x29, x30, [sp, #0xa0]
+    0x19fdce640 <+108>: ldp    x20, x19, [sp, #0x90]
+    0x19fdce644 <+112>: add    sp, sp, #0xb0
+    0x19fdce648 <+116>: retab  
+    0x19fdce64c <+120>: str    xzr, [sp, #0x18]
+    0x19fdce650 <+124>: movi.2d v0, #0000000000000000
+    0x19fdce654 <+128>: stp    q0, q0, [sp, #0x60]
+    0x19fdce658 <+132>: stp    q0, q0, [sp, #0x40]
+    0x19fdce65c <+136>: str    q0, [sp, #0x30]
+    0x19fdce660 <+140>: adrp   x19, 374726
+    0x19fdce664 <+144>: ldr    x19, [x19, #0x4d8]
+    0x19fdce668 <+148>: mov    x0, x19
+    0x19fdce66c <+152>: mov    w1, #0x10                 ; =16 
+    0x19fdce670 <+156>: bl     0x1a0b7a690               ; symbol stub for: os_log_type_enabled
+    0x19fdce674 <+160>: cmp    w0, #0x0
+    0x19fdce678 <+164>: adrp   x8, 3704
+    0x19fdce67c <+168>: ldr    d0, [x8, #0x7a0]
+    0x19fdce680 <+172>: mov    w8, #0x2                  ; =2 
+    0x19fdce684 <+176>: cinc   w0, w8, ne
+    0x19fdce688 <+180>: str    s0, [sp, #0x20]
+    0x19fdce68c <+184>: stur   xzr, [sp, #0x24]
+    0x19fdce690 <+188>: mov    w8, #0xc                  ; =12 
+    0x19fdce694 <+192>: str    w8, [sp, #0x8]
+    0x19fdce698 <+196>: add    x8, sp, #0x20
+    0x19fdce69c <+200>: str    x8, [sp]
+    0x19fdce6a0 <+204>: adrp   x4, -225
+    0x19fdce6a4 <+208>: add    x4, x4, #0x0
+    0x19fdce6a8 <+212>: adrp   x7, 3959
+    0x19fdce6ac <+216>: add    x7, x7, #0x437            ; "assertion failure: "_windowNum <= 0 || _auxiliaryStorage->_cgsWindow != ((void *)0)" -> %lld"
+    0x19fdce6b0 <+220>: add    x1, sp, #0x18
+    0x19fdce6b4 <+224>: add    x2, sp, #0x30
+    0x19fdce6b8 <+228>: mov    w3, #0x50                 ; =80 
+    0x19fdce6bc <+232>: mov    x5, x19
+    0x19fdce6c0 <+236>: mov    w6, #0x10                 ; =16 
+    0x19fdce6c4 <+240>: bl     0x1a0b793a0               ; symbol stub for: _os_log_send_and_compose_impl
+    0x19fdce6c8 <+244>: mov    x1, x0
+    0x19fdce6cc <+248>: ldr    x0, [sp, #0x18]
+    0x19fdce6d0 <+252>: bl     0x1a0b79340               ; symbol stub for: _os_crash_msg
+    0x19fdce6d4 <+256>: brk    #0x1
+    0x19fdce6d8 <+260>: bl     0x1a0b79140               ; symbol stub for: __stack_chk_fail
+(lldb) image lookup -rn "NSCGSWindow.*(flush|transaction|commit)"
+5 matches found in /System/Library/Frameworks/AppKit.framework/Versions/C/AppKit:
+        Address: AppKit[0x00000001841ad9cc] (AppKit.__TEXT.__text + 1593560)
+        Summary: AppKit`-[_NSCGSWindowOrdering _hasUncommittedSpaceAssignmentChanges:]
+        Address: AppKit[0x0000000184bf4f0c] (AppKit.__TEXT.__text + 12371480)
+        Summary: AppKit`-[NSCGSWindowBackingStore flushBackBufferInRegion:]
+        Address: AppKit[0x0000000184bf4f58] (AppKit.__TEXT.__text + 12371556)
+        Summary: AppKit`-[NSCGSWindowBackingStore flushBackBufferInRect:]
+        Address: AppKit[0x0000000184bfa068] (AppKit.__TEXT.__text + 12392308)
+        Summary: AppKit`-[NSCGSWindow(NSCGSWindowSpaceAssignmentInternal) _hasUncommittedSpaceAssignmentChanges]
+        Address: AppKit[0x0000000184d8cd64] (AppKit.__TEXT.__text + 14042224)
+        Summary: AppKit`-[NSCGSWindow(NSCGSWindowSpaceGeometryInternal) _hasUncommittedSpaceGeometryChanges]

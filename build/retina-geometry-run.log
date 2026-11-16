@@ -1,0 +1,101 @@
+Hint: used config file '/Users/me/.nimby/nim/config/nim.cfg' [Conf]
+Hint: used config file '/Users/me/.nimby/nim/config/config.nims' [Conf]
+Hint: used config file '/Users/me/p/nim.cfg' [Conf]
+Hint: used config file '/Users/me/p/polyworld/config.nims' [Conf]
+...................................................................................................................................................................................................................................
+/Users/me/p/windy/src/windy/platforms/macos/platform.nim(14, 9) Hint: Using OpenGL backend [User]
+..........................
+/Users/me/p/windy/src/windy/platforms/macos/objc.nim(159, 14) Hint: 'addProtocol' is declared but not used [XDeclaredButNotUsed]
+..
+CC: system/exceptions.nim
+CC: std/private/digitsutils.nim
+CC: std/assertions.nim
+CC: std/private/dragonbox.nim
+CC: std/formatfloat.nim
+CC: std/objectdollar.nim
+CC: system/dollars.nim
+CC: std/syncio.nim
+CC: system.nim
+CC: bitops.nim
+CC: math.nim
+CC: unicode.nim
+CC: strutils.nim
+CC: std/oserrors.nim
+CC: posix.nim
+CC: options.nim
+CC: times.nim
+CC: std/cmdline.nim
+CC: os.nim
+CC: tables.nim
+CC: pixie/common.nim
+CC: pixie/simd/neon.nim
+CC: pixie/internal.nim
+CC: pixie/fontformats/opentype.nim
+CC: zippy/common.nim
+CC: zippy/internal.nim
+CC: zippy/bitstreams.nim
+CC: pixie/fileformats/jpeg.nim
+CC: zippy/adler32_simd.nim
+CC: zippy/adler32.nim
+CC: zippy/crc32_simd.nim
+CC: zippy/crc.nim
+CC: zippy/lz77.nim
+CC: zippy/snappy.nim
+CC: heapqueue.nim
+CC: zippy/deflate.nim
+CC: zippy/inflate.nim
+CC: std/sysrand.nim
+CC: zippy.nim
+CC: crunchy/common.nim
+CC: crunchy/adler32_simd.nim
+CC: crunchy/adler32.nim
+CC: crunchy/crc32_simd.nim
+CC: crunchy/crc32.nim
+CC: pixie/fileformats/png.nim
+CC: windy/common.nim
+CC: cpuinfo.nim
+CC: deques.nim
+CC: windy/platforms/macos/utils.nim
+CC: std/monotimes.nim
+CC: random.nim
+CC: windy/internal.nim
+CC: windy/platforms/macos/objc.nim
+CC: dynlib.nim
+CC: opengl.nim
+CC: windy/platforms/macos/macdefs.nim
+CC: asyncfutures.nim
+CC: asyncstreams.nim
+CC: nativesockets.nim
+CC: selectors.nim
+CC: asyncdispatch.nim
+CC: asyncnet.nim
+CC: httpcore.nim
+CC: httpclient.nim
+CC: ws.nim
+CC: windy/http.nim
+CC: windy/platforms/macos/platform.nim
+CC: polyworld/fullscreens.nim
+CC: polyworld/displays.nim
+CC: polyworld/inputs.nim
+CC: polyworld/rtscameras.nim
+CC: retina_geometry_probe.nim
+Hint:  [Link]
+Hint: mm: orc; threads: on; opt: speed; options: -d:release
+155708 lines; 3.298s; 420.75MiB peakmem; proj: /Users/me/p/polyworld/build/retina_geometry_probe.nim; out: /Users/me/p/polyworld/build/retina-geometry-probe [SuccessX]
+Hint: /Users/me/p/polyworld/build/retina-geometry-probe [Exec]
+initial frame=(origin: (x: 276.0, y: 207.0), size: (width: 960.0, height: 568.0)) view.frame=(origin: (x: 0.0, y: 0.0), size: (width: 960.0, height: 540.0)) view.bounds=(origin: (x: 0.0, y: 0.0), size: (width: 960.0, height: 540.0)) layout=(origin: (x: 0.0, y: 0.0), size: (width: 960.0, height: 540.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 1920.0, height: 1080.0)) confinement=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) size=ivec2(1920, 1080) scale=2.0 visible=false
+confined-windowed frame=(origin: (x: 276.0, y: 207.0), size: (width: 960.0, height: 568.0)) view.frame=(origin: (x: 0.0, y: 0.0), size: (width: 960.0, height: 540.0)) view.bounds=(origin: (x: 0.0, y: 0.0), size: (width: 960.0, height: 540.0)) layout=(origin: (x: 0.0, y: 0.0), size: (width: 960.0, height: 540.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 1920.0, height: 1080.0)) confinement=(origin: (x: 0.0, y: 0.0), size: (width: 960.0, height: 540.0)) size=ivec2(1920, 1080) scale=2.0 visible=false
+fullscreen-immediate frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) view.frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) view.bounds=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) layout=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) confinement=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) size=ivec2(3024, 1964) scale=2.0 visible=false
+fullscreen-polled frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) view.frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) view.bounds=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) layout=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) confinement=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) size=ivec2(3024, 1964) scale=2.0 visible=false
+shrunk-with-confinement frame=(origin: (x: 0.0, y: 0.0), size: (width: 600.0, height: 400.0)) view.frame=(origin: (x: 0.0, y: 0.0), size: (width: 600.0, height: 400.0)) view.bounds=(origin: (x: 0.0, y: 0.0), size: (width: 600.0, height: 400.0)) layout=(origin: (x: 0.0, y: 0.0), size: (width: 600.0, height: 400.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 1200.0, height: 800.0)) confinement=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) size=ivec2(1200, 800) scale=2.0 visible=false
+restored-with-confinement frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) view.frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) view.bounds=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) layout=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) confinement=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) size=ivec2(3024, 1964) scale=2.0 visible=false
+reapplied-identical-bounds frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) view.frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) view.bounds=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) layout=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) confinement=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) size=ivec2(3024, 1964) scale=2.0 visible=false
+reset-then-reapplied frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) view.frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) view.bounds=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) layout=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) confinement=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) size=ivec2(3024, 1964) scale=2.0 visible=false
+initial frame=(origin: (x: 506.0, y: 302.0), size: (width: 500.0, height: 378.0)) view.frame=(origin: (x: 0.0, y: 0.0), size: (width: 500.0, height: 350.0)) view.bounds=(origin: (x: 0.0, y: 0.0), size: (width: 500.0, height: 350.0)) layout=(origin: (x: 0.0, y: 0.0), size: (width: 500.0, height: 350.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 1000.0, height: 700.0)) confinement=(origin: (x: 0.0, y: 0.0), size: (width: 0.0, height: 0.0)) size=ivec2(1000, 700) scale=2.0 visible=false
+confined-windowed frame=(origin: (x: 506.0, y: 302.0), size: (width: 500.0, height: 378.0)) view.frame=(origin: (x: 0.0, y: 0.0), size: (width: 500.0, height: 350.0)) view.bounds=(origin: (x: 0.0, y: 0.0), size: (width: 500.0, height: 350.0)) layout=(origin: (x: 0.0, y: 0.0), size: (width: 500.0, height: 350.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 1000.0, height: 700.0)) confinement=(origin: (x: 0.0, y: 0.0), size: (width: 500.0, height: 350.0)) size=ivec2(1000, 700) scale=2.0 visible=false
+fullscreen-immediate frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) view.frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) view.bounds=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) layout=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) confinement=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) size=ivec2(3024, 1964) scale=2.0 visible=false
+fullscreen-polled frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) view.frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) view.bounds=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) layout=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) confinement=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) size=ivec2(3024, 1964) scale=2.0 visible=false
+shrunk-with-confinement frame=(origin: (x: 0.0, y: 0.0), size: (width: 600.0, height: 400.0)) view.frame=(origin: (x: 0.0, y: 0.0), size: (width: 600.0, height: 400.0)) view.bounds=(origin: (x: 0.0, y: 0.0), size: (width: 600.0, height: 400.0)) layout=(origin: (x: 0.0, y: 0.0), size: (width: 600.0, height: 400.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 1200.0, height: 800.0)) confinement=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) size=ivec2(1200, 800) scale=2.0 visible=false
+restored-with-confinement frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) view.frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) view.bounds=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) layout=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) confinement=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) size=ivec2(3024, 1964) scale=2.0 visible=false
+reapplied-identical-bounds frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) view.frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) view.bounds=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) layout=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) confinement=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) size=ivec2(3024, 1964) scale=2.0 visible=false
+reset-then-reapplied frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) view.frame=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) view.bounds=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) layout=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) backing=(origin: (x: 0.0, y: 0.0), size: (width: 3024.0, height: 1964.0)) confinement=(origin: (x: 0.0, y: 0.0), size: (width: 1512.0, height: 982.0)) size=ivec2(3024, 1964) scale=2.0 visible=false

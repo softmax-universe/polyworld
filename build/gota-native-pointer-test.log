@@ -1,0 +1,26 @@
+Hint: used config file '/Users/me/.nimby/nim/config/nim.cfg' [Conf]
+Hint: used config file '/Users/me/.nimby/nim/config/config.nims' [Conf]
+Hint: used config file '/Users/me/p/nim.cfg' [Conf]
+Hint: used config file '/Users/me/p/polyworld/config.nims' [Conf]
+Hint: used config file '/Users/me/p/polyworld/games/gods_of_the_arena/config.nims' [Conf]
+...................................................................................................................................................................................................................................
+/Users/me/p/windy/src/windy/platforms/macos/platform.nim(14, 9) Hint: Using OpenGL backend [User]
+..............................................................................
+/Users/me/p/polyworld/games/gods_of_the_arena/sim.nim(1911, 6) Hint: 'currentWaypointLayer' is declared but not used [XDeclaredButNotUsed]
+/Users/me/p/polyworld/games/gods_of_the_arena/sim.nim(5977, 6) Hint: 'settleSurface' is declared but not used [XDeclaredButNotUsed]
+.
+/Users/me/p/polyworld/games/gods_of_the_arena/pointers.nim(3, 24) Hint: duplicate import of 'rtscameras'; previous import here: /Users/me/p/polyworld/games/gods_of_the_arena/tests/test_pointers.nim(5, 13) [DuplicateModuleImport]
+/Users/me/p/windy/src/windy/platforms/macos/objc.nim(159, 14) Hint: 'addProtocol' is declared but not used [XDeclaredButNotUsed]
+CC: test_pointers.nim
+Hint:  [Link]
+Hint: mm: orc; threads: on; opt: speed; options: -d:release
+220563 lines; 2.877s; 651.969MiB peakmem; proj: /Users/me/p/polyworld/games/gods_of_the_arena/tests/test_pointers.nim; out: /Users/me/.cache/nim/test_pointers_r/test_pointers_1F555CCED91C2057401DDAD9865956F87460A8C5 [SuccessX]
+Hint: /Users/me/.cache/nim/test_pointers_r/test_pointers_1F555CCED91C2057401DDAD9865956F87460A8C5 [Exec]
+Testing confinement follows the edge-scrolling preference and focus
+Testing fullscreen presentation removes hover reveal without locking apps
+PASS native confinement settings, focus/refocus, resize and close
+PASS fullscreen-only bar suppression and native presentation restoration
+PASS native fullscreen delegate, transitions and failed-entry recovery
+PASS deferred control restoration retains the correct native owner
+PASS native confinement edges/corners at ivec2(800, 600) scale=2.0
+PASS native confinement edges/corners at ivec2(1200, 900) scale=2.0

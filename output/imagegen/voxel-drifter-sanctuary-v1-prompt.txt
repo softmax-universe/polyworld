@@ -1,0 +1,22 @@
+Generated with the built-in image_gen tool.
+
+Use case: stylized-concept
+Asset type: one convincing in-game screenshot for an original 3D voxel action-adventure prototype, wide 16:9 landscape.
+
+Primary request: Imagine Cube World's actual three-dimensional voxel rendering and third-person exploration camera rebuilt with Hyper Light Drifter's colors, eerie ancient technology, glowing machinery, and austere science-fantasy design. This must feel like a playable voxel game, not a painted illustration.
+
+Input images: All four provided images are style references, not edit targets. Images 1 and 2 supply the small-cube geometry, visibly stepped landforms, block-built character and trees, strong 3D depth, readable game lighting, and third-person camera. Images 3 and 4 supply the palette and mood: deep petrol teal and indigo, dusty violet ruins, saturated crimson-magenta foliage, pale mint stone, concentrated turquoise emissive machinery, ancient robotic forms, and lonely atmosphere. Translate those 2D references into genuine 3D voxel geometry.
+
+Scene/backdrop: An abandoned mechanical sanctuary at the edge of an expansive terraced valley. A broad broken pale stone causeway runs from the foreground across a readable open courtyard to a monumental stairway and tall ancient gateway in the middle distance. Angular weathered technological ruins, exposed recessed conduits and block-stepped cliff edges. Two imposing stationary geometric robot sentinels flank the stairs, with narrow cyan face slits and luminous geometric inset circuitry. Magenta and burgundy voxel trees with irregular angular canopies grow through the indigo and teal ruins. Beyond the sanctuary, show stepped hills, ruined towers, and a hazy turquoise-blue horizon so the world feels explorable.
+
+Subject: One small playable masked wanderer in the lower center-left foreground, seen from behind in three-quarter view, full body visible and occupying about one fifth of the image height. Slim adult proportions translated to simple angular voxel limbs, a dark navy faceless helmet, tattered crimson scarf and short angular cape, weathered dark armor, one narrow cyan energy sword held low. A small hovering geometric companion with a cyan core nearby. Character is intent on the path ahead, not posing for the viewer.
+
+Style/medium: Crisp real-time 3D voxel game rendering. All objects are constructed from clearly visible small cuboids with stepped silhouettes, flat square faces, simple solid-color materials, directional shadows and contact occlusion. Reference Cube World's voxel density, terracing and spatial depth. Retain restrained shapes and game-ready readability. Smooth perspective projection of actual block geometry, not a screen-space pixel-art filter. The ground, stairs, tree canopies, robots and character must all clearly share the same voxel construction language.
+
+Composition/framing: Wide 16:9 screenshot from a third-person follow camera a little above and behind the traveler, looking forward across the sanctuary, with a visible distant horizon in the upper quarter. Strong foreground/midground/background separation, walkable space around the player, modest perspective convergence. Let the player and nearby block geometry be large enough to assess the proposed game style. No top-down orthographic view, no floating diorama, no cinematic close-up.
+
+Lighting/mood: Luminous eerie daylight, pale cyan atmospheric haze, bold cool shadows, a few pale diagonal sunbeams. Cyan emissive accents on the sword, sentinel cores and gateway cast localized light with restrained bloom. Beautiful saturated color, still somber and alien. Quiet technological decay rather than cute fantasy.
+
+Color palette: Teal and cobalt terrain, muted lavender and indigo architecture, rose-magenta and deep burgundy foliage, pale mint/ivory paving, small brilliant turquoise energy accents, crimson scarf. Preserve Hyper Light Drifter's graphic color relationships and Cube World's legible block shading.
+
+Constraints: One coherent screenshot, no collage or panels. No title, branding, watermarks, labels or text. No large HUD obscuring the world. Avoid cute chibi proportions, oversized heads or cartoon eyes, smiling creatures, bright lime-green grass, medieval cottages, rounded toy forms, plastic gloss, photorealistic textures, painterly brushwork, traditional 2D pixel art, excessive tiny noisy details, and indiscriminate neon outlines. The image should demonstrate a distinct, mature voxel game world using the four references as guidance.

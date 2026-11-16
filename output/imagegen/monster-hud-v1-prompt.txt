@@ -1,0 +1,21 @@
+Use case: style-transfer.
+Asset type: high-fidelity fantasy game HUD mockup, presented in the actual game.
+
+Inputs: Image 1 and Image 2 are STYLE REFERENCES ONLY: early Warcraft III interfaces with substantial hand-painted ornamental frames, detailed materials, beveled compartments, portraits, and item slots. Image 3 is the EDIT TARGET: an actual screenshot of Monster, with a blue Elemental named Moss in a wooded village. Replace ONLY the bottom UI of Image 3. Preserve its playable world, trees, terrain, buildings, stream, camera, creature, and overhead labels above the HUD. Do not import the Warcraft battlefield or characters.
+
+Create one beautiful original interface inspired by an ancient woodland shrine: sculpted willow roots entwining weathered dark stone, chased aged brass fittings, worn hand-painted bevels, tiny blue crystal inlays, restrained leaves and carved water motifs. Dense, tactile, lovingly crafted old fantasy strategy-game art, grounded and slightly chunky, not a flat modern web dashboard. Ornament belongs on the borders; generous quiet interiors remain charcoal black with subtle translucency and bright white readable text.
+
+Composition: retain the landscape 8:5 game screenshot composition. A continuous connected HUD is anchored flush across the BOTTOM approximately 31% of the image. Three functional areas in one cohesive carved frame: LEFT minimap roughly 22% of HUD width, MIDDLE conversation roughly 50%, RIGHT creature information and carried resources roughly 28%. No panels at top or sides. Show the complete HUD with no cropped edges, no outside mockup labels, no title, no watermark.
+
+LEFT: a nearly square actual terrain minimap based on the original screenshot, green land and blue Willow Stream, three settlements labelled "Willow", "Bracken", "Reedbank", a clearly visible blue Moss portrait marker at Willow, and a pale camera viewport rectangle. Set it in a deep stone-and-brass recess. Keep map readable.
+
+MIDDLE: make conversation the dominant usable area, a wide dark translucent well with bright white legible text. No header, no tab bar. Four clean dialogue lines, exactly:
+"You: Bring food to Willow. Leave the farm alone."
+"Moss: I'll gather wild berries and take them to the hall."
+"You: Good. Remember that."
+"Moss: Wild food when we're helping. I remember."
+Beneath them a broad empty input field with the placeholder "Talk to Moss..." and one small carved "Send" button at its right. A fine scrollbar can sit on the right edge of the transcript. Subtle tiny speaker accents may distinguish Moss, but the text itself is white.
+
+RIGHT: a portrait medallion of the SAME blue, smooth, broad-headed Elemental from Image 3, marked "Moss", next to "Energy 93%" with a narrow green bar and "Carrying 6/6". Beneath, six large clearly separated recessed square inventory slots in a 3-column by 2-row grid. Use high-quality individually hand-painted icons: red wild berries, golden grain, silvery fish, pale pine wood, dark oak wood, grey stone. Small legible quantities at bottom-right of each slot respectively: 2, 0, 0, 1, 1, 2. Empty stock icons can be slightly muted. Place short white captions "Berries", "Grain", "Fish", "Pine", "Oak", "Stone" beneath their respective slots if space permits.
+
+Keep functional elements aligned and text comfortably large; protect them from decorative roots. Small sculptural accents at panel junctions should make the silhouette distinctive without obscuring world or controls. No Warcraft insignias, army selection rows, weapon-command grids, extra action buttons, giant heading, quest list, or new villagers. Output a polished convincing game interface design, not a concept sketch or a poster.

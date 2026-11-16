@@ -1,0 +1,9 @@
+Hint: used config file '/Users/me/.nimby/nim/config/nim.cfg' [Conf]
+Hint: used config file '/Users/me/.nimby/nim/config/config.nims' [Conf]
+Hint: used config file '/Users/me/p/nim.cfg' [Conf]
+Hint: used config file '/Users/me/p/polyworld/config.nims' [Conf]
+...................................................................................................................................................................................................................................
+/Users/me/p/windy/src/windy/platforms/macos/platform.nim(14, 9) Hint: Using OpenGL backend [User]
+..........................
+Hint: 
+155207 lines; 1.649s; 422.852MiB peakmem; proj: /Users/me/p/polyworld/tests/test_rtscameras.nim; out: unknownOutput [SuccessX]

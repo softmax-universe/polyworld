@@ -1,0 +1,87 @@
+(lldb) target create "build/inspect_window_confinement"
+Current executable set to '/Users/me/p/polyworld/build/inspect_window_confinement' (arm64).
+(lldb) breakpoint set --name main
+Breakpoint 1: 26 locations.
+(lldb) run
+Process 15649 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 1.1
+    frame #0: 0x0000000100003c08 inspect_window_confinement`main
+inspect_window_confinement`main:
+->  0x100003c08 <+0>:  sub    sp, sp, #0xd0
+    0x100003c0c <+4>:  stp    x29, x30, [sp, #0xc0]
+    0x100003c10 <+8>:  add    x29, sp, #0xc0
+    0x100003c14 <+12>: adrp   x8, 1
+Target 0: (inspect_window_confinement) stopped.
+Process 15649 launched: '/Users/me/p/polyworld/build/inspect_window_confinement' (arm64)
+(lldb) image lookup -rn "CGRegion.*(Bounds|Bounding)"
+4 matches found in /System/Library/Frameworks/CoreGraphics.framework/Versions/A/CoreGraphics:
+        Address: CoreGraphics[0x00000001865dc650] (CoreGraphics.__TEXT.__text + 915816)
+        Summary: CoreGraphics`CGRegionEnumeratorGetNextBounds
+        Address: CoreGraphics[0x00000001868c6d64] (CoreGraphics.__TEXT.__text + 3973244)
+        Summary: CoreGraphics`CGRegionCreateWithBoundsBlock
+        Address: CoreGraphics[0x00000001869c78f0] (CoreGraphics.__TEXT.__text + 5024776)
+        Summary: CoreGraphics`CGRegionForwardEnumeratorGetNextBounds
+        Address: CoreGraphics[0x0000000186515540] (CoreGraphics.__TEXT.__text + 100440)
+        Summary: CoreGraphics`CGRegionGetBoundingBox
+(lldb) image lookup -rn "NSCGSWindow.*(Confinement|commit|flush|size)"
+16 matches found in /System/Library/Frameworks/AppKit.framework/Versions/C/AppKit:
+        Address: AppKit[0x00000001841ad9cc] (AppKit.__TEXT.__text + 1593560)
+        Summary: AppKit`-[_NSCGSWindowOrdering _hasUncommittedSpaceAssignmentChanges:]
+        Address: AppKit[0x0000000184b44cf4] (AppKit.__TEXT.__text + 11650048)
+        Summary: AppKit`-[NSCGSWindowCornerMask imageForScale:size:center:]
+        Address: AppKit[0x0000000184b44cfc] (AppKit.__TEXT.__text + 11650056)
+        Summary: AppKit`-[NSCGSWindowCornerMask caImageForScale:size:center:]
+        Address: AppKit[0x0000000184b44d44] (AppKit.__TEXT.__text + 11650128)
+        Summary: AppKit`-[NSCGSWindowCornerMask slImageForScale:size:center:]
+        Address: AppKit[0x0000000184b45098] (AppKit.__TEXT.__text + 11650980)
+        Summary: AppKit`-[NSCGSWindowCornerImageMask imageForScale:size:center:]
+        Address: AppKit[0x0000000184b45364] (AppKit.__TEXT.__text + 11651696)
+        Summary: AppKit`-[NSCGSWindowCornerRadiusMask imageForScale:size:center:]
+        Address: AppKit[0x0000000184b45690] (AppKit.__TEXT.__text + 11652508)
+        Summary: AppKit`-[NSCGSWindowCornerPathMask imageForScale:size:center:]
+        Address: AppKit[0x0000000184bf4f0c] (AppKit.__TEXT.__text + 12371480)
+        Summary: AppKit`-[NSCGSWindowBackingStore flushBackBufferInRegion:]
+        Address: AppKit[0x0000000184bf4f58] (AppKit.__TEXT.__text + 12371556)
+        Summary: AppKit`-[NSCGSWindowBackingStore flushBackBufferInRect:]
+        Address: AppKit[0x0000000184bfa068] (AppKit.__TEXT.__text + 12392308)
+        Summary: AppKit`-[NSCGSWindow(NSCGSWindowSpaceAssignmentInternal) _hasUncommittedSpaceAssignmentChanges]
+        Address: AppKit[0x0000000184d89cc0] (AppKit.__TEXT.__text + 14029772)
+        Summary: AppKit`-[NSCGSWindow resizeEventShape]
+        Address: AppKit[0x0000000184d89d4c] (AppKit.__TEXT.__text + 14029912)
+        Summary: AppKit`-[NSCGSWindow setResizeEventShape:]
+        Address: AppKit[0x0000000184d8bc8c] (AppKit.__TEXT.__text + 14037912)
+        Summary: AppKit`-[NSCGSWindow(NSCGSWindowGeometry) size]
+        Address: AppKit[0x0000000184d8cc40] (AppKit.__TEXT.__text + 14041932)
+        Summary: AppKit`-[NSCGSWindow(NSCGSWindowCursorClipping) mouseConfinementShape]
+        Address: AppKit[0x0000000184d8cccc] (AppKit.__TEXT.__text + 14042072)
+        Summary: AppKit`-[NSCGSWindow(NSCGSWindowCursorClipping) setMouseConfinementShape:]
+        Address: AppKit[0x0000000184d8cd64] (AppKit.__TEXT.__text + 14042224)
+        Summary: AppKit`-[NSCGSWindow(NSCGSWindowSpaceGeometryInternal) _hasUncommittedSpaceGeometryChanges]
+(lldb) disassemble --name "-[NSCGSWindow size]"
+AppKit`-[NSCGSWindow(NSCGSWindowGeometry) size]:
+    0x1a0a53c8c <+0>:   pacibsp 
+    0x1a0a53c90 <+4>:   stp    d9, d8, [sp, #-0x30]!
+    0x1a0a53c94 <+8>:   stp    x20, x19, [sp, #0x10]
+    0x1a0a53c98 <+12>:  stp    x29, x30, [sp, #0x20]
+    0x1a0a53c9c <+16>:  add    x29, sp, #0x20
+    0x1a0a53ca0 <+20>:  mov    x19, x0
+    0x1a0a53ca4 <+24>:  adrp   x0, 395350
+    0x1a0a53ca8 <+28>:  add    x0, x0, #0x928            ; _transactionLock
+    0x1a0a53cac <+32>:  bl     0x1a0b7a8e0               ; symbol stub for: pthread_mutex_lock
+    0x1a0a53cb0 <+36>:  ldrb   w8, [x19, #0x30]
+    0x1a0a53cb4 <+40>:  tbnz   w8, #0x0, 0x1a0a53ccc     ; <+64>
+    0x1a0a53cb8 <+44>:  ldr    w0, [x19, #0x18]
+    0x1a0a53cbc <+48>:  bl     0x1a0b73b00               ; symbol stub for: CGSGetWindowSize
+    0x1a0a53cc0 <+52>:  fmov   d8, d0
+    0x1a0a53cc4 <+56>:  fmov   d9, d1
+    0x1a0a53cc8 <+60>:  b      0x1a0a53cd0               ; <+68>
+    0x1a0a53ccc <+64>:  ldp    d8, d9, [x19, #0x70]
+    0x1a0a53cd0 <+68>:  adrp   x0, 395350
+    0x1a0a53cd4 <+72>:  add    x0, x0, #0x928            ; _transactionLock
+    0x1a0a53cd8 <+76>:  bl     0x1a0b7a8f0               ; symbol stub for: pthread_mutex_unlock
+    0x1a0a53cdc <+80>:  fmov   d0, d8
+    0x1a0a53ce0 <+84>:  fmov   d1, d9
+    0x1a0a53ce4 <+88>:  ldp    x29, x30, [sp, #0x20]
+    0x1a0a53ce8 <+92>:  ldp    x20, x19, [sp, #0x10]
+    0x1a0a53cec <+96>:  ldp    d9, d8, [sp], #0x30
+    0x1a0a53cf0 <+100>: retab  

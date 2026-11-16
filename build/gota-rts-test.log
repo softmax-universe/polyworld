@@ -1,0 +1,22 @@
+Hint: used config file '/Users/me/.nimby/nim/config/nim.cfg' [Conf]
+Hint: used config file '/Users/me/.nimby/nim/config/config.nims' [Conf]
+Hint: used config file '/Users/me/p/nim.cfg' [Conf]
+Hint: used config file '/Users/me/p/polyworld/config.nims' [Conf]
+...................................................................................................................................................................................................................................
+/Users/me/p/windy/src/windy/platforms/macos/platform.nim(14, 9) Hint: Using OpenGL backend [User]
+..........................
+CC: polyworld/rtscameras.nim
+CC: test_rtscameras.nim
+Hint:  [Link]
+Hint: mm: orc; threads: on; opt: speed; options: -d:release
+155207 lines; 1.914s; 420.734MiB peakmem; proj: /Users/me/p/polyworld/tests/test_rtscameras.nim; out: /Users/me/.cache/nim/test_rtscameras_r/test_rtscameras_6CA751503C792A840CEDF8E792BDE367CF0E4460 [SuccessX]
+Hint: /Users/me/.cache/nim/test_rtscameras_r/test_rtscameras_6CA751503C792A840CEDF8E792BDE367CF0E4460 [Exec]
+Testing screen-edge pan directions
+Testing edge pan stays off unless fullscreen
+Testing combined pan does not double a held direction
+Testing pan scales with zoom
+Testing pan stays on the map
+Testing follow frame lifts the subject
+Testing camera ease-in-out
+Testing ground tile picking
+RTS camera tests passed

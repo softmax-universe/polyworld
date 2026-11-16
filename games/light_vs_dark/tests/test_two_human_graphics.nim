@@ -50,11 +50,11 @@ proc frontendIssueMove(session: NetworkMatch, id: int32, target: Tile2) =
   echo "INPUT size=", window.size, " mouse=", window.mousePos,
     " pressed=", window.mousePressed(MouseRight), " slot=", options.playerSlot,
     " focused=", window.focused
-  updatePlayerOrder(viewProjection)
+  updatePlayerOrder(viewProjection, focused = true)
   doAssert rightOrderStarted, "Right press rejected"
   window.state.buttonDown = {}
   window.state.perFrame = PerFrame(buttonReleased: {MouseRight})
-  updatePlayerOrder(viewProjection)
+  updatePlayerOrder(viewProjection, focused = true)
   doAssert not rightOrderStarted, "Right release not consumed"
 
 window = newWindow("LvD two human input regression", ivec2(1600, 1000), visible = false)

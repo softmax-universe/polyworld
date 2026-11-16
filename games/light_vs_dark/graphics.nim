@@ -38,9 +38,21 @@ const
     ## Pointer travel that turns a click into a box select.
 
 type
+  GraphicsHooks* = object
+    ## Optional tools share the full game renderer and playback lifecycle.
+    ready*: proc(camera: var ActionCam)
+      ## Frames the initial world and each replacement after its reset.
+    reload*: proc(): bool
+      ## Replaces run between frames; requires the same seed and factions.
+    key*: proc(button: Button, camera: var ActionCam): bool
+    overlay*: proc()
+    frame*: proc(): bool
+      ## Returns true to leave the current match after presenting its frame.
   MatchMenuPage = enum
     HiddenMatchMenu, PauseMenu, MatchSettings
   GraphicsError = object of CatchableError
+  CaptureTarget = object
+    framebuffer, colorTexture, depthBuffer: GLuint
   SeekCheckpoint = object
     world: World
     actionIndex: int
@@ -323,19 +335,55 @@ proc buildUiAtlas(factions: openArray[Faction]): AtlasBuilder =
   result.addHomeAssets()
   result.addFont(DefaultFontPath, "WorldName", 32.0)
 
-proc initializeGraphics*() =
+proc initializeGraphics*(visible = true) =
   ## Creates one application window without constructing a hidden match.
   if window != nil: return
   let builder = buildUiAtlas(factionOrder(DefaultSeed.int64))
   builder.write(AtlasPath)
   (window, sk) = initGameWindow(WindowTitle, AtlasPath,
     gameWindowSize(options.windowWidth, options.windowHeight),
-    options.vsync, msaa = msaa4x)
+    options.vsync, msaa = msaa4x, visible = visible)
+
+proc initCaptureTarget(size: IVec2): CaptureTarget =
+  ## Allocates color and depth without relying on a visible Cocoa drawable.
+  glGenFramebuffers(1, result.framebuffer.addr)
+  glBindFramebuffer(GL_FRAMEBUFFER, result.framebuffer)
+  glGenTextures(1, result.colorTexture.addr)
+  glBindTexture(GL_TEXTURE_2D, result.colorTexture)
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8.GLint, size.x, size.y,
+    0, GL_RGBA, GL_UNSIGNED_BYTE, nil)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST.GLint)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST.GLint)
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+    GL_TEXTURE_2D, result.colorTexture, 0)
+  glGenRenderbuffers(1, result.depthBuffer.addr)
+  glBindRenderbuffer(GL_RENDERBUFFER, result.depthBuffer)
+  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, size.x, size.y)
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+    GL_RENDERBUFFER, result.depthBuffer)
+  if glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE:
+    raise newException(GraphicsError, "Unable to allocate screenshot target")
+  glBindFramebuffer(GL_FRAMEBUFFER, 0)
+
+proc close(target: var CaptureTarget) =
+  ## Releases the offscreen target while its OpenGL context is still current.
+  if target.framebuffer == 0:
+    return
+  glBindFramebuffer(GL_FRAMEBUFFER, 0)
+  glDeleteRenderbuffers(1, target.depthBuffer.addr)
+  glDeleteTextures(1, target.colorTexture.addr)
+  glDeleteFramebuffers(1, target.framebuffer.addr)
 
 proc runGraphics*(network: NetworkMatch = nil,
-    connection: Connection = nil): bool {.discardable.} =
+    connection: Connection = nil,
+    hooks = GraphicsHooks(),
+    hidden = defined(takeScreenshot)): bool {.discardable.} =
   ## Owns match resources; the application window survives returning home.
-  initializeGraphics()
+  initializeGraphics(visible = not hidden)
+  var captureTarget: CaptureTarget
+  if hidden:
+    captureTarget = initCaptureTarget(window.size)
+  defer: captureTarget.close()
   window.onFrame = nil
   window.onButtonPress = nil
   window.onButtonRelease = nil
@@ -365,42 +413,48 @@ proc runGraphics*(network: NetworkMatch = nil,
     matchMenu = HiddenMatchMenu
     preferences = readLvdPreferences()
     saveError: string
-  preferences.applyPreferences(window)
+  preferences.applyPreferences(window, configureDisplay = not hidden)
   let previousBindings = customBindingsEnabled
   customBindingsEnabled = true
   bindingCapture = false
   defer:
     customBindingsEnabled = previousBindings
     bindingCapture = false
-  viewMode = if options.playerSlot > 0: options.playerSlot else: options.viewMode
-  primaryId = NoEntity
-  lineGesture.cancelLine()
-  rightOrderStarted = false
-  selectedIds.setLen(0)
-  seekCheckpoints.setLen(0)
-  previousUnitPositions.clear()
-  previousUnitFacings.clear()
-  unitPoses.setLen(0)
-  terrainVisionTick = int32.low
-  terrainVisionMode = int32.low
-  pendingBuild = -1
-  attackMoveArmed = false
-  selectionStarted = false
-  panning = false
-  minimapPanning = false
-  followSelection = false
-  cameraDistance = DefaultCameraDistance
-  cameraTarget = vec3(0)
-  placedEditCount = 0
-  placedBuildingKey = ""
-  framesSinceRebake = 0
-  frameAlpha = 0
-  clearPlayerCommands()
-  targetFlash = TargetFeedback()
-  transport = initPlayer(live = not run.replayMode,
-    durationTicks = run.maximumTicks, playing = not options.pauseOnStart,
-    speed = options.speed,
-    repeating = network == nil and (run.replayMode or options.playerSlot == 0))
+  proc resetMatchState() =
+    ## Clears world-specific state while retaining uploaded render resources.
+    viewMode = if options.playerSlot > 0: options.playerSlot else: options.viewMode
+    primaryId = NoEntity
+    cancelGameplayGestures()
+    shortcutState.resetShortcut()
+    shortcutHeldButtons = {}
+    shortcutFrameButtons = {}
+    selectedIds.setLen(0)
+    seekCheckpoints.setLen(0)
+    previousUnitPositions.clear()
+    previousUnitFacings.clear()
+    unitPoses.setLen(0)
+    terrainVisionTick = int32.low
+    terrainVisionMode = int32.low
+    pendingBuild = -1
+    followSelection = false
+    groupCameraScale = 1
+    cameraDistance = DefaultCameraDistance
+    cameraTarget = vec3(0)
+    placedEditCount = 0
+    placedBuildingKey = ""
+    framesSinceRebake = 0
+    frameAlpha = 0
+    clearPlayerCommands()
+    targetFlash = TargetFeedback()
+    transport = initPlayer(live = not run.replayMode,
+      durationTicks = run.maximumTicks, playing = not options.pauseOnStart,
+      speed = options.speed,
+      repeating = network == nil and (run.replayMode or options.playerSlot == 0))
+
+  resetMatchState()
+  if network != nil and hooks.reload != nil:
+    raise newException(GraphicsError, "Cannot replace a network match in place")
+  let assetSeed = run.mapSeed
   let order = factionOrder(run.mapSeed.int64)
   let
     playerFactions = playerFactions(run.mapSeed,
@@ -418,7 +472,7 @@ proc runGraphics*(network: NetworkMatch = nil,
         primaryId = unit.id
         followSelection = false
         break
-  let splash = startSplash(sk, window)
+  let splash = if hidden: Splash() else: startSplash(sk, window)
   profileBlock "terrain":
     seed = run.mapSeed
     clearProps()
@@ -482,7 +536,8 @@ proc runGraphics*(network: NetworkMatch = nil,
             pack,
             woodAxe = axe
           )
-  drawSplash(sk, window, splash.name)
+  if not hidden:
+    drawSplash(sk, window, splash.name)
 
   let scene = newCharacterScene(window)
   scene.useToonShading()
@@ -507,7 +562,7 @@ proc runGraphics*(network: NetworkMatch = nil,
   var
     grove: Grove
     buildingArt: BuildingArt
-  let scenery = grovePlacements(
+  var scenery = grovePlacements(
     run.world.treeWood, run.mapSeed, run.world.map.forestRocks
   )
   profileBlock "props":
@@ -1769,9 +1824,54 @@ proc runGraphics*(network: NetworkMatch = nil,
     cameraSeekSerial = -1
     networkPresentation: NetworkPresentation
 
-  holdSplash(sk, window, splash)
+  proc reloadMatch() =
+    ## Reuses models and textures while replacing the map and playback history.
+    if run.mapSeed != assetSeed or playerFactions !=
+        teamlooks.playerFactions(run.mapSeed,
+          run.world.diplomacy.settings, run.world.players.len):
+      raise newException(GraphicsError,
+        "A renderer reload requires the same map seed and player factions")
+    let playback = transport
+    resetMatchState()
+    transport.playing = playback.playing
+    transport.speedIndex = playback.speedIndex
+    transport.repeating = playback.repeating
+    seekCheckpoints.add SeekCheckpoint(
+      world: run.world.clone(), actionIndex: 0, hashCheck: run.hashCheck
+    )
+    resetHudTooltips()
+    resetHumanCommunication()
+    matchMenu = HiddenMatchMenu
+    currentSight.setLen(0)
+    particles.clearParticles()
+    harvesting.clearHarvest()
+    clickMarks.advanceClickMarks(ClickMarkDuration)
+    attackClickMarks.advanceClickMarks(ClickMarkDuration)
+    damageTrails = DamageTrailTracker()
+    playerLabels = layoutNames(sk.atlas.fonts["WorldName"],
+      sk.atlas.size, run.config.players)
+    scenery = grovePlacements(
+      run.world.treeWood, run.mapSeed, run.world.map.forestRocks
+    )
+    rebakeScene(initial = true)
+    actionCam.resetDirector()
+    actionCam.mapSpan = mapHalf() * 2
+    cameraSeekSerial = -1
+    viewingClock = ViewingClock()
+    viewingDt = 0
+    viewingSeeking = false
+    if hooks.ready != nil:
+      hooks.ready(actionCam)
+    lastFrameTime = epochTime()
+
+  if not hidden:
+    holdSplash(sk, window, splash)
+  if hooks.ready != nil:
+    hooks.ready(actionCam)
   window.onFrame = proc() =
     profileBlock "frame":
+      if hooks.reload != nil and hooks.reload():
+        reloadMatch()
       let dt = frameDelta(lastFrameTime, Step)
       viewingDt = viewingClock.viewingDelta(window)
       viewingSeeking = transport.targetTick >= 0 or transport.restoreTick >= 0
@@ -1940,6 +2040,7 @@ proc runGraphics*(network: NetworkMatch = nil,
           scene.sunDepthPass = true
           drawWorldUnits()
           scene.sunDepthPass = false
+        glBindFramebuffer(GL_FRAMEBUFFER, captureTarget.framebuffer)
         when not defined(emscripten):
           glEnable(GL_MULTISAMPLE)
         glClearColor(0.05, 0.06, 0.09, 1.0)
@@ -2119,6 +2220,8 @@ proc runGraphics*(network: NetworkMatch = nil,
             saveError = error.msg
           if saveError.len > 0: sk.menuLabel(saveError, origin + vec2(0, 340), 464)
           sk.popLayer()
+        if matchMenu == HiddenMatchMenu and hooks.overlay != nil:
+          hooks.overlay()
         sk.endUi()
         if matchMenu == HiddenMatchMenu:
           drawStatsOverlay(sk, window, teamColors)
@@ -2128,6 +2231,8 @@ proc runGraphics*(network: NetworkMatch = nil,
           window.runeInputEnabled = humanCommunicationTyping() and window.focused
         if humanCommunicationBlocksGameplay(): cancelGameplayGestures()
       finishHumanCommunicationFrame()
+      if hooks.frame != nil and hooks.frame():
+        leaveMatch = true
       when defined(takeScreenshot):
         captureScreenshot(
           window,
@@ -2157,6 +2262,9 @@ proc runGraphics*(network: NetworkMatch = nil,
     if matchMenu == HiddenMatchMenu and humanCommunicationBlocksGameplay():
       cancelGameplayGestures()
       return
+    if matchMenu == HiddenMatchMenu and hooks.key != nil:
+      if hooks.key(button, actionCam):
+        return
     # Combat owns its configured attack key whenever eligible units are selected,
     # even when the selected producer union offers Archer on A.
     if matchMenu == HiddenMatchMenu and playerMode() and

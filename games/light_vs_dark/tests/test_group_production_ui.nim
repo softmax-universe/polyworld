@@ -22,6 +22,10 @@ proc main() =
   sk = newSilky(window, atlas.atlasImage, atlas.atlas)
   sk.applyThemePatches()
   defer: window.close()
+  var target = initCaptureTarget(window.size)
+  defer: target.close()
+  glBindFramebuffer(GL_FRAMEBUFFER, target.framebuffer)
+  doAssert not window.visible
   run = newLocalMatch(defaultConfig(2), ["", ""])
   run.networked = true
   options.playerSlot = 1
@@ -32,6 +36,7 @@ proc main() =
   var preferences: Preferences
   var network: NetworkMatch
   var scene: CharacterScene
+  let hooks = GraphicsHooks()
   production("playerMode")
   production("selectionTarget")
   production("clearSelection")

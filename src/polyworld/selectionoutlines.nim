@@ -18,6 +18,7 @@ type
 
   SelectionOutline* = object
     framebuffer: GLuint
+    destinationFramebuffer: GLint
     colorTexture: GLuint
     depthTexture: GLuint
     program: GLuint
@@ -322,6 +323,7 @@ proc ensureSize(outline: var SelectionOutline, size: IVec2) =
 
 proc beginMask*(outline: var SelectionOutline, size: IVec2) =
   ## Clears and binds the selected-object silhouette target.
+  glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, outline.destinationFramebuffer.addr)
   outline.ensureSize(size)
   glBindFramebuffer(GL_FRAMEBUFFER, outline.framebuffer)
   glViewport(0, 0, outline.size.x, outline.size.y)
@@ -336,8 +338,8 @@ proc drawOutline*(
     outline: SelectionOutline,
     color = SelectionOutlineColor
 ) =
-  ## Draws silhouette edges, optionally only behind the window's scene depth.
-  glBindFramebuffer(GL_FRAMEBUFFER, 0)
+  ## Draws silhouette edges into the scene target that preceded the mask.
+  glBindFramebuffer(GL_FRAMEBUFFER, outline.destinationFramebuffer.GLuint)
   glViewport(0, 0, outline.size.x, outline.size.y)
   glDepthMask(GL_FALSE)
   if outline.visibility == OccludedOutline:

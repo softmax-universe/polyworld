@@ -1,5 +1,5 @@
 ## Native production graphics callbacks, not source-string route assertions.
-## Separate from the art-free suite: creates a real Windy GL window.
+## Uses hidden native GL; focus is supplied to the callback harness explicitly.
 import std/[macros, importutils]
 import windy/internal
 import polyworld/mailboxes
@@ -8,7 +8,10 @@ include ../graphics
 privateAccess(Window)
 
 proc renameDirector(node: NimNode): NimNode {.compileTime.} =
+  ## Routes local camera and focus inputs into extracted production callbacks.
   if node.kind == nnkIdent and node.strVal == "actionCam": return ident("director")
+  if node.kind == nnkDotExpr and node.repr == "window.focused":
+    return ident("fixtureFocused")
   result = copyNimNode(node)
   for item in node: result.add renameDirector(item)
 
@@ -37,7 +40,7 @@ macro finishProductionUi(): untyped =
     for child in node:
       let found = search(child)
       if found != nil: return found
-  result = search(parseStmt(staticRead("../graphics.nim")))
+  result = renameDirector(search(parseStmt(staticRead("../graphics.nim"))))
   if result == nil: error("Missing production post-Silky rune restoration")
 
 window = newWindow("LvD communication callback regression", ivec2(1200, 800), visible = false)
@@ -46,9 +49,12 @@ loadExtensions()
 glClearColor(0, 0, 0, 1)
 let atlas = buildUiAtlas(factionOrder(DefaultSeed.int64))
 sk = newSilky(window, atlas.atlasImage, atlas.atlas)
-window.visible = true
+var
+  fixtureFocused = true
+  target = initCaptureTarget(window.size)
+glBindFramebuffer(GL_FRAMEBUFFER, target.framebuffer)
 pollEvents()
-doAssert window.focused, "Camera polling regression needs a focused native window"
+doAssert not window.visible
 var config = defaultConfig(2)
 config.diplomacySettings.enabled = true
 config.maxTicks = 100
@@ -64,6 +70,7 @@ var matchMenu = HiddenMatchMenu
 var preferences = readLvdPreferences()
 var director = initActionCam(subjectMode = true)
 let network: NetworkMatch = nil
+let hooks = GraphicsHooks()
 var scene: CharacterScene
 productionRoutine("playerMode")
 productionRoutine("selectionTarget")
@@ -200,8 +207,7 @@ block diplomacyPanel:
 press(KeyEnter)
 release(KeyEnter)
 press(KeyS) # Deliberately lose its release while unfocused.
-window.visible = false
-pollEvents()
+fixtureFocused = false
 window.onFocusChange()
 doAssert not humanCommunicationTyping()
 doAssert not window.runeInputEnabled
@@ -210,6 +216,7 @@ doAssert not humanCommunicationBlocksGameplay(), "Focus loss clears held-key qua
 press(KeyEscape)
 doAssert matchMenu == PauseMenu, "Escape outside communication still opens pause"
 release(KeyEscape)
+target.close()
 window.close()
 window = nil
 run = nil

@@ -5,7 +5,10 @@ include ../graphics
 privateAccess(Window)
 
 proc renameDirector(node: NimNode): NimNode {.compileTime.} =
+  ## Supplies local camera and explicit focus to hidden-window callbacks.
   if node.kind == nnkIdent and node.strVal == "actionCam": return ident("director")
+  if node.kind == nnkDotExpr and node.repr == "window.focused":
+    return ident("fixtureFocused")
   result = copyNimNode(node)
   for child in node: result.add renameDirector(child)
 
@@ -28,21 +31,21 @@ macro productionOrderPass(): untyped =
     for child in node:
       let found = search(child)
       if found != nil: return found
-  result = search(parseStmt(staticRead("../graphics.nim")))
+  result = renameDirector(search(parseStmt(staticRead("../graphics.nim"))))
   if result == nil: error("Missing production frame input gate")
 
 proc main() =
   window = newWindow("LvD building placement regression", ivec2(1600, 1000), visible = false)
   window.makeContextCurrent()
   loadExtensions()
-  window.visible = true
   pollEvents()
-  doAssert window.focused
+  doAssert not window.visible
   sk = Silky(uiScale: gameUiScale(window))
   options.playerSlot = 1
   viewMode = 0
   var
     matchMenu = HiddenMatchMenu
+    fixtureFocused = true
     director = initActionCam(subjectMode = true)
     preferences: Preferences
     network: NetworkMatch
@@ -52,6 +55,7 @@ proc main() =
     scenery: seq[GrovePlacement]
     clickMarks = initClickMarks(orderMarkSettings(false))
     attackClickMarks = initClickMarks(orderMarkSettings(true))
+  let hooks = GraphicsHooks()
   director.takeManual()
   productionRoutine("playerMode")
   productionRoutine("selectionTarget")

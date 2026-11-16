@@ -29,7 +29,7 @@ Default matches are **FFA**: other players are enemies immediately, independent 
 
 Peons are workers, but not noncombatants: explicit attack and attack-move work. Idle peons deliberately do not autoattack. Their attack has only 1 basic damage and no piercing, so armor can reduce it to **zero** (including against a Swordsman); use military units against armored opponents.
 
-Normal human gameplay has no bottom time scrubber; playback controls remain for replays and spectator viewing. Use Esc for the match menu, pause controls, and Return to Home/Lobby—no persistent return button sits on the battlefield. Finished matches automatically display the winner/outcome headline above the Tab-style statistics and history charts.
+Normal human gameplay has no bottom time scrubber; playback controls remain for replays and spectator viewing. Use Esc for the match menu, pause controls, and Return to main menu / Return to lobby—no persistent return button sits on the battlefield. Finished matches automatically display the winner/outcome headline above the Tab-style statistics and history charts.
 
 Select workers, then right-click a tree's visible canopy or trunk to harvest wood. Tree picking uses the rendered tree rather than the empty ground behind its canopy. If another worker blocks the chopping position, workers seek a reachable alternative approach or another explored tree, retaining cargo and queued orders. Opposing peons deterministically yield sideways when there is safe passing space, then resume their original work; they never overlap to force through a one-cell corridor.
 

@@ -2,7 +2,7 @@ import
   std/[os, random, strutils, uri],
   bumpy, chroma, jsony, silky, vmath, windy,
   polyworld/[displays, chrome, connections, menus, roomclients, rooms, policies, viewers],
-  content, controls, game, graphics, homes, lobbies, multiplayer, presets, replays,
+  content, controls, game, graphics, homes, lobbies, multiplayer, presets,
   rosterstate, participantcontext, lobbyreadiness
 
 const AppName = "Polyworld LvD"

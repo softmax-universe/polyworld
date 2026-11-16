@@ -387,7 +387,6 @@ var
   visionSkipWorld: pointer
   visionSkipKeys: seq[int32]
   visionSkipNow: seq[int32]
-  splashHits: seq[int32]
   visionSources: seq[VisionSource]
 
 proc fillVisionKeys(w: World, dest: var seq[int32]) =

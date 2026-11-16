@@ -8,7 +8,7 @@
 ## what gets drawn changes.
 
 import
-  std/[math, os, strformat, strutils, tables, times, unicode],
+  std/[math, strformat, tables, times, unicode],
   chroma, fixxy, opengl, pixie, vmath, windy, silky,
   polyworld/[actioncam, assets, characters, chargen, chrome, clickmarks, common,
     inputs, lighting, particles, particleshaders, pathing, player, profiles, gameuis,
@@ -24,6 +24,9 @@ import
   networkpresentation, shortcutsettings, unitselection, orderfeedback,
   constructionpresentation, targetfeedback, rendervisibility,
   harvestpresentation, woodcuttingpresentation, battlesounds
+
+when defined(takeScreenshot):
+  import std/[os, strutils]
 
 const
   DefaultCameraDistance = 17.0'f
@@ -2239,7 +2242,7 @@ proc runGraphics*(network: NetworkMatch = nil,
               if sk.lobbyButton("Settings", origin + vec2(0, 164), 464):
                 matchMenu = MatchSettings
               if network == nil or network.client.snapshot.phase in {rooms.Ended, Desynced, Lobby}:
-                if sk.lobbyButton(if network == nil: "Return to Home" else: "Return to lobby",
+                if sk.lobbyButton(if network == nil: "Return to main menu" else: "Return to lobby",
                   origin + vec2(0, 220), 464):
                   leaveMatch = returnToMatchLobby(network)
               if network != nil and sk.lobbyButton("Quit to main menu",

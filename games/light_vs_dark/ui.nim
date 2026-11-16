@@ -19,7 +19,6 @@ const
   ## Icons draw at power-of-two sizes so the 128 and 256 px source art
   ## lands on exact mip levels and stays crisp.
   IconTiny = 16.0'f32
-  IconSmall = 64.0'f32
   IconLarge = 128.0'f32
   WellPad = 4.0'f32
   IconTint = rgbx(245, 230, 190, 255)
@@ -102,31 +101,6 @@ proc commandPlayer(viewMode: int32): int32 =
     viewMode - 1
   else:
     LightPlayer
-
-proc canShowTrain(
-    player: int32,
-    buildingId: int32,
-    kind: UnitKind
-): bool =
-  ## Returns whether this side could start training the unit right now.
-  if buildingId.isBuildingId and
-      run.world.buildingOwner(buildingId) == player:
-    return run.world.canTrain(buildingId, kind)
-  for structure in run.world.buildings:
-    if structure.owner == player and
-        run.world.canTrain(structure.id, kind):
-      return true
-  false
-
-proc commandPortraitColor(
-  ready: bool,
-  tint = rgbx(255, 255, 255, 255)
-): ColorRGBX =
-  ## Fades portraits that cannot be built or trained yet.
-  if ready:
-    tint
-  else:
-    rgbx(tint.r div 2, tint.g div 2, tint.b div 2, 128)
 
 proc placeChrome(layout: GameUiLayout): HudChrome =
   ## Places every textured HUD panel in one layout space.

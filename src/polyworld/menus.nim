@@ -297,11 +297,12 @@ template soundButton(label: string, enabled: bool, body: untyped) =
     let
       soundLabel = label
       soundEnabled = enabled
-    if soundEnabled and sk.mouseDelta != vec2(0):
-      sk.startCurrentChildren()
-      let size = sk.getTextSize(sk.textStyle, soundLabel) +
-        vec2(sk.theme.padding.float32) * 2
-      sk.hoverSound(GameUiPanel(origin: sk.placedAt(size), size: size))
+    sk.startCurrentChildren()
+    let size = sk.getTextSize(sk.textStyle, soundLabel) +
+      vec2(sk.theme.padding.float32) * 2
+    sk.hoverSound(
+      GameUiPanel(origin: sk.placedAt(size), size: size), soundEnabled
+    )
     button soundLabel, soundEnabled:
       body
 

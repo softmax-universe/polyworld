@@ -1,9 +1,10 @@
 ## Shared Silky HUD chrome for Polyworld games.
 
 import
-  std/[math, strutils, times, unicode],
+  std/[math, strutils, tables, times, unicode],
   bumpy, chroma, pixie, silky, vmath, windy,
-  daycycles, gameuis, inputs, profiles, quadterrain, rtscameras, networks, sounds
+  daycycles, gameuis, hovers, inputs, profiles, quadterrain, rtscameras,
+  networks, sounds
 
 export daycycles
 
@@ -76,6 +77,7 @@ var
   fpsNowText = "  0.00"
   fpsAvgText = "frame   0.00 ms"
   fpsStdText = "  0.00 ms std"
+  hoverStates: Table[pointer, HoverState]
 
 proc sparkPoints*(
     panel: GameUiPanel,
@@ -431,12 +433,14 @@ proc drawSlot*(
 
 proc hoverSound*(sk: Silky, panel: GameUiPanel, enabled = true) =
   ## Plays a quiet cue on pointer entry, without repeating during hover or drag.
-  if not enabled or sk.mouseConsumed or sk.buttonDown[MouseLeft] or
-      sk.mouseDelta == vec2(0):
-    return
-  let previous = sk.mousePos - sk.mouseDelta
-  if panel.contains(sk.mousePos) and sk.mousePos.overlaps(sk.clipRect) and
-      not (panel.contains(previous) and previous.overlaps(sk.clipRect)):
+  if hoverStates.mgetOrPut(cast[pointer](sk), HoverState()).hoverEntered(
+    sk.frameStartTime,
+    sk.mousePos,
+    rect(panel.origin, panel.size),
+    sk.clipRect,
+    enabled,
+    sk.mouseConsumed or sk.buttonDown[MouseLeft]
+  ):
     playSound(HoverSound)
 
 proc drawTab*(

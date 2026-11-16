@@ -4,7 +4,7 @@ import
   polyworld/[displays, chrome, connections, menus, roomclients, rooms, policies,
     pointers, sounds, viewers],
   content, controls, game, graphics, homes, lobbies, multiplayer, presets,
-  rosterstate, participantcontext, lobbyreadiness
+  rosterstate, participantcontext, lobbyreadiness, joiningseats
 
 const AppName = "Polyworld LvD"
 
@@ -33,6 +33,7 @@ proc runFrontend*() =
     prepared: NetworkMatch
     preparedRevision = 0'u32
     readyRefresh: ReadyRefresh
+    joiningSeat: JoiningSeat
     viewedRevision = 0'u32
     config = defaultConfig()
     viewedPayload: string
@@ -97,6 +98,7 @@ proc runFrontend*() =
           preparedRevision = 0
           viewedRevision = 0
           readyRefresh = ReadyRefresh()
+          joiningSeat = JoiningSeat()
           viewedPayload = ""
           roster = RosterState()
           multiplayerHuman = -1
@@ -108,6 +110,9 @@ proc runFrontend*() =
         confirmedPlayerName(preferences.name):
       connection.pump()
       let client = connection.client
+      let joinedSeat = joiningSeat.claimJoiningSeat(client)
+      if joinedSeat.updated:
+        multiplayerHuman = joinedSeat.seat
       if client.welcomed and not editingPlayer and
         confirmedPlayerName(preferences.name) and joinRequested and invite.len > 0 and
         client.snapshot.room.len == 0:
@@ -568,7 +573,7 @@ proc runFrontend*() =
                 roster.assignmentsEnabled(online)):
                 for i in 0 ..< config.playerCount:
                   if online:
-                    if snapshot.seats[i].owner == 0:
+                    if snapshot.seats[i].owner == 0 and i != multiplayerHuman:
                       networkPolicies[i] = chosenPolicy
                       client.send(RoomMessage(kind: ClaimSeat, seat: uint32(i),
                         name: chosenPolicy.name))
@@ -689,6 +694,7 @@ proc runFrontend*() =
                 chosenPolicy = selected
                 lobbyUi.selectedBot = selected.name
               if online:
+                joiningSeat.cancelJoiningSeat()
                 if choice.human:
                   client.claimHumanSeat(selectedSeat, multiplayerHuman)
                   for i, seat in snapshot.seats:

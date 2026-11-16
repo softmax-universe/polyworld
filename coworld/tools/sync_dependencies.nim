@@ -90,7 +90,7 @@ proc worker(job: SyncJob) {.thread.} =
   completed.send(outcome)
 
 proc syncDependencies*(latest = false) =
-  ## Synchronizes pinned dependencies and optionally updates both lock files.
+  ## Synchronizes dependencies and optionally updates the shared lock.
   let
     cache = normalizedPath(absolutePath(getEnv("POLYWORLD_DEPS", Root.parentDir)))
     local = cache == Root.parentDir
@@ -104,7 +104,7 @@ proc syncDependencies*(latest = false) =
   else:
     {.error: "Dependency cache locking currently requires POSIX.".}
   var dependencies: seq[Dependency]
-  for line in readFile(Root / "coworld/dependencies.lock").splitLines():
+  for line in readFile(Root / "nimby.lock").splitLines():
     if line.strip().len == 0:
       continue
     let fields = line.splitWhitespace()
@@ -144,7 +144,6 @@ proc syncDependencies*(latest = false) =
         echo fields[0], ": ", fields[3]
     require(errors.len == 0, errors.join("\n"))
   if latest:
-    writeFile(Root / "coworld/dependencies.lock", resolved.join("\n") & "\n")
     writeFile(Root / "nimby.lock", resolved.join("\n") & "\n")
   echo "Dependencies ready in ", cache
 

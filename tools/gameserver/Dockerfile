@@ -6,7 +6,7 @@ RUN curl -fsSL https://github.com/nim-lang/nightlies/releases/download/2026-04-2
     | tar xJ -C /opt
 ENV PATH=/opt/nim-2.2.10/bin:$PATH
 WORKDIR /src/polyworld
-COPY coworld/dependencies.lock coworld/dependencies.lock
+COPY nimby.lock nimby.lock
 COPY coworld/tools/sync_dependencies.nim coworld/tools/tooling.nim coworld/tools/
 RUN nim r --hints:off coworld/tools/sync_dependencies.nim
 ENV POLYWORLD_DEPS=/src/polyworld/tmp/coworld/deps

@@ -55,7 +55,7 @@ class FrontendRosterTests(unittest.TestCase):
                 output.write(f'doAssert ({fill}), "local Fill is blocked by online draft state"\n')
             dependencies = []
             dependency_root = Path(os.environ.get("POLYWORLD_DEPS", ROOT.parent))
-            for line in (ROOT / "coworld/dependencies.lock").read_text().splitlines():
+            for line in (ROOT / "nimby.lock").read_text().splitlines():
                 fields = line.split()
                 if not fields:
                     continue

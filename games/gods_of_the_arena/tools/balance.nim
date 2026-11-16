@@ -7,7 +7,7 @@ const
   ToolsPath = "games/gods_of_the_arena/tools"
   ContentPath = "games/gods_of_the_arena/content.nim"
   SnapshotPaths = @["src", "games/gods_of_the_arena", "tests",
-    "config.nims", "coworld/dependencies.lock"]
+    "config.nims", "nimby.lock"]
   ExclusiveNonblockingLock = 6.cint
 
 type

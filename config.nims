@@ -4,7 +4,7 @@ import std/[os, strutils]
 let
   projectRoot = currentSourcePath().parentDir
   dependencyRoot = getEnv("POLYWORLD_DEPS", projectRoot.parentDir)
-for line in readFile(projectRoot / "coworld/dependencies.lock").splitLines():
+for line in readFile(projectRoot / "nimby.lock").splitLines():
   let fields = line.splitWhitespace()
   if fields.len == 0:
     continue

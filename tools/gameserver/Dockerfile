@@ -8,8 +8,8 @@ ENV PATH=/opt/nim-2.2.10/bin:$PATH
 WORKDIR /src/polyworld
 COPY nimby.lock nimby.lock
 COPY coworld/tools/sync_dependencies.nim coworld/tools/tooling.nim coworld/tools/
-RUN nim r --hints:off coworld/tools/sync_dependencies.nim
 ENV POLYWORLD_DEPS=/src/polyworld/tmp/coworld/deps
+RUN nim r --hints:off coworld/tools/sync_dependencies.nim
 COPY config.nims config.nims
 COPY src/polyworld/rooms.nim src/polyworld/relays.nim src/polyworld/
 COPY tools/gameserver.nim tools/gameserver.nim

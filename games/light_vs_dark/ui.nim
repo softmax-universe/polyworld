@@ -106,7 +106,7 @@ proc placeChrome(layout: GameUiLayout): HudChrome =
   ## Places every textured HUD panel in one layout space.
   result.layout = layout
   result.score = layout.panel(GameUiRegion.TopLeft, PanelScore)
-  result.resources = layout.panel(GameUiRegion.TopCenter, PanelResources)
+  result.resources = layout.resourcePanel()
   result.minimap = layout.panel(GameUiRegion.TopRight, PanelMinimap)
   result.selection = layout.panel(
     GameUiRegion.BottomLeft,
@@ -1228,7 +1228,7 @@ proc drawUi*(
     hoveredIcon, hoveredTint, hoveredDetails)
   let warning = run.world.hallDefeatWarning(if run.replayMode: 0'i32 else: options.playerSlot)
   if warning.len > 0:
-    # Center below the resource ribbon, outside score/minimap/chat columns.
+    # Center below the top HUD row, outside score/minimap/chat columns.
     let size = vec2(350, 32)
     let at = vec2((chrome.layout.size.x - size.x) / 2, 84)
     sk.drawRect(at, size, rgbx(55, 20, 18, 245))

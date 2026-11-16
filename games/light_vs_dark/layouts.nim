@@ -35,6 +35,11 @@ proc showPlaybackControls*(replayMode: bool, playerSlot: int32,
       if seat.owner == participant: return false
   true
 
+proc resourcePanel*(layout: GameUiLayout): GameUiPanel =
+  ## Anchors the resource ribbon just left of the top-right minimap.
+  result = layout.panel(GameUiRegion.TopRight, PanelResources)
+  result.origin.x -= PanelMinimap.x + 48
+
 proc resourcePanels*(panel: GameUiPanel): array[3, GameUiPanel] =
   ## Places three equal resource cells across the top ribbon.
   var row = panel.stack(LeftToRight, vec2(12, 14))

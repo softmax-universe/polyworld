@@ -89,11 +89,11 @@ for size in [
     layout.panel(GameUiRegion.BottomRight, gota.PanelInventory)
   ])
   checkHud(layout, [
-    (GameUiRegion.TopLeft, lvd.PanelScore),
-    (GameUiRegion.TopCenter, lvd.PanelResources),
-    (GameUiRegion.TopRight, lvd.PanelMinimap),
-    (GameUiRegion.BottomLeft, lvd.PanelSelection),
-    (GameUiRegion.BottomRight, lvd.PanelBuild)
+    layout.panel(GameUiRegion.TopLeft, lvd.PanelScore),
+    lvd.resourcePanel(layout),
+    layout.panel(GameUiRegion.TopRight, lvd.PanelMinimap),
+    layout.panel(GameUiRegion.BottomLeft, lvd.PanelSelection),
+    layout.panel(GameUiRegion.BottomRight, lvd.PanelBuild)
   ])
   checkHud(layout, [
     (GameUiRegion.TopLeft, cta.PanelParty),

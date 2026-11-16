@@ -1,6 +1,6 @@
 FROM ubuntu:24.04 AS compiler
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc git curl ca-certificates xz-utils \
+    gcc libc6-dev git curl ca-certificates xz-utils \
     && rm -rf /var/lib/apt/lists/*
 RUN curl -fsSL https://github.com/nim-lang/nightlies/releases/download/2026-04-24-version-2-2-bfeb3146d1638b39f69007a4ae5a23e23ae4e5ef/nim-2.2.10-linux_x64.tar.xz \
     | tar xJ -C /opt
@@ -11,7 +11,8 @@ COPY coworld/tools/sync_dependencies.nim coworld/tools/tooling.nim coworld/tools
 ENV POLYWORLD_DEPS=/src/polyworld/tmp/coworld/deps
 RUN nim r --hints:off coworld/tools/sync_dependencies.nim
 COPY config.nims config.nims
-COPY src/polyworld/rooms.nim src/polyworld/relays.nim src/polyworld/
+COPY src src
+COPY games/gods_of_the_arena games/gods_of_the_arena
 COPY tools/gameserver.nim tools/gameserver.nim
 RUN nim c --threads:on -d:release -o:/out/gameserver tools/gameserver.nim
 FROM ubuntu:24.04

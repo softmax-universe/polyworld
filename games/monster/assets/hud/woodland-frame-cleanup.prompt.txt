@@ -1,0 +1,8 @@
+Use case: precise-object-edit.
+The provided RGBA image is a game HUD overlay asset. Make a technical cleanup only. Preserve every existing decorative frame, the six inventory slots, empty portrait rim, energy outline, minimap rim, raised large chat opening, input outline, and empty send button. Do not add content or redesign it.
+
+Place the COMPLETE existing frame slightly smaller within a wide transparent canvas, leaving at least 32 pixels of fully transparent clearance on EVERY side, especially ABOVE the central blue crystal tip. Its tip currently touches the top canvas edge: reconstruct the tiny missing tip so the entire jewel and all leaves are fully visible. Nothing may touch or be cropped by any image edge.
+
+Clean the alpha: all outside space and every opening (minimap, chat, input, send button, portrait, energy bar interior, six item-slot interiors, status text space) must be completely transparent, alpha zero. Remove faint grey haze and stray background pixels in openings. Preserve strong nearly opaque decorative material pixels with clean antialiasing confined to their edges. No red/yellow/green cutout halos, no black matte, no painted transparency checkerboard. The only visible pixels are the hand-painted decorative wooden, stone, brass, leaf, and blue crystal frames. No landscape, text, symbols replacing text, scrollbar, portrait, item contents, or status fill.
+
+Keep the same proportions. One complete game overlay, ideally a 1792 by 640 pixel RGBA PNG with generous transparent padding. Do not place captions or annotations anywhere.

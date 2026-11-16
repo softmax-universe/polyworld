@@ -6,7 +6,7 @@
 import
   std/[os, strformat, strutils, times],
   chroma, opengl, pixie, silky, vmath, windy,
-  polyworld/[actioncam, chrome, player, rtscameras, tapes],
+  polyworld/[actioncam, chrome, cli, menus, player, rtscameras, tapes],
   demos/pathingscenarios,
   game, graphics, replays
 
@@ -20,12 +20,15 @@ type
     capture: string
     ticks: int32
     pause, help: bool
+    soundMuted, soundOverride: bool
 
 proc readOptions(): DemoOptions =
   ## Reads scene and capture options without invoking the match CLI parser.
   result.ticks = 240
   for argument in commandLineParams():
-    if argument in ["--help", "-h"]:
+    if result.soundMuted.takeSoundFlag(argument):
+      result.soundOverride = true
+    elif argument in ["--help", "-h"]:
       result.help = true
     elif argument == "--pause":
       result.pause = true
@@ -206,8 +209,12 @@ Run: nim r games/light_vs_dark/demo_pathing.nim
 1-5: scenario / Space: pause / R: replay / S: speed / P: paths
 F: frame scenario / Scroll: zoom / Middle drag or arrows: pan
 F12: screenshot / Escape: game menu
-Options: --scenario=1..5 --pause --ticks=240 --capture=output/demo.png"""
+Options: --scenario=1..5 --pause --ticks=240 --capture=output/demo.png
+Audio: saved volumes by default; --mute[=BOOL], --unmute"""
     return
+  options.soundMuted = demo.soundMuted
+  options.soundOverride = demo.soundOverride
+  configureSoundLaunch(demo.soundMuted, demo.soundOverride)
   options.windowWidth = 1600
   options.windowHeight = 1000
   options.playerSlot = 0

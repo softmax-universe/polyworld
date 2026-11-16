@@ -37,6 +37,8 @@ proc usage() =
   echo "  --play=false            Start the graphical transport paused."
   echo "  --windowSize WxH        Graphical window, such as 800x400."
   echo "  --vsync:off             Unlock the frame rate (default on)."
+  echo "  --mute[=true|false]     Override saved sound levels for this launch."
+  echo "  --unmute                Enable sound for this launch."
   echo "  --verbose               Print periodic headless summaries."
   echo "  --arena                 Debug fight in one 10x10 room."
   echo "  --hero:CLASS[,CLASS]    Arena party: wizard (the mage), rogue (the"

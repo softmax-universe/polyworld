@@ -297,8 +297,13 @@ proc runGraphics*(
     preferences = readPreferences("Polyworld GotA")
   except CatchableError as error:
     saveError = error.msg
-  configureSounds(preferences.soundMuted, preferences.mainVolume,
-    preferences.fxVolume, preferences.uiVolume)
+  configureSounds(
+    false,
+    preferences.mainVolume,
+    preferences.fxVolume,
+    preferences.uiVolume,
+    preferences.musicVolume
+  )
   window.updateCursorConfinement(preferences.edgeScrolling)
   inputBindings = preferences.bindings
   chrome.uiScaleMode = preferences.uiScaleMode

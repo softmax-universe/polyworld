@@ -80,6 +80,30 @@
     commandArguments.push("--verbose");
   }
 
+  var muteValues = parameters.getAll("mute");
+  if (muteValues.length > 1) {
+    throw new Error("Only one mute query parameter is allowed.");
+  }
+  if (muteValues.length === 1) {
+    switch (muteValues[0].trim().toLowerCase()) {
+      case "":
+      case "1":
+      case "true":
+      case "on":
+      case "yes":
+        commandArguments.push("--mute");
+        break;
+      case "0":
+      case "false":
+      case "off":
+      case "no":
+        commandArguments.push("--unmute");
+        break;
+      default:
+        throw new Error("The mute query parameter must be true or false.");
+    }
+  }
+
   Module["arguments"] = commandArguments;
   if (inputs.length === 0) {
     return;

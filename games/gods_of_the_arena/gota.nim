@@ -17,9 +17,14 @@ when defined(headless):
 else:
   import windy, polyworld/[menus, sounds], game, graphics, frontend, pointers
   initializeOptions()
-  initSounds()
+  configureSoundLaunch(options.soundMuted, options.soundOverride)
   try:
     var preferences = readPreferences("Polyworld GotA")
+    configureSounds(
+      false, preferences.mainVolume,
+      preferences.fxVolume, preferences.uiVolume, preferences.musicVolume
+    )
+    initSounds()
     if playerNameOverride.len > 0:
       preferences.name = playerNameOverride
       preferences.savePreferences("Polyworld GotA")

@@ -97,6 +97,8 @@ Light vs Dark, a small real-time strategy match between any number of BASIC over
   --speed N        Graphical start speed: 1, 2, 4, or 16.
   --windowSize WxH Graphical window, such as 800x400.
   --vsync:off      Unlock the frame rate (default on).
+  --mute[=true|false] Override saved sound levels for this launch.
+  --unmute         Enable sound for this launch.
   --headless-tick-rate N  Wall-clock ticks per second, 0 is unlimited.
   --llm-mode:async|barrier Wait for all requests between headless ticks.
   --help           Show this message.

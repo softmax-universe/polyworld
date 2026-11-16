@@ -138,15 +138,14 @@ proc cueGain(cue: SoundCue): float32 =
   else:
     0.36'f
 
-proc configureSounds*(silent: bool, main, effects, ui: int, music = 100) =
-  ## Applies persisted mixer settings to active and future voices.
+proc soundsMuted*(): bool =
+  ## Reports silence from an explicit mute or zero Master volume.
+  muted or masterVolume <= 0
+
+proc setSoundMuted*(silent: bool) =
+  ## Changes session mute without changing any channel's saved volume.
   muted = silent
-  masterVolume = clamp(main, 0, 100).float32 / 100
-  musicVolume = clamp(music, 0, 100).float32 / 100
-  effectsVolume = clamp(effects, 0, 100).float32 / 100
-  interfaceVolume = clamp(ui, 0, 100).float32 / 100
   if available:
-    setMusicVolume(musicVolume)
     setSoundVolumes(
       if muted: 0.0'f else: masterVolume,
       effectsVolume,
@@ -154,6 +153,16 @@ proc configureSounds*(silent: bool, main, effects, ui: int, music = 100) =
     )
     if muted or masterVolume == 0:
       stopSoundVoices()
+
+proc configureSounds*(silent: bool, main, effects, ui: int, music = 100) =
+  ## Applies saved channel levels, with zero Master silencing every source.
+  masterVolume = clamp(main, 0, 100).float32 / 100
+  musicVolume = clamp(music, 0, 100).float32 / 100
+  effectsVolume = clamp(effects, 0, 100).float32 / 100
+  interfaceVolume = clamp(ui, 0, 100).float32 / 100
+  if available:
+    setMusicVolume(musicVolume)
+  setSoundMuted(silent)
 
 proc initSounds*(musicPath = "") =
   ## Preloads the curated library once without changing simulation state.

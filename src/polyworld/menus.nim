@@ -22,7 +22,6 @@ type
     interpolation*: bool = true
     edgeScrolling*: EdgeScrollMode = FullscreenEdgeScroll
     bindings*: InputBindings = DefaultBindings
-    soundMuted*: bool
     mainVolume*: int = 100
     musicVolume*: int = 100
     fxVolume*: int = 100
@@ -43,6 +42,11 @@ type
     ## Optional game-owned rows; the shared menu knows no game actions.
     draw*: proc(sk: Silky, window: Window, origin: Vec2)
     capturing*: proc(): bool
+  LegacySoundPreferences = object
+    soundMuted: bool
+  SoundLaunch = object
+    explicit, silent, applied: bool
+    volume, savedVolume: int
 
 const
   DefaultControlProfile* = block:
@@ -59,6 +63,7 @@ var
   settingsTab: SettingsTab
   captureAction: InputAction
   captureSlot: int
+  soundLaunch: SoundLaunch
 
 when defined(emscripten):
   {.emit: """
@@ -132,15 +137,21 @@ proc saveReplayFile*(bytes: string) =
       except IOError, OSError:
         raise newException(MenusError, "Cannot save replay: " & getCurrentExceptionMsg())
 
+proc configureSoundLaunch*(silent: bool, explicit = true) =
+  ## Applies explicit launch flags to Master without replacing saved levels.
+  soundLaunch = SoundLaunch(explicit: explicit, silent: silent)
+
 proc readPreferences*(app: string): Preferences =
   ## Loads native or browser settings through Windy's configuration storage.
   let bytes = getConfig(app, "settings.json")
-  if bytes.len == 0:
-    return Preferences()
-  try:
-    result = bytes.fromJson(Preferences)
-  except JsonError as error:
-    raise newException(MenusError, "Cannot read settings: " & error.msg)
+  result = Preferences()
+  if bytes.len > 0:
+    try:
+      result = bytes.fromJson(Preferences)
+      if bytes.fromJson(LegacySoundPreferences).soundMuted:
+        result.mainVolume = 0
+    except JsonError as error:
+      raise newException(MenusError, "Cannot read settings: " & error.msg)
   if result.windowMode == BorderlessWindow:
     result.windowMode = Fullscreen
   result.fps = clamp(result.fps, 0, 240)
@@ -148,13 +159,28 @@ proc readPreferences*(app: string): Preferences =
   result.musicVolume = clamp(result.musicVolume, 0, 100)
   result.fxVolume = clamp(result.fxVolume, 0, 100)
   result.uiVolume = clamp(result.uiVolume, 0, 100)
+  if soundLaunch.explicit:
+    if not soundLaunch.applied:
+      soundLaunch.savedVolume = result.mainVolume
+      soundLaunch.volume =
+        if soundLaunch.silent: 0
+        elif result.mainVolume > 0: result.mainVolume
+        else: 100
+      soundLaunch.applied = true
+    result.mainVolume = soundLaunch.volume
   result.uiScalePercent = clamp(result.uiScalePercent, 25, 400)
   if result.name.len > 64:
     result.name.setLen(64)
 
 proc savePreferences*(preferences: Preferences, app: string) =
   ## Saves ordinary preferences without bot data or reconnect secrets.
-  setConfig(app, "settings.json", preferences.toJson())
+  var saved = preferences
+  if soundLaunch.explicit and soundLaunch.applied:
+    if preferences.mainVolume == soundLaunch.volume:
+      saved.mainVolume = soundLaunch.savedVolume
+    else:
+      soundLaunch = SoundLaunch()
+  setConfig(app, "settings.json", saved.toJson())
 
 proc applyPreferences*(
   preferences: Preferences,
@@ -173,7 +199,7 @@ proc applyPreferences*(
   framePaceHz = preferences.fps
   interpolateVisuals = preferences.interpolation
   configureSounds(
-    preferences.soundMuted, preferences.mainVolume,
+    false, preferences.mainVolume,
     preferences.fxVolume, preferences.uiVolume, preferences.musicVolume
   )
 
@@ -503,39 +529,37 @@ proc settingsPanel*(
     )
   case settingsTab
   of SoundSettings:
-    sk.at = origin + vec2(0, 64)
-    checkBox "Mute all sound", preferences.soundMuted
     sk.percentageSlider(
-      window, "Master", preferences.mainVolume, origin + vec2(0, 112)
+      window, "Master", preferences.mainVolume, origin + vec2(0, 64)
     )
     sk.percentageSlider(
-      window, "Music", preferences.musicVolume, origin + vec2(0, 160)
+      window, "Music", preferences.musicVolume, origin + vec2(0, 112)
     )
     sk.percentageSlider(
-      window, "Sound effects", preferences.fxVolume, origin + vec2(0, 208)
+      window, "Sound effects", preferences.fxVolume, origin + vec2(0, 160)
     )
     sk.percentageSlider(
-      window, "UI effects", preferences.uiVolume, origin + vec2(0, 256)
+      window, "UI effects", preferences.uiVolume, origin + vec2(0, 208)
     )
     if preferences != previous:
       configureSounds(
-        preferences.soundMuted, preferences.mainVolume,
+        false, preferences.mainVolume,
         preferences.fxVolume, preferences.uiVolume, preferences.musicVolume
       )
       preferences.savePreferences(app)
-    let audioEnabled = not preferences.soundMuted and preferences.mainVolume > 0
-    sk.at = origin + vec2(0, 312)
+    let audioEnabled = preferences.mainVolume > 0
+    sk.at = origin + vec2(0, 264)
     soundButton "Test combat sound", audioEnabled and preferences.fxVolume > 0:
       playSound(SwordSound)
-    sk.at = origin + vec2(320, 312)
+    sk.at = origin + vec2(320, 264)
     soundButton "Test UI sound", audioEnabled and preferences.uiVolume > 0:
       playSound(ClickSound)
     sk.drawLabel(
-      if preferences.soundMuted:
-        "Audio is muted. Uncheck Mute all sound to hear music and effects."
+      if preferences.mainVolume == 0:
+        "Master is at 0%. Raise it to hear music and effects."
       else:
         "Master controls all audio. Music, sound effects and UI have separate volumes.",
-      origin + vec2(0, 360),
+      origin + vec2(0, 312),
       vec2(720, 36),
       sk.theme.disabledTextColor
     )

@@ -35,6 +35,8 @@ Heartleaf, a village dinner-party week between nine BASIC villagers.
   --speed N        Graphical start speed: 1, 2, 4, or 16.
   --windowSize WxH Graphical window, such as 800x400.
   --vsync:off      Unlock the frame rate (default on).
+  --mute[=true|false] Override saved sound levels for this launch.
+  --unmute         Enable sound for this launch.
   --help           Show this message.
 
 Compile with -d:headless for a command-line game.

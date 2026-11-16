@@ -52,6 +52,8 @@ proc usage() =
   echo "  --speed NUMBER          Graphical start speed: 1, 2, 4, or 16."
   echo "  --windowSize WxH        Graphical window, such as 1024x576."
   echo "  --vsync:off             Unlock the frame rate (default on)."
+  echo "  --mute[=true|false]     Override saved sound levels for this launch."
+  echo "  --unmute                Enable sound for this launch."
   echo "Compile with -d:headless for command-line simulation."
   echo "Compile with -d:emscripten for the web backend."
 

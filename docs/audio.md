@@ -6,6 +6,18 @@ the browser's Web Audio implementation, resuming playback after a
 pointer or keyboard gesture. A missing output device disables playback
 without preventing the game from running.
 
+Settings > Sound saves Master, Music, Sound effects and UI effects separately.
+Native and browser launches restore these levels. New settings start at 100%.
+Master at 0% silences every source; raising it restores the other channel levels.
+Older saved mute-checkbox settings become Master 0% on load.
+
+Explicit `--mute` or `--mute=true` launches show Master at 0% for that session.
+`--unmute` or `--mute=false` uses the saved nonzero Master level, or 100% if it
+was zero. The browser equivalents are `?mute=true` and `?mute=false`.
+Without an explicit flag, saved levels always win. Changing Master saves the
+new value and clears the launch override. Other settings changes preserve the
+saved Master value. A pointer or keyboard gesture unlocks browser playback.
+
 Native playback uses the system OpenAL framework on macOS, OpenAL on Linux,
 and Slappy's `soft_oal.dll` beside the game executable on Windows. Linux
 builds need the OpenAL development package, such as `libopenal-dev` on
@@ -101,7 +113,7 @@ starts "Yearning of the Deep Woods" at application startup and loops it across
 menus, matches, pauses and replay seeks. In the browser, playback begins after
 the first pointer or keyboard gesture unlocks audio. One dedicated stereo source
 keeps music separate from the effects pool and its burst limits. Music volume
-changes apply immediately without restarting the song; Master and Mute also apply.
+changes apply immediately without restarting the song; Master also applies.
 Master volume and mute are applied directly to every playback source, including
 stereo music. Music, sound effects and UI gains stay independent. The Sound panel
 provides separate combat and UI preview buttons that play alongside the track.
@@ -122,6 +134,9 @@ Run the focused checks from the Polyworld repository root:
 ```sh
 nim check src/polyworld/sounds.nim
 nim r -d:audioTest -d:nimAllocStats tests/test_sounds.nim
+nim r -d:audioTest tests/test_sound_startup.nim
+node tests/test_webinputs.js
+node tests/test_replay_audio.js
 nim r -d:audioTest -d:nimAllocStats games/gods_of_the_arena/tests/test_audio.nim
 nim r -d:audioTest -d:nimAllocStats games/light_vs_dark/tests/test_battle_sounds.nim
 nim r -d:nimAllocStats tests/manual_sound_allocations.nim
@@ -131,5 +146,6 @@ nim r tests/test_sound_mixing.nim
 ```
 
 To audition a mix, run either game normally, open Settings > Sound, and use
-Test combat sound. Main, Music, FX, UI and Mute apply immediately and persist.
+Test combat sound or Test UI sound. Master, Music, Sound effects and UI effects
+apply immediately and persist across launches. Set Master to 0% for silence.
 The native music check uses a muted device without opening a window.

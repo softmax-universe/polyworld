@@ -51,12 +51,12 @@ when not defined(headless):
       # Graphics reads and saves its own preferences while the local match runs.
       # Returning must load those edits, but not its stale/default relay address.
       stored.name = "After match"
-      stored.soundMuted = true
+      stored.mainVolume = 0
       stored.uiScalePercent = 125
       effective = effectivePreferences(stored, queryServer, Preferences().server)
       check effective.server == queryServer
       check effective.name == "After match"
-      check effective.soundMuted
+      check effective.mainVolume == 0
       check effective.uiScalePercent == 125
       check stored.server == Preferences().server
 

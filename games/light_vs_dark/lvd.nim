@@ -18,10 +18,11 @@ else:
   import windy, polyworld/[menus, sounds], game, graphics, frontend, lobbies,
     assets
   initializeOptions()
+  configureSoundLaunch(options.soundMuted, options.soundOverride)
   try:
     var preferences = readLvdPreferences()
     configureSounds(
-      preferences.soundMuted, preferences.mainVolume,
+      false, preferences.mainVolume,
       preferences.fxVolume, preferences.uiVolume, preferences.musicVolume
     )
     initSounds(MusicPath)

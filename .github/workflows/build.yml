@@ -34,6 +34,8 @@ jobs:
           nimby sync "${{ github.event.repository.name }}/nimby.lock"
       - name: Run release tests and all-game determinism
         run: nim r -d:release -d:audioTest -d:bassyNativeStrict -d:replayEvents tests/all.nim
+      - name: Test display settings
+        run: nim r -d:release tests/test_displays.nim
       - name: Test lockstep training API
         run: nim r -d:release -d:headless -d:bassyNativeStrict games/gods_of_the_arena/tests/test_lockstep.nim
       - name: Test presentation audio without an output device

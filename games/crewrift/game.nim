@@ -2,12 +2,14 @@
 
 import
   std/[os, strutils],
+  polyworld/cli,
   sim, maps, bots, replays
 
 type
   Options* = object
     seed*, players*, ticks*, player*: int
     speed*: float32
+    soundMuted*: bool = true
     role*, name*, record*, replay*, screenshot*: string
     width*, height*, captureTicks*: int
   Game* = ref object
@@ -42,9 +44,11 @@ proc usage() =
   echo "  --replay:PATH     Play and verify a saved input replay."
   echo "  --windowSize:WxH  Window size (default 1440x900)."
   echo "  --screenshot:PATH Save a frame and exit."
+  echo "  --mute[=BOOL]     Start muted (default true)."
+  echo "  --unmute          Start with sound enabled."
   echo "Compile with -d:headless to run and verify without graphics."
 
-proc parseOptions*(): Options =
+proc parseOptions*(arguments = commandLineParams()): Options =
   ## Parses the shared native and headless command surface.
   result = Options(
     seed: 2026, players: MinPlayers, ticks: MaxTicks,
@@ -53,12 +57,14 @@ proc parseOptions*(): Options =
   )
   when defined(headless):
     result.player = -1
-  for argument in commandLineParams():
+  for argument in arguments:
     let
       parts = argument.split(':', 1)
       flag = parts[0]
       value = if parts.len > 1: parts[1] else: ""
     try:
+      if result.soundMuted.takeSoundFlag(argument):
+        continue
       case flag
       of "--seed": result.seed = parseInt(value)
       of "--players": result.players = parseInt(value)

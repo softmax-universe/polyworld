@@ -60,7 +60,7 @@ macro homeMultiplayer(): untyped =
       let found = find(child)
       if found != nil: return found
   result = find(parseStmt(staticRead("../frontend.nim")))
-  if result == nil: error("Missing Home multiplayer route")
+  if result == nil: error("Missing main menu multiplayer route")
 
 proc connecting(connection: TestConnection): bool = false
 
@@ -173,7 +173,7 @@ proc enter() =
   window.state.perFrame.buttonPressed = {}
 
 suite "LvD production native name editor":
-  test "fresh storage and stored placeholders prompt on Home multiplayer entry":
+  test "fresh storage and stored placeholders prompt on main menu multiplayer entry":
     for stored in ["missing", "", "   ", "Player", "  pLaYeR  ", "Saved Ω :)"]:
       reset()
       if stored != "missing":

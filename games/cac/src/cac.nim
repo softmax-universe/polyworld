@@ -40,6 +40,8 @@ when not defined(headless):
       "                   play its precon.\n" &
       "  --replay PATH    Watch a recorded match (see --record in the\n" &
       "                   headless build)\n" &
+      "  --mute           Start with sound muted (default)\n" &
+      "  --unmute         Enable sound for this launch (--mute=false)\n" &
       "  --cards          List every card and exit\n" &
       "  --cards:CLASS    List one class's cards (archer, warrior or mage)\n" &
       "                   and exit\n" &

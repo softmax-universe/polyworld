@@ -3,7 +3,7 @@ import pixie, silky
 import polyworld/homes
 
 # Packing a game's differently named sources must still produce the sprite
-# contract consumed by the shared home renderer, including trimmed buttons.
+# contract consumed by the shared main menu renderer, including trimmed buttons.
 block:
   let root = getTempDir() / "polyworld-shared-homes-test"
   createDir(root)
@@ -29,4 +29,4 @@ block:
     doAssert entry.height == entry.width
   doAssert not builder.atlas.entries.hasKey("home-backdrop")
 
-echo "Shared home asset tests passed"
+echo "Shared main menu asset tests passed"

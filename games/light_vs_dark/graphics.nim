@@ -381,7 +381,7 @@ proc runGraphics*(network: NetworkMatch = nil,
     connection: Connection = nil,
     hooks = GraphicsHooks(),
     hidden = defined(takeScreenshot)): bool {.discardable.} =
-  ## Owns match resources; the application window survives returning home.
+  ## Owns match resources; the application window survives returning to the main menu.
   initializeGraphics(visible = not hidden)
   var captureTarget: CaptureTarget
   if hidden:
@@ -2243,7 +2243,7 @@ proc runGraphics*(network: NetworkMatch = nil,
               if sk.lobbyButton("Settings", origin + vec2(0, 164), 464):
                 matchMenu = MatchSettings
               if network == nil or network.client.snapshot.phase in {rooms.Ended, Desynced, Lobby}:
-                if sk.lobbyButton(if network == nil: "Return to main menu" else: "Return to lobby",
+                if sk.lobbyButton(if network == nil: "Return to menu" else: "Return to lobby",
                   origin + vec2(0, 220), 464):
                   leaveMatch = returnToMatchLobby(network)
               if network != nil and sk.lobbyButton("Quit to main menu",

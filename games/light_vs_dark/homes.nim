@@ -1,6 +1,6 @@
-## Game-specific art and startup routing over the shared home screen.
+## Game-specific art and startup routing over the shared main menu.
 proc opensMultiplayer*(room: string): bool =
-  ## A server URL configures a future connection; only invites bypass home.
+  ## A server URL configures a future connection; only invites bypass the main menu.
   room.len > 0
 
 when not defined(headless):

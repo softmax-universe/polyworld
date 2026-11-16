@@ -452,4 +452,20 @@ block:
   doAssert replay.world.players == completed.world.players
   removeFile(path)
 
+echo "Testing muted launch options"
+block:
+  doAssert parseOptions(@[]).soundMuted
+  doAssert parseOptions(@["--mute"]).soundMuted
+  doAssert not parseOptions(@["--unmute"]).soundMuted
+  doAssert not parseOptions(@["--mute=false"]).soundMuted
+  doAssert not parseOptions(@["--mute:off"]).soundMuted
+  doAssert parseOptions(@["--unmute", "--mute"]).soundMuted
+  doAssert not parseOptions(@["--mute", "--unmute"]).soundMuted
+  var rejected = false
+  try:
+    discard parseOptions(@["--mute=loud"])
+  except CrewriftError:
+    rejected = true
+  doAssert rejected, "Invalid mute values must not silently enable audio"
+
 echo "Crewrift checks passed"

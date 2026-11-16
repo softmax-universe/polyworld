@@ -239,7 +239,7 @@ suite "GotA name prompt production routes":
       check loaded.name == original
       check eligiblePlayerName(loaded.name) == (original == "  mason :)  ")
 
-  test "URL server-only keeps Home and invite or explicit server enters multiplayer":
+  test "URL server-only keeps the main menu and invite or explicit server enters multiplayer":
     for invite in ["", "ABC123"]:
       for serverAddress in ["", "ws://direct/ws"]:
         var

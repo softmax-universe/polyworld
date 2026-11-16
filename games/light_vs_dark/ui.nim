@@ -254,7 +254,7 @@ proc matchResultHeadline*(): string =
   "Match interrupted"
 
 proc returnToMatchLobby*(network: NetworkMatch): bool =
-  ## Back to Home locally; network return keeps both room and socket intact.
+  ## Back to the main menu locally; network return keeps both room and socket intact.
   ## Only the room owner may request a new lobby revision on the relay.
   if network == nil: return true
   let client = network.client

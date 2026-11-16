@@ -1,5 +1,6 @@
 import
   std/[os, parseopt, strutils, times],
+  polyworld/cli,
   common, maps, sim, brains, conversations
 
 when not defined(headless):
@@ -20,6 +21,7 @@ when not defined(headless):
 type Options = object
   seed, width, height, frames: int
   offline: bool
+  soundMuted: bool = true
   saveDir, screenshot, prompt, model, selection: string
 
 proc options(): Options =
@@ -35,51 +37,57 @@ proc options(): Options =
       getEnv("SCREENSHOT_PATH", "output/monster.png")
     )
   try:
-    for kind, key, value in getopt():
-      case kind
-      of cmdLongOption, cmdShortOption:
-        case key
-        of "seed":
-          result.seed = parseInt(value)
-        of "width":
-          result.width = parseInt(value)
-        of "height":
-          result.height = parseInt(value)
-        of "frames":
-          result.frames = parseInt(value)
-        of "save-dir":
-          result.saveDir = absolutePath(value)
-          customSave = true
-        of "screenshot":
-          result.screenshot = absolutePath(value)
-        of "select":
-          result.selection = value
-        of "prompt":
-          result.prompt = value
-        of "model":
-          result.model = value
-        of "offline":
-          result.offline = true
-        of "help", "h":
-          echo "Monster / Polyworld"
-          echo "Run from the repository: nim r games/monster/monster.nim"
-          echo "Options: --model:ID --seed:N --save-dir:PATH --offline"
-          echo "Hidden capture: --screenshot:PATH [--prompt:TEXT] [--frames:N]"
-          echo "Inspect a profile on launch: --select:moss or a person/place ID."
-          echo "Or compile with -d:takeScreenshot (default: output/monster.png)."
-          echo "Camera: right-drag to pan, wheel to zoom, F to find Moss."
-          echo "Click or drag the minimap to look around; click Moss to follow."
-          echo "Left-click a villager, house, or stash to inspect it."
-          echo "Conversation: Enter to speak, Escape to release focus."
-          quit(0)
-        else:
-          raise newException(MonsterError, "Unknown option: " & key)
-      of cmdArgument:
-        raise newException(MonsterError, "Unexpected argument: " & key)
-      of cmdEnd:
-        discard
-  except ValueError:
-    raise newException(MonsterError, "Invalid numeric Monster option.")
+    var arguments: seq[string]
+    for argument in commandLineParams():
+      if not result.soundMuted.takeSoundFlag(argument):
+        arguments.add argument
+    if arguments.len > 0:
+      for kind, key, value in getopt(arguments):
+        case kind
+        of cmdLongOption, cmdShortOption:
+          case key
+          of "seed":
+            result.seed = parseInt(value)
+          of "width":
+            result.width = parseInt(value)
+          of "height":
+            result.height = parseInt(value)
+          of "frames":
+            result.frames = parseInt(value)
+          of "save-dir":
+            result.saveDir = absolutePath(value)
+            customSave = true
+          of "screenshot":
+            result.screenshot = absolutePath(value)
+          of "select":
+            result.selection = value
+          of "prompt":
+            result.prompt = value
+          of "model":
+            result.model = value
+          of "offline":
+            result.offline = true
+          of "help", "h":
+            echo "Monster / Polyworld"
+            echo "Run from the repository: nim r games/monster/monster.nim"
+            echo "Options: --model:ID --seed:N --save-dir:PATH --offline"
+            echo "Audio: --mute[=BOOL] (default true), --unmute"
+            echo "Hidden capture: --screenshot:PATH [--prompt:TEXT] [--frames:N]"
+            echo "Inspect a profile on launch: --select:moss or a person/place ID."
+            echo "Or compile with -d:takeScreenshot (default: output/monster.png)."
+            echo "Camera: right-drag to pan, wheel to zoom, F to find Moss."
+            echo "Click or drag the minimap to look around; click Moss to follow."
+            echo "Left-click a villager, house, or stash to inspect it."
+            echo "Conversation: Enter to speak, Escape to release focus."
+            quit(0)
+          else:
+            raise newException(MonsterError, "Unknown option: " & key)
+        of cmdArgument:
+          raise newException(MonsterError, "Unexpected argument: " & key)
+        of cmdEnd:
+          discard
+  except ValueError as error:
+    raise newException(MonsterError, "Invalid Monster option: " & error.msg)
   if result.width < 640 or result.height < 480 or result.frames < 1:
     raise newException(MonsterError, "Use at least 640x480 and one frame.")
   if not customSave:

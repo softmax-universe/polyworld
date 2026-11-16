@@ -25,7 +25,7 @@ Space pauses, R replays, S changes speed, P toggles the game's path overlay,
 and F restores the scenario's camera framing. Scroll to zoom and use the normal
 game camera controls to pan. The playback bar also supports seeking and stepping.
 Scenarios loop after 1800 ticks. Escape opens the ordinary game menu; choosing
-Return to main menu exits the demo. F12 saves the current game frame under
+Return to menu exits the demo. F12 saves the current game frame under
 `output/lvd-pathing-demo/`.
 
 Start on a particular scenario with `--scenario=5`; add `--pause` to start paused.

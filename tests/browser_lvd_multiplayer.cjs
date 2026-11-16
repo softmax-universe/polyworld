@@ -78,7 +78,7 @@ async function main(){
    await page.waitForFunction(()=>window.Module && document.querySelector('#loading')?.hidden,null,{timeout:60000});
    await page.evaluate(()=>{window.__lvdFrames=[];const original=Module.polyworldFrame;Module.polyworldFrame=function(tick,mismatches){window.__lvdFrames.push({tick,mismatches,at:performance.now()});if(window.__lvdFrames.length>10000)window.__lvdFrames.shift();return original.apply(this,arguments);};});
    await shot(peer,'home');await click(page,757,633);await text(page,757,435,'QA '+role);await page.keyboard.press('Enter',{delay:140});
-   await wait(role+' welcomed',()=>last(peer,'Welcome'));await shot(peer,'multiplayer');step(role+': Home → Multiplayer, named QA '+role+', welcomed');
+   await wait(role+' welcomed',()=>last(peer,'Welcome'));await shot(peer,'multiplayer');step(role+': Main menu → Multiplayer, named QA '+role+', welcomed');
   }
   const [host,guest]=peers;assert.notEqual(host.context,guest.context);assert.notEqual(last(host,'Welcome').participant,last(guest,'Welcome').participant);
   await click(host.page,1349,472);await host.page.waitForTimeout(500);

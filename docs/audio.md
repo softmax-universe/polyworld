@@ -21,7 +21,7 @@ saved Master value. A pointer or keyboard gesture unlocks browser playback.
 Native playback uses the system OpenAL framework on macOS, OpenAL on Linux,
 and Slappy's `soft_oal.dll` beside the game executable on Windows. Linux
 builds need the OpenAL development package, such as `libopenal-dev` on
-Debian and Ubuntu. Both lockfiles pin the merged `master` revision from
+Debian and Ubuntu. The lockfile pins the merged `master` revision from
 [Slappy PR #27](https://github.com/treeform/slappy/pull/27), including reusable
 voices, lifecycle and macOS replay fixes, PCM loading, and gain fades.
 
@@ -111,7 +111,8 @@ replacement and teardown may allocate.
 Effects never queue events while browser audio is suspended. Light vs Dark
 starts "Yearning of the Deep Woods" at application startup and loops it across
 menus, matches, pauses and replay seeks. In the browser, playback begins after
-the first pointer or keyboard gesture unlocks audio. One dedicated stereo source
+the first pointer or keyboard gesture unlocks audio, with mute still applied.
+One dedicated stereo source
 keeps music separate from the effects pool and its burst limits. Music volume
 changes apply immediately without restarting the song; Master also applies.
 Master volume and mute are applied directly to every playback source, including

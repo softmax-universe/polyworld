@@ -24,7 +24,7 @@ suite "LvD roster":
     check humanAfterRemoval(-1, 0) == -1
 
 suite "LvD menu entry":
-  test "server overrides do not skip home, room invites do":
+  test "server overrides do not skip the main menu, room invites do":
     check not opensMultiplayer("")
     check opensMultiplayer("room-code")
 

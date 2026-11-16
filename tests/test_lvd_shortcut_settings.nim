@@ -4,7 +4,7 @@ import polyworld/[menus, inputs]
 import ../games/light_vs_dark/[lobbies, shortcuts, shortcutsettings]
 
 suite "LvD shortcut settings integration":
-  test "settings entry point accepts the shared home and match layout":
+  test "settings entry point accepts the shared main menu and match layout":
     static:
       doAssert compiles(block:
         let sk = Silky()

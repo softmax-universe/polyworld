@@ -1,10 +1,10 @@
 # Light vs Dark menus and multiplayer
 
-Run `nim c -r games/light_vs_dark/lvd.nim` from the Polyworld root to open the home menu. Explicit `--bot` or `--replay` arguments retain direct match/replay startup; headless builds retain the command-line runner.
+Run `nim c -r games/light_vs_dark/lvd.nim` from the Polyworld root to open the main menu. Explicit `--bot` or `--replay` arguments retain direct match/replay startup; headless builds retain the command-line runner.
 
 ## Shared versus game-specific code
 
-- `src/polyworld/homes.nim`: centered home layout, keyboard navigation, atlas packing, and backdrop drawing.
+- `src/polyworld/homes.nim`: centered main menu layout, keyboard navigation, atlas packing, and backdrop drawing.
 - `src/polyworld/lobbies.nim`: common lobby layout, buttons, panels, fonts, inputs, seat picker, and readiness indicators.
 - `src/polyworld/menus.nim`: persisted display/sound/network preferences and configurable control-binding profiles.
 - `src/polyworld/connections.nim`, `rooms.nim`, `roomclients.nim`: unchanged universal transport and room protocol.
@@ -29,7 +29,7 @@ Default matches are **FFA**: other players are enemies immediately, independent 
 
 Peons are workers, but not noncombatants: explicit attack and attack-move work. Idle peons deliberately do not autoattack. Their attack has only 1 basic damage and no piercing, so armor can reduce it to **zero** (including against a Swordsman); use military units against armored opponents.
 
-Normal human gameplay has no bottom time scrubber; playback controls remain for replays and spectator viewing. Use Esc for the match menu, pause controls, and Return to main menu / Return to lobby—no persistent return button sits on the battlefield. Finished matches automatically display the winner/outcome headline above the Tab-style statistics and history charts.
+Normal human gameplay has no bottom time scrubber; playback controls remain for replays and spectator viewing. Use Esc for the match menu, pause controls, and Return to menu / Return to lobby—no persistent return button sits on the battlefield. Finished matches automatically display the winner/outcome headline above the Tab-style statistics and history charts.
 
 Select workers, then right-click a tree's visible canopy or trunk to harvest wood. Tree picking uses the rendered tree rather than the empty ground behind its canopy. If another worker blocks the chopping position, workers seek a reachable alternative approach or another explored tree, retaining cargo and queued orders. Opposing peons deterministically yield sideways when there is safe passing space, then resume their original work; they never overlap to force through a one-cell corridor.
 
@@ -52,7 +52,7 @@ Construction requires the assigned living owned peon beside or inside that exact
 
 Per-unit queues hold up to 32 pending orders. Queued harvest hands off after its next resource deposit; invalid future targets are skipped. The current semantics use LvD gameplay version 28 / network protocol 2 / replay format 6, so all multiplayer clients must reload the current build; older gameplay recordings (including version 27) require their matching archived client.
 
-`?server=wss://HOST/ws` chooses the relay without skipping Home. A `room` query additionally opens multiplayer and joins the invitation. Browser pages served over HTTPS require `wss://`.
+`?server=wss://HOST/ws` chooses the relay without skipping the main menu. A `room` query additionally opens multiplayer and joins the invitation. Browser pages served over HTTPS require `wss://`.
 
 ## Contextual action keys
 
@@ -118,4 +118,4 @@ nim r tests/test_control_profiles.nim
 python3 tests/test_web_game_packaging.py
 ```
 
-Graphics/menu-asset checks need the normal dependencies and art checkout. Browser acceptance should exercise home → setup → local match → exit, settings, relay connection, room creation/join, readiness, and authoritative tick advancement.
+Graphics/menu-asset checks need the normal dependencies and art checkout. Browser acceptance should exercise main menu → setup → local match → exit, settings, relay connection, room creation/join, readiness, and authoritative tick advancement.

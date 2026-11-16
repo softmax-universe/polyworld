@@ -1,6 +1,7 @@
 ## Shared browser/server session options, deterministic bots and snapshot codec.
 ## Card programs stay in the base set; the wire format contains stable card IDs.
 import std/[algorithm, json, options, sets, strutils]
+from polyworld/cli import takeSoundFlag
 import sim
 export sim
 
@@ -14,6 +15,8 @@ type
     seedGiven*: bool  ## --seed was passed; otherwise games may pick their own.
     playerCount*: int  ## Above two selects the multiplayer scene preview.
     human*: bool
+    soundMuted*: bool = true
+      ## Launch audio preference, separate from deterministic match state.
     humanDeckPath*: string
       ## `--human PATH.bas`: a bot script whose class and deck the human
       ## plays. Only its setup runs.
@@ -54,6 +57,9 @@ proc parseSessionOptions*(args: openArray[string]): SessionOptions =
     human: false)
   var index = 0
   while index < args.len:
+    if result.soundMuted.takeSoundFlag(args[index]):
+      inc index
+      continue
     let separator = args[index].find('=')
     let key = if separator >= 0: args[index][0 ..< separator] else: args[index]
     if key notin ["--seed", "--players", "--bot", "--human", "--replay"]:

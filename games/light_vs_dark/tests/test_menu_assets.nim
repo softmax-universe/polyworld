@@ -3,7 +3,7 @@ import polyworld/assets
 import ../assets as lvdassets
 
 suite "LvD menu browser assets":
-  test "browser bundle includes every home image":
+  test "browser bundle includes every main menu image":
     let declared = lvdassets.browserAssets()
     var names: HashSet[string]
     for asset in declared:

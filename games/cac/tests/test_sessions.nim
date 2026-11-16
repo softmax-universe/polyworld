@@ -8,6 +8,25 @@ suite "session options":
     check not options.seedGiven
     check options.playerCount == 2
     check options.human == false
+    check options.soundMuted
+
+  test "audio flags preserve session arguments and the last choice wins":
+    check SessionOptions().soundMuted
+    check parseSessionOptions(["--mute"]).soundMuted
+    check not parseSessionOptions(["--unmute"]).soundMuted
+    for argument in ["--mute=false", "--mute:off", "--mute=0"]:
+      let options = parseSessionOptions([
+        "--human", argument, "--seed", "42", "--replay", "m.replay"
+      ])
+      check not options.soundMuted
+      check options.human
+      check options.seed == 42
+      check options.replayPath == "m.replay"
+    check parseSessionOptions(["--unmute", "--mute=true"]).soundMuted
+    check not parseSessionOptions(["--mute", "--unmute"]).soundMuted
+    for argument in ["--mute=", "--mute=maybe"]:
+      expect ValueError:
+        discard parseSessionOptions([argument])
 
   test "URL argument forms and negative seeds":
     let options = parseSessionOptions([

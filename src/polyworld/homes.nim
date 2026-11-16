@@ -19,7 +19,9 @@ proc addHomeAssets*(
 ) =
   ## Packs the generated menu art, trimming empty space around button faces.
   if images.len != MenuImages.len:
-    raise newException(MenusError, "Home art requires a background, logo and four buttons")
+    raise newException(
+      MenusError, "Main menu art requires a background, logo and four buttons"
+    )
   let
     shade = newImage(256, 256)
     gradient = newPaint(RadialGradientPaint)

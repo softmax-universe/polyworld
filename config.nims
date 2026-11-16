@@ -1,5 +1,7 @@
 import std/[os, strutils]
 
+switch("hint", "[CC]:off")
+
 --path:"src"
 let
   projectRoot = currentSourcePath().parentDir

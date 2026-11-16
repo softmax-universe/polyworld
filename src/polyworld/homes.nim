@@ -1,7 +1,7 @@
 import
   std/os,
   pixie, silky, vmath, windy,
-  chrome, menus
+  chrome, gameuis, menus, sounds
 
 const
   MenuImages* = [
@@ -97,8 +97,10 @@ proc drawHome*(sk: Silky, window: Window, focus: var int,
       rgbx(222, 222, 218, 255), "Bold", CenterAlign)
   if window.buttonPressed[KeyUp]:
     focus = (focus + count - 1) mod count
+    playSound(SelectSound)
   if window.buttonPressed[KeyDown] or window.buttonPressed[KeyTab]:
     focus = (focus + 1) mod count
+    playSound(SelectSound)
   for i in 0 ..< count:
     let
       position = origin + vec2(596, 490 + i.float32 * 86)
@@ -109,6 +111,7 @@ proc drawHome*(sk: Silky, window: Window, focus: var int,
         sk.mousePos.y < position.y + buttonSize.y
     if hovered and window.mouseDelta != ivec2(0):
       focus = i
+    sk.hoverSound(GameUiPanel(origin: position, size: buttonSize))
     let
       active = hovered or focus == i
       tint = if active: 255'u8 else: 226'u8
@@ -121,3 +124,4 @@ proc drawHome*(sk: Silky, window: Window, focus: var int,
     if (hovered and window.buttonReleased[MouseLeft]) or
       (focus == i and window.buttonPressed[KeyEnter]):
         result = HomeAction(i + 1)
+        playSound(ClickSound)

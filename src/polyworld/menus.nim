@@ -1,7 +1,7 @@
 import
   std/[os, strutils],
   chroma, jsony, pixie, silky, vmath, windy,
-  chrome, displays, gameuis, inputs, policies, rtscameras
+  chrome, displays, gameuis, inputs, policies, rtscameras, sounds
 
 type
   MenusError* = object of CatchableError
@@ -172,6 +172,10 @@ proc applyPreferences*(
       window.configureWindow(preferences.windowMode, preferences.resolution)
   framePaceHz = preferences.fps
   interpolateVisuals = preferences.interpolation
+  configureSounds(
+    preferences.soundMuted, preferences.mainVolume,
+    preferences.fxVolume, preferences.uiVolume
+  )
 
 proc customScale(preferences: var Preferences, percent: int) =
   ## Selects a fixed scale without changing other window settings.
@@ -278,11 +282,33 @@ proc menuButton*(
       elif hovered: rgbx(66, 83, 73, 255)
       else: rgbx(41, 54, 48, 255)
   sk.drawRect(position, size, color)
+  sk.hoverSound(GameUiPanel(origin: position, size: size), enabled)
   sk.drawLabel(
     text, position, size, if enabled: MenuInk else: MenuMuted,
     "Default", CenterAlign
   )
-  enabled and hovered and window.buttonPressed[MouseLeft]
+  result = enabled and hovered and window.buttonPressed[MouseLeft]
+  if result:
+    playSound(ClickSound)
+
+template soundButton(label: string, enabled: bool, body: untyped) =
+  ## Adds pointer-entry feedback to a standard Silky menu button.
+  block:
+    let
+      soundLabel = label
+      soundEnabled = enabled
+    if soundEnabled and sk.mouseDelta != vec2(0):
+      sk.startCurrentChildren()
+      let size = sk.getTextSize(sk.textStyle, soundLabel) +
+        vec2(sk.theme.padding.float32) * 2
+      sk.hoverSound(GameUiPanel(origin: sk.placedAt(size), size: size))
+    button soundLabel, soundEnabled:
+      body
+
+template soundButton(label: string, body: untyped) =
+  ## Adds pointer-entry feedback to an enabled Silky menu button.
+  soundButton(label, true):
+    body
 
 proc menuInput*(
     sk: Silky, window: Window, id: string, value: var string,
@@ -387,14 +413,14 @@ proc bindingsPanel(
             "Press a button..."
           else:
             preferences.bindings[action][slot].bindingLabel
-        button label, not capturing:
+        soundButton label, not capturing:
           captureAction = action
           captureSlot = slot
           bindingCapture = true
     if extension.draw != nil:
       extension.draw(sk, window, listOrigin + vec2(0, controls.actions.len.float32 * 38 + 12))
   sk.at = origin + vec2(500, height - 32)
-  button "Reset bindings", not capturing:
+  soundButton "Reset bindings", not capturing:
     preferences.resetBindings(controls)
 
 proc percentageSlider(
@@ -462,6 +488,8 @@ proc settingsPanel*(
       )
     if interaction == Released:
       settingsTab = page
+      playSound(ClickSound)
+    sk.hoverSound(tab, not bindingCapture)
     let selected = settingsTab == page
     sk.drawTab(tab, selected, interaction in {Hovered, Pressed, Held})
     sk.drawLabel(
@@ -480,16 +508,22 @@ proc settingsPanel*(
       window, "Main", preferences.mainVolume, origin + vec2(0, 120)
     )
     sk.percentageSlider(
-      window, "Music", preferences.musicVolume, origin + vec2(0, 176)
+      window, "FX", preferences.fxVolume, origin + vec2(0, 176)
     )
     sk.percentageSlider(
-      window, "FX", preferences.fxVolume, origin + vec2(0, 232)
+      window, "UI", preferences.uiVolume, origin + vec2(0, 232)
     )
-    sk.percentageSlider(
-      window, "UI", preferences.uiVolume, origin + vec2(0, 288)
-    )
+    if preferences != previous:
+      configureSounds(
+        preferences.soundMuted, preferences.mainVolume,
+        preferences.fxVolume, preferences.uiVolume
+      )
+      preferences.savePreferences(app)
+    sk.at = origin + vec2(0, 292)
+    soundButton "Test combat sound":
+      playSound(SwordSound)
     sk.drawLabel(
-      "Audio playback is not available yet.",
+      "FX controls battles and workers. UI controls menus, orders, and notices.",
       origin + vec2(0, 352),
       vec2(720, 36),
       sk.theme.disabledTextColor
@@ -566,13 +600,13 @@ proc settingsPanel*(
       previous.uiScaleMode == AutoUiScale:
         preferences.customScale(percent)
     sk.at = origin + vec2(420, 292)
-    button "-", percent > 25:
+    soundButton "-", percent > 25:
       preferences.customScale(percent - 10)
     sk.at = origin + vec2(480, 292)
-    button $percent & "%":
+    soundButton $percent & "%":
       preferences.customScale(100)
     sk.at = origin + vec2(600, 292)
-    button "+", percent < 400:
+    soundButton "+", percent < 400:
       preferences.customScale(percent + 10)
     if preferences.uiScaleMode == CustomUiScale:
       sk.percentageSlider(
@@ -599,6 +633,7 @@ proc settingsPanel*(
         )
         preferences.savePreferences(app)
   sk.at = origin + vec2(0, height - 32)
-  button "Save and Back", not bindingCapture:
+  soundButton "Save and Back", not bindingCapture:
     preferences.savePreferences(app)
+    playSound(CancelSound)
     result = true

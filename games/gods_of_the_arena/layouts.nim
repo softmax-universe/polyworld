@@ -4,7 +4,7 @@ import
   std/math,
   vmath,
   polyworld/[gameuis, stackpanels],
-  content
+  content, shopcatalog
 
 const
   PanelScore* = vec2(298, 104)
@@ -44,7 +44,8 @@ type
     slots*: array[6, GameUiPanel]
 
   ShopPanels* = object
-    panel*, heading*, catalog*, footer*: GameUiPanel
+    panel*, heading*, catalog*, footer*, tooltipGutter*: GameUiPanel
+    groups*: array[ShopGroup, GameUiPanel]
     cards*: array[Item.high.ord, GameUiPanel]
     compact*: bool
 
@@ -174,28 +175,44 @@ proc inventoryPanels*(panel: GameUiPanel): InventoryPanels =
   stackGrid(result.contents, vec2(72), 3, vec2(4, 5), result.slots)
 
 proc shopPanels*(size: Vec2): ShopPanels =
-  ## Fits the complete item catalog and inventory into the full-screen shop.
-  result.compact = size.x < 1920 or size.y < 1080
-  let
-    margin = if result.compact: 16.0'f else: 24.0'f
-    gap = if result.compact: 12.0'f else: 20.0'f
-    gridGap = if result.compact: 12.0'f else: 16.0'f
-    footerHeight = if result.compact: 112.0'f else: 132.0'f
-  result.panel = GameUiPanel(
-    origin: vec2(margin),
-    size: vec2(floor(size.x), floor(size.y)) - vec2(margin * 2)
-  )
-  var rows = result.panel.stack(TopToBottom, vec2(margin))
-  result.heading = rows.takeRow(72, gap)
-  result.catalog = rows.takeRow(rows.remainingSpace.y - footerHeight, gap)
-  result.footer = rows.takeRest()
-  let
-    columns = 6
-    rowCount = (result.cards.len + columns - 1) div columns
-    cell = vec2(
-      floor((result.catalog.size.x - gridGap * (columns - 1).float32) /
-        columns.float32),
-      floor((result.catalog.size.y - gridGap * (rowCount - 1).float32) /
-        rowCount.float32)
-    )
-  stackGrid(result.catalog, cell, columns, vec2(gridGap), result.cards)
+  ## Centered icon shop; its right-hand gutter is never a purchase target.
+  result.panel.size = min(size - vec2(32), vec2(1200, 744))
+  result.panel.origin = floor((size - result.panel.size) / 2)
+  result.compact = result.panel.size.x < 1100 or result.panel.size.y < 720
+  let at = result.panel.origin + vec2(20)
+  let width = result.panel.size.x - 40
+  result.heading = GameUiPanel(origin: at, size: vec2(width, 48))
+  result.catalog = GameUiPanel(origin: at + vec2(0, 60),
+    size: vec2(width - 400, result.panel.size.y - 220))
+  result.tooltipGutter = GameUiPanel(
+    origin: vec2(result.catalog.origin.x + result.catalog.size.x + 12,
+      result.catalog.origin.y),
+    size: vec2(388, result.catalog.size.y))
+  result.footer = GameUiPanel(origin: at + vec2(0, result.panel.size.y - 144),
+    size: vec2(width, 104))
+  # Four small functional groups across the top; equipment and utility below.
+  # The equipment group wraps left-to-right before advancing to its next row.
+  let cell = vec2(80, 96)
+  let pitch = vec2(88, 102)
+  let topWidth = result.catalog.size.x / 4
+  for group in ShopHealing..ShopRanged:
+    result.groups[group] = GameUiPanel(
+      origin: result.catalog.origin + vec2(group.ord.float32 * topWidth, 0),
+      size: vec2(topWidth - 8, 24))
+  result.groups[ShopEquipment] = GameUiPanel(
+    origin: result.catalog.origin + vec2(0, 136),
+    size: vec2(result.catalog.size.x - 184, 24))
+  result.groups[ShopUtility] = GameUiPanel(
+    origin: result.catalog.origin + vec2(result.catalog.size.x - 176, 136),
+    size: vec2(176, 24))
+  var counts: array[ShopGroup, int]
+  for i, item in sortedShopItems():
+    let group = item.shopGroup
+    let columns = if group == ShopEquipment:
+        max(1, int(result.groups[group].size.x / pitch.x))
+      else: 2
+    let n = counts[group]
+    result.cards[i] = GameUiPanel(origin: result.groups[group].origin +
+      vec2((n mod columns).float32 * pitch.x,
+        26 + (n div columns).float32 * pitch.y), size: cell)
+    inc counts[group]

@@ -13,10 +13,10 @@ export fixxy
 
 const
   ReplayGame* = "light_vs_dark"
-  ReplayFormatVersion* = 6'u16
+  ReplayFormatVersion* = 7'u16
   ## This client supports only this gameplay version. Bump it when rules change.
   ## Older replays use their archived client; never add compatibility branches.
-  ReplayGameVersion* = 36'u16
+  ReplayGameVersion* = 38'u16
 
   ActionMove* = 1'u8
   ActionAttack* = 2'u8
@@ -171,7 +171,7 @@ proc validateSetup(setup: Setup) =
     fail("replay setup has no deterministic content fingerprint")
   try:
     setup.mapSettings.validate(setup.players.len)
-    setup.diplomacySettings.validate()
+    setup.diplomacySettings.validate(setup.players.len)
   except LvdError as error:
     fail(error.msg)
   for index, player in setup.players:

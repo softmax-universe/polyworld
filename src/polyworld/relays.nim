@@ -436,6 +436,72 @@ proc removeGuest(relay: Relay, room: RelayRoom, guest: Guest) =
   else:
     relay.publish(room)
 
+proc readRosterTeams(payload: JsonNode, players: int, count: var int,
+    teams: var seq[int]): bool =
+  ## Reads only the bounded team metadata needed to classify a roster edit.
+  if players notin 1 .. MaxSeats:
+    return false
+  count = players
+  if payload.hasKey("teamCount"):
+    if payload["teamCount"].kind != JInt:
+      return false
+    let configured = payload["teamCount"].getInt
+    if configured notin 0 .. MaxSeats:
+      return false
+    if configured > 0:
+      count = configured
+  var assigned: JsonNode
+  if payload.hasKey("diplomacySettings"):
+    let settings = payload["diplomacySettings"]
+    if settings.kind != JObject:
+      return false
+    if settings.hasKey("teams"):
+      assigned = settings["teams"]
+      if assigned.kind != JArray or assigned.len notin [0, players]:
+        return false
+  teams = newSeq[int](players)
+  for player in 0 ..< players:
+    if assigned == nil or assigned.len == 0:
+      teams[player] = player mod count
+    else:
+      if assigned[player].kind != JInt:
+        return false
+      teams[player] = assigned[player].getInt
+      if teams[player] notin 0 ..< count:
+        return false
+  true
+
+proc unchangedRosterTeams(before, after: JsonNode,
+    oldPlayers, newPlayers: int): bool =
+  ## Excludes team metadata only when resizing preserves every surviving team.
+  var
+    oldCount, newCount: int
+    oldTeams, newTeams: seq[int]
+  if not readRosterTeams(before, oldPlayers, oldCount, oldTeams) or
+    not readRosterTeams(after, newPlayers, newCount, newTeams):
+      return false
+  for player in 0 ..< min(oldPlayers, newPlayers):
+    if oldTeams[player] != newTeams[player]:
+      return false
+  if oldCount != newCount:
+    var
+      independent = oldCount == oldPlayers
+      seen: array[MaxSeats, bool]
+    for team in oldTeams:
+      independent = independent and not seen[team]
+      seen[team] = true
+    let validCountChange =
+      (newPlayers > oldPlayers and independent and newCount == newPlayers) or
+      (newPlayers < oldPlayers and newCount == min(oldCount, newPlayers))
+    if not validCountChange:
+      return false
+  before.delete("teamCount")
+  after.delete("teamCount")
+  for payload in [before, after]:
+    if payload.hasKey("diplomacySettings"):
+      payload["diplomacySettings"].delete("teams")
+  true
+
 proc receive*(
     relay: Relay, connection: int, message: RoomMessage, now: float64
 )
@@ -616,11 +682,13 @@ proc receive*(
               for index in before["players"].len ..< after["players"].len:
                 if after["players"][index] != %*{"name": ""}:
                   namesUnchanged = false
+              let teamsUnchanged = unchangedRosterTeams(before, after,
+                before["players"].len, after["players"].len)
               before.delete("players")
               after.delete("players")
               before.delete("playerCount")
               after.delete("playerCount")
-              rosterOnly = namesUnchanged and before == after
+              rosterOnly = namesUnchanged and teamsUnchanged and before == after
         except JsonParsingError:
           discard
     # Validate the entire removed tail before changing settings or assignments.

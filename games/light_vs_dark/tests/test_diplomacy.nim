@@ -3,7 +3,12 @@ import
   ../[bots, content, diplomacies, maps, replays, sim]
 
 const
-  FastDiplomacy = DiplomacySettings(neutralStart: true, warGraceSeconds: 1, offerSeconds: 4)
+  FastDiplomacy = DiplomacySettings(
+    enabled: true,
+    neutralStart: true,
+    warGraceSeconds: 1,
+    offerSeconds: 4
+  )
   BasePolicy = staticRead("../players/base.bas")
 
 proc step(game: Game, ticks = 1) =

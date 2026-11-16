@@ -3040,18 +3040,32 @@ proc checkVictory(w: World) =
   var
     survivors = 0
     survivor = -1'i32
+    survivingTeam = -1'i32
+    multipleTeams = false
+    competitiveMatch = w.diplomacy.settings.enabled and w.players.len > 1
   for player, side in w.players:
+    if w.diplomacy.teamFor(player.int32) != w.diplomacy.teamFor(0):
+      competitiveMatch = true
     if not side.defeated:
       inc survivors
-      survivor = int32(player)
-  if survivors == 0 or (survivors == 1 and w.players.len > 1):
+      if survivor < 0:
+        survivor = int32(player)
+      let team = w.diplomacy.teamFor(int32(player))
+      if survivingTeam < 0:
+        survivingTeam = team
+      elif survivingTeam != team:
+        multipleTeams = true
+  let oneSide =
+    if w.diplomacy.settings.enabled: survivors == 1
+    else: survivors > 0 and not multipleTeams
+  if survivors == 0 or (oneSide and competitiveMatch):
     w.over = true
     w.winner = survivor
     return
   if w.tick >= w.maximumTicks:
     w.over = true
     # Scores remain rankings, not victory. A solo sandbox still ends at its cap.
-    w.winner = if survivors == 1: survivor else: -1
+    w.winner = if oneSide: survivor else: -1
 
 ## The tick
 ##
@@ -3328,7 +3342,13 @@ proc newGame*(
   result.sampleMetrics(true)
 
 proc scores*(world: World): seq[int] =
-  ## Converts the existing winner into binary scores in platform slot order.
+  ## Awards every fixed teammate, including those eliminated before victory.
   result.setLen(world.players.len)
   if world.winner >= 0:
-    result[world.winner] = 1
+    if world.diplomacy.settings.enabled:
+      result[world.winner] = 1
+    else:
+      let winningTeam = world.diplomacy.teamFor(world.winner)
+      for player in 0 ..< world.players.len:
+        if world.diplomacy.teamFor(player.int32) == winningTeam:
+          result[player] = 1

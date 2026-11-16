@@ -24,6 +24,7 @@ when defined(coworld):
     mapSize: int32 = DefaultMapSize
     expansions: int32 = 2
     minDistance: int32 = DefaultSpawnDistance
+    diplomacyMode: bool = false
     warGraceSeconds: int32 = 10
     diplomacyOfferSeconds: int32 = 60
 
@@ -34,6 +35,7 @@ when defined(coworld):
     of "maplayout": fieldName = "mapLayout"
     of "mapsize": fieldName = "mapSize"
     of "mindistance": fieldName = "minDistance"
+    of "diplomacymode": fieldName = "diplomacyMode"
     of "wargraceseconds": fieldName = "warGraceSeconds"
     of "diplomacyofferseconds": fieldName = "diplomacyOfferSeconds"
     else: discard
@@ -56,6 +58,8 @@ when defined(coworld):
     result.expansions = options.expansions
     result.minDistance = options.minDistance
     diplomacy = DiplomacySettings(
+      enabled: options.diplomacyMode,
+      neutralStart: options.diplomacyMode,
       warGraceSeconds: options.warGraceSeconds,
       offerSeconds: options.diplomacyOfferSeconds
     )
@@ -85,6 +89,7 @@ Light vs Dark, a small real-time strategy match between any number of BASIC over
   --map-size N     Baseline map side for two players (default 90 tiles).
   --expansions N   Nearby expansions per player (default 2).
   --min-distance N Minimum spawn separation in tiles (default 45).
+  --diplomacy      Enable negotiated diplomacy instead of fixed solo teams.
   --war-grace-seconds N  War warning; alliance withdrawal takes 2N (default 10).
   --diplomacy-offer-seconds N  Peace/alliance offer lifetime (default 60).
   --view MODE      Spectator fog: all or player number (light/dark aliases).
@@ -136,6 +141,9 @@ proc parseGameOptions(
         diplomacy.warGraceSeconds = parsePositiveInt32(
           arguments.argumentValue(index, argument), argument
         )
+      of "--diplomacy":
+        diplomacy.enabled = true
+        diplomacy.neutralStart = true
       of "--diplomacy-offer-seconds":
         diplomacy.offerSeconds = parsePositiveInt32(
           arguments.argumentValue(index, argument), argument
@@ -351,6 +359,17 @@ proc describeResult*(): string =
   if run.world.winner < 0:
     return "draw"
   let winner = int(run.world.winner)
+  if not run.world.diplomacy.settings.enabled:
+    let team = run.world.diplomacy.teamFor(winner.int32)
+    var
+      members = 0
+      total = 0'i64
+    for player in 0 ..< run.world.players.len:
+      if run.world.diplomacy.teamFor(player.int32) == team:
+        inc members
+        total += run.world.score(player.int32)
+    if members > 1:
+      return "Team " & $(team + 1) & " wins (score " & $total & ")"
   run.config.players[winner].displayName(winner) & " wins (score " &
     $run.world.score(int32(winner)) & ")"
 

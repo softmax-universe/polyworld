@@ -24,6 +24,7 @@ block defaultSettingsAndOptionalDiplomacy:
   for count in [2, 4]:
     let config = parseConfig(defaultConfig(count).toJson())
     let w = newLocalMatch(config, newSeq[string](count)).world
+    doAssert not config.diplomacySettings.enabled
     for a in 0'i32 ..< int32(count):
       doAssert not w.atWar(a, a)
       for b in 0'i32 ..< int32(count):
@@ -31,6 +32,7 @@ block defaultSettingsAndOptionalDiplomacy:
     doAssert not w.atWar(0, -1)
   doAssert not parseConfig("{}").diplomacySettings.neutralStart
   var config = defaultConfig(2)
+  config.diplomacySettings.enabled = true
   config.diplomacySettings.neutralStart = true
   let neutral = newLocalMatch(parseConfig(config.toJson()), ["", ""])
   doAssert not neutral.world.atWar(0, 1)
@@ -66,8 +68,10 @@ block idlePeonsAndArmorAreIntentional:
   doAssert attackDamage(unitOf(0, PeonUnit), 0) == 1
   doAssert attackDamage(unitOf(0, PeonUnit), unitOf(1, SoldierUnit).armor) == 0
 
-block ffaPeaceThenAlliance:
-  let w = newLocalMatch(defaultConfig(2), ["", ""]).world
+block negotiatedWarStartPeaceThenAlliance:
+  var config = defaultConfig(2)
+  config.diplomacySettings.enabled = true
+  let w = newLocalMatch(config, ["", ""]).world
   let enemyHome = w.map.hallOrigin[1]
   doAssert w.atWar(0, 1)
   doAssert not w.visible(0, enemyHome)

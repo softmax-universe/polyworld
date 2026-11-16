@@ -50,6 +50,7 @@ window.visible = true
 pollEvents()
 doAssert window.focused, "Camera polling regression needs a focused native window"
 var config = defaultConfig(2)
+config.diplomacySettings.enabled = true
 config.maxTicks = 100
 config.mapSettings = MapSettings(layout: RandomLayout, size: 90, expansions: 0)
 run = newLocalMatch(config, ["", ""])
@@ -192,6 +193,10 @@ block diplomacyPanel:
   press(KeyEscape)
   release(KeyEscape)
   finishHumanCommunicationFrame()
+  run.world.diplomacy.settings.enabled = false
+  drawHud(vec2(60, 216), {MouseLeft})
+  doAssert not humanCommunicationBlocksGameplay(),
+    "Fixed team label must not open negotiation controls"
 press(KeyEnter)
 release(KeyEnter)
 press(KeyS) # Deliberately lose its release while unfocused.

@@ -4,6 +4,7 @@ import ../[multiplayer, presets, sim, replays, content, controls]
 
 proc sparseClient(id: uint32): RoomClient =
   var config = defaultConfig(4)
+  config.diplomacySettings.enabled = true
   config.maxTicks = 12
   config.mapSettings = MapSettings(layout: RandomLayout, size: 90, expansions: 0)
   result = RoomClient(identity: lvdIdentity(), participant: id, match: 1,

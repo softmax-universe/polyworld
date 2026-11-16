@@ -35,6 +35,7 @@ for i in 0 ..< 2:
 var config = defaultConfig(2)
 # This tests support/movement, not post-arrival combat against nearby bases.
 # Completed moves now restore ordinary acquisition; keep these lanes neutral.
+config.diplomacySettings.enabled = true
 config.diplomacySettings.neutralStart = true
 config.maxTicks = TickRate * 8
 config.mapSettings = MapSettings(layout: RandomLayout, expansions: 0)

@@ -14,7 +14,7 @@ import
     inputs, lighting, particles, particleshaders, pathing, player, profiles, gameuis,
     quadterrain, rtscameras, selectionoutlines, shapes, shadows, tapes, toon,
     viewers, visions, worldbars, worldtexts, menus, connections, roomclients, rooms, displays],
-  appearances, assets, backpacks, buildings, content, factions, groves,
+  appearances, assets, backpacks, buildings, content, factions, groves, teamlooks,
   resourcepacks, symbols, treeorders,
   sim, maps,
   game,
@@ -174,7 +174,7 @@ proc addHudIcons(builder: AtlasBuilder, factions: openArray[Faction]) =
       if kind == GoldMineBuilding and player != LightPlayer:
         continue
       if not builder.addImage(
-          buildingPortraitKey(player, kind),
+          buildingPortraitSlotKey(player, kind),
           readImage(buildingPortraitPath(factions[player], kind))
         ):
         raise newException(
@@ -402,10 +402,10 @@ proc runGraphics*(network: NetworkMatch = nil,
     speed = options.speed,
     repeating = network == nil and (run.replayMode or options.playerSlot == 0))
   let order = factionOrder(run.mapSeed.int64)
-  var playerFactions = newSeq[Faction](run.world.players.len)
-  for player in 0 ..< run.world.players.len:
-    playerFactions[player] = order[Faction(player mod FactionFiles.len)]
-  let builder = buildUiAtlas(playerFactions)
+  let
+    playerFactions = playerFactions(run.mapSeed,
+      run.world.diplomacy.settings, run.world.players.len)
+    builder = buildUiAtlas(order)
   sk.builder = builder
   sk.image = builder.atlasImage
   sk.atlas = builder.atlas
@@ -464,12 +464,6 @@ proc runGraphics*(network: NetworkMatch = nil,
     for player in 0 ..< run.world.players.len:
       # UI and every summoned body identify their owning faction.
       teamColors[player] = FactionColors[roster.factions[player]]
-      if player >= FactionFiles.len:
-        unitModels[player] = unitModels[player mod FactionFiles.len]
-        unitClips[player] = unitClips[player mod FactionFiles.len]
-        woodAxeModels[player] = woodAxeModels[player mod FactionFiles.len]
-        resourceModels[player] = resourceModels[player mod FactionFiles.len]
-        continue
       for kind in UnitKind:
         let model = unitModelCache.loadUnitModel(
           manifest, roster.players[player][kind.ord], kind

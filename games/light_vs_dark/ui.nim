@@ -7,7 +7,7 @@ import
     stackpanels, networks, rooms, roomclients],
   assets, content, sim, game, controls, layouts, symbols, maps, factions, tooltips, multiplayer,
   hudpresentation, researchpresentation, rendervisibility,
-  shortcutsettings, shortcutpresentation
+  shortcutsettings, shortcutpresentation, teamlooks
 import humancommunication as communications
 
 const
@@ -71,9 +71,18 @@ proc hudTooltipContains*(mouse: Vec2): bool =
       resetHudTooltips()
   commandHover.tooltipContains(mouse)
 
+proc buildingPortraitSlotKey*(slot: int32, kind: BuildingKind): string =
+  ## Names one of the eight seeded appearance slots packed into the atlas.
+  buildingPortraitKeys[max(slot, 0) mod FactionFiles.len][kind]
+
 proc buildingPortraitKey*(player: int32, kind: BuildingKind): string =
-  ## Returns the atlas name packed from one building's profile PNG.
-  buildingPortraitKeys[max(player, 0) mod FactionFiles.len][kind]
+  ## Selects the owner's team portrait, including nonperiodic team rosters.
+  let slot =
+    if run != nil and run.world != nil:
+      run.world.diplomacy.settings.appearanceSlot(player).int32
+    else:
+      player
+  buildingPortraitSlotKey(slot, kind)
 
 proc drawPortrait(
     sk: Silky,
@@ -229,23 +238,39 @@ proc currentStats*(
       slot: slot,
       name: run.config.players[slot].displayName(slot),
       subtitle:
-        if slot mod FactionCount == 0: "LIGHT COMMANDER"
+        if not run.world.diplomacy.settings.enabled:
+          run.world.diplomacy.settings.teamLabel(slot.int32)
+        elif slot mod FactionCount == 0: "LIGHT COMMANDER"
         else: "DARK COMMANDER",
       portrait: unitSymbolKey(PeonUnit),
       portraitTint:
         if slot < teamColors.len: teamColors[slot]
         else: rgbx(255, 255, 255, 255),
-      team: slot,
+      team:
+        if run.world.diplomacy.settings.enabled: slot
+        else: run.world.diplomacy.teamFor(slot.int32).int,
       selected: not run.replayMode and options.playerSlot == slot + 1,
       metrics: currentMetrics(slot, result.complete)
     )
+
+proc winnerLabel(): string =
+  ## Names shared victories by team while preserving independent player names.
+  let winner = run.world.winner
+  if not run.world.diplomacy.settings.enabled:
+    let team = run.world.diplomacy.teamFor(winner)
+    var members = 0
+    for player in 0 ..< run.world.players.len:
+      if run.world.diplomacy.teamFor(player.int32) == team:
+        inc members
+    if members > 1:
+      return run.world.diplomacy.settings.teamLabel(winner)
+  run.config.players[winner].displayName(winner.int)
 
 proc matchResultHeadline*(): string =
   ## Only declare a victory/draw when the simulation actually resolved one.
   if run.world.over:
     if run.world.winner < 0: return "Draw"
-    let winner = int(run.world.winner)
-    return run.config.players[winner].displayName(winner) & " wins"
+    return winnerLabel() & " wins"
   if run.maximumTicks > 0 and run.world.tick >= run.maximumTicks:
     return "Time limit reached"
   "Match interrupted"
@@ -269,8 +294,7 @@ proc currentStatsOptions*(): StatsOptions =
     result.scores.add run.world.score(int32(slot))
   if matchResultsVisible():
     if run.world.over and run.world.winner >= 0:
-      let winner = int(run.world.winner)
-      result.headline = run.config.players[winner].displayName(winner)
+      result.headline = winnerLabel()
       result.headlineSuffix = " wins"
     else:
       result.headline = matchResultHeadline()
@@ -328,11 +352,17 @@ proc drawHumanCommunication(sk: Silky, window: Window) =
     if other == player: continue
     let relation = run.world.diplomacy.relation(player, other)
     if relation.offer != NoOffer and relation.sender == other: inc pending
-  if button("Diplomacy" & (if pending > 0: " (" & $pending & ")" else: ""),
+  if run.world.diplomacy.settings.enabled and
+    button("Diplomacy" & (if pending > 0: " (" & $pending & ")" else: ""),
       communicationButtonPanel(window)):
-    commState.diplomacyOpen = not commState.diplomacyOpen
-    commState.typing = false
-    commState.blockedFrame = true
+      commState.diplomacyOpen = not commState.diplomacyOpen
+      commState.typing = false
+      commState.blockedFrame = true
+  if not run.world.diplomacy.settings.enabled:
+    commState.diplomacyOpen = false
+    let panel = communicationButtonPanel(window)
+    sk.drawLabel(run.world.diplomacy.settings.teamLabel(player) & " / Fixed teams",
+      panel.origin, panel.size, muted, "Small")
   let feedWidth = min(440'f32, layout.size.x - 24)
   let feedOrigin = vec2(12, 238)
   let shown = min(5, commState.feed.len)

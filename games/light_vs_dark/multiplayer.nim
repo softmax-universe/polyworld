@@ -85,14 +85,19 @@ proc newLocalMatch*(config: LvdConfig, sources: openArray[string]): Game =
   config.validate()
   if sources.len != config.playerCount:
     reject("Policies must match the complete player roster")
+  var diplomacy = config.diplomacySettings
+  if diplomacy.teams.len == 0:
+    diplomacy.teams = newSeq[int32](config.playerCount)
+    for player in 0 ..< config.playerCount:
+      diplomacy.teams[player] = config.playerTeam(player)
   let map = generateMap(config.seed, config.playerCount, config.mapSettings)
   map.validateMap()
-  result = newGame(map, config.maxTicks, config.diplomacySettings)
+  result = newGame(map, config.maxTicks, diplomacy)
   var setup = Setup(mapSeed: config.seed, tickRate: uint16(TickRate),
     gridTiles: uint16(map.side), decisionTicks: uint16(DecisionTicks),
     maximumTicks: uint32(config.maxTicks), mapHash: map.hash,
     contentHash: contentHash(), mapSettings: config.mapSettings,
-    diplomacySettings: config.diplomacySettings)
+    diplomacySettings: diplomacy)
   for i, origin in map.hallOrigin:
     setup.players.add ReplayPlayerSetup(id: int32(i),
       startX: int32(origin.x), startY: int32(origin.y))
@@ -110,8 +115,11 @@ proc prepareNetworkMatch*(client: RoomClient,
     snapshot.seats.len != config.playerCount:
       reject("LvD identity, roster, or tick rate differs from room setup")
   config.playerSlot = 0
-  let potentialPlayers = config.players
+  let
+    potentialPlayers = config.players
+    potentialTeams = config.diplomacySettings.teams
   config.players = @[]
+  config.diplomacySettings.teams = @[]
   var owned: seq[string]
   var playerSeats: seq[int]
   for i, seat in snapshot.seats:
@@ -119,6 +127,7 @@ proc prepareNetworkMatch*(client: RoomClient,
     discard snapshot.humanSeatFor(seat.owner)
     let player = config.players.len
     config.players.add potentialPlayers[i]
+    config.diplomacySettings.teams.add potentialTeams[i]
     playerSeats.add i
     owned.add ""
     config.players[player].name = seat.name

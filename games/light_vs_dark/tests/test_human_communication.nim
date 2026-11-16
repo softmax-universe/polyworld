@@ -29,6 +29,7 @@ for client in clients: client.opened()
 exchange()
 var config = defaultConfig(3)
 config.maxTicks = 400
+config.diplomacySettings.enabled = true
 config.diplomacySettings.warGraceSeconds = 1
 config.mapSettings = MapSettings(layout: RandomLayout, size: 90, expansions: 0)
 clients[0].send(RoomMessage(kind: CreateRoom, name: "Human communication QA",

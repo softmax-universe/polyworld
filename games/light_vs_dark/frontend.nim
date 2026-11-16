@@ -39,6 +39,7 @@ proc runFrontend*() =
     lobbyUi = LobbyUi()
     rosterScroll = FrameState()
     participantMenu: ParticipantContext
+    teamPicker: TeamPicker
     contextDismissGuard: bool
     rng = initRand(2026)
     publicRoom = true
@@ -205,6 +206,8 @@ proc runFrontend*() =
       var contextInputBlocked = false
       if page != LobbyMenu:
         participantMenu.dismiss()
+      if page notin {SingleMenu, LobbyMenu}:
+        teamPicker.dismiss()
         contextDismissGuard = false
       let needsPlayerName = preferences.name.len > 64 or
         not validName(preferences.name)
@@ -299,7 +302,7 @@ proc runFrontend*() =
           layout =
             if page in {SingleMenu, LobbyMenu}:
               sk.beginLvdBattle(window, lobbyUi, config.playerCount,
-                participantMenu.isOpen or contextDismissGuard)
+                participantMenu.isOpen or teamPicker.isOpen or contextDismissGuard)
             else:
               sk.beginLobby(window, lobbyUi, "MULTIPLAYER", true)
           layout.origin
@@ -445,7 +448,8 @@ proc runFrontend*() =
             snapshot = if online: client.snapshot else: RoomMessage()
             editable = not online or snapshot.phase == rooms.Lobby
             owner = not online or snapshot.participant == client.participant
-            contextBlocked = participantMenu.isOpen or contextDismissGuard
+            contextBlocked = participantMenu.isOpen or teamPicker.isOpen or
+              contextDismissGuard
             modal = lobbyUi.selectedSeat != -1 or contextBlocked
           # Keep the underlying UI inert for the entire dismissal gesture.
           contextInputBlocked = contextBlocked
@@ -457,7 +461,16 @@ proc runFrontend*() =
             escape = window.buttonPressed[KeyEscape])
           if online and not roster.pending and snapshot.seats.len != config.playerCount:
             raise newException(MenusError, "Room roster does not match its settings")
-          sk.lvdRosterPanel(layout)
+          if teamPicker.isOpen and (not owner or not editable or roster.pending):
+            teamPicker.dismiss()
+          var occupiedSeats: seq[int]
+          for i in 0 ..< config.playerCount:
+            let occupied =
+              if online: i < snapshot.seats.len and snapshot.seats[i].owner != 0
+              else: i == humanSeat or localPolicies[i].bytes.len > 0
+            if occupied:
+              occupiedSeats.add i
+          sk.lvdRosterPanel(layout, config.diplomacySettings.enabled)
           sk.beginRoster(window, layout, rosterScroll, config.playerCount, not modal)
           var
             emptyCount = 0
@@ -491,9 +504,16 @@ proc runFrontend*() =
               inc emptyCount
             if sk.seatButton(layout, i, rosterScroll.scrollPos.y, name, controller, human, empty,
               editable and (mine or empty) and not modal and
-                roster.assignmentsEnabled(online), config.seed):
+                roster.assignmentsEnabled(online), config.seed,
+              team = if config.diplomacySettings.enabled: -1
+                else: config.playerTeam(i).int):
                 lobbyUi.selectedSeat = i
-            if online and not modal and window.buttonPressed[MouseRight] and
+            if not modal and window.buttonPressed[MouseRight] and
+                not config.diplomacySettings.enabled and
+                teamBadgeHit(layout, i, rosterScroll.scrollPos.y, sk.mousePos):
+              if owner and editable and not roster.pending:
+                teamPicker.openTeamPicker(i, sk.mousePos)
+            elif online and not modal and window.buttonPressed[MouseRight] and
                 rosterCardHit(layout, i, rosterScroll.scrollPos.y, sk.mousePos):
               participantMenu.openSeat(client, i, sk.mousePos)
           sk.popClipRect()
@@ -577,7 +597,8 @@ proc runFrontend*() =
             layout.rightWidth, layout.panelHeight,
             owner and editable and not modal and not roster.pending,
             showControls = owner,
-            gameName = if online: addr matchName else: nil):
+            gameName = if online: addr matchName else: nil,
+            occupied = occupiedSeats):
               roster.dirty = online
           if online and owner and editable and not modal and not roster.pending and
               matchName != snapshot.name and window.buttonPressed[KeyEnter]:
@@ -683,6 +704,8 @@ proc runFrontend*() =
                   humanSeat = -1
                 localPolicies[selectedSeat] = selected
               lobbyUi.selectedSeat = -1
+          if sk.drawTeamPicker(window, teamPicker, config):
+            roster.dirty = online
           if participantMenu.isOpen:
             sk.pushLayer(PopupsLayer)
             let
@@ -707,7 +730,8 @@ proc runFrontend*() =
       except CatchableError as problem:
         error = problem.msg
       if page in {MultiplayerMenu, LobbyMenu, SettingsMenu} and
-        not participantMenu.isOpen and not contextInputBlocked and
+        not participantMenu.isOpen and not teamPicker.isOpen and
+        not contextInputBlocked and
         lobbyUi.selectedSeat == -1 and
         sk.playerButton(window, preferences.name,
           page != LobbyMenu or connection.client.snapshot.phase == rooms.Lobby):

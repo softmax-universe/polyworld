@@ -30,7 +30,7 @@ class FrontendRosterTests(unittest.TestCase):
     def test_local_seats_and_fill_ignore_online_draft_flags(self):
         source = FRONTEND.read_text()
         seat = expression_after(source, "name, controller, human, empty,\n")
-        seat = seat.removesuffix(", config.seed")
+        seat = seat.split(", config.seed", 1)[0]
         fill = expression_after(source, 'fill + vec2(444, 0), 198, "cross",\n')
         scratch = Path.home() / ".hermes/cache/scratch"
         scratch.mkdir(parents=True, exist_ok=True)

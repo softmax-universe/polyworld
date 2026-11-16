@@ -1,5 +1,5 @@
 ## Exercise retained readiness through the real relay and LvD preparation.
-import std/unittest
+import std/[unittest, json]
 import jsony, polyworld/[rooms, relays, roomclients]
 import ../[multiplayer, presets, content, lobbyreadiness, rosterstate]
 
@@ -52,6 +52,22 @@ proc manualReady(client: RoomClient, sources: openArray[string]): NetworkMatch =
   client.send(RoomMessage(kind: Ready, revision: result.revision,
     hash: result.game.networkHash()))
 
+proc readyControllers(f: Fixture) =
+  ## Marks both real controllers ready against the current authoritative setup.
+  discard f.clients[0].manualReady(
+    ["", "", readFile("games/light_vs_dark/players/base.bas")]
+  )
+  discard f.clients[1].manualReady(["", "", ""])
+  f.exchange()
+
+proc publishConfig(f: Fixture) =
+  ## Publishes a valid fixture configuration before readiness is established.
+  let host = f.clients[0]
+  host.send(RoomMessage(kind: ConfigureRoom, name: host.snapshot.name,
+    number: uint32(f.config.playerCount), tickRate: host.snapshot.tickRate,
+    payload: f.config.toJson()))
+  f.exchange()
+
 suite "LvD retained readiness":
   test "new controllers automatically prepare without clicking cosmetic Ready":
     let f = lobby()
@@ -79,6 +95,96 @@ suite "LvD retained readiness":
     check f.relay.guest(host.participant).ready
     check f.relay.guest(f.clients[1].participant).ready
     check host.snapshot.seats.len == 4
+
+  test "unchanged-team shrink and configured-team growth retain readiness":
+    for target in [2, 4]:
+      let f = lobby()
+      let host = f.clients[0]
+      if target == 2:
+        # The removed high-numbered team has no surviving assigned players.
+        f.config.diplomacySettings.teams = @[0'i32, 1, 1]
+      else:
+        f.config.setTeamCount(2)
+      f.publishConfig()
+      f.readyControllers()
+      let previous = f.config.diplomacySettings.teams
+      var roster: RosterState
+      roster.resizeRoster(f.config, host, target)
+      f.exchange()
+      check host.snapshot.seats.len == target
+      check f.relay.guest(host.participant).ready
+      check f.relay.guest(f.clients[1].participant).ready
+      let published = parseConfig(host.snapshot.payload)
+      for player in 0 ..< min(previous.len, target):
+        check published.playerTeam(player) == previous[player]
+
+  test "ResizeRoom cannot hide team assignments mode timing or arbitrary counts":
+    for alteration in 0 .. 4:
+      let f = lobby()
+      let host = f.clients[0]
+      f.readyControllers()
+      var config = f.config
+      config.resizePlayers(if alteration == 4: 3 else: 4)
+      case alteration
+      of 0:
+        config.assignTeam(0, 1)
+      of 1:
+        config.diplomacySettings.enabled = true
+      of 2:
+        inc config.diplomacySettings.warGraceSeconds
+      of 3, 4:
+        inc config.teamCount
+      else:
+        discard
+      host.send(RoomMessage(kind: ResizeRoom, name: host.snapshot.name,
+        number: uint32(config.playerCount), tickRate: host.snapshot.tickRate,
+        payload: config.toJson()))
+      f.exchange()
+      check not f.relay.guest(host.participant).ready
+      check not f.relay.guest(f.clients[1].participant).ready
+
+  test "non-independent growth cannot change the configured team count":
+    let f = lobby()
+    let host = f.clients[0]
+    f.config.setTeamCount(2)
+    f.publishConfig()
+    f.readyControllers()
+    var config = f.config
+    config.resizePlayers(4)
+    config.teamCount = 4
+    host.send(RoomMessage(kind: ResizeRoom, name: host.snapshot.name,
+      number: 4, tickRate: host.snapshot.tickRate, payload: config.toJson()))
+    f.exchange()
+    check not f.relay.guest(host.participant).ready
+    check not f.relay.guest(f.clients[1].participant).ready
+
+  test "malformed team metadata never preserves readiness":
+    for malformed in 0 .. 4:
+      let f = lobby()
+      let host = f.clients[0]
+      f.readyControllers()
+      var config = f.config
+      config.resizePlayers(4)
+      let payload = parseJson(config.toJson())
+      case malformed
+      of 0:
+        payload["teamCount"] = %"4"
+      of 1:
+        payload["teamCount"] = %0
+        payload["diplomacySettings"]["teams"] = %[-1, 1, 2, 3]
+      of 2:
+        payload["diplomacySettings"]["teams"] = %[0, 1, 2]
+      of 3:
+        payload["diplomacySettings"]["teams"] = %[0, 1, 2, 64]
+      of 4:
+        payload["diplomacySettings"]["teams"] = %"0,1,2,3"
+      else:
+        discard
+      host.send(RoomMessage(kind: ResizeRoom, name: host.snapshot.name,
+        number: 4, tickRate: host.snapshot.tickRate, payload: $payload))
+      f.exchange()
+      check not f.relay.guest(host.participant).ready
+      check not f.relay.guest(f.clients[1].participant).ready
 
   test "cosmetic toggles preserve prepared object hash revision and relay confirmation":
     let f = lobby()

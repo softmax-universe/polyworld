@@ -91,16 +91,20 @@ when not defined(emscripten):
       Windowed
 
   proc windowSizeLimit*(window: Window): IVec2 =
-    ## Leaves room for window decorations and the desktop on the current screen.
-    let screens = getScreens()
-    if screens.len == 0:
-      return window.size
-    var screen = screens[0]
-    for candidate in screens:
-      if window.pos.x >= candidate.left and window.pos.x < candidate.right:
-        screen = candidate
-        break
-    ((screen.size.vec2 - vec2(80, 140)) * window.contentScale).ivec2
+    ## Leaves desktop room when the backend can enumerate screens.
+    when declared(getScreens):
+      let screens = getScreens()
+      if screens.len == 0:
+        return window.size
+      var screen = screens[0]
+      for candidate in screens:
+        if window.pos.x >= candidate.left and window.pos.x < candidate.right:
+          screen = candidate
+          break
+      ((screen.size.vec2 - vec2(80, 140)) * window.contentScale).ivec2
+    else:
+      # Do not cap requested resolutions at the current window size.
+      ivec2(int32.high, int32.high)
 
   proc updateWindowSettings*(window: Window) =
     ## Applies queued OS changes outside drawing and waits for fullscreen.

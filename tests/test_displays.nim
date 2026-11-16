@@ -2,6 +2,13 @@ import
   windy,
   polyworld/displays
 
+when not defined(emscripten) and not declared(getScreens):
+  let limit = Window(nil).windowSizeLimit()
+  for resolution in WindowResolution:
+    let size = resolution.resolutionSize()
+    doAssert size.x <= limit.x and size.y <= limit.y,
+      "Backends without screen enumeration must allow every size preset"
+
 when defined(macosx) and not defined(emscripten):
   import windy/platforms/macos/macdefs
 

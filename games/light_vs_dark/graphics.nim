@@ -13,7 +13,7 @@ import
   polyworld/[actioncam, assets, characters, chargen, chrome, clickmarks, common,
     inputs, lighting, particles, particleshaders, pathing, player, profiles, gameuis,
     quadterrain, rtscameras, selectionoutlines, shapes, shadows, tapes, toon,
-    viewers, visions, worldbars, worldtexts, menus, connections, roomclients, rooms, displays],
+    viewers, visions, worldbars, worldtexts, menus, connections, roomclients, rooms, displays, sounds],
   appearances, assets, backpacks, buildings, content, factions, groves,
   resourcepacks, symbols, treeorders,
   sim, maps,
@@ -23,7 +23,7 @@ import
   controls, homes, lobbies, multiplayer, attackorders, layouts, linemoves,
   networkpresentation, shortcutsettings, unitselection, orderfeedback,
   constructionpresentation, targetfeedback, rendervisibility,
-  harvestpresentation, woodcuttingpresentation
+  harvestpresentation, woodcuttingpresentation, battlesounds
 
 const
   DefaultCameraDistance = 17.0'f
@@ -350,6 +350,7 @@ proc runGraphics*(network: NetworkMatch = nil,
   resetHudTooltips()
   resetHumanCommunication()
   defer:
+    stopSounds()
     hudNetwork = nil
     resetHudTooltips()
     resetHumanCommunication()
@@ -362,6 +363,8 @@ proc runGraphics*(network: NetworkMatch = nil,
   startGameProfile()
   var
     leaveMatch, quitToMenu, leaveRequested: bool
+    battleAudio: BattleSounds
+    audioWasActive = false
     matchMenu = HiddenMatchMenu
     preferences = readLvdPreferences()
     saveError: string
@@ -373,6 +376,9 @@ proc runGraphics*(network: NetworkMatch = nil,
     customBindingsEnabled = previousBindings
     bindingCapture = false
   viewMode = if options.playerSlot > 0: options.playerSlot else: options.viewMode
+  stopSounds()
+  battleAudio.resetBattleSounds()
+  discard battleAudio.observeBattleSounds(run.world, viewMode, enabled = false)
   primaryId = NoEntity
   lineGesture.cancelLine()
   rightOrderStarted = false
@@ -623,6 +629,8 @@ proc runGraphics*(network: NetworkMatch = nil,
 
   proc restoreTo(target: int32) =
     ## Reloads the last checkpoint at or before a tick, then resimulates.
+    stopSounds()
+    battleAudio.resetBattleSounds()
     let wanted = clamp(target, 0'i32, transport.timelineEnd)
     var slot = min(
       int(wanted) div SeekCheckpointTicks,
@@ -646,6 +654,7 @@ proc runGraphics*(network: NetworkMatch = nil,
     while run.world.tick < wanted:
       advanceGame()
       if network == nil: captureCheckpoint()
+    discard battleAudio.observeBattleSounds(run.world, viewMode, enabled = false)
 
   ## Camera and input
 
@@ -680,6 +689,7 @@ proc runGraphics*(network: NetworkMatch = nil,
     ## Selects or toggles one entity. Spectator mode follows the selection.
     if not selectionTarget(id).found:
       return
+    playSound(SelectSound)
     if not additive:
       selectedIds.setLen(0)
     elif isSelected(id) and selectedIds.len > 1:
@@ -727,6 +737,7 @@ proc runGraphics*(network: NetworkMatch = nil,
           continue
         selectedIds.add unit.id
     if selectedIds.len > 0:
+      playSound(SelectSound)
       primaryId = selectedIds[0]
       if not playerMode():
         followSelection = true
@@ -912,6 +923,7 @@ proc runGraphics*(network: NetworkMatch = nil,
       if not additive:
         clearSelection()
       return
+    playSound(SelectSound)
     if not additive:
       selectedIds.setLen(0)
     for id in ids:
@@ -1227,6 +1239,7 @@ proc runGraphics*(network: NetworkMatch = nil,
                 else:
                   clickMarks.emitClickMark(clickTilePoint(target.tile.x.int32,
                     target.tile.y.int32))
+              playSound(if wasAttack: AttackOrderSound else: MoveOrderSound)
               if wasAttack: consumeAttackModifier()
             return
         elif not window.mouseDown(MouseRight):
@@ -1248,6 +1261,8 @@ proc runGraphics*(network: NetworkMatch = nil,
           selectedBuildWorker()):
         queuePendingBuild(origin[0], origin[1])
         clickMarks.emitClickMark(clickTilePoint(origin[0], origin[1]))
+      else:
+        playSound(ErrorSound)
       return
     # Minimap orders must precede generic HUD rejection. Tab owns its overlay.
     let mini = attackMinimapTile(currentLayout(window), sk.mousePos,
@@ -1259,8 +1274,10 @@ proc runGraphics*(network: NetworkMatch = nil,
         if run.world.queueArmedAttackMove(player, selectedIds,
             mini.x.int32, mini.y.int32, append = window.actionDown(ShiftInput)):
           consumeAttackModifier()
+          playSound(AttackOrderSound)
           attackClickMarks.emitClickMark(clickTilePoint(mini.x.int32, mini.y.int32))
       elif pendingBuild < 0 and issueSelectedMove(player, mini.x.int32, mini.y.int32, append = window.actionDown(ShiftInput)):
+        playSound(MoveOrderSound)
         clickMarks.emitClickMark(clickTilePoint(mini.x.int32, mini.y.int32))
       return
     if mouseOverUi(window, sk.mousePos):
@@ -1274,8 +1291,10 @@ proc runGraphics*(network: NetworkMatch = nil,
           targetFlash.flashTarget(AttackEntityFlash, picked, player)
           consumeAttackModifier()
           if run.world.hasUnit(picked):
+            playSound(AttackOrderSound)
             attackClickMarks.emitClickMark(renderPoint(run.world.units[run.world.unitIndex(picked)]))
           elif run.world.hasBuilding(picked):
+            playSound(AttackOrderSound)
             attackClickMarks.emitClickMark(buildingCentre(run.world.buildings[run.world.buildingIndex(picked)]))
         # Friendly/neutral/invalid entity clicks never become ground orders.
         return
@@ -1284,6 +1303,7 @@ proc runGraphics*(network: NetworkMatch = nil,
       let tile = groundTile(ground, mapHalf(), run.world.map.side)
       if run.world.queueArmedAttackMove(player, selectedIds, tile[0], tile[1], append = window.actionDown(ShiftInput)):
         consumeAttackModifier()
+        playSound(AttackOrderSound)
         attackClickMarks.emitClickMark(clickTilePoint(tile[0], tile[1]))
       return
     let
@@ -1314,6 +1334,7 @@ proc runGraphics*(network: NetworkMatch = nil,
             if unit.kind == PeonUnit:
               queueBuild(player, id, structure.kind.ord.int32,
                 structure.origin.x.int32, structure.origin.y.int32)
+              playSound(MoveOrderSound)
               clickMarks.emitClickMark(buildingCentre(structure))
               return
           return
@@ -1321,6 +1342,7 @@ proc runGraphics*(network: NetworkMatch = nil,
           if run.world.queueFeedbackHarvest(player, selectedIds, target, tree = false,
               append = window.actionDown(ShiftInput)):
             targetFlash.flashTarget(HarvestEntityFlash, target, player)
+            playSound(MoveOrderSound)
             clickMarks.emitClickMark(buildingCentre(structure))
           attackMoveArmed = false
           return
@@ -1328,6 +1350,7 @@ proc runGraphics*(network: NetworkMatch = nil,
           if run.world.queueFeedbackAttack(player, selectedIds, target,
               append = window.actionDown(ShiftInput)):
             targetFlash.flashTarget(AttackEntityFlash, target, player)
+            playSound(AttackOrderSound)
             attackClickMarks.emitClickMark(buildingCentre(structure))
           attackMoveArmed = false
           return
@@ -1336,6 +1359,7 @@ proc runGraphics*(network: NetworkMatch = nil,
         if run.world.queueFeedbackAttack(player, selectedIds, target,
             append = window.actionDown(ShiftInput)):
           targetFlash.flashTarget(AttackEntityFlash, target, player)
+          playSound(AttackOrderSound)
           attackClickMarks.emitClickMark(renderPoint(run.world.units[run.world.unitIndex(target)]))
         attackMoveArmed = false
         return
@@ -1343,12 +1367,14 @@ proc runGraphics*(network: NetworkMatch = nil,
       if run.world.queueFeedbackHarvest(player, selectedIds, tree, tree = true,
           append = window.actionDown(ShiftInput)):
         targetFlash.flashTarget(HarvestTreeFlash, tree, player)
+        playSound(MoveOrderSound)
         clickMarks.emitClickMark(clickTilePoint(
           tree mod run.world.map.side, tree div run.world.map.side
         ))
       attackMoveArmed = false
       return
     if issueSelectedMove(player, tile[0], tile[1], append = window.actionDown(ShiftInput)):
+      playSound(MoveOrderSound)
       clickMarks.emitClickMark(clickTilePoint(tile[0], tile[1]))
     attackMoveArmed = false
 
@@ -1734,6 +1760,16 @@ proc runGraphics*(network: NetworkMatch = nil,
       observeHumanCommunication(network, packet)
     feedLvdActions(observeTick = true)
     emitTickParticles(oldUnitCooldowns, towerTargets)
+    let audible = not defined(takeScreenshot) and window.focused and
+      transport.playing and
+      transport.speed == 1 and transport.targetTick < 0 and
+      transport.restoreTick < 0 and matchMenu == HiddenMatchMenu
+    for event in battleAudio.observeBattleSounds(run.world, viewMode,
+        options.playerSlot - 1, audible):
+      if event.global:
+        playSound(event.cue)
+      else:
+        playWorldSound(event.cue, event.position, cameraTarget)
     if network == nil: captureCheckpoint()
 
   when defined(takeScreenshot):
@@ -1779,6 +1815,12 @@ proc runGraphics*(network: NetworkMatch = nil,
   window.onFrame = proc() =
     profileBlock "frame":
       let dt = frameDelta(lastFrameTime, Step)
+      let audioActive = not defined(takeScreenshot) and window.focused and
+        transport.playing and transport.speed == 1 and transport.targetTick < 0 and
+        transport.restoreTick < 0 and matchMenu == HiddenMatchMenu
+      if audioWasActive and not audioActive and not run.world.over:
+        stopSounds()
+      audioWasActive = audioActive
       viewingDt = viewingClock.viewingDelta(window)
       viewingSeeking = transport.targetTick >= 0 or transport.restoreTick >= 0
       if not transport.playing or viewingSeeking:
@@ -1826,6 +1868,7 @@ proc runGraphics*(network: NetworkMatch = nil,
         except RoomsError as error:
           network.abort(error.msg)
         connection.pump()
+        observeServerCommunication(network)
         transport.sync(run.world.tick, run.world.tick, run.world.over)
       else:
         let restoreTick = transport.takeRestore()
@@ -2185,8 +2228,8 @@ proc runGraphics*(network: NetworkMatch = nil,
       if matched.consumed:
         shortcutHeldButtons.incl button
         shortcutFrameButtons.incl button
-        if matched.action >= 0 and run.world.performShortcut(options.playerSlot - 1,
-            selectedIds, ShortcutAction(matched.action)):
+        if matched.action >= 0 and performAudibleShortcut(run.world,
+            options.playerSlot - 1, selectedIds, ShortcutAction(matched.action)):
           selectionStarted = false
           minimapPanning = false
           lineGesture.cancelLine()
@@ -2238,6 +2281,7 @@ proc runGraphics*(network: NetworkMatch = nil,
           if run.world.unitOwner(id) == player or
               run.world.buildingOwner(id) == player:
             queueCancel(player, id)
+            playSound(CancelSound)
         pendingBuild = -1
         attackMoveArmed = false
     elif button == KeyE: showTiles = not showTiles
@@ -2256,6 +2300,7 @@ proc runGraphics*(network: NetworkMatch = nil,
 
   window.onFocusChange = proc() =
     if not window.focused:
+      stopSounds()
       resetHudTooltips()
       cancelHumanCommunicationInput()
       shortcutState.resetShortcut()

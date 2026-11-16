@@ -15,6 +15,9 @@ pathy 0.0.2 https://github.com/treeform/pathy d8cbb2af4876842069ab54530fad114692
 crunchy 0.1.11 https://github.com/guzba/crunchy 98eb6526982bb8aae8eec6e8781f4539fa19e049
 shady 0.1.5 https://github.com/treeform/shady c899f7cd17dbe7021d6e3aa2908e6de6549c47f1
 windy 0.5.0 https://github.com/treeform/windy 891e08ff090719620c4e6a3e4940461e6b26150d
+slappy 0.4.0 https://github.com/treeform/slappy 05d5ac8a3019cfebb7610a5008d00b27bac16a7f
+openal 0.2.0 https://github.com/treeform/openal 1686996c840c1aaa224603dafbb19fa0cb842992
+supersnappy 2.1.3 https://github.com/guzba/supersnappy ff8fe2bffefc1f4edc15deb20d921f600babb8c4
 opengl 1.2.9 https://github.com/nim-lang/opengl 8e2e098f82dc5eefd874488c37b5830233cd18f4
 urlly 1.1.1 https://github.com/treeform/urlly 99784779f05649df25fd9c33003d8ef6de027345
 ws 0.6.0 https://github.com/treeform/ws c9c0c7b51e2e83cc9305a895a0b144a297b4bea8

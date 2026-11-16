@@ -54,7 +54,7 @@ for client in clients:
   session.game.world.retainFixtureHalls()
   sessions.add session
   if initial == nil: initial = session.game.world.clone()
-  client.send(RoomMessage(kind: Ready, revision: session.revision,
+  client.send(RoomMessage(kind: PreparedDuration, durationTicks: uint32(session.game.maximumTicks), revision: session.revision,
     hash: session.game.networkHash()))
 exchange()
 clients[0].send(RoomMessage(kind: StartMatch))

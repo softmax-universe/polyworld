@@ -2,8 +2,8 @@
 
 import
   std/[math, strutils, times, unicode],
-  chroma, pixie, silky, vmath, windy,
-  daycycles, gameuis, inputs, profiles, quadterrain, rtscameras, networks
+  bumpy, chroma, pixie, silky, vmath, windy,
+  daycycles, gameuis, inputs, profiles, quadterrain, rtscameras, networks, sounds
 
 export daycycles
 
@@ -429,6 +429,16 @@ proc drawSlot*(
       "slot.9patch"
   sk.draw9Patch(name, SlotPatch, panel.origin, panel.size)
 
+proc hoverSound*(sk: Silky, panel: GameUiPanel, enabled = true) =
+  ## Plays a quiet cue on pointer entry, without repeating during hover or drag.
+  if not enabled or sk.mouseConsumed or sk.buttonDown[MouseLeft] or
+      sk.mouseDelta == vec2(0):
+    return
+  let previous = sk.mousePos - sk.mouseDelta
+  if panel.contains(sk.mousePos) and sk.mousePos.overlaps(sk.clipRect) and
+      not (panel.contains(previous) and previous.overlaps(sk.clipRect)):
+    playSound(HoverSound)
+
 proc drawTab*(
     sk: Silky,
     panel: GameUiPanel,
@@ -436,6 +446,7 @@ proc drawTab*(
     hovered = false
 ) =
   ## Draws one theme tab 9-patch.
+  sk.hoverSound(panel, hovered)
   let name =
     if selected:
       "panel.tab.selected.9patch"

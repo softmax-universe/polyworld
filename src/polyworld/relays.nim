@@ -1,6 +1,7 @@
 import
   std/[strutils, sysrand, times, json],
-  rooms
+  rooms,
+  ../../games/gods_of_the_arena/relaynotice
 
 const
   MaxRooms* = 64
@@ -33,6 +34,7 @@ type
     ready*, recovering*: bool
     readyHash: uint64
     readyRevision: uint32
+    readyDuration: uint32
     applied*, hashTick*, finishTick: uint32
     hash, finishHash: uint64
     receipts: seq[Receipt]
@@ -60,8 +62,11 @@ type
     checkpoints: seq[Checkpoint]
     finalTick: uint32
     finalHash: uint64
+    durationTicks: uint32
+    retainedNotice: RoomMessage ## At most one typed notice per match.
     deadline*: float64
     detail*, pausedBy: string
+    gotaNotice: RelayNotice
   Outgoing* = object
     connection*: int
     bytes*: string
@@ -229,9 +234,17 @@ proc retainedBytes(relay: Relay): int =
     result += room.historyBytes + room.pendingBytes +
       room.checkpoints.len * sizeof(Checkpoint)
 
+proc durationNotices(room: RelayRoom): bool =
+  ## Adapter opt-in; preserve legacy preparation semantics.
+  room.identity.game == "light_vs_dark" and room.identity.protocol >= 4
+
 proc changed(relay: Relay, room: RelayRoom, rosterOnly = false) =
   ## Keeps roster readiness intent, but requires hashes for the new revision.
   inc room.revision
+  room.durationTicks = 0
+  room.retainedNotice = RoomMessage()
+  for id in room.participants:
+    relay.guest(id).readyDuration = 0
   room.galconStartPending = false
   if not rosterOnly:
     room.lvdStartPending = false
@@ -253,6 +266,7 @@ proc clearMembership(guest: Guest) =
   guest.recovering = false
   guest.readyHash = 0
   guest.readyRevision = 0
+  guest.readyDuration = 0
   guest.applied = 0
   guest.hashTick = 0
   guest.finishTick = 0
@@ -379,6 +393,9 @@ proc hello(relay: Relay, connection: int, message: RoomMessage, now: float64) =
         kind: MatchStatus, match: room.match, phase: room.phase,
         tick: room.playbackTick(), detail: room.detail, flag: room.paused
       ))
+
+      if room.retainedNotice.kind == ServerNotice:
+        relay.send(guest, room.retainedNotice)
 
 proc acknowledge(guest: Guest, sequence: uint64) =
   ## Releases transport credit only for actually issued deliveries.
@@ -573,6 +590,8 @@ proc receive*(
         kind: MatchStatus, match: room.match, phase: room.phase,
         tick: room.playbackTick(), detail: room.detail, flag: room.paused
       ))
+      if room.retainedNotice.kind == ServerNotice:
+        relay.send(guest, room.retainedNotice)
     return
   let room = relay.room(guest.room)
   if room == nil:
@@ -656,15 +675,21 @@ proc receive*(
       reject("Only lobby controllers can change ready status")
     guest.ready = message.flag
     relay.publish(room)
-  of Ready, Prepared:
+  of Ready, Prepared, PreparedDuration:
     if room.phase != Lobby or message.revision != room.revision:
       reject("Ready refers to outdated room settings")
     if not room.controls(guest.id):
       reject("Only controllers can ready up")
+    if room.durationNotices and message.kind != PreparedDuration:
+      reject("This adapter requires duration-bearing preparation")
+    if message.kind == PreparedDuration and
+        message.durationTicks notin 1'u32 .. uint32(MaxHistoryTicks):
+      reject("Preparation duration is outside retained history bounds")
     if message.kind == Ready:
       guest.ready = true
     guest.readyHash = message.hash
     guest.readyRevision = room.revision
+    guest.readyDuration = if message.kind == PreparedDuration: message.durationTicks else: 0
     relay.publish(room)
     if room.identity.game == "galcon" and room.identity.protocol >= 2 and
       room.galconStartPending:
@@ -701,6 +726,7 @@ proc receive*(
     var
       first = true
       initialHash = if hostPrepared: message.hash else: 0'u64
+      durationTicks = 0'u32
     for seat in room.seats:
       if seat.owner == 0:
         # Legacy LvD versions predate the packed-seat adapter.
@@ -721,17 +747,27 @@ proc receive*(
         reject("Controllers must automatically prepare the current roster revision")
       if first:
         initialHash = controller.readyHash
+        durationTicks = controller.readyDuration
         first = false
       elif initialHash != controller.readyHash:
         relay.stop(room, "Initial state hash mismatch: " &
           $initialHash & " versus " & $controller.readyHash &
           " from " & controller.name)
         return
+      if room.durationNotices and (controller.readyDuration == 0 or
+          controller.readyDuration != durationTicks):
+        relay.stop(room, "Initial preparation duration mismatch")
+        return
     if first:
       reject("At least one controlling client is required")
+    let gotaNotice = initRelayNotice(room.identity, room.payload,
+      room.tickRate, room.seats)
+    room.gotaNotice = gotaNotice
     room.galconStartPending = false
     room.lvdStartPending = false
     room.initialHash = initialHash
+    room.durationTicks = if room.durationNotices: durationTicks else: 0
+    room.retainedNotice = RoomMessage()
     room.checkpoints = @[Checkpoint(present: true, hash: initialHash)]
     room.finalTick = 0
     room.history.setLen(0)
@@ -763,6 +799,8 @@ proc receive*(
       message.seat >= uint32(room.seats.len) or
       room.seats[message.seat].owner != guest.id:
         reject("Command seat is not owned by this participant")
+    if room.identity.supportsRelayNotice() and message.payload.reservedNoticePayload():
+      reject("GotA system notices are reserved for the server")
     if message.sequence == 0 or
       message.sequence > uint64(guest.receipts.len) + 1:
         reject("Command sequence must be consecutive")
@@ -777,7 +815,8 @@ proc receive*(
       return
     if room.phase notin {Playing, Waiting}:
       reject("New commands require an active match")
-    if room.pending.len >= MaxCommandsPerTick or
+    let commandLimit = MaxCommandsPerTick - ord(room.identity.supportsRelayNotice())
+    if room.pending.len >= commandLimit or
       room.pendingBytes + message.payload.len + 32 > MaxWireBytes div 2:
         relay.stop(room, "Pending command limit exhausted")
         return
@@ -924,6 +963,18 @@ proc advance*(relay: Relay, now: float64) =
         detail = "finalTick=" & $room.finalTick & " finalHash=" & $room.finalHash)
       relay.status(room)
       continue
+    # Decide after known completion, from occupied controllers' applied edge.
+    # Slow peers/spectators gate presentation against their own applied cursor.
+    let warningTicks = 180'u32 * room.tickRate
+    if room.durationTicks > warningTicks and room.retainedNotice.kind != ServerNotice:
+      let trigger = room.durationTicks - warningTicks
+      var confirmed = 0'u32
+      for id in room.participants:
+        if room.controls(id): confirmed = max(confirmed, relay.guest(id).applied)
+      if confirmed >= trigger:
+        room.retainedNotice = RoomMessage(kind: ServerNotice, match: room.match,
+          noticeId: 1, tick: trigger, noticeCode: ThreeMinutesRemain)
+        relay.broadcast(room, room.retainedNotice)
     if reason.len == 0 and room.paused:
       reason = "Match paused by " & room.pausedBy & " at tick " & $room.tick
     if reason.len > 0:
@@ -946,10 +997,16 @@ proc advance*(relay: Relay, now: float64) =
         relay.stop(room, "Match history limit exhausted")
         continue
     inc room.tick
-    let packet = RoomMessage(
+    var packet = RoomMessage(
       kind: TickPacket, match: room.match, tick: room.tick,
       commands: room.pending
     )
+    if room.gotaNotice.advanceNotice(room.tick, room.pending):
+      if packet.commands.len >= MaxCommandsPerTick:
+        relay.stop(room, "No command capacity for scheduled server notice")
+        continue
+      packet.commands.add Command(participant: 0, seat: ServerNoticeSeat,
+        sequence: 1, payload: noticePayload())
     let bytes = packet.encode()
     room.history.add bytes
     room.historyBytes += bytes.len + room.pendingBytes

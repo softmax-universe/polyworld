@@ -1,10 +1,17 @@
 ## LvD's team-free roster and map controls; all menu chrome is shared.
+import std/strutils
 import presets
 import polyworld/[rooms, roomclients]
 
 const RosterColumns* = 2
 
-proc defaultGameName*(player: string): string = player & "'s game"
+proc confirmedPlayerName*(name: string): bool =
+  ## Legacy placeholder settings are not a chosen identity. Inspect a trimmed
+  ## copy only for this sentinel; legitimate names remain opaque UTF-8 bytes.
+  name.len <= 64 and name.validName and name.strip.toLowerAscii != "player"
+
+proc defaultGameName*(player: string): string =
+  if player.confirmedPlayerName: player & "'s game" else: ""
 
 proc canEditGameName*(snapshot: RoomMessage, self: uint32): bool =
   self != 0 and snapshot.room.len > 0 and snapshot.phase == Lobby and

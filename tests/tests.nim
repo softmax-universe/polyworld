@@ -2,6 +2,7 @@
 
 {.warning[UnusedImport]: off.}
 import
+  test_sounds,
   test_assetpacks,
   test_actioncam,
   test_animblend_controls,
@@ -24,6 +25,7 @@ import
   test_fxmeshes,
   test_gameuis,
   ../games/gods_of_the_arena/tests/test_abilities as TestGotaAbilities,
+  ../games/gods_of_the_arena/tests/test_audio as TestGotaAudio,
   ../games/gods_of_the_arena/tests/test_andre as TestGotaAndre,
   ../games/gods_of_the_arena/tests/test_attacks as TestGotaAttacks,
   ../games/gods_of_the_arena/tests/test_base as TestGotaBase,
@@ -77,6 +79,7 @@ import
   test_hudlayouts,
   test_inputs,
   ../games/light_vs_dark/tests/test_content as TestLvdContent,
+  ../games/light_vs_dark/tests/test_battle_sounds as TestLvdBattleSounds,
   ../games/light_vs_dark/tests/test_diplomacy as TestLvdDiplomacy,
   ../games/light_vs_dark/tests/test_groves as TestLvdGroves,
   ../games/light_vs_dark/tests/test_maps as TestLvdMaps,
@@ -111,6 +114,7 @@ import
   test_visions,
   test_worldtexts,
   test_rooms,
+  test_match_notices,
   test_room_codes,
   test_room_cleanup,
   test_relay_async_hashes,

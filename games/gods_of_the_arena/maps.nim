@@ -25,6 +25,7 @@ type MapData* = object
   layout*: ArenaLayout
   minimap*: seq[uint32]
   mainRoads*: seq[bool]
+  preparationGates*: seq[PathTile]
 
 var activeMapResolution = GridTiles
 
@@ -87,6 +88,10 @@ proc generateMap*(
   var hash = uint32(mapFingerprint())
   for area in savedArena.baseAreas:
     hash.addHashy(area.ord)
+  for tile in savedArena.preparationGates:
+    hash.addHashy(tile.layer)
+    hash.addHashy(tile.x)
+    hash.addHashy(tile.z)
   for points in [savedArena.layout.forts, savedArena.layout.spawns]:
     for point in points:
       hash.addHashy(point.x)
@@ -125,7 +130,8 @@ proc generateMap*(
     hash: uint64(hash),
     layout: savedArena.layout,
     minimap: savedArena.minimap,
-    mainRoads: savedArena.mainRoads
+    mainRoads: savedArena.mainRoads,
+    preparationGates: savedArena.preparationGates
   )
   battleMapHash = result.hash
 

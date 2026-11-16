@@ -1,7 +1,7 @@
 import
   std/strutils,
   bumpy, chroma, pixie, silky, vmath, windy,
-  assets, chrome, homes, menus
+  assets, chrome, homes, menus, sounds
 
 const
   LobbyCanvas = vec2(1514, 970)
@@ -123,7 +123,9 @@ proc lobbyButton*(
     "LobbyBody",
     CenterAlign
   )
-  interaction == Released
+  result = interaction == Released
+  if result:
+    playSound(ClickSound)
 
 proc playerButton*(
   sk: Silky, window: Window, name: string, enabled = true

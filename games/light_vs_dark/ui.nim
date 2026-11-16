@@ -4,7 +4,7 @@ import
   std/[strformat, monotimes, unicode, tables],
   chroma, pixie, silky, vmath, windy,
   polyworld/[stats, metrics, actioncam, chrome, configs, gameuis, inputs, pathing, player, rtscameras,
-    stackpanels, networks, rooms, roomclients],
+    stackpanels, networks, rooms, roomclients, sounds],
   assets, content, sim, game, controls, layouts, symbols, maps, factions, tooltips, multiplayer,
   hudpresentation, researchpresentation, rendervisibility,
   shortcutsettings, shortcutpresentation
@@ -185,6 +185,10 @@ proc humanCommunicationRelease*(button: Button) =
 
 proc observeHumanCommunication*(session: NetworkMatch, packet: RoomMessage) =
   commState.observeHumanPacket(session, packet)
+  commState.observeServerNotices(session)
+
+proc observeServerCommunication*(session: NetworkMatch) =
+  commState.observeServerNotices(session)
 
 proc humanCommunicationRune*(rune: Rune): bool =
   commState.chatRune(rune)
@@ -265,6 +269,12 @@ proc returnToMatchLobby*(network: NetworkMatch): bool =
 proc currentStatsOptions*(): StatsOptions =
   ## Use the simulation's existing end-score, never a presentation formula.
   result.individualPlayers = true
+  let remaining = max(0'i64, int64(run.maximumTicks) - int64(run.world.tick))
+  let seconds = (remaining + int64(TickRate) - 1) div int64(TickRate)
+  let minutes = seconds div 60
+  let remainder = seconds mod 60
+  result.statusText = "Time remaining: " & (if minutes < 10: "0" else: "") &
+    $minutes & ":" & (if remainder < 10: "0" else: "") & $remainder
   for slot in 0 ..< run.world.players.len:
     result.scores.add run.world.score(int32(slot))
   if matchResultsVisible():
@@ -280,7 +290,8 @@ proc resultsLayout*(layout: GameUiLayout, table: StatsTable):
   ## Match the shared card's reserved headline and readable scale exactly.
   result.viewport = layout
   let slots = statsLayout(layout, table,
-    StatsOptions(headline: "Results", individualPlayers: true))
+    StatsOptions(headline: "Results", statusText: currentStatsOptions().statusText,
+      individualPlayers: true))
   result.headline = slots.headline
   result.panel = slots.panel
 
@@ -293,9 +304,23 @@ proc statsContains(window: Window, mouse: Vec2): bool =
   statsState.mouseOverStats(window, currentLayout(window),
     currentStats(), mouse, currentStatsOptions())
 
+proc performAudibleShortcut*(world: World, player: int32,
+    selected: openArray[int32], action: ShortcutAction): bool =
+  ## Gives mouse and keyboard production the same acceptance feedback.
+  result = world.performShortcut(player, selected, action)
+  if not result:
+    playSound(ErrorSound)
+  elif action <= BuildBlacksmithShortcut:
+    playSound(SelectSound)
+  elif action == CancelSiteShortcut:
+    playSound(CancelSound)
+  else:
+    playSound(PurchaseSound)
+
 proc hudClicked(window: Window, sk: Silky, panel: GameUiPanel): bool =
   ## Keeps covered HUD controls from receiving an overlay click.
-  not humanCommunicationBlocksGameplay() and not hudTooltipContains(sk.mousePos) and
+  result = not humanCommunicationBlocksGameplay() and
+    not hudTooltipContains(sk.mousePos) and
     not window.statsContains(sk.mousePos) and chrome.clicked(window, sk, panel)
 
 proc currentChrome(window: Window): HudChrome =
@@ -307,28 +332,30 @@ proc communicationButtonPanel(window: Window): GameUiPanel =
   GameUiPanel(origin: vec2(12, 202), size: vec2(min(180'f32, layout.size.x - 24), 30))
 
 proc drawHumanCommunication(sk: Silky, window: Window) =
-  if run == nil or run.replayMode or options.playerSlot <= 0 or
-      matchResultsVisible(): return
+  if run == nil or run.replayMode or matchResultsVisible(): return
   let
     layout = currentLayout(window)
     player = options.playerSlot - 1
     ink = rgbx(235, 231, 214, 255)
     muted = rgbx(175, 187, 201, 255)
   proc button(label: string, panel: GameUiPanel, enabled = true): bool =
+    sk.hoverSound(panel, enabled and not statsState.visible(window.tabHeld))
     sk.drawRect(panel.origin, panel.size,
       if enabled: rgbx(48, 66, 85, 255) else: rgbx(27, 32, 42, 255))
     sk.drawLabel(sk.fittedLabel(label, panel.size.x - 10, "Small"),
       panel.origin + vec2(5, 0), panel.size - vec2(10, 0),
       if enabled: ink else: muted, "Small", CenterAlign)
     # Communication owns keyboard input; typed select aliases cannot click it.
-    enabled and not window.statsContains(sk.mousePos) and
+    result = enabled and not window.statsContains(sk.mousePos) and
       window.buttonPressed[MouseLeft] and panel.contains(sk.mousePos)
+    if result:
+      playSound(ClickSound)
   var pending = 0
   for other in 0'i32 ..< int32(run.world.players.len):
-    if other == player: continue
+    if player < 0 or other == player: continue
     let relation = run.world.diplomacy.relation(player, other)
     if relation.offer != NoOffer and relation.sender == other: inc pending
-  if button("Diplomacy" & (if pending > 0: " (" & $pending & ")" else: ""),
+  if player >= 0 and button("Diplomacy" & (if pending > 0: " (" & $pending & ")" else: ""),
       communicationButtonPanel(window)):
     commState.diplomacyOpen = not commState.diplomacyOpen
     commState.typing = false
@@ -341,12 +368,14 @@ proc drawHumanCommunication(sk: Silky, window: Window) =
   for row in 0 ..< shown:
     let line = commState.feed[commState.feed.len - shown + row]
     sk.drawLabel(sk.fittedLabel(line.name & ": " & line.text, feedWidth - 12, "Small"),
-      feedOrigin + vec2(6, float32(row * 23)), vec2(feedWidth - 12, 23), ink, "Small")
+      feedOrigin + vec2(6, float32(row * 23)), vec2(feedWidth - 12, 23),
+      (if line.serverNotice: rgbx(235,196,95,255) else: ink), "Small")
   let prompt = if commState.typing: "> " & commState.draft & "|"
-    else: "Enter: chat to all players"
+    elif player >= 0: "Enter: chat to all players"
+    else: "Spectating"
   sk.drawLabel(sk.fittedLabel(prompt, feedWidth - 12, "Small"),
     feedOrigin + vec2(6, float32(shown * 23)), vec2(feedWidth - 12, 30), muted, "Small")
-  if not commState.diplomacyOpen: return
+  if player < 0 or not commState.diplomacyOpen: return
   let
     width = min(660'f32, layout.size.x - 24)
     rows = max(1, min(6, int((layout.size.y - 148) / 92)))
@@ -877,6 +906,7 @@ proc drawUi*(
       iconSize = 32
     )
     if canSwitchView and window.hudClicked(sk, button):
+      playSound(ClickSound)
       let count = int32(run.world.players.len)
       if i == 0:
         viewMode = if viewMode == 0: count else: viewMode - 1
@@ -1006,6 +1036,9 @@ proc drawUi*(
     else: continue
     let tint = if owner >= 0: teamColors[owner] else: NeutralHealthColor
     sk.drawPortrait(slot, key, min(SelectionIcon, slot.size.x - WellPad * 2), tint)
+    sk.hoverSound(slot, not humanCommunicationBlocksGameplay() and
+      not commandHover.tooltipContains(sk.mousePos) and
+      not statsState.visible(window.tabHeld))
     sk.drawBar(
       slot.origin + vec2(WellPad, slot.size.y - GridBarH),
       vec2(min(SelectionIcon, slot.size.x - WellPad * 2), GridBarH),
@@ -1015,6 +1048,7 @@ proc drawUi*(
       clickedId = id
     inc shown
   if clickedId != NoEntity:
+    playSound(SelectSound)
     actionCam.takeManual()
     if shiftHeld(window):
       dropSelected(selectedIds, primaryId, clickedId)
@@ -1075,27 +1109,38 @@ proc drawUi*(
     hoveredIcon = ""
     hoveredDetails: DetailTooltip
     hoveredTint = rgbx(255, 255, 255, 255)
-  let player = commandPlayer(viewMode)
+  let
+    player = commandPlayer(viewMode)
+    hoverCommands = options.playerSlot > 0 and not run.replayMode and
+      not run.historyPlayback and not tooltipsBlocked and
+      not commandHover.tooltipContains(sk.mousePos)
   var paletteIndex = 0
   for action in palette:
     let slot = build.slots[paletteIndex]
     inc paletteIndex
     if action <= BuildBlacksmithShortcut:
-      let kind = BuildingKind(action.ord)
-      let stats = BuildingTable[kind]
+      let
+        kind = BuildingKind(action.ord)
+        stats = BuildingTable[kind]
+        enabled = run.world.canBuild(player, kind)
       sk.drawBuildPortrait(slot, buildingPortraitKey(player, kind),
-        run.world.canBuild(player, kind))
+        enabled)
+      sk.hoverSound(slot, hoverCommands and enabled)
       sk.drawSlotCosts(slot, stats.gold, stats.wood)
       if sk.hovered(slot):
         hoveredTarget = buildingTooltipTarget(kind, player)
         hoveredIcon = buildingPortraitKey(player, kind)
         hoveredDetails = buildingDetails(kind, player)
     elif action <= TrainSummonShortcut:
-      let kind = UnitKind(action.ord - TrainPeonShortcut.ord)
-      let stats = unitOf(player, kind)
+      let
+        kind = UnitKind(action.ord - TrainPeonShortcut.ord)
+        stats = unitOf(player, kind)
+        enabled =
+          run.world.selectedProducer(player, selectedIds, kind) != NoEntity
       sk.drawTrainPortrait(slot, unitSymbolKey(kind), teamColors[player],
-        run.world.selectedProducer(player, selectedIds, kind) != NoEntity,
+        enabled,
         run.world.selectedTrainingCount(player, selectedIds, kind))
+      sk.hoverSound(slot, hoverCommands and enabled)
       if sk.hovered(slot):
         sk.drawTrainCosts(slot, stats.gold, stats.wood)
         hoveredTarget = unitTooltipTarget(kind, player)
@@ -1104,6 +1149,7 @@ proc drawUi*(
         hoveredDetails = unitDetails(kind, player)
     elif action == CancelSiteShortcut:
       sk.drawBuildPortrait(slot, "stop", true)
+      sk.hoverSound(slot, hoverCommands)
       if sk.hovered(slot):
         hoveredTarget = TooltipTarget(kind: CancelCommandTooltip, player: player)
         hoveredIcon = "stop"
@@ -1128,6 +1174,7 @@ proc drawUi*(
       let temporaryIcon = not sk.atlas.entries.hasKey(card.icon)
       if temporaryIcon: card.icon = TemporaryResearchIcons[kind]
       sk.drawBuildPortrait(slot, card.icon, card.researchEnabled)
+      sk.hoverSound(slot, hoverCommands and card.researchEnabled)
       if sk.hovered(slot):
         sk.drawTrainCosts(slot, card.gold, card.wood)
         hoveredTarget = TooltipTarget(kind: ResearchCommandTooltip,
@@ -1140,7 +1187,8 @@ proc drawUi*(
       hoveredAnchor = slot
       hoveredDetails.subtitle.add " / Shortcut: " & currentShortcuts.shortcutRouteLabel(action)
     if options.playerSlot > 0 and not run.replayMode and window.hudClicked(sk, slot):
-      discard run.world.performShortcut(options.playerSlot - 1, selectedIds, action)
+      discard performAudibleShortcut(run.world, options.playerSlot - 1,
+        selectedIds, action)
 
   if playbackControlsVisible():
     transport.drawTransport(

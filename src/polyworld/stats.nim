@@ -46,11 +46,11 @@ type
     finalTable: StatsTable
   StatsOptions* = object
     ## Opt-in presentation; defaults preserve all existing game layouts.
-    headline*, headlineSuffix*: string
+    headline*, headlineSuffix*, statusText*: string
     individualPlayers*: bool
     scores*: seq[int64] ## Optional game-owned Score values indexed by stable slot.
   StatsLayout* = object
-    panel*, headline*, header*, body*: GameUiPanel
+    panel*, headline*, status*, header*, body*: GameUiPanel
     contentHeight*, maxScroll*: float32
   StatsColumn = object
     label: string
@@ -202,7 +202,8 @@ proc statsLayout*(layout: GameUiLayout, table: StatsTable,
   let
     area = layout.gameAreaSize
     headline = if options.headline.len > 0: StatsKillsHeight else: 0.0'f
-    kills = (if table.kind == GotaStats: StatsKillsHeight else: 0.0'f) + headline
+    statusHeight = if options.statusText.len > 0: StatsHeaderHeight else: 0.0'f
+    kills = (if table.kind == GotaStats: StatsKillsHeight else: 0.0'f) + headline + statusHeight
     content = table.rows.len.float32 * StatsRowHeight +
       bands.float32 * StatsBandHeight
     height = min(content + StatsHeaderHeight + kills + StatsPadding * 2,
@@ -212,6 +213,10 @@ proc statsLayout*(layout: GameUiLayout, table: StatsTable,
   result.headline = GameUiPanel(
     origin: result.panel.origin + vec2(StatsPadding),
     size: vec2(max(width - StatsPadding * 2, 0), headline)
+  )
+  result.status = GameUiPanel(
+    origin: result.panel.origin + vec2(StatsPadding, StatsPadding + kills - statusHeight),
+    size: vec2(max(width - StatsPadding * 2, 0), statusHeight)
   )
   result.header = GameUiPanel(
     origin: result.panel.origin + vec2(StatsPadding, StatsPadding + kills),
@@ -295,6 +300,9 @@ proc drawStats*(sk: Silky, window: Window, layout: GameUiLayout,
   if options.headline.len > 0:
     sk.drawLabel(sk.fittedStatsHeadline(options, slots.headline.size.x),
       slots.headline.origin, slots.headline.size, GoldColor, "H1", CenterAlign)
+  if options.statusText.len > 0:
+    sk.drawLabel(sk.fittedLabel(options.statusText, slots.status.size.x),
+      slots.status.origin, slots.status.size, GoldColor, align = CenterAlign)
   if table.kind == GotaStats:
     let center = slots.panel.origin + vec2(slots.panel.size.x / 2, 16)
     sk.drawLabel($table.kills[1], center - vec2(132, 0), vec2(88, 48),

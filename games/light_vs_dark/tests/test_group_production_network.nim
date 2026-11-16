@@ -74,7 +74,7 @@ for client in clients:
     initial = w.clone()
   else: doAssert groups == localGroups
   sessions.add session
-  client.send(RoomMessage(kind: Ready, revision: session.revision, hash: session.game.networkHash()))
+  client.send(RoomMessage(kind: PreparedDuration, durationTicks: uint32(session.game.maximumTicks), revision: session.revision, hash: session.game.networkHash()))
 exchange()
 clients[0].send(RoomMessage(kind: StartMatch))
 exchange()

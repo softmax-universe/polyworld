@@ -15,15 +15,19 @@ when defined(headless):
       outcome: "winner_" & $run.world.winner
     ))
 else:
-  import windy, polyworld/menus, game, graphics, frontend, lobbies
+  import windy, polyworld/[menus, sounds], game, graphics, frontend, lobbies
   initializeOptions()
-  var preferences = readLvdPreferences()
-  if playerNameOverride.len > 0:
-    preferences.name = playerNameOverride
-    preferences.savePreferences("Polyworld LvD")
-  if options.botGroups.len > 0 or options.replayPath.len > 0 or
-      options.playerSlot > 0 or defined(takeScreenshot):
-    initializeMatch()
-    runGraphics()
-  if window == nil or not window.closeRequested:
-    runFrontend()
+  initSounds()
+  try:
+    var preferences = readLvdPreferences()
+    if playerNameOverride.len > 0:
+      preferences.name = playerNameOverride
+      preferences.savePreferences("Polyworld LvD")
+    if options.botGroups.len > 0 or options.replayPath.len > 0 or
+        options.playerSlot > 0 or defined(takeScreenshot):
+      initializeMatch()
+      runGraphics()
+    if window == nil or not window.closeRequested:
+      runFrontend()
+  finally:
+    closeSounds()

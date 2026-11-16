@@ -78,8 +78,8 @@ proc runFrontend*() =
       window.updateWindowSettings()
     launchLocal = false
     launchNetwork = false
-    if connectRequested and preferences.name.len <= 64 and
-      validName(preferences.name):
+    if connectRequested and not editingPlayer and
+      confirmedPlayerName(preferences.name):
         connectRequested = false
         try:
           preferences.server = serverUrl(preferences.server)
@@ -101,10 +101,12 @@ proc runFrontend*() =
           error = ""
         except CatchableError as problem:
           error = problem.msg
-    if connection != nil:
+    if connection != nil and not editingPlayer and
+        confirmedPlayerName(preferences.name):
       connection.pump()
       let client = connection.client
-      if client.welcomed and joinRequested and invite.len > 0 and
+      if client.welcomed and not editingPlayer and
+        confirmedPlayerName(preferences.name) and joinRequested and invite.len > 0 and
         client.snapshot.room.len == 0:
         client.send(RoomMessage(kind: JoinRoom, room: invite))
         joinRequested = false
@@ -206,8 +208,7 @@ proc runFrontend*() =
       if page != LobbyMenu:
         participantMenu.dismiss()
         contextDismissGuard = false
-      let needsPlayerName = preferences.name.len > 64 or
-        not validName(preferences.name)
+      let needsPlayerName = not confirmedPlayerName(preferences.name)
       if editingPlayer or (page == MultiplayerMenu and needsPlayerName):
           sk.textStyle = "Default"
           discard sk.beginSettings(window)
@@ -215,8 +216,6 @@ proc runFrontend*() =
           let
             view = window.size.vec2 / sk.uiScale
             at = (view - vec2(620, 260)) * 0.5'f
-            name = playerName.strip()
-            valid = name.len <= 64 and validName(name)
           sk.drawRect(vec2(0), view, rgbx(0, 0, 0, 110))
           sk.lobbyPanel(at, vec2(620, 260))
           sk.drawLabel(if needsPlayerName: "Please enter your player name"
@@ -225,8 +224,11 @@ proc runFrontend*() =
             sk.theme.defaultTextColor, "H1")
           sk.menuInput(window, "newPlayerName", playerName,
             at + vec2(24, 80), 572, 44)
+          let
+            name = playerName
+            valid = confirmedPlayerName(name)
           if playerName.len > 0 and not valid:
-            sk.drawLabel("Enter a shorter name without line breaks.",
+            sk.drawLabel("Choose a name other than Player (max 64 bytes, no controls).",
               at + vec2(24, 128), vec2(572, 28),
               sk.theme.disabledTextColor)
           if sk.lobbyButton("Cancel", at + vec2(24, 188), 180) or
@@ -234,6 +236,7 @@ proc runFrontend*() =
               if needsPlayerName and page == MultiplayerMenu:
                 page = HomeMenu
                 connectRequested = false
+                joinRequested = false
               editingPlayer = false
               playerName = ""
               error = ""
@@ -309,7 +312,8 @@ proc runFrontend*() =
           discard
         of MultiplayerMenu:
           let
-            connected = connection != nil and connection.client.welcomed
+            connected = not editingPlayer and confirmedPlayerName(preferences.name) and
+              connection != nil and connection.client.welcomed
             p = layout.origin + vec2(32, 144)
             totalWidth = if layout.compact: 936.0'f else: 1450.0'f
           sk.lobbyPanel(p, vec2(totalWidth, 74))
@@ -711,7 +715,7 @@ proc runFrontend*() =
         lobbyUi.selectedSeat == -1 and
         sk.playerButton(window, preferences.name,
           page != LobbyMenu or connection.client.snapshot.phase == rooms.Lobby):
-          playerName = preferences.name
+          playerName = if confirmedPlayerName(preferences.name): preferences.name else: ""
           editingPlayer = true
       if error.len > 0:
         sk.lobbyLabel(error, vec2(24, 0), 1400, tint = rgbx(245, 151, 139, 255))

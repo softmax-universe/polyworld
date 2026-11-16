@@ -1,6 +1,6 @@
 import jsony
 import polyworld/[rooms, roomclients, tapes]
-import ../[maps, multiplayer, replays, sim]
+import ../[content, maps, multiplayer, replays, sim]
 
 let config = parseConfig("{\"maxTicks\":48,\"draftMode\":\"open\"}")
 let base = readFile("games/gods_of_the_arena/players/base.bas")
@@ -49,7 +49,7 @@ while not first.finished:
   first.applyPacket(packet)
   second.applyPacket(packet)
   doAssert first.game.stateHash() == second.game.stateHash()
-  doAssert tick < 100
+  doAssert tick < uint32(100 + PreparationTicks)
 doAssert botCommands > 0, "An actual sparse bot must submit commands"
 let data = decodeReplay(encodeReplay(first.game.recorder.data))
 data.validate()

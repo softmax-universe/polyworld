@@ -3,6 +3,8 @@
 {.warning[UnusedImport]: off.}
 import
   test_content,
+  test_battle_sounds,
+  test_match_clock,
   test_diplomacy,
   test_ffa_combat,
   test_siege,

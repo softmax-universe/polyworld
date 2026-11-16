@@ -149,7 +149,8 @@ suite "LvD name-only real relay operation":
     var guestRevision = guestPrepared.revision
     var hostRefresh, guestRefresh: ReadyRefresh
     for client in f.clients:
-      client.send(RoomMessage(kind: Ready, revision: client.snapshot.revision,
+      client.send(RoomMessage(kind: ReadyStatus, flag: true))
+      client.send(RoomMessage(kind: PreparedDuration, durationTicks: uint32(hostPrepared.game.maximumTicks), revision: client.snapshot.revision,
         hash: hostPrepared.game.networkHash()))
     f.exchange()
     let oldRevision = hostRevision

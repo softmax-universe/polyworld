@@ -2,7 +2,7 @@
 import jsony, polyworld/[rooms, roomclients, tapes, metrics, bodies, hashes, mailboxes],
   bots, content, controls, presets, replays, sim
 
-const LvdNetworkProtocol* = 3'u32
+const LvdNetworkProtocol* = 4'u32
 
 type NetworkMatch* = ref object
   client*: RoomClient

@@ -21,7 +21,7 @@ Multiplayer connects to the **same universal relay as GotA**. Game identity filt
 
 Roster capacity is 64, subject to a combined map/roster budget. Validation uses the generator's actual seeded growth before allocating cells: at most 262,144 map cells and 8,388,608 player×map cells. Large configurations report a validation error rather than exhausting browser memory.
 
-Sound preferences are shared with GotA; actual audio playback remains unimplemented, as indicated in the Sound tab.
+The Sound tab uses the same controls as GotA, with preferences saved separately for each game. It controls master, effects, and interface volume, plus mute. CC0 effects cover selections, accepted orders, production, weapons, spells, hits, deaths, and match results. Combat follows current visibility and camera distance, and stays silent while seeking, fast-forwarding, paused, or unfocused.
 
 ## Playing
 

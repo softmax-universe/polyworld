@@ -53,6 +53,7 @@ proc runFrontend*() =
     error = getCurrentExceptionMsg()
   roomName = defaultGameName(preferences.name)
   preferences.applyPreferences(window)
+  window.updateCursorConfinement(preferences.edgeScrolling)
   let bots = @[
     bundledBot("Base bot", "base"),
     bundledBot("Rusher", "rusher"),
@@ -193,7 +194,7 @@ proc runFrontend*() =
       )
     window.onFrame = proc() =
       ## Draws this lifecycle state without constructing a hidden match.
-      window.updateCursorConfinement()
+      window.updateCursorConfinement(preferences.edgeScrolling)
       let needsPlayerName = preferences.name.len > 64 or
         not validName(preferences.name)
       if editingPlayer or (page == MultiplayerMenu and needsPlayerName):

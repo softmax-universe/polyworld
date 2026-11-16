@@ -41,6 +41,7 @@ import
   test_observations,
   test_policies,
   test_portals,
+  test_pointers,
   test_potions,
   test_presets,
   test_progression,

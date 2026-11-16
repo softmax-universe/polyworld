@@ -295,6 +295,7 @@ proc runGraphics*(
     preferences = readPreferences("Polyworld GotA")
   except CatchableError as error:
     saveError = error.msg
+  window.updateCursorConfinement(preferences.edgeScrolling)
   inputBindings = preferences.bindings
   chrome.uiScaleMode = preferences.uiScaleMode
   chrome.uiScalePercent = preferences.uiScalePercent
@@ -1784,7 +1785,8 @@ proc runGraphics*(
         cameraTarget.z = clamp(cameraTarget.z, -mapHalfSize(), mapHalfSize())
       elif applyRtsPan(
           cameraTarget,
-          rtsPanDir(window, preferences.edgeScrolling),
+          rtsPanDir(window, preferences.edgeScrolling, GotaEdgePanMargin,
+            pointerConfined = window.cursorConfined),
           dt,
           cameraDistance,
           mapHalfSize()
@@ -1810,7 +1812,8 @@ proc runGraphics*(
     if not minimapPanning and
         applyRtsPan(
           cameraTarget,
-          rtsPanDir(window, preferences.edgeScrolling),
+          rtsPanDir(window, preferences.edgeScrolling, GotaEdgePanMargin,
+            pointerConfined = window.cursorConfined),
           dt,
           cameraDistance,
           mapHalfSize()
@@ -2482,7 +2485,7 @@ proc runGraphics*(
     let chatText = chat.takeChatText()
     if chatText.len > 0:
       discard network.sendHumanChat(chatText, chat.team)
-    window.updateCursorConfinement()
+    window.updateCursorConfinement(preferences.edgeScrolling)
     when ProfileWarmupFrames > 0 and ActiveTracePath.len > 0:
       if profileWarmup == ProfileWarmupFrames:
         startGameProfile()

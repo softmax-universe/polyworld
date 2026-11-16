@@ -15,15 +15,18 @@ when defined(headless):
       outcome: run.world.outcome()
     ), run.world.totalXp())
 else:
-  import windy, polyworld/menus, game, graphics, frontend
+  import windy, polyworld/menus, game, graphics, frontend, pointers
   initializeOptions()
-  var preferences = readPreferences("Polyworld GotA")
-  if playerNameOverride.len > 0:
-    preferences.name = playerNameOverride
-    preferences.savePreferences("Polyworld GotA")
-  localPlayerName = preferences.name
-  if options.botGroups.len > 0 or options.replayPath.len > 0:
-    initializeMatch()
-    runGraphics()
-  if window == nil or not window.closeRequested:
-    runFrontend()
+  try:
+    var preferences = readPreferences("Polyworld GotA")
+    if playerNameOverride.len > 0:
+      preferences.name = playerNameOverride
+      preferences.savePreferences("Polyworld GotA")
+    localPlayerName = preferences.name
+    if options.botGroups.len > 0 or options.replayPath.len > 0:
+      initializeMatch()
+      runGraphics()
+    if window == nil or not window.closeRequested:
+      runFrontend()
+  finally:
+    releaseCursorConfinement()

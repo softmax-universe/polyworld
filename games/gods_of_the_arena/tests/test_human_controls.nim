@@ -6,7 +6,7 @@ import polyworld/[inputs, rtscameras]
 from polyworld/actioncam import initActionCam, takeManual, toggle
 import polyworld/player
 import ../[chats, chatinput]
-import ../[content, game, sim, cameras, minimaporders]
+import ../[content, game, sim, cameras, minimaporders, pointers]
 include ../controls
 privateAccess(Window)
 
@@ -174,6 +174,24 @@ proc main() =
     const DefaultCameraDistance = 80'f32
     proc scaleModifier(window: Window): bool = false
     proc damping(rate, dt: float32): float32 = 1
+    proc rtsPanDir(
+        window: Window,
+        mode: EdgeScrollMode,
+        margin = RtsEdgePanMargin,
+        pointerConfined = false
+    ): Vec2 =
+      ## Uses real pan math while updateCamera supplies simulated OS focus.
+      let edge =
+        if rtsEdgePanAllowed(
+          true,
+          window.mouseInside or pointerConfined,
+          window.mouseCaptured,
+          mode
+        ):
+          rtsEdgePanDir(window.mousePos.vec2, window.size.vec2, margin)
+        else:
+          vec2(0)
+      rtsPanDir(rtsKeyPanDir(window), edge)
     production(updateCamera)
     window.state.buttonDown = {KeySpace}
     window.state.perFrame = PerFrame()
@@ -204,6 +222,74 @@ proc main() =
     updateCamera(0.1, true)
     doAssert cameraTarget == vec3(20, 0, 20), "portrait recenter must not latch follow"
     echo "PASS production hold/release camera, modal/focus gates, portrait one-shot"
+
+    preferences.edgeScrolling = AlwaysEdgeScroll
+    window.state.mouseInside = true
+    window.state.perFrame = PerFrame()
+    let size = window.size
+    for human in [true, false]:
+      options.playerSlot = if human: 1 else: 0
+      for offset in [30'i32, 60]:
+        for (pointer, direction) in [
+          (ivec2(offset, size.y div 2), vec2(-1, 0)),
+          (ivec2(size.x - offset, size.y div 2), vec2(1, 0)),
+          (ivec2(size.x div 2, offset), vec2(0, -1)),
+          (ivec2(size.x div 2, size.y - offset), vec2(0, 1))
+        ]:
+          cameraTarget = vec3(0)
+          followSelection = not human
+          actionCam = initActionCam()
+          window.state.mousePos = pointer
+          # HUD overlap must not create gaps in the edge scrolling band.
+          overUi = true
+          for frame in 0 ..< 10:
+            let before = cameraTarget
+            updateCamera(1.0'f / 60, true)
+            let movement = cameraTarget - before
+            doAssert dot(vec2(movement.x, movement.z), direction) > 0,
+              "A stationary pointer inside the 60-pixel band must keep panning"
+          doAssert not followSelection
+          if not human:
+            doAssert not actionCam.enabled,
+              "Edge scrolling must release spectator camera following"
+          window.state.mousePos = ivec2(size.x div 2, size.y div 2)
+          let stopped = cameraTarget
+          updateCamera(1.0'f / 60, true)
+          doAssert cameraTarget == stopped,
+            "Moving away from the edge must stop scrolling immediately"
+
+      for pointer in [
+        ivec2(61, size.y div 2),
+        ivec2(size.x - 61, size.y div 2),
+        ivec2(size.x div 2, 61),
+        ivec2(size.x div 2, size.y - 61)
+      ]:
+        cameraTarget = vec3(0)
+        window.state.mousePos = pointer
+        updateCamera(1.0'f / 60, true)
+        doAssert cameraTarget == vec3(0),
+          "The 60-pixel band must not scroll from 61 pixels inside the window"
+
+      window.state.mousePos = ivec2(30, size.y div 2)
+      for gate in 0 .. 4:
+        cameraTarget = vec3(0)
+        chat.blocksGameplay = gate == 0
+        matchMenu = if gate == 1: 1 else: HiddenMatchMenu
+        shopOpen = gate == 2
+        run.world.phase = if gate == 3: Drafting else: Playing
+        updateCamera(1.0'f / 60, gate != 4)
+        doAssert cameraTarget == vec3(0),
+          "Edge scrolling must respect chat/menu/shop/draft/focus"
+      chat.blocksGameplay = false
+      matchMenu = HiddenMatchMenu
+      shopOpen = false
+      run.world.phase = Playing
+      updateCamera(1.0'f / 60, true)
+      doAssert cameraTarget.x < 0,
+        "Edge scrolling must resume when a modal closes or focus returns"
+    options.playerSlot = 1
+    overUi = false
+    echo "PASS continuous 60-pixel edge band, release, both camera modes and modal/focus gates"
   block callback:
     type TestNetwork = ref object
       isSpectator: bool

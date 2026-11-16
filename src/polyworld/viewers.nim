@@ -3,7 +3,7 @@
 import
   std/[math, os, strutils, times],
   chroma, opengl, pixie, silky, vmath, windy,
-  actioncam, assets, player
+  actioncam, assets, fullscreens, player
 
 when defined(emscripten):
   {.emit: "#include <emscripten.h>".}
@@ -170,6 +170,7 @@ proc initGameWindow*(
     vsync = vsync,
     msaa = msaa
   )
+  window.prepareDesktopFullscreen()
   window.makeContextCurrent()
   loadExtensions()
   let sk = newSilky(window, atlasPath)

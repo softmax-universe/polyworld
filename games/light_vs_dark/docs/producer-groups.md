@@ -1,6 +1,6 @@
 # Selected producer groups
 
-- Shift-click toggles buildings; drag-box selects owned visible units and buildings.
+- Shift-click toggles buildings; drag-box selects owned visible units, or buildings when no selectable units are inside the box.
 - Double-clicking a building selects owned buildings of its type whose projected centres are on screen and currently visible. The second release cannot collapse the group.
 - The selection grid includes clickable building portraits.
 - Units tab and keyboard training use `controls.queueSelectedTrain`. Readiness is the union of selected eligible producers, never unrelated global producers or only the primary portrait.

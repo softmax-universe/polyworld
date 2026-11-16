@@ -1,4 +1,5 @@
-import windy
+import windy, fullscreens
+export fullscreens
 
 type
   WindowMode* = enum
@@ -59,7 +60,7 @@ proc isFullscreen*(window: Window): bool =
   when defined(emscripten):
     polyworldFullscreen() != 0
   else:
-    window.fullscreen
+    window.desktopFullscreen or window.fullscreen
 
 proc setFullscreen*(window: Window, enabled: bool) =
   ## Changes fullscreen, deferring browser requests until an input gesture.
@@ -74,14 +75,17 @@ proc setFullscreen*(window: Window, enabled: bool) =
     if status < 0:
       echo "Fullscreen unavailable: check browser or iframe permissions."
   else:
-    window.fullscreen = enabled
+    when defined(macosx):
+      window.setDesktopFullscreen(enabled)
+    else:
+      window.fullscreen = enabled
 
 when not defined(emscripten):
   proc windowMode*(window: Window): WindowMode =
     ## Reports the selected mode, including an OS fullscreen transition.
     if pendingWindowSettings:
       requestedWindowMode
-    elif window.fullscreen:
+    elif window.isFullscreen:
       Fullscreen
     else:
       Windowed
@@ -100,25 +104,31 @@ when not defined(emscripten):
 
   proc updateWindowSettings*(window: Window) =
     ## Applies queued OS changes outside drawing and waits for fullscreen.
+    window.updateDesktopFullscreen()
+    if window.desktopFullscreenChanging:
+      return
     if fullscreenTransition:
-      if window.fullscreen != fullscreenTarget:
+      if window.isFullscreen != fullscreenTarget:
         return
       fullscreenTransition = false
     if not pendingWindowSettings:
       return
     let wantsFullscreen = requestedWindowMode == Fullscreen
-    if window.fullscreen != wantsFullscreen:
-      if wantsFullscreen and window.style != DecoratedResizable:
-        window.style = DecoratedResizable
+    if window.isFullscreen != wantsFullscreen:
+      when not defined(macosx):
+        if wantsFullscreen and window.style != DecoratedResizable:
+          window.style = DecoratedResizable
       fullscreenTarget = wantsFullscreen
-      fullscreenTransition = true
+      fullscreenTransition = not defined(macosx)
       window.setFullscreen(wantsFullscreen)
-      return
+      if fullscreenTransition:
+        return
     if wantsFullscreen:
       pendingWindowSettings = false
       return
-    if window.style != DecoratedResizable:
-      window.style = DecoratedResizable
+    when not defined(macosx):
+      if window.style != DecoratedResizable:
+        window.style = DecoratedResizable
     if requestedResolution != CurrentResolution:
       let
         size = requestedResolution.resolutionSize
@@ -134,6 +144,7 @@ when not defined(emscripten):
     resolution: WindowResolution
   ) =
     ## Queues native display changes for the outer event loop.
+    window.prepareDesktopFullscreen()
     requestedWindowMode =
       if mode == BorderlessWindow:
         Fullscreen

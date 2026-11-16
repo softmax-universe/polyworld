@@ -13,13 +13,13 @@ for mode in [Windowed, Fullscreen, Windowed]:
     window.updateWindowSettings()
     pollEvents()
     if mode == Fullscreen:
-      if window.fullscreen:
+      if window.isFullscreen:
         break
-    elif not window.fullscreen and window.size == ivec2(1600, 900) and
+    elif not window.isFullscreen and window.size == ivec2(1600, 900) and
       window.style == DecoratedResizable:
         break
     sleep(10)
-  doAssert window.fullscreen == (mode == Fullscreen)
+  doAssert window.isFullscreen == (mode == Fullscreen)
   if mode != Fullscreen:
     doAssert window.size == ivec2(1600, 900)
     doAssert window.style == DecoratedResizable

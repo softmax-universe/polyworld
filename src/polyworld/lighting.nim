@@ -1,7 +1,7 @@
 import
   std/[os, strutils],
   vmath,
-  chrome, shadows, toon
+  daycycles, shadows, toon
 
 const
   PaletteFadeSeconds* = 2.0'f

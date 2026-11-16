@@ -872,7 +872,7 @@ proc runGraphics*(network: NetworkMatch = nil,
       point.y <= origin.y + size.y
 
   proc boxedUnits(viewProjection: Mat4): seq[int32] =
-    ## Returns visible units whose screens fall inside the drag box.
+    ## Returns boxed units, or boxed buildings when no selectable units are inside.
     let
       press = selectionPressPosition
       current = window.mousePos.vec2
@@ -896,6 +896,8 @@ proc runGraphics*(network: NetworkMatch = nil,
       )
       if insideBox(point, origin, size):
         result.add unit.id
+    if result.len > 0:
+      return
     for structure in run.world.buildings:
       if structure.hp <= 0 or structure.state == BuildingDying or
           (ownerFilter >= 0 and structure.owner != ownerFilter) or

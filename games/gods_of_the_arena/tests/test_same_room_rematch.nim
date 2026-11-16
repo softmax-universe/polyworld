@@ -133,7 +133,8 @@ proc sameRoomRematch() =
           session.applyPacket(packet)
       exchange()
       inc ticks
-      doAssert ticks < 100
+      doAssert ticks < 100 + PreparationTicks,
+        "Draft, full preparation and both completed battles must stay bounded"
       doAssert sessions[0].game.networkHash() == sessions[1].game.networkHash()
     doAssert picks == [1, 1]
     for i, session in sessions:

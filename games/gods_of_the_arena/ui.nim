@@ -6,7 +6,7 @@ import
   polyworld/[stats, metrics, actioncam, chrome, configs, gameuis, inputs, pathing, player, rtscameras,
     stackpanels, profiles, networks],
   assets, content, sim, game, controls, layouts, shops, maps, events, drafts, cameras, tooltips,
-  deathhud
+  deathhud, matchtiming
 
 const
   ## Icons draw at power-of-two sizes so the 128 and 256 px source art
@@ -99,6 +99,30 @@ proc deathHudPanel(chrome: HudChrome): GameUiPanel =
   result.size = vec2(260, 60)
   result.origin = vec2(floor((chrome.layout.size.x - result.size.x) / 2),
     chrome.heroes.origin.y + chrome.heroes.size.y + 10)
+  if run.world.preparationTicksLeft() > 0:
+    result.origin.y += 54
+
+proc preparationHudText*(world: World): string =
+  ## Round up applied simulation ticks, never wall time or render interpolation.
+  let ticks = world.preparationTicksLeft()
+  if ticks > 0:
+    let seconds = (ticks + TickRate - 1) div TickRate
+    result = "PREPARATION " & $(seconds div 60) & ":" &
+      align($(seconds mod 60), 2, '0')
+
+proc preparationHudPanel(chrome: HudChrome): GameUiPanel =
+  result.size = vec2(300, 44)
+  result.origin = vec2(floor((chrome.layout.size.x - result.size.x) / 2),
+    chrome.heroes.origin.y + chrome.heroes.size.y + 10)
+
+proc drawPreparationHud(sk: Silky, chrome: HudChrome) =
+  let text = preparationHudText(run.world)
+  if text.len == 0:
+    return
+  let panel = preparationHudPanel(chrome)
+  sk.draw9Patch("window.9patch", sk.theme.windowPatch, panel.origin, panel.size)
+  sk.drawLabel(text, panel.origin + vec2(12, 4), panel.size - vec2(24, 8),
+    sk.theme.defaultTextColor, "Bold", CenterAlign)
 
 proc drawDeathHud(sk: Silky, chrome: HudChrome) =
   ## Ownership is independent of selection/camera; ticks remain authoritative.
@@ -211,12 +235,15 @@ proc currentStats(): lent StatsTable =
       inc index
   statsTable
 
+proc matchStatsOptions(): StatsOptions =
+  StatsOptions(headline: "TIME REMAINING", headlineSuffix: "  " & run.remainingMatchText())
+
 proc statsContains(window: Window, mouse: Vec2): bool =
   ## Tests the overlay before allowing input through to the existing HUD.
   if not statsState.visible(window.tabHeld):
     return false
   statsState.mouseOverStats(window, currentLayout(window),
-    currentStats(), mouse)
+    currentStats(), mouse, matchStatsOptions())
 
 proc hudClicked(window: Window, sk: Silky, panel: GameUiPanel): bool =
   ## Keeps covered HUD controls from receiving an overlay click.
@@ -295,6 +322,10 @@ proc inspectionPanel*(window: Window): GameUiPanel =
   ## One shared passive inspection rectangle, clear of ribbon and death plate.
   let chrome = currentChrome(window)
   result = chrome.layout.inspectionPanel(chrome.score, chrome.heroes)
+  if run.world.preparationTicksLeft() > 0 and
+      result.overlaps(preparationHudPanel(chrome)):
+    let preparation = preparationHudPanel(chrome)
+    result.origin.y = preparation.origin.y + preparation.size.y + 10
 
 proc mouseOverInspection*(window: Window, mouse: Vec2,
     primaryId: int32, viewMode = 0'i32): bool
@@ -1056,6 +1087,7 @@ proc drawUi*(
     inventory = inventoryPanel.inventoryPanels()
     details = chrome.details.detailsPanels()
     hudTime = currentHudTime()
+  sk.drawPreparationHud(chrome)
   sk.drawDeathHud(chrome)
   sk.drawInspection(window, primaryId, viewMode)
   let detailId = hudDetailId(primaryId, actionCam)
@@ -1735,7 +1767,8 @@ proc drawStatsOverlay*(sk: Silky, window: Window) {.measure.} =
   if not statsState.visible(window.tabHeld):
     return
   sk.drawStatsOverlay(
-    window, currentLayout(window), statsState, currentStats(), run.history
+    window, currentLayout(window), statsState, currentStats(), run.history,
+    matchStatsOptions()
   )
 
 when defined(gotaTestRoom):

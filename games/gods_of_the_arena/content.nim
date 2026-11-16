@@ -19,6 +19,8 @@ const
     ## Simulation ticks per second.
   DraftPickTicks* = 10 * TickRate
     ## Each human or bot gets ten simulation seconds to choose a hero.
+  PreparationTicks* = 30 * TickRate
+    ## Live opening after all picks, before the first creep wave spawns.
 
 type
   CreepKind* = enum MeleeCreep, RangedCreep

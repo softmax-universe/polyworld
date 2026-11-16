@@ -333,6 +333,8 @@ type
     draftTurn*: int
     draftTicks*: int32
     draftTurnTicks*: int32
+    preparationTicks*: int32
+      ## Elapsed live opening ticks after the final pick; capped at 30 seconds.
     heroTurnTicks*: int32
     heroTurnStart*: int
     teamHeroKills*: array[2, int]
@@ -576,7 +578,8 @@ const
   BlueFortId = 2'i32
   FirstHeroId* = 100'i32
   FirstFootmanId = 1000'i32
-  UnitCap = 120 * CreepsPerBarracks
+  UnitCap* = 120 * CreepsPerBarracks
+    ## Maximum lane-creep population, including lingering corpses.
   CorpseLingerTicks = 60'i32
   FootmanDeathTicks* = 24'i32
   HeroDeathTicks* = 24'i32
@@ -4045,8 +4048,13 @@ proc applyBuyback*(world: World, heroId: int32): bool =
   world.finishAction(heroId, ActionBuyback, 0, 0, 0, NoActionError)
 
 proc battleTick*(world: World): int32 {.raises: [].} =
-  ## Excludes drafting from the elapsed battle clock.
-  world.tick - world.draftTicks
+  ## Excludes drafting and the live opening from the battle duration budget.
+  world.tick - world.draftTicks - world.preparationTicks
+
+proc preparationTicksLeft*(world: World): int32 {.raises: [].} =
+  ## Public countdown API; draft picks and non-draft fixtures report zero.
+  if world.drafting and world.phase == Playing:
+    result = max(PreparationTicks - world.preparationTicks, 0)
 
 proc finished*(game: Game): bool =
   ## Ends a battle on victory or after its full configured battle duration.
@@ -4063,11 +4071,13 @@ proc outcome*(world: World): string =
     "time_limit"
 
 proc durationTicks*(game: Game): int32 =
-  ## Includes the remaining pick deadlines before the full battle budget.
+  ## Includes draft deadlines and the live opening before the battle budget.
   if game.replayMode:
     return game.replayData.hashes.len.int32
   let world = game.world
   result = game.config.maxTicks + world.draftTicks
+  if world.drafting:
+    result += PreparationTicks
   if world.phase == Drafting:
     result += (world.draftOrder.len - world.draftTurn).int32 *
       DraftPickTicks - world.draftTurnTicks
@@ -5766,6 +5776,7 @@ proc stateHash*(game: Game): uint64 =
   hash.addHashy(world.draftTurn)
   hash.addHashy(world.draftTicks)
   hash.addHashy(world.draftTurnTicks)
+  hash.addHashy(world.preparationTicks)
   hash.addHashy(world.draftOrder.len)
   for index in world.draftOrder:
     hash.addHashy(index)
@@ -6033,11 +6044,19 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
     return
 
   when not defined(gotaTestRoom):
-    dec world.spawnTimerTicks
-    if world.spawnTimerTicks <= 0:
-      world.spawnTimerTicks += world.spawnIntervalTicks
-      profileBlock "spawnWave":
-        spawnWave(world)
+    let preparing = world.preparationTicksLeft() > 0
+    if preparing:
+      inc world.preparationTicks
+    if not preparing or world.preparationTicksLeft() == 0:
+      if not preparing:
+        dec world.spawnTimerTicks
+      if world.spawnTimerTicks <= 0:
+        if preparing:
+          world.spawnTimerTicks = world.spawnIntervalTicks
+        else:
+          world.spawnTimerTicks += world.spawnIntervalTicks
+        profileBlock "spawnWave":
+          spawnWave(world)
 
   world.tick = world.tick +% 1
   world.collectingHits = true
@@ -6076,7 +6095,8 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
       let footman {.cursor.} = world.footmen[i]
       game.targetSpace.insert(i, footman.position.x, footman.position.z)
 
-  world.updateCamps(game.targetSpace)
+  if world.preparationTicksLeft() == 0:
+    world.updateCamps(game.targetSpace)
 
   # Plan every unit against the same actor state, then publish together.
   game.nextFootmen.setLen(world.footmen.len)
@@ -6114,7 +6134,8 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
     for i in 0 ..< world.footmen.len:
       let footman {.cursor.} = world.footmen[i]
       game.targetSpace.insert(i, footman.position.x, footman.position.z)
-  world.updateCamps(game.targetSpace)
+  if world.preparationTicksLeft() == 0:
+    world.updateCamps(game.targetSpace)
 
   var write = 0
   for read in 0 ..< world.footmen.len:

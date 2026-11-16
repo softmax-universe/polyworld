@@ -98,7 +98,8 @@ block:
   draftSetup.drafting = true
   let
     draft = initReplayRecorder(draftSetup)
-    maximum = setup.maximumTicks.int + setup.heroes.len * DraftPickTicks
+    maximum = setup.maximumTicks.int + setup.heroes.len * DraftPickTicks +
+      30 * TickRate
   draft.recordWalkTo(maximum.uint32, 100, 64, 42)
   for tick in 1 .. maximum:
     draft.recordHash(tick.uint64)

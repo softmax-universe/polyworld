@@ -31,11 +31,17 @@ proc drawDraft*(sk: Silky, window: Window, size: Vec2, playing: bool) =
     scale = draftScale(size)
     draftSize = size / scale
     mousePos = sk.mousePos
+    mouseDelta = sk.mouseDelta
+    clipRect = sk.clipRect
     layer = sk.drawer.currentLayer
     firstVertex = sk.vertexMark()
   sk.mousePos /= scale
+  sk.mouseDelta /= scale
+  sk.pushRawClipRect(rect(clipRect.xy / scale, clipRect.wh / scale))
   defer:
     sk.mousePos = mousePos
+    sk.mouseDelta = mouseDelta
+    sk.popClipRect()
     # Scale the picker, its text, and its clips together before drawing the HUD.
     for i in firstVertex ..< sk.drawer.layers[layer].len:
       sk.drawer.layers[layer][i].pos *= scale

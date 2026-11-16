@@ -4,6 +4,7 @@
 import
   test_content,
   test_battle_sounds,
+  test_match_clock,
   test_diplomacy,
   test_fixed_teams,
   test_team_setup,

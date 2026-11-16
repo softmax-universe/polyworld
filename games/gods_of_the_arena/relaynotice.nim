@@ -4,7 +4,7 @@ import polyworld/[rooms, rngs]
 import content, presets
 
 const
-  NoticeGameplay* = 79'u32
+  NoticeGameplay* = 80'u32
   NoticeProtocol* = 4'u32
   ServerNoticeSeat* = high(uint32)
   ThreeMinuteNotice* = "3 minutes remain"

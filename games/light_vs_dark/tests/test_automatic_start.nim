@@ -168,7 +168,7 @@ suite "LvD automatic two-human start":
     check f.prepare(0)
     f.exchange()
     let wrongHash = f.sessions[0].game.networkHash() xor 1'u64
-    f.clients[1].send(RoomMessage(kind: Ready,
+    f.clients[1].send(RoomMessage(kind: PreparedDuration, durationTicks: uint32(f.sessions[0].game.maximumTicks),
       revision: f.clients[1].snapshot.revision, hash: wrongHash))
     f.exchange()
     check f.clients[0].snapshot.phase == Desynced

@@ -2341,7 +2341,7 @@ proc applyHeroAction*(
     )
     if not tile.walkable:
       return false
-    game.world.stepToward(slot, tile, action.offset)
+    result = game.world.stepToward(slot, tile, action.offset)
   of ActionAttackTarget:
     let targetSlot = game.world.actorSlot(action.first)
     if targetSlot < 0:
@@ -2352,7 +2352,7 @@ proc applyHeroAction*(
       return false
     if not game.world.actorCanSee(slot, targetSlot):
       return false
-    game.fight(slot, targetSlot)
+    result = game.fight(slot, targetSlot)
   of ActionPickupTarget:
     let itemIndex = game.world.itemIndex(action.first)
     if itemIndex < 0 or game.world.items[itemIndex].carrier != 0:
@@ -2371,7 +2371,7 @@ proc applyHeroAction*(
     # In reach, the hero takes it now or holds there while picking cools down.
     game.world.clearPath(slot)
     game.pickUp(slot, itemIndex)
-    true
+    result = true
   of ActionUseItem:
     if action.first < 0 or action.first >= InventorySlots:
       return false
@@ -2409,7 +2409,7 @@ proc applyHeroAction*(
       game.world.actors[slot].inventory[action.first] = 0
       game.world.deleteItem(itemIndex)
       game.world.actors[slot].refreshSpeed()
-    true
+    result = true
   of ActionDropItem:
     if action.first < 0 or action.first >= InventorySlots:
       return false
@@ -2423,7 +2423,7 @@ proc applyHeroAction*(
       game.world.items[itemIndex].weight
     game.world.actors[slot].inventory[action.first] = 0
     game.world.actors[slot].refreshSpeed()
-    true
+    result = true
   of ActionHealTarget:
     if actor.heroClass != ClericClass or
         actor.cooldowns[int(Bloom)] != 0 or
@@ -2440,9 +2440,9 @@ proc applyHeroAction*(
       return false
     game.world.actors[slot].mana -= Abilities[Bloom].manaCost
     game.beginAbility(slot, Bloom, target.id)
-    true
+    result = true
   else:
-    false
+    result = false
 
 
 ## Monster behaviour

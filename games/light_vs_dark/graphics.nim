@@ -425,10 +425,10 @@ proc runGraphics*(network: NetworkMatch = nil,
     bindingCapture = false
   proc resetMatchState() =
     ## Clears world-specific state while retaining uploaded render resources.
+    viewMode = if options.playerSlot > 0: options.playerSlot else: options.viewMode
     stopSounds()
     battleAudio.resetBattleSounds()
     discard battleAudio.observeBattleSounds(run.world, viewMode, enabled = false)
-    viewMode = if options.playerSlot > 0: options.playerSlot else: options.viewMode
     primaryId = NoEntity
     cancelGameplayGestures()
     shortcutState.resetShortcut()
@@ -1961,6 +1961,7 @@ proc runGraphics*(network: NetworkMatch = nil,
         except RoomsError as error:
           network.abort(error.msg)
         connection.pump()
+        observeServerCommunication(network)
         transport.sync(run.world.tick, run.world.tick, run.world.over)
       else:
         let restoreTick = transport.takeRestore()

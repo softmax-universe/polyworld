@@ -136,28 +136,29 @@ block dayAndNightTransitions:
 block winnerNotifications:
   for negotiated in [false, true]:
     for sameTeam in [false, true]:
-      for player in 0'i32 ..< 2'i32:
-        let world = trafficFixture(0, "open").world
-        world.diplomacy.settings.enabled = negotiated
-        world.diplomacy.settings.teams =
-          if sameTeam: @[4'i32, 4'i32]
-          else: @[4'i32, 9'i32]
-        var state: BattleSounds
-        discard state.observeBattleSounds(world, 0, player)
-        world.over = true
-        world.winner = 0
-        inc world.tick
-        let expected =
-          if world.scores()[player] > 0: VictorySound else: DefeatSound
-        let events = state.observeBattleSounds(world, 0, player)
-        doAssert events.len == 1 and events[0].cue == expected,
-          "Winner announcements must match negotiated and fixed-team scoring"
-        doAssert events[0].global,
-          "Result fanfares must use UI volume without distance attenuation"
-        doAssert state.observeBattleSounds(world, 0, player).len == 0,
-          "Repeated result-screen frames must not repeat a fanfare"
-        inc world.tick
-        doAssert state.observeBattleSounds(world, 0, player).len == 0
+      for winner in 0'i32 ..< 2'i32:
+        for player in 0'i32 ..< 2'i32:
+          let world = trafficFixture(0, "open").world
+          world.diplomacy.settings.enabled = negotiated
+          world.diplomacy.settings.teams =
+            if sameTeam: @[4'i32, 4'i32]
+            else: @[4'i32, 9'i32]
+          var state: BattleSounds
+          discard state.observeBattleSounds(world, 0, player)
+          world.over = true
+          world.winner = winner
+          inc world.tick
+          let expected =
+            if world.scores()[player] > 0: VictorySound else: DefeatSound
+          let events = state.observeBattleSounds(world, 0, player)
+          doAssert events.len == 1 and events[0].cue == expected,
+            "Winner announcements must match negotiated and fixed-team scoring"
+          doAssert events[0].global,
+            "Result fanfares must use UI volume without distance attenuation"
+          doAssert state.observeBattleSounds(world, 0, player).len == 0,
+            "Repeated result-screen frames must not repeat a fanfare"
+          inc world.tick
+          doAssert state.observeBattleSounds(world, 0, player).len == 0
 
 block spectatorAndDrawNotifications:
   for winner in [-1'i32, 0'i32, 1'i32]:

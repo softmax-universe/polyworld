@@ -91,7 +91,7 @@ proc twoHumanCombat*() =
   for i, session in sessions:
     doAssert clients[i].snapshot.humanSeatFor(clients[i].participant) == i
     for brain in session.game.brains: doAssert brain == nil
-    clients[i].send(RoomMessage(kind: Ready, revision: session.revision,
+    clients[i].send(RoomMessage(kind: PreparedDuration, durationTicks: uint32(session.game.maximumTicks), revision: session.revision,
       hash: session.game.networkHash()))
     exchange()
   clients[0].send(RoomMessage(kind: StartMatch))

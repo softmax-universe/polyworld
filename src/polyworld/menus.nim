@@ -505,16 +505,16 @@ proc settingsPanel*(
     sk.at = origin + vec2(0, 64)
     checkBox "Mute all sound", preferences.soundMuted
     sk.percentageSlider(
-      window, "Main", preferences.mainVolume, origin + vec2(0, 112)
+      window, "Master", preferences.mainVolume, origin + vec2(0, 112)
     )
     sk.percentageSlider(
       window, "Music", preferences.musicVolume, origin + vec2(0, 160)
     )
     sk.percentageSlider(
-      window, "FX", preferences.fxVolume, origin + vec2(0, 208)
+      window, "Sound effects", preferences.fxVolume, origin + vec2(0, 208)
     )
     sk.percentageSlider(
-      window, "UI", preferences.uiVolume, origin + vec2(0, 256)
+      window, "UI effects", preferences.uiVolume, origin + vec2(0, 256)
     )
     if preferences != previous:
       configureSounds(
@@ -522,11 +522,18 @@ proc settingsPanel*(
         preferences.fxVolume, preferences.uiVolume, preferences.musicVolume
       )
       preferences.savePreferences(app)
+    let audioEnabled = not preferences.soundMuted and preferences.mainVolume > 0
     sk.at = origin + vec2(0, 312)
-    soundButton "Test combat sound":
+    soundButton "Test combat sound", audioEnabled and preferences.fxVolume > 0:
       playSound(SwordSound)
+    sk.at = origin + vec2(320, 312)
+    soundButton "Test UI sound", audioEnabled and preferences.uiVolume > 0:
+      playSound(ClickSound)
     sk.drawLabel(
-      "Music: soundtrack. FX: battles and workers. UI: menus, orders, notices.",
+      if preferences.soundMuted:
+        "Audio is muted. Uncheck Mute all sound to hear music and effects."
+      else:
+        "Master controls all audio. Music, sound effects and UI have separate volumes.",
       origin + vec2(0, 360),
       vec2(720, 36),
       sk.theme.disabledTextColor

@@ -2,7 +2,7 @@ import
   openal,
   polyworld/common
 
-# Inspect the real playback source without opening a window or making sound.
+# Keep the real soundtrack silent using source-level master gain.
 include ../src/polyworld/sounddevices
 
 when defined(emscripten) or defined(audioTest) or defined(headless):
@@ -15,24 +15,24 @@ setSoundVolumes(0, 1, 1)
 setMusicVolume(0.4)
 doAssert openSoundDevice()
 try:
-  doAssert listener.gain == 0
+  doAssert listener.gain == 1
   doAssert loadMusic(MusicPath)
   doAssert musicBuffer.channels == 2
   doAssert abs(musicBuffer.duration - 203.56) < 0.05
   doAssert musicSource.looping
   doAssert musicSource.playing
   doAssert musicSource.rolloffFactor == 0
-  doAssert abs(musicSource.gain - 0.4) < 0.001
+  doAssert musicSource.gain == 0 and abs(musicVolume - 0.4) < 0.001
   let firstSource = musicSource
   setSoundVolumes(0, 0, 0)
   doAssert musicSource == firstSource
   doAssert musicSource.playing
-  doAssert abs(musicSource.gain - 0.4) < 0.001,
-    "FX and UI volume must not change music gain"
+  doAssert musicSource.gain == 0 and abs(musicVolume - 0.4) < 0.001,
+    "FX and UI controls must preserve Music volume and master mute"
   setMusicVolume(0.7)
-  doAssert abs(musicSource.gain - 0.7) < 0.001
+  doAssert musicSource.gain == 0 and abs(musicVolume - 0.7) < 0.001
   doAssert effectsVolume == 0 and interfaceVolume == 0
-  doAssert listener.gain == 0
+  doAssert listener.gain == 1
 
   echo "Testing effects resets and music muting preserve playback"
   musicSource.playback = 5
@@ -51,7 +51,7 @@ try:
   setMusicVolume(0.6)
   doAssert musicSource.playback >= beforeRestore
   doAssert musicSource.playing
-  doAssert abs(musicSource.gain - 0.6) < 0.001
+  doAssert musicSource.gain == 0 and abs(musicVolume - 0.6) < 0.001
 
   echo "Testing playback wraps at the end of the recording"
   musicSource.playback = musicBuffer.duration - 0.1
@@ -59,7 +59,7 @@ try:
   doAssert musicSource.playing
   doAssert musicSource.playback < 1,
     "Looping music must wrap to the start without a new play request"
-  doAssert listener.gain == 0
+  doAssert listener.gain == 1
   doAssert alGetError() == AL_NO_ERROR
 
   echo "Testing music cleanup and device reopening"
@@ -70,11 +70,11 @@ try:
   closeSoundDevice()
   setMusicVolume(0.25)
   doAssert openSoundDevice()
-  doAssert listener.gain == 0
+  doAssert listener.gain == 1
   doAssert loadMusic(MusicPath)
   doAssert musicSource != firstSource
   doAssert musicSource.playing and musicSource.looping
-  doAssert abs(musicSource.gain - 0.25) < 0.001
+  doAssert musicSource.gain == 0 and abs(musicVolume - 0.25) < 0.001
   doAssert alGetError() == AL_NO_ERROR
 finally:
   closeSoundDevice()

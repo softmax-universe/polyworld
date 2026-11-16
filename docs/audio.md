@@ -101,7 +101,14 @@ starts "Yearning of the Deep Woods" at application startup and loops it across
 menus, matches, pauses and replay seeks. In the browser, playback begins after
 the first pointer or keyboard gesture unlocks audio. One dedicated stereo source
 keeps music separate from the effects pool and its burst limits. Music volume
-changes apply immediately without restarting the song; Main and Mute also apply.
+changes apply immediately without restarting the song; Master and Mute also apply.
+Master volume and mute are applied directly to every playback source, including
+stereo music. Music, sound effects and UI gains stay independent. The Sound panel
+provides separate combat and UI preview buttons that play alongside the track.
+The listener stays at unity: [Apple's OpenAL implementation](https://github.com/apple-oss-distributions/OpenAL/blob/main/Source/OpenAL/oalContext.cpp#L804)
+converts listener gain zero to negative infinity, which its mixer rejects.
+Source gain zero uses an explicit silence path, avoiding audible music while
+the application has blocked muted effects.
 
 The soundtrack is `polyworld_art/music/yearning-of-the-deep-woods.ogg`.
 The full 3:23 recording retains its stereo 48 kHz format, converted from WAV to
@@ -120,6 +127,7 @@ nim r -d:audioTest -d:nimAllocStats games/light_vs_dark/tests/test_battle_sounds
 nim r -d:nimAllocStats tests/manual_sound_allocations.nim
 nim r tests/manual_sound_fanfares.nim
 nim r tests/manual_music.nim
+nim r tests/test_sound_mixing.nim
 ```
 
 To audition a mix, run either game normally, open Settings > Sound, and use

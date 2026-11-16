@@ -61,7 +61,8 @@ proc openSoundDevice*(): bool =
       slappyInit()
       opened = true
       listener.pos = vec3(0)
-      listener.gain = masterVolume
+      # Master gain is applied per source, avoiding native listener mute bugs.
+      listener.gain = 1
       for voice in voices.mitems:
         voice.buffer = -1
         voice.source = newSource()
@@ -126,7 +127,7 @@ proc loadMusic*(path: string): bool =
       source.rolloffFactor = 0
       source.pos = vec3(0)
       source.looping = true
-      source.gain = musicVolume
+      source.gain = musicVolume * masterVolume
       if musicSource != nil:
         musicSource.close()
       musicSource = source
@@ -146,7 +147,7 @@ proc setMusicVolume*(volume: float32) =
   when not (defined(headless) or defined(audioTest)):
     musicVolume = clamp(volume, 0.0'f, 1.0'f)
     if musicSource != nil:
-      musicSource.gain = musicVolume
+      musicSource.gain = musicVolume * masterVolume
 
 proc startSoundVoice*(
     id: int, gain, pan: float32, ui: bool, fanfare = false
@@ -195,7 +196,7 @@ proc startSoundVoice*(
     source.stop()
     if voices[slot].buffer != id:
       source.sound = buffers[id]
-    source.gain = level * category
+    source.gain = level * category * masterVolume
     source.pos = vec3(
       horizontal, 0, -sqrt(max(0.0'f, 1 - horizontal * horizontal))
     )
@@ -218,11 +219,13 @@ proc setSoundVolumes*(master, fx, ui: float32) =
     interfaceVolume = clamp(ui, 0.0'f, 1.0'f)
     if not opened:
       return
-    listener.gain = masterVolume
+    listener.gain = 1
+    if musicSource != nil:
+      musicSource.gain = musicVolume * masterVolume
     collectVoices()
     for i, voice in voices:
       if voice.active:
-        let gain = voice.gain *
+        let gain = voice.gain * masterVolume *
           (if i < InterfaceVoiceLimit: interfaceVolume else: effectsVolume)
         voice.source.gain = gain
 

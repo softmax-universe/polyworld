@@ -1,6 +1,6 @@
 # Game sounds
 
-Gota uses a shared sound mixer with separate UI and effects
+Gota and Light vs Dark use a shared sound mixer with separate UI and effects
 volumes. Slappy decodes OGG Vorbis recordings for native OpenAL and
 the browser's Web Audio implementation, resuming playback after a
 pointer or keyboard gesture. A missing output device disables playback
@@ -30,7 +30,7 @@ allowed for audio.
 
 `sounds.nim` owns cue selection, gain, distance attenuation, stereo pan and
 burst limits. Variation selection uses a presentation-only counter, so it
-never consumes simulation randomness. Gota observes rendered state
+never consumes simulation randomness. Each game observes rendered state
 changes and emits audible events only for visible activity. Seeking and world
 replacement reset the observations, and fast-forward suppresses battle
 audio. Unit orders and menu actions are local UI feedback.
@@ -41,7 +41,7 @@ feedback uses the UI volume, with a short cooldown for fast pointer movement.
 Gota also plays selection feedback when changing draft portraits and a
 confirmation when locking in a hero.
 
-Gota plays distinct result fanfares once when a match resolves: a
+Both games play distinct result fanfares once when a match resolves: a
 2.4-second trumpet phrase for victory and a 6-second orchestral cue for
 defeat. They use UI volume, with a moderate gain and normalized recordings.
 Fixed teammates share the winning result; spectators hear the victory cue.
@@ -56,7 +56,19 @@ Each has its own source folder, license record and exact processing history.
 The old door-close defeat effect remains only in the download archive;
 the wooden chime still serves healing.
 
-Gota announces dawn at 06:00 with a rooster and dusk at 18:00 with a
+Light vs Dark plays chopping and mining beats during active harvesting, and
+wood or coin delivery cues when a worker deposits its load. Mining sounds
+come from the source mine, with current-sight checks so neutral mine art does
+not reveal unseen enemy workers. Routine work has a separate, quieter burst
+limit that cannot consume the combat or construction sound budget.
+
+A new construction site plays a soft placement thud. Its first actual work
+progress plays one short hammer burst; continued work, replacement builders
+and resuming an interrupted site never repeat that burst. If placement and
+work begin together, only the hammer burst plays. These positional effects
+use FX volume and fade with camera distance.
+
+Both games announce dawn at 06:00 with a rooster and dusk at 18:00 with a
 quiet, 2.8-second distant wolf howl, using the same clock as the HUD and
 lighting. The dusk cue uses Sacha.Julien's CC0
 [distant wolf recording](https://freesound.org/people/Sacha.Julien/sounds/753896/),
@@ -77,7 +89,7 @@ until shutdown. In the browser,
 Emscripten continues to use Web Audio's standard one-shot playback nodes;
 the game keeps its preloaded recordings and Slappy voice objects.
 
-Gota reserves audio snapshots before match playback and return fixed
+Both games reserve audio snapshots before match playback and return fixed
 event buffers. Playback, voice reuse, gain changes, and sound observation
 are checked with `-d:nimAllocStats` for zero Nim allocations and frees after
 initialization. Browser one-shot nodes, engine internals and audio-driver
@@ -85,7 +97,7 @@ allocations are outside these measurements; match setup,
 replacement and teardown may allocate.
 
 Playback never queues events while browser audio is suspended. The Music
-preference is retained for settings-file compatibility. The game ships effects
+preference is retained for settings-file compatibility. The games ship effects
 rather than a soundtrack, so the sound panel exposes Main, FX and UI controls.
 
 Run the focused checks from the Polyworld repository root:
@@ -94,9 +106,10 @@ Run the focused checks from the Polyworld repository root:
 nim check src/polyworld/sounds.nim
 nim r -d:audioTest -d:nimAllocStats tests/test_sounds.nim
 nim r -d:audioTest -d:nimAllocStats games/gods_of_the_arena/tests/test_audio.nim
+nim r -d:audioTest -d:nimAllocStats games/light_vs_dark/tests/test_battle_sounds.nim
 nim r -d:nimAllocStats tests/manual_sound_allocations.nim
 nim r tests/manual_sound_fanfares.nim
 ```
 
-To audition a mix, run Gota normally, open Settings > Sound, and use
+To audition a mix, run either game normally, open Settings > Sound, and use
 Test combat sound. Main, FX, UI and Mute apply immediately and persist.

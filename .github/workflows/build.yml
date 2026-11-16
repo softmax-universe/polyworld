@@ -41,5 +41,6 @@ jobs:
         run: |
           nim r -d:release -d:audioTest -d:nimAllocStats tests/test_sounds.nim
           nim r -d:release -d:audioTest -d:nimAllocStats games/gods_of_the_arena/tests/test_audio.nim
+          nim r -d:release -d:audioTest -d:nimAllocStats games/light_vs_dark/tests/test_battle_sounds.nim
       - name: Check neural converters
         run: python games/gods_of_the_arena/tests/test_neural_converters.py

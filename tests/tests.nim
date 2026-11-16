@@ -79,6 +79,7 @@ import
   test_hudlayouts,
   test_inputs,
   ../games/light_vs_dark/tests/test_content as TestLvdContent,
+  ../games/light_vs_dark/tests/test_battle_sounds as TestLvdBattleSounds,
   ../games/light_vs_dark/tests/test_diplomacy as TestLvdDiplomacy,
   ../games/light_vs_dark/tests/test_groves as TestLvdGroves,
   ../games/light_vs_dark/tests/test_maps as TestLvdMaps,

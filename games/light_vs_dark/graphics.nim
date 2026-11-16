@@ -2186,7 +2186,15 @@ proc runGraphics*(network: NetworkMatch = nil,
           glDisable(GL_MULTISAMPLE)
         glActiveTexture(GL_TEXTURE0)
         glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
-        sk.beginUi(window, window.size)
+        var menuOrigin: Vec2
+        if matchMenu == HiddenMatchMenu:
+          sk.beginUi(window, window.size)
+        elif matchMenu == MatchSettings:
+          menuOrigin = sk.beginOverlay(window, vec2(768, 488)) + vec2(24)
+        else:
+          let panel = sk.beginOverlay(window, vec2(512, 488))
+          sk.lobbyPanel(panel, vec2(512, 488))
+          menuOrigin = panel + vec2(24)
         let beforeHud = transport
         if matchMenu == HiddenMatchMenu:
           drawUi(
@@ -2219,14 +2227,7 @@ proc runGraphics*(network: NetworkMatch = nil,
         if network != nil: transport = beforeHud
         if matchMenu != HiddenMatchMenu:
           resetHudTooltips()
-          sk.pushLayer(PopupsLayer)
-          let view = window.size.vec2 / sk.uiScale
-          sk.drawRect(vec2(0), view, rgbx(0, 0, 0, 170))
-          let origin = (view - vec2(if matchMenu == MatchSettings: 720 else: 464,
-            if matchMenu == MatchSettings: 700 else: 440)) * 0.5'f
-          sk.lobbyPanel(origin - vec2(24),
-            vec2(if matchMenu == MatchSettings: 768 else: 512,
-              if matchMenu == MatchSettings: 748 else: 488))
+          let origin = menuOrigin
           try:
             if quitToMenu:
               sk.menuLabel("Leaving match...", origin, 464)
@@ -2279,7 +2280,6 @@ proc runGraphics*(network: NetworkMatch = nil,
           except CatchableError as error:
             saveError = error.msg
           if saveError.len > 0: sk.menuLabel(saveError, origin + vec2(0, 340), 464)
-          sk.popLayer()
         if matchMenu == HiddenMatchMenu and hooks.overlay != nil:
           hooks.overlay()
         sk.endUi()

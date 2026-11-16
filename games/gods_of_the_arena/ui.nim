@@ -4,7 +4,7 @@ import
   std/[strformat, strutils, times, monotimes],
   chroma, pixie, silky, vmath, windy,
   polyworld/[stats, metrics, actioncam, chrome, configs, gameuis, inputs, pathing, player, rtscameras,
-    stackpanels, profiles, networks],
+    sounds, stackpanels, profiles, networks],
   assets, content, sim, game, controls, layouts, shops, maps, events, drafts, cameras, tooltips,
   deathhud, matchtiming
 
@@ -310,6 +310,7 @@ proc drawBuyback(
     CenterAlign
   )
   if enabled and window.hudClicked(sk, button):
+    playSound(ClickSound)
     queueBuyback(hero.id)
     armedAbility = -1
     armedItem = -1
@@ -673,6 +674,7 @@ proc selectHeroCard(
       break
   if not found:
     return
+  playSound(SelectSound)
   if localHudHeroId() != 0:
     primaryId = id
     selectedIds = @[id]
@@ -943,6 +945,8 @@ proc drawHeroPortrait(
     selected = picked,
     iconSize = IconSmall
   )
+  sk.hoverSound(portrait, not statsState.visible(window.tabHeld) and
+    not hudTooltip.tooltipContains(sk.mousePos))
   if window.hudClicked(sk, portrait):
     actionCam.takeManual()
     selectHeroCard(
@@ -1106,13 +1110,18 @@ proc drawUi*(
     )
     controlsHero = localHudHeroId() != 0 and
       selection.kind == SelectedHero and selection.id == localHudHeroId()
+    hoverEnabled = not statsState.visible(window.tabHeld) and
+      not hudTooltip.tooltipContains(sk.mousePos) and
+      not mouseOverDebugMenu(sk.mousePos) and not run.historyPlayback
     attackClicked = controlsHero and selection.hp > 0 and
       window.hudClicked(sk, basic)
+  sk.hoverSound(basic, hoverEnabled and controlsHero and selection.hp > 0)
   if (window.mousePressed(MouseLeft) or window.mousePressed(MouseRight)) and
     mouseOverUi(window, sk.mousePos, primaryId) and not attackClicked:
       attackMoveArmed = attackMoveHeld
   if attackClicked:
     attackMoveArmed = attackMoveHeld or not attackMoveArmed
+    playSound(if attackMoveArmed: SelectSound else: CancelSound)
     armedAbility = -1
     armedItem = -1
   if selection.id != 0:
@@ -1295,11 +1304,13 @@ proc drawUi*(
         of SelectedHero:
           "champion"
       sk.drawWellImage(portrait, glyph, teamColor, iconSize = IconLarge)
+    sk.hoverSound(portrait, hoverEnabled and controlsHero)
     if window.hudClicked(sk, portrait) and
         selection.kind == SelectedHero and
         localHudHeroId() != 0 and selection.id == localHudHeroId():
       actionCam.takeManual()
       focusPlayerHero = true
+      playSound(SelectSound)
     if selection.kind == SelectedHero:
       let
         melee = selection.attackCasting == MeleeCast
@@ -1358,16 +1369,23 @@ proc drawUi*(
               )
               clickedUpgrade = hero.abilityLevelError(slot) == NoActionError and
                 window.hudClicked(sk, upgrade)
+            sk.hoverSound(well, hoverEnabled and selection.hp > 0 and
+              (hero.abilityLevelError(slot) == NoActionError or
+                (selection.abilityLevels[slot] > 0 and remaining <= 0 and
+                  selection.mana >= spec.manaCost.float32)))
             if window.hudClicked(sk, well):
               armedItem = -1
               armedAbility = -1
               if clickedUpgrade or window.actionDown(ShiftInput):
                   queueLevelAbility(selection.id, slot.ord.int32)
+                  playSound(if hero.abilityLevelError(slot) == NoActionError:
+                    ClickSound else: ErrorSound)
                   armedAbility = -1
               else:
-                discard activatePlayerAbility(
+                let accepted = activatePlayerAbility(
                   run.world, selection.id, slot.ord.int32
                 )
+                playSound(if accepted: SelectSound else: ErrorSound)
             if armedAbility == slot.ord.int32:
               let color = rgbx(255, 223, 133, 255)
               sk.drawRect(well.origin, vec2(well.size.x, 3), color)
@@ -1386,8 +1404,13 @@ proc drawUi*(
             item.itemSpec.cooldownTicks)
         else:
           sk.drawWellImage(well, "")
+        sk.hoverSound(well, hoverEnabled and controlsHero and
+          selection.hp > 0 and item != NoItem and
+          (item == PortalScroll or item.itemSpec.kind == Consumable) and
+          selection.itemCooldowns[i] <= 0)
         if controlsHero and selection.hp > 0 and
           window.hudClicked(sk, well):
+            playSound(if item == NoItem: ErrorSound else: SelectSound)
             activatePlayerItem(
               run.world,
               selection.id,
@@ -1403,6 +1426,7 @@ proc drawUi*(
     sk.drawLabel("SHOP  " & ShopInput.actionLabel, inventory.shop.origin + vec2(28, 0),
       inventory.shop.size - vec2(28, 0), rgbx(247, 221, 143, 255), "Small")
     if window.hudClicked(sk, inventory.shop):
+      playSound(ClickSound)
       shopOpen = true
       armedAbility = -1
       armedItem = -1
@@ -1418,8 +1442,14 @@ proc drawUi*(
         item.itemSpec.cooldownTicks)
     else:
       sk.drawSlot(slotPanel)
+    sk.hoverSound(slotPanel, hoverEnabled and playerHero and
+      inventoryHero.id == playerHeroId and inventoryHero.hp > 0 and
+      item != NoItem and
+      (item == PortalScroll or item.itemSpec.kind == Consumable) and
+      inventoryHero.itemCooldowns[slot] <= 0)
     if playerHero and inventoryHero.id != 0 and inventoryHero.hp > 0 and
       window.hudClicked(sk, slotPanel):
+        playSound(if item == NoItem: ErrorSound else: SelectSound)
         activatePlayerItem(
           run.world,
           playerHeroId,

@@ -15,8 +15,9 @@ when defined(headless):
       outcome: run.world.outcome()
     ), run.world.totalXp())
 else:
-  import windy, polyworld/menus, game, graphics, frontend, pointers
+  import windy, polyworld/[menus, sounds], game, graphics, frontend, pointers
   initializeOptions()
+  initSounds()
   try:
     var preferences = readPreferences("Polyworld GotA")
     if playerNameOverride.len > 0:
@@ -30,3 +31,4 @@ else:
       runFrontend()
   finally:
     releaseCursorConfinement()
+    closeSounds()

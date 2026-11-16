@@ -25,6 +25,7 @@ import
   test_fxmeshes,
   test_gameuis,
   ../games/gods_of_the_arena/tests/test_abilities as TestGotaAbilities,
+  ../games/gods_of_the_arena/tests/test_audio as TestGotaAudio,
   ../games/gods_of_the_arena/tests/test_andre as TestGotaAndre,
   ../games/gods_of_the_arena/tests/test_attacks as TestGotaAttacks,
   ../games/gods_of_the_arena/tests/test_base as TestGotaBase,

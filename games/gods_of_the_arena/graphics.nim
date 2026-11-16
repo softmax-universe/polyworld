@@ -5,13 +5,13 @@ import
   bumpy, chroma, opengl, pixie, silky, vmath,
   assets, brushes, content, groves, landscapes, sim, game, maps, replays, ui, walls,
   aiming, cameras, controls, faces, lighting, spelleffects, multiplayer, homes, lobbies, cursors, pointers,
-  minimaporders, spectator, chats, chatinput, chatui, shops,
+  minimaporders, spectator, chats, chatinput, chatui, shops, audios,
   polyworld/actioncam, polyworld/assets, polyworld/characters,
   polyworld/clickmarks, polyworld/fxshapes, polyworld/weapontrails,
   polyworld/chargen, polyworld/common, polyworld/pathing,
   polyworld/tapes, polyworld/toon, polyworld/metrics,
   polyworld/particles, polyworld/particleshaders, polyworld/player,
-  polyworld/profiles,
+  polyworld/profiles, polyworld/sounds,
   polyworld/quadterrain,
   polyworld/shadows,
   polyworld/terrainsurfaces, polyworld/waters,
@@ -269,6 +269,8 @@ proc runGraphics*(
 ): bool {.discardable.} =
   ## Runs one match on the existing window and releases match-owned resources.
   initializeGraphics()
+  stopSounds()
+  defer: stopSounds()
   clearHudTooltip()
   defer: clearHudTooltip()
   # Loading polls window events, so retire the lobby before drawing the splash.
@@ -295,6 +297,8 @@ proc runGraphics*(
     preferences = readPreferences("Polyworld GotA")
   except CatchableError as error:
     saveError = error.msg
+  configureSounds(preferences.soundMuted, preferences.mainVolume,
+    preferences.fxVolume, preferences.uiVolume)
   window.updateCursorConfinement(preferences.edgeScrolling)
   inputBindings = preferences.bindings
   chrome.uiScaleMode = preferences.uiScaleMode
@@ -1217,6 +1221,8 @@ proc runGraphics*(
     groupCameraScale = 1.0'f32
     viewingDt = 0.0'f
     viewingSeeking = false
+    audioEnabled = false
+    arenaAudio: ArenaAudio
     actionCam = initActionCam(
       subjectMode = true,
       defaultDistance = DefaultCameraDistance,
@@ -1236,6 +1242,7 @@ proc runGraphics*(
       repeating = not network.isSpectator
     )
     spectatorStream = if network.isSpectator: newSpectatorStream(network) else: nil
+  arenaAudio.syncAudio(run.world)
   transport.streamed = network.isSpectator
   networkSpectator = network.isSpectator
 
@@ -1258,6 +1265,7 @@ proc runGraphics*(
     if window.scaleKey(button, preferences, sk.uiScale, "Polyworld GotA"):
       return
     if button == KeyEscape and shopOpen:
+      playSound(CancelSound)
       clearHudTooltip()
       shopOpen = false
       resetShopUi()
@@ -1278,6 +1286,7 @@ proc runGraphics*(
           armedItem = -1
           attackMoveArmed = false
           return
+      playSound(ClickSound)
       matchMenu =
         if matchMenu == HiddenMatchMenu: PauseMenu
         elif matchMenu == MatchSettings: PauseMenu
@@ -1298,6 +1307,7 @@ proc runGraphics*(
         if ShopInput.matches(button):
           clearHudTooltip()
           shopOpen = not shopOpen
+          playSound(if shopOpen: ClickSound else: CancelSound)
           armedAbility = -1
           armedItem = -1
           attackMoveArmed = false
@@ -1309,12 +1319,14 @@ proc runGraphics*(
             armedAbility = -1
             armedItem = -1
             attackMoveArmed = true
+            playSound(SelectSound)
             return
         if StopInput.matches(button):
           armedAbility = -1
           armedItem = -1
           attackMoveArmed = false
           queueStop(run.world.heroes[options.playerSlot - 1].id)
+          playSound(MoveOrderSound)
           return
     if FullscreenInput.matches(button):
       window.setFullscreen(not window.isFullscreen)
@@ -1325,6 +1337,7 @@ proc runGraphics*(
         (options.playerSlot <= 0 or run.replayMode or button != KeySpace) and
         (network == nil or network.isSpectator):
       transport.togglePlay()
+      playSound(ClickSound)
     elif CameraInput.matches(button) and (options.playerSlot <= 0 or run.replayMode):
       actionCam.toggle(followSelection)
     elif ShadingInput.matches(button) and not defined(gotaTestRoom):
@@ -1334,6 +1347,7 @@ proc runGraphics*(
     elif (ItemOneInput.matches(button) or ItemTwoInput.matches(button)) and
         options.playerSlot > 0 and
         not run.replayMode:
+      playSound(SelectSound)
       activatePlayerItem(
         run.world,
         run.world.heroes[options.playerSlot - 1].id,
@@ -1488,6 +1502,7 @@ proc runGraphics*(
     ## Selects or toggles one object and activates selection following.
     if not selectionTarget(id).found:
       return
+    playSound(SelectSound)
     if not additive:
       selectedIds.setLen(0)
     elif isSelected(id) and selectedIds.len > 1:
@@ -1510,6 +1525,7 @@ proc runGraphics*(
 
   proc selectAllHeroes() =
     ## Selects every hero and activates the group-follow camera.
+    playSound(SelectSound)
     selectedIds.setLen(0)
     for hero in run.world.heroes:
       selectedIds.add hero.id
@@ -1915,8 +1931,10 @@ proc runGraphics*(
       mapY = int32(layers[walk.layer].originZ + walk.z - mapOrigin())
     if attackMove:
       queueAttackMove(heroId, mapX, mapY)
+      playSound(AttackOrderSound)
     else:
       queueWalkTo(heroId, mapX, mapY)
+      playSound(MoveOrderSound)
 
   proc holdingAttackMove(): bool =
     ## Keeps attack-move armed while its binding is held without Control.
@@ -1962,14 +1980,16 @@ proc runGraphics*(
         let hero = heroById(run.world, playerHeroId())
         if window.actionDown(ShiftInput):
           queueLevelAbility(hero.id, slot.int32)
+          playSound(ClickSound)
           armedAbility = -1
           armedItem = -1
           attackMoveArmed = false
           continue
         attackMoveArmed = false
-        discard activatePlayerAbility(
-          run.world, hero.id, slot.int32
-        )
+        if activatePlayerAbility(run.world, hero.id, slot.int32):
+          playSound(SelectSound)
+        else:
+          playSound(ErrorSound)
 
   proc updateWorldSelection(viewProjection: Mat4) =
     ## Inspects a clicked unit; only armed attack-move issues an attack.
@@ -1988,6 +2008,7 @@ proc runGraphics*(
         let heroId = playerHeroId()
         if picked != 0 and objectTeam(picked) != objectTeam(heroId):
           queueAttackTarget(heroId, picked)
+          playSound(AttackOrderSound)
         else:
           issueGroundOrder(viewProjection, true)
         attackMoveArmed = holdingAttackMove()
@@ -2021,9 +2042,11 @@ proc runGraphics*(
         marker = minimapMarker(destination, surfaceHeight(center.x, center.z))
       if minimapAction == MinimapAttackMove:
         queueAttackMove(heroId, destination.x, destination.y)
+        playSound(AttackOrderSound)
         attackMarks.emitClickMark(marker)
       else:
         queueWalkTo(heroId, destination.x, destination.y)
+        playSound(MoveOrderSound)
         clickMarks.emitClickMark(marker)
       selectionStarted = false
       attackMoveArmed = holdingAttackMove()
@@ -2087,6 +2110,7 @@ proc runGraphics*(
       return
     if armedAbility >= 0:
       if aimError notin {NoActionError, ActionOutOfRange}:
+        playSound(ErrorSound)
         return
       let
         hero = heroById(run.world, heroId)
@@ -2121,6 +2145,7 @@ proc runGraphics*(
       return
     if picked != 0 and objectTeam(picked) != objectTeam(heroId):
       queueAttackTarget(heroId, picked)
+      playSound(AttackOrderSound)
       attackMoveArmed = holdingAttackMove()
       return
     issueGroundOrder(viewProjection, attackMoveArmed)
@@ -2345,6 +2370,15 @@ proc runGraphics*(
         previousUnitPositions[hero.id] = renderPoint(hero.position)
     feedGotaActions(observeTick = true)
     emitTickParticles()
+    let audioTeam =
+      if playerMode(): heroById(run.world, playerHeroId()).team.ord
+      else: -1
+    for event in arenaAudio.collectSounds(
+        run.world, viewMode, audioEnabled, audioTeam):
+      if event.spatial:
+        playWorldSound(event.cue, renderPoint(event.position), cameraTarget)
+      else:
+        playSound(event.cue)
     if not defined(gotaTestRoom) and network == nil and
         (int(run.world.tick) mod SeekCheckpointTicks == 0 or
         int32(run.world.tick) == transport.timelineEnd):
@@ -2357,6 +2391,7 @@ proc runGraphics*(
 
   proc restoreTo(targetTick: int32) =
     ## Reloads the last checkpoint at or before a tick, then resimulates.
+    stopSounds()
     var checkpointIndex = 0
     for i, checkpoint in replayCheckpoints:
       if checkpoint.tick > targetTick:
@@ -2388,6 +2423,8 @@ proc runGraphics*(
         if replayCheckpoints.len == 0 or
             replayCheckpoints[^1].tick < int(run.world.tick):
           replayCheckpoints.add captureCheckpoint()
+
+    arenaAudio.syncAudio(run.world)
 
   when not defined(gotaTestRoom):
     if not run.replayMode and network == nil:
@@ -2494,6 +2531,14 @@ proc runGraphics*(
       let dt = frameDelta(lastFrameTime)
       viewingDt = viewingClock.viewingDelta(window)
       viewingSeeking = transport.targetTick >= 0 or transport.restoreTick >= 0
+      let audible = window.focused and not viewingSeeking and
+        transport.playing and transport.speedIndex == 0 and
+        matchMenu == HiddenMatchMenu
+      if audioEnabled and not audible and
+          (not run.world.gameOver or not window.focused or
+          viewingSeeking or matchMenu != HiddenMatchMenu):
+        stopSounds()
+      audioEnabled = audible
       if ((network == nil or network.isSpectator) and not transport.playing) or viewingSeeking or
         (network != nil and not network.isSpectator and network.client.snapshot.phase != rooms.Playing):
         viewingDt = 0

@@ -1,7 +1,7 @@
 import
   std/os,
   jsony,
-  polyworld/[assets, chargen, common],
+  polyworld/[assets, chargen, common, soundassets],
   content
 
 const
@@ -234,6 +234,7 @@ proc generatedCharacterAssets*(): seq[Asset] =
 proc browserAssets*(): seq[Asset] =
   ## Declares every presentation asset reachable by an arena match.
   result = hudAssets(LogoPath)
+  result.add soundAssets()
   for asset in result.mitems:
     if asset.source == LogoPath.assetName:
       asset = imageAsset(LogoPath, 768)

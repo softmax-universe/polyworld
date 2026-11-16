@@ -2,13 +2,17 @@
 ## Geometry is deterministic here; no renderer, browser or OS focus is required.
 import std/[macros, os, importutils]
 import windy, windy/internal, vmath
-import polyworld/[inputs, rtscameras]
+import polyworld/[inputs, rtscameras, soundassets]
 from polyworld/actioncam import initActionCam, takeManual, toggle
 import polyworld/player
 import ../[chats, chatinput]
 import ../[content, game, sim, cameras, minimaporders, pointers]
 include ../controls
 privateAccess(Window)
+
+proc playSound(cue: SoundCue) =
+  ## Keeps extracted gameplay handlers silent without opening an audio device.
+  discard
 
 macro production(names: varargs[untyped]): untyped =
   let tree = parseStmt(readFile(currentSourcePath().parentDir.parentDir / "graphics.nim"))

@@ -1,6 +1,6 @@
 import
   pixie, silky, vmath, windy,
-  polyworld/[inputs, chrome, configs, gameuis],
+  polyworld/[inputs, chrome, configs, gameuis, sounds],
   assets, content, controls, game, layouts, presets, sim
 
 const
@@ -110,6 +110,7 @@ proc drawDraft*(sk: Silky, window: Window, size: Vec2, playing: bool) =
         origin: card.origin + vec2(4, card.size.y - 32),
         size: vec2(card.size.x - 8, 28)
       )
+    sk.hoverSound(card, canPick and available)
     if selected:
       sk.drawSprite(WhiteTileKey, card.origin - vec2(3),
         card.size + vec2(6), Gold, radius = 9)
@@ -139,6 +140,8 @@ proc drawDraft*(sk: Silky, window: Window, size: Vec2, playing: bool) =
               badge.origin, badge.size, Muted, "Small", CenterAlign)
             break
     if canPick and available and hovered and window.mousePressed(MouseLeft):
+      if selectedClass != class.ord.int32:
+        playSound(SelectSound)
       selectedClass = class.ord.int32
   let
     enabled = canPick and selectedClass >= 0 and playing
@@ -150,6 +153,7 @@ proc drawDraft*(sk: Silky, window: Window, size: Vec2, playing: bool) =
       if selectedClass >= 0: HeroClass(selectedClass).heroSpec.role
       else: "A random available hero is picked when time runs out."
     button = layout.confirm
+  sk.hoverSound(button, enabled)
   sk.drawLabel(title, layout.selection.origin, layout.selection.size,
     White, "Bold")
   sk.drawLabel(detail, layout.role.origin, layout.role.size, Muted, "Small")
@@ -165,4 +169,5 @@ proc drawDraft*(sk: Silky, window: Window, size: Vec2, playing: bool) =
     if enabled: rgbx(22, 24, 28, 255) else: Muted, "Bold", CenterAlign)
   if enabled and sk.hovered(button) and window.mousePressed(MouseLeft):
     queueDraft(activeId, selectedClass)
+    playSound(ReadySound)
     selectedClass = -1

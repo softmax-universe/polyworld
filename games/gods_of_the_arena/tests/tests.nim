@@ -3,6 +3,7 @@
 {.warning[UnusedImport]: off.}
 import
   test_abilities,
+  test_audio,
   test_andre,
   test_attacks,
   test_base,
@@ -15,9 +16,6 @@ import
   test_tooltips,
   test_controls,
   test_shop_backend,
-  test_shop_catalog,
-  test_shop_layout,
-  test_shop_tooltips,
   test_shop_network,
   test_human_chat,
   test_human_chat_network,
@@ -32,6 +30,9 @@ import
   test_server_notice_relay,
   test_relay_notice_draft,
   test_relay_notice_policy,
+  test_shop_catalog,
+  test_shop_layout,
+  test_shop_tooltips,
   test_death_hud,
   test_draft_pause,
   test_effects,

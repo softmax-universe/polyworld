@@ -41,7 +41,8 @@ for seed in [0, 1, 42, 1049, 89_271]:
   doAssert map.ground.tiles == same.ground.tiles
   doAssert map.blocked == same.blocked
   doAssert map.relief == same.relief
-  doAssert map.landmarks.len == 13
+  doAssert MapSize == 128
+  doAssert map.landmarks.len == 30
   var trees, stream: int
   for i, tile in map.ground.tiles:
     doAssert tile.impassable == map.blocked[i]
@@ -52,7 +53,23 @@ for seed in [0, 1, 42, 1049, 89_271]:
       inc stream
       doAssert map.blocked[i]
   doAssert trees > 30
-  doAssert stream > 100
+  doAssert stream > 800
+  for z in [-26'f, 26'f]:
+    for x in 12 .. 27:
+      doAssert map.walkable(vec2(x.float32, z)),
+        "The stream crossing must be continuous."
+  for x in 16 .. 22:
+    let position = vec2(x.float32, 0)
+    doAssert not map.walkable(position),
+      "The widened stream must block both former banks."
+    doAssert map.groundHeight(position) < 0,
+      "The riverbed must extend beneath the wider water surface."
+  let crossing = map.route(vec2(12, 0), vec2(27, 0))
+  var usedFord = false
+  for point in crossing:
+    if abs(point.y) >= 24:
+      usedFord = true
+  doAssert usedFord, "Cross-bank routes must go through a ford."
   for landmark in map.landmarks:
     let
       point = landmark.position + vec2(MapHalf)

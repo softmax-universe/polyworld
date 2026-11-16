@@ -1,6 +1,7 @@
 import
-  std/[math, os],
+  std/[json, math, os],
   jsony, vmath,
+  polyworld/daycycles,
   common, resources
 
 const
@@ -21,10 +22,18 @@ type
     version, seed: int
     creature: LegacyCreature
     villageFood, berryFood, farmFood: int
-  WorldSave = object
+  ResourceSave = object
     version, seed: int
     creature: Creature
     stock: Inventory
+    sources: seq[ResourceSource]
+    households: seq[Household]
+    villagers: seq[Villager]
+  WorldSave = object
+    version, seed: int
+    tick: int32
+    creature: Creature
+    villages: seq[Village]
     sources: seq[ResourceSource]
     households: seq[Household]
     villagers: seq[Villager]
@@ -106,6 +115,28 @@ proc route*(map: MonsterMap, start, target: Vec2): seq[Vec2] =
     result.add center(reverse[i])
   result.add target
 
+proc clearReach(map: MonsterMap, start, target: Vec2): bool =
+  ## Checks direct contact without reaching through walls or blocked corners.
+  let steps = max(1, int(ceil(length(target - start) * 12)))
+  var previous = cell(start)
+  if previous < 0 or not map.walkable(start):
+    return false
+  for i in 1 .. steps:
+    let point = mix(start, target, i.float32 / steps.float32)
+    let current = cell(point)
+    if current < 0 or not map.walkable(point):
+      return false
+    let
+      x = current mod MapSize
+      z = current div MapSize
+      px = previous mod MapSize
+      pz = previous div MapSize
+    if x != px and z != pz and
+      (map.blocked[pz * MapSize + x] or map.blocked[z * MapSize + px]):
+        return false
+    previous = current
+  true
+
 proc event(world: var World, text: string) =
   ## Records a bounded stream of actual physical outcomes.
   if world.events.len == 32:
@@ -124,6 +155,7 @@ proc actionDescription(action: CreatureAction): string =
       of DanceAction: "dance"
       of StopAction: "stop"
       of WaitAction: "wait"
+      of AttackAction: "attack"
     target =
       if action.target.len > 0:
         (if action.kind == MoveAction: " to " else: " at ") & action.target
@@ -151,31 +183,54 @@ proc newWorld*(map: MonsterMap): World =
     raise newException(MonsterError, "Monster map has no home.")
   result = World(
     map: map,
-    creature: Creature(position: map.landmarks[home].position, energy: 100),
+    creature: Creature(position: map.landmarks[home].position,
+      energy: 100, health: 100),
     status: "Waiting for your voice"
   )
-  const Capacities = [24, 12, 18, 36, 24, 48]
+  const
+    Capacities = [24, 12, 18, 36, 24, 48, 12, 12, 24, 18, 36, 24, 36]
+    Kinds = [BerriesResource, GrainResource, FishResource, SoftwoodResource,
+      HardwoodResource, StoneResource, GrainResource, GrainResource,
+      BerriesResource, FishResource, SoftwoodResource, HardwoodResource,
+      StoneResource]
+    VillageNames = ["Willow", "Bracken", "Reedbank"]
+  for i, id in VillageIds:
+    let index = map.landmark(id)
+    if index >= 0 or i == 0:
+      result.villages.add Village(
+        id: id, name: VillageNames[i],
+        position: map.landmarks[if index >= 0: index else: home].position,
+        health: 100
+      )
   for i, id in SourceIds:
     let index = map.landmark(id)
     if index >= 0:
       result.sources.add ResourceSource(
         id: id, name: map.landmarks[index].name,
         position: map.landmarks[index].position,
-        resource: ResourceKind(i), amount: Capacities[i],
+        resource: Kinds[i], amount: Capacities[i],
+        owner: (if id == "farm": 0
+          elif id == "bracken_farm": result.villageIndex("bracken")
+          elif id == "reedbank_farm": result.villageIndex("reedbank")
+          else: -1),
         capacity: Capacities[i]
       )
   for i, id in HouseholdIds:
     let index = map.landmark(id)
-    if index >= 0:
+    let village = result.villageIndex(VillageIds[i div 3])
+    if index >= 0 and village >= 0:
       var house = Household(
         id: id, name: map.landmarks[index].name,
         position: map.landmarks[index].position,
-        integrity: (if i == 2: 35'f else: 100'f),
-        fuel: (if i == 1: 8'f else: 30'f)
+        village: village,
+        integrity: (if i mod 3 == 2: 35'f else: 100'f),
+        fuel: (if i mod 3 == 1: 8'f else: 30'f)
       )
       house.stock[GrainResource] = 1
       result.households.add house
-  const Names = ["Ada", "Ben", "Clara", "Dara", "Eli", "Finn"]
+  const Names = ["Ada", "Ben", "Clara", "Dara", "Eli", "Finn",
+    "Iris", "Jory", "Kira", "Leo", "Mina", "Ned", "Ora", "Pax",
+    "Rosa", "Seth", "Tess", "Uri"]
   for i, id in VillagerIds:
     let house = result.householdIndex(HouseholdIds[i div 2])
     if house >= 0:
@@ -184,11 +239,12 @@ proc newWorld*(map: MonsterMap): World =
       result.villagers.add Villager(
         id: id, name: Names[i], home: house,
         position: (if map.walkable(offset): offset else: doorway),
-        hunger: (if i mod 2 == 0: 65'f else: 25'f),
+        hunger: (if i mod 2 == 0: 65'f else: 25'f), health: 100,
+        sleepiness: InitialSleepiness,
         activity: "At home"
       )
-  if result.villagers.len > 0:
-    result.stock[GrainResource] = 4
+  for house in result.households:
+    result.villages[house.village].stock[GrainResource] = 4
 
 proc destination*(world: World, action: CreatureAction): Vec2 =
   ## Resolves named people and places before numeric map coordinates.
@@ -196,6 +252,11 @@ proc destination*(world: World, action: CreatureAction): Vec2 =
     let person = world.villagerIndex(action.target)
     if person >= 0:
       return world.villagers[person].position
+    let hall = world.villageIndex(action.target)
+    if action.kind == AttackAction and hall >= 0:
+      let approach = world.villages[hall].position + vec2(-3, -2)
+      if world.map.walkable(approach):
+        return approach
     let index = world.map.landmark(
       if action.target == "hall": "village" else: action.target
     )
@@ -211,18 +272,37 @@ proc validateAction(world: World, action: CreatureAction) =
   if not (action.duration >= 0 and action.duration <= 30):
     raise newException(MonsterError, "Action duration must be 0 to 30 seconds.")
   case action.kind
+  of AttackAction:
+    if world.villagerIndex(action.target) < 0 and
+      world.householdIndex(action.target) < 0 and
+      world.villageIndex(action.target) < 0 and
+      world.sourceIndex(action.target) < 0:
+        raise newException(MonsterError,
+          "Attack a named villager, building, or resource source.")
+    if world.targetDestroyed(action.target):
+      raise newException(MonsterError, world.targetName(action.target) &
+        " is already " & (if world.villagerIndex(action.target) >= 0:
+          "dead." else: "destroyed."))
+    if action.duration != 0:
+      raise newException(MonsterError, "An attack is one strike; use zero duration.")
   of GatherAction:
     if world.sourceIndex(action.target) < 0:
       raise newException(MonsterError, "That place has no gathering source.")
+    if world.targetDestroyed(action.target):
+      raise newException(MonsterError, "That resource source was destroyed.")
   of GiveAction:
-    if action.target notin ["village", "hall"] and
+    if world.villageIndex(action.target) < 0 and
       world.householdIndex(action.target) < 0 and
       world.villagerIndex(action.target) < 0:
         raise newException(MonsterError,
           "Deliver to the hall, a household, or a villager.")
+    if world.targetDestroyed(action.target):
+      raise newException(MonsterError, world.targetName(action.target) &
+        " can no longer receive supplies.")
   else:
     discard
-  if action.kind in {MoveAction, GatherAction, GiveAction, RestAction}:
+  if action.kind in {MoveAction, GatherAction, GiveAction, RestAction,
+    AttackAction}:
     if not world.map.walkable(world.destination(action)):
       raise newException(MonsterError, "That destination is not walkable.")
 
@@ -232,6 +312,8 @@ proc stop*(world: var World) =
   world.path.setLen(0)
   world.active = false
   world.creature.moving = false
+  world.elapsed = 0
+  world.actionTime = 0
   world.status = "Listening"
 
 proc instruct*(world: var World, actions: seq[CreatureAction]) =
@@ -255,11 +337,13 @@ proc beginAction(world: var World) =
   world.actions.delete(0)
   world.active = true
   world.elapsed = 0
+  world.actionTime = 0
   world.waypoint = 0
   world.path.setLen(0)
   let action = world.current
   case action.kind
-  of MoveAction, GatherAction, GiveAction, RestAction:
+  of MoveAction, GatherAction, GiveAction, RestAction, AttackAction:
+    world.validateAction(action)
     let target = world.destination(action)
     if length(target - world.creature.position) > 0.05'f:
       world.path = world.map.route(world.creature.position, target)
@@ -280,9 +364,116 @@ proc beginAction(world: var World) =
     world.status = "Listening"
     world.event("Stopped the previous action.")
 
+proc frighten(world: var World, position: Vec2, victim = -1, village = -1) =
+  ## Interrupts nearby witnesses while preserving the supplies they carry.
+  for i in 0 ..< world.villagers.len:
+    if world.villagers[i].health <= 0:
+      continue
+    if i != victim and (length(world.villagers[i].position - position) > 8 or
+      not world.map.clearReach(position, world.villagers[i].position)):
+        continue
+    world.villagers[i].fear = FrightDuration
+    world.villagers[i].fearLevel = min(100'f,
+      world.villagers[i].fearLevel + (if i == victim: 75'f else: 65'f))
+    world.villagers[i].trust = max(0'f, world.villagers[i].trust - 45)
+    world.villagers[i].sleeping = false
+    world.villagers[i].task = IdleTask
+    world.villagers[i].path.setLen(0)
+    world.villagers[i].waypoint = 0
+    world.villagers[i].elapsed = 0
+    world.villagers[i].retry = 0
+    world.villagers[i].moving = false
+    world.villagers[i].activity = "Frightened by Moss"
+    let village = world.households[world.villagers[i].home].village
+    world.villages[village].alarm = 30
+  if village >= 0:
+    world.villages[village].alarm = 30
+
+proc thank(world: var World, target: string, amount: int) =
+  ## Rewards real deliveries among the people who receive their benefit.
+  let
+    person = world.villagerIndex(target)
+    house = world.householdIndex(target)
+    village = world.villageIndex(target)
+  for i in 0 ..< world.villagers.len:
+    if world.villagers[i].health <= 0:
+      continue
+    if i != person and world.villagers[i].home != house and
+      (village < 0 or world.households[world.villagers[i].home].village != village):
+        continue
+    let gain = amount.float32 * (if i == person: 5'f else: 2'f)
+    world.villagers[i].trust = min(100'f, world.villagers[i].trust + gain)
+    world.villagers[i].fearLevel = max(0'f,
+      world.villagers[i].fearLevel - gain * 1.5'f)
+    if world.villagers[i].fearLevel < PanicFear:
+      world.villagers[i].fear = 0
+
 proc finishAction(world: var World) =
   ## Applies a completed action and reports only events that really happened.
   case world.current.kind
+  of AttackAction:
+    let
+      target = world.current.target
+      position = world.destination(world.current)
+      person = world.villagerIndex(target)
+      house = world.householdIndex(target)
+      hall = world.villageIndex(target)
+      source = world.sourceIndex(target)
+      name = world.targetName(target)
+    if world.targetDestroyed(target):
+      world.reportProblem(world.current, name & " is already gone.")
+      world.stop()
+      return
+    if length(position - world.creature.position) > AttackRange or
+      not world.map.clearReach(world.creature.position, position):
+        world.reportProblem(world.current, "The target moved out of reach.")
+        world.stop()
+        return
+    var village = hall
+    if person >= 0:
+      let damage = min(AttackDamage, world.villagers[person].health)
+      village = world.households[world.villagers[person].home].village
+      world.villagers[person].health -= damage
+      world.villagers[person].hitTime = HitDuration
+      world.frighten(position, person, village)
+      if world.villagers[person].health == 0:
+        world.villagers[person].fear = 0
+        world.villagers[person].sleeping = false
+        world.villagers[person].task = IdleTask
+        world.villagers[person].path.setLen(0)
+        world.villagers[person].waypoint = 0
+        world.villagers[person].moving = false
+        world.villagers[person].supplyingHall = false
+        world.villagers[person].activity = "Dead"
+      world.event("Struck " & name & " for " & $int(damage) & " damage. " &
+        name & (if world.villagers[person].health == 0: " died."
+        else: " has " & $int(world.villagers[person].health) &
+          " health remaining."))
+    else:
+      var remaining = 0'f
+      if house >= 0:
+        village = world.households[house].village
+        world.households[house].integrity = max(0'f,
+          world.households[house].integrity - AttackDamage)
+        remaining = world.households[house].integrity
+        if remaining == 0:
+          world.households[house].stock = default(Inventory)
+          world.households[house].fuel = 0
+      elif hall >= 0:
+        world.villages[hall].health = max(0'f,
+          world.villages[hall].health - AttackDamage)
+        remaining = world.villages[hall].health
+        if remaining == 0:
+          world.villages[hall].stock = default(Inventory)
+      elif source >= 0:
+        village = world.sources[source].owner
+        world.sources[source].amount = 0
+        world.sources[source].elapsed = 0
+        world.sources[source].destroyed = true
+      world.frighten(position, village = village)
+      world.event(if remaining == 0: "Destroyed " & name & "."
+        else: "Struck " & name & ". It has " & $int(remaining) &
+          " health remaining.")
   of MoveAction:
     let target = world.current.target
     world.event(
@@ -318,8 +509,11 @@ proc finishAction(world: var World) =
     let
       target = world.current.target
       description = world.creature.cargo.inventoryText()
+      amount = world.creature.cargo.total()
       house = world.householdIndex(target)
       person = world.villagerIndex(target)
+      hall = world.villageIndex(target)
+    var recipientVillage = hall
     if person >= 0:
       if world.villagers[person].cargo.total() +
         world.creature.cargo.total() > 12:
@@ -328,10 +522,13 @@ proc finishAction(world: var World) =
           world.stop()
           return
       world.creature.cargo.transfer(world.villagers[person].cargo)
-      world.villagers[person].task = IdleTask
+      world.villagers[person].task =
+        if world.villagers[person].sleeping: SleepTask else: IdleTask
       world.villagers[person].path.setLen(0)
       world.villagers[person].retry = 0
       world.villagers[person].moving = false
+      world.villagers[person].supplyingHall = false
+      recipientVillage = world.households[world.villagers[person].home].village
     elif house >= 0:
       if world.households[house].stock.total() +
         world.creature.cargo.total() > 4096:
@@ -339,12 +536,16 @@ proc finishAction(world: var World) =
           world.stop()
           return
       world.creature.cargo.transfer(world.households[house].stock)
+      recipientVillage = world.households[house].village
     else:
-      if world.stock.total() + world.creature.cargo.total() > 4096:
+      if world.villages[hall].stock.total() +
+        world.creature.cargo.total() > 4096:
         world.reportProblem(world.current, "The village hall's storage is full.")
         world.stop()
         return
-      world.creature.cargo.transfer(world.stock)
+      world.creature.cargo.transfer(world.villages[hall].stock)
+    world.villages[recipientVillage].gifts += amount
+    world.thank(target, amount)
     world.event("Delivered " & description & " to " &
       world.targetName(target) & ".")
   of EatAction:
@@ -441,22 +642,32 @@ proc planVillager(
 proc seekResource(
   world: var World,
   index: int,
-  kinds: set[ResourceKind]
+  kinds: set[ResourceKind],
+  forHall = false,
+  meal = false
 ): bool =
   ## Tries the shared hall before choosing the nearest reachable source.
   let
     home = world.villagers[index].home
-    houseName = world.households[home].name
-    hall = world.map.landmark("village")
-  if hall >= 0:
+    village = world.households[home].village
+    hall = world.villages[village]
+    destination =
+      if forHall: hall.name & " hall"
+      else: world.households[home].name
+  if not forHall and hall.health > 0:
     for kind in kinds:
-      if world.stock[kind] > 0 and world.planVillager(index, WithdrawTask,
-        "village", world.map.landmarks[hall].position,
-        "Fetching " & kind.resourceName() & " for " & houseName, kind):
+      if hall.stock[kind] > 0 and world.planVillager(index,
+        (if meal: EatTask else: WithdrawTask),
+        hall.id, hall.position,
+        (if meal: "Going to the hall for a meal"
+          else: "Fetching " & kind.resourceName() & " for " & destination),
+        kind):
+          world.villagers[index].supplyingHall = false
           return true
   var candidates: seq[int]
   for i, source in world.sources:
-    if source.resource in kinds and source.amount > 0:
+    if not source.destroyed and source.resource in kinds and source.amount > 0 and
+      source.owner in [-1, village]:
       candidates.add i
   while candidates.len > 0:
     var nearest = 0
@@ -468,38 +679,90 @@ proc seekResource(
           nearest = i
     let source = world.sources[candidates[nearest]]
     candidates.delete(nearest)
-    if world.planVillager(index, GatherTask, source.id, source.position,
-      "Gathering " & source.resource.resourceName() & " for " & houseName,
+    if world.planVillager(index, (if meal: EatTask else: GatherTask),
+      source.id, source.position,
+      (if meal: "Finding a meal at " & source.name
+        else: "Gathering " & source.resource.resourceName() & " for " &
+          destination),
       source.resource):
+        world.villagers[index].supplyingHall = forHall
         return true
+
+proc seekMeal(world: var World, index: int): bool =
+  ## Finds real food even when tools or gifts have filled the carrying space.
+  let
+    person = world.villagers[index]
+    house = world.households[person.home]
+  if person.cargo.foodTotal() > 0:
+    return world.planVillager(index, EatTask, person.id,
+      person.position, "Eating a meal")
+  if house.integrity > 0 and house.stock.foodTotal() > 0:
+    return world.planVillager(index, EatTask, house.id,
+      house.position, "Going home for a meal")
+  world.seekResource(index, {BerriesResource, GrainResource, FishResource},
+    meal = person.cargo.total() >= VillagerCarryLimit)
+
+proc wantsSleep(person: Villager, night: bool): bool {.raises: [].} =
+  ## Prefers a night's rest well before daytime exhaustion sets in.
+  person.sleepiness >=
+    (if night: NightSleepThreshold else: DaySleepThreshold)
+
+proc clearVillagerTask(person: var Villager) {.raises: [].} =
+  ## Interrupts an errand or sleep without changing carried supplies.
+  person.task = IdleTask
+  person.sleeping = false
+  person.moving = false
+  person.path.setLen(0)
+  person.waypoint = 0
+  person.elapsed = 0
+  person.retry = 0
 
 proc chooseVillagerTask(world: var World, index: int) =
   ## Chooses a personal or household need without accepting player commands.
   let
     person = world.villagers[index]
     house = world.households[person.home]
+    hall = world.villages[house.village]
+    deliverHall = (person.supplyingHall and hall.health > 0) or
+      house.integrity <= 0
+    canDeliver = if deliverHall: hall.health > 0 else: house.integrity > 0
+    deliveryId = if deliverHall: hall.id else: house.id
+    deliveryPosition = if deliverHall: hall.position else: house.position
+    deliveryName = if deliverHall: hall.name & " hall" else: house.name
+    night = isNight(clockHour(world.tick, TickRate.int32))
   var planned = false
-  if person.cargo.total() >= VillagerCarryLimit and
-    person.cargo.foodTotal() == 0:
-      planned = world.planVillager(index, DeliverTask, house.id,
-        house.position, "Taking " & person.cargo.inventoryText() &
-          " to " & house.name)
-  if not planned and person.hunger >= 50:
-    if person.cargo.foodTotal() > 0:
-      planned = world.planVillager(index, EatTask, person.id,
-        person.position, "Eating a meal")
-    elif house.stock.foodTotal() > 0:
-      planned = world.planVillager(index, EatTask, house.id,
-        house.position, "Going home for a meal")
+  if person.cargo.total() == 0:
+    world.villagers[index].supplyingHall = false
+  if person.hunger >= UrgentHunger:
+    planned = world.seekMeal(index)
+  if not planned and person.hunger < UrgentHunger and person.wantsSleep(night):
+    if house.integrity > 0:
+      planned = world.planVillager(index, SleepTask, house.id,
+        house.position, "Going home to sleep")
+    elif hall.health > 0:
+      planned = world.planVillager(index, SleepTask, hall.id,
+        hall.position, "Seeking shelter at the hall")
     else:
-      planned = world.seekResource(index,
-        {BerriesResource, GrainResource, FishResource})
-  if not planned and person.cargo.total() > 0:
-    planned = world.planVillager(index, DeliverTask, house.id,
-      house.position, "Taking " & person.cargo.inventoryText() &
-        " to " & house.name)
+      planned = world.planVillager(index, SleepTask, person.id,
+        person.position, "Sleeping outside; home destroyed")
+  if not planned and person.cargo.total() >= VillagerCarryLimit and
+    person.cargo.foodTotal() == 0 and canDeliver:
+      planned = world.planVillager(index, DeliverTask, deliveryId,
+        deliveryPosition, "Taking " & person.cargo.inventoryText() &
+          " to " & deliveryName)
+  if not planned and person.hunger >= 50:
+    planned = world.seekMeal(index)
+  if not planned and person.cargo.total() > 0 and canDeliver:
+    planned = world.planVillager(index, DeliverTask, deliveryId,
+      deliveryPosition, "Taking " & person.cargo.inventoryText() &
+        " to " & deliveryName)
   if not planned and person.hunger < 50:
-    if house.stock.foodTotal() < 4:
+    if house.integrity <= 0:
+      if hall.health > 0 and person.cargo.total() < VillagerCarryLimit and
+        hall.stock.foodTotal() < 12:
+          planned = world.seekResource(index,
+            {BerriesResource, GrainResource, FishResource}, forHall = true)
+    elif house.stock.foodTotal() < 4:
       planned = world.seekResource(index,
         {BerriesResource, GrainResource, FishResource})
     elif house.fuel < 35:
@@ -518,6 +781,15 @@ proc chooseVillagerTask(world: var World, index: int) =
         planned = world.seekResource(index, {StoneResource})
       else:
         planned = world.seekResource(index, {HardwoodResource})
+    elif hall.health > 0 and hall.stock.foodTotal() < 12:
+      planned = world.seekResource(index,
+        {BerriesResource, GrainResource, FishResource}, forHall = true)
+    elif hall.health > 0 and
+      hall.stock[SoftwoodResource] + hall.stock[HardwoodResource] < 8:
+      planned = world.seekResource(index,
+        {SoftwoodResource, HardwoodResource}, forHall = true)
+    elif hall.health > 0 and hall.stock[StoneResource] < 6:
+      planned = world.seekResource(index, {StoneResource}, forHall = true)
   if not planned and person.hunger < 50 and house.stock.foodTotal() >= 4 and
     house.fuel >= 35 and house.integrity >= 100:
       let resting = world.arrivalPosition(index, house.id, house.position)
@@ -529,45 +801,103 @@ proc chooseVillagerTask(world: var World, index: int) =
     world.villagers[index].moving = false
     world.villagers[index].activity =
       if person.hunger >= 50: "Looking for food"
+      elif person.wantsSleep(night): "Looking for a way home to sleep"
+      elif house.integrity <= 0: "Homeless; seeking shelter"
       elif house.integrity < 100: "Waiting for repair supplies"
       elif house.fuel < 35: "Looking for firewood"
       else: "Resting; household supplied"
+
+proc flee(world: var World, index: int) =
+  ## Chooses reachable shelter away from the creature without dropping cargo.
+  let
+    person = world.villagers[index]
+    house = world.households[person.home]
+    danger = world.creature.position
+  var candidates: seq[Vec2]
+  if house.integrity > 0 and
+    length(house.position - danger) > length(person.position - danger) + 2:
+    candidates.add house.position
+  var away = person.position - danger
+  if lengthSq(away) < 0.01'f:
+    away = vec2(1, 0)
+  else:
+    away = normalize(away)
+  for angle in [0'f, 0.7'f, -0.7'f, 1.3'f, -1.3'f]:
+    let direction = vec2(away.x * cos(angle) - away.y * sin(angle),
+      away.x * sin(angle) + away.y * cos(angle))
+    for distance in [8'f, 5'f, 3'f]:
+      candidates.add person.position + direction * distance
+  for target in candidates:
+    if world.planVillager(index, FleeTask, person.id, target,
+      "Fleeing from Moss"):
+        return
+  world.villagers[index].task = FleeTask
+  world.villagers[index].path.setLen(0)
+  world.villagers[index].moving = false
+  world.villagers[index].retry = 2
+  world.villagers[index].activity = "Frightened; nowhere to run"
 
 proc finishVillagerTask(world: var World, index: int) =
   ## Transfers or consumes real supplies only after reaching their location.
   let
     person = world.villagers[index]
     home = person.home
+    village = world.households[home].village
   case person.task
   of GatherTask:
     let source = world.sourceIndex(person.target)
-    if source >= 0:
+    if source >= 0 and not world.sources[source].destroyed:
       let amount = min(max(0, VillagerCarryLimit - person.cargo.total()),
         world.sources[source].amount)
       world.sources[source].amount -= amount
       world.villagers[index].cargo[person.resource] += amount
+      world.villages[village].harvested += amount
   of WithdrawTask:
-    let amount = min(max(0, VillagerCarryLimit - person.cargo.total()),
-      world.stock[person.resource])
-    world.stock[person.resource] -= amount
-    world.villagers[index].cargo[person.resource] += amount
+    if world.villages[village].health > 0:
+      let amount = min(max(0, VillagerCarryLimit - person.cargo.total()),
+        world.villages[village].stock[person.resource])
+      world.villages[village].stock[person.resource] -= amount
+      world.villagers[index].cargo[person.resource] += amount
   of DeliverTask:
-    if world.households[home].stock.total() + person.cargo.total() <= 4096:
+    if person.target == world.villages[village].id:
+      if world.villages[village].health > 0 and
+        world.villages[village].stock.total() + person.cargo.total() <= 4096:
+        world.villagers[index].cargo.transfer(world.villages[village].stock)
+        world.villagers[index].supplyingHall = false
+      else:
+        world.villagers[index].retry = 5
+        world.villagers[index].activity = "Hall storage is full"
+    elif world.households[home].integrity > 0 and
+      world.households[home].stock.total() + person.cargo.total() <= 4096:
       world.villagers[index].cargo.transfer(world.households[home].stock)
+      world.villagers[index].supplyingHall = false
     else:
       world.villagers[index].retry = 5
       world.villagers[index].activity = "Home storage is full"
 
   of EatTask:
-    let ate =
-      if world.villagers[index].cargo.foodTotal() > 0:
-        world.villagers[index].cargo.eat()
-      else:
-        world.households[home].stock.eat()
+    var ate = false
+    if person.target == person.id:
+      ate = world.villagers[index].cargo.eat()
+    elif person.target == world.households[home].id and
+      world.households[home].integrity > 0:
+      ate = world.households[home].stock.eat()
+    elif person.target == world.villages[village].id and
+      world.villages[village].health > 0:
+      ate = world.villages[village].stock.eat()
+    else:
+      let source = world.sourceIndex(person.target)
+      if source >= 0 and not world.sources[source].destroyed and
+        world.sources[source].amount > 0 and
+        world.sources[source].resource in
+          {BerriesResource, GrainResource, FishResource}:
+            dec world.sources[source].amount
+            inc world.villages[village].harvested
+            ate = true
     if ate:
       world.villagers[index].hunger = max(0'f, person.hunger - 45)
   of RefuelTask:
-    if world.households[home].fuel < 35:
+    if world.households[home].integrity > 0 and world.households[home].fuel < 35:
       if world.households[home].stock[SoftwoodResource] > 0:
         dec world.households[home].stock[SoftwoodResource]
         world.households[home].fuel += 35
@@ -575,14 +905,15 @@ proc finishVillagerTask(world: var World, index: int) =
         dec world.households[home].stock[HardwoodResource]
         world.households[home].fuel += 50
   of RepairTask:
-    if world.households[home].integrity < 100 and
+    if world.households[home].integrity > 0 and
+      world.households[home].integrity < 100 and
       world.households[home].stock[StoneResource] >= 2 and
       world.households[home].stock[HardwoodResource] >= 1:
         world.households[home].stock[StoneResource] -= 2
         dec world.households[home].stock[HardwoodResource]
         world.households[home].integrity = min(100'f,
           world.households[home].integrity + 35)
-  of IdleTask:
+  of IdleTask, FleeTask, SleepTask:
     discard
   world.villagers[index].task = IdleTask
   world.villagers[index].moving = false
@@ -592,8 +923,10 @@ proc finishVillagerTask(world: var World, index: int) =
 proc stepVillage(world: var World) =
   ## Advances regrowth, household consumption, and independent NPC errands.
   const Dt = 1'f / TickRate.float32
+  let night = isNight(clockHour(world.tick, TickRate.int32))
   for source in world.sources.mitems:
-    if source.resource == StoneResource or source.amount >= source.capacity:
+    if source.destroyed or source.resource == StoneResource or
+      source.amount >= source.capacity:
       source.elapsed = 0
       continue
     source.elapsed += Dt
@@ -610,9 +943,100 @@ proc stepVillage(world: var World) =
       inc source.amount
   for house in world.households.mitems:
     house.fuel = max(0'f, house.fuel - Dt * 0.08'f)
+  for village in world.villages.mitems:
+    village.alarm = max(0'f, village.alarm - Dt)
   for i in 0 ..< world.villagers.len:
+    world.villagers[i].hitTime = max(0'f, world.villagers[i].hitTime - Dt)
+    if world.villagers[i].health <= 0:
+      world.villagers[i].moving = false
+      world.villagers[i].sleeping = false
+      world.villagers[i].task = IdleTask
+      world.villagers[i].activity = "Dead"
+      continue
     world.villagers[i].hunger = min(100'f,
       world.villagers[i].hunger + Dt * 0.12'f)
+    if not world.villagers[i].sleeping:
+      world.villagers[i].sleepiness = min(100'f,
+        world.villagers[i].sleepiness + Dt * (if night: 0.5'f else: 0.24'f))
+    let
+      distance = length(world.villagers[i].position - world.creature.position)
+      baseline = max(0'f, InitialFear - world.villagers[i].trust * 0.7'f)
+      receivingGift = world.active and world.current.kind == GiveAction and
+        world.current.target == world.villagers[i].id
+    if world.villagers[i].fearLevel > baseline:
+      world.villagers[i].fearLevel = max(baseline,
+        world.villagers[i].fearLevel - Dt * 0.08'f)
+    if world.villagers[i].fearLevel >= PanicFear and distance < 8 and
+      world.map.clearReach(world.creature.position, world.villagers[i].position):
+        world.villagers[i].fear = max(world.villagers[i].fear, 2'f)
+    if world.villagers[i].task != IdleTask and
+      world.targetDestroyed(world.villagers[i].target):
+        world.villagers[i].clearVillagerTask()
+    if world.villagers[i].sleeping and
+      world.households[world.villagers[i].home].integrity <= 0:
+        let hall = world.villages[
+          world.households[world.villagers[i].home].village]
+        if hall.health > 0 and
+          length(world.villagers[i].position - hall.position) > 1.1'f:
+            world.villagers[i].clearVillagerTask()
+    if world.villagers[i].fear > 0:
+      world.villagers[i].sleeping = false
+      world.villagers[i].fear = max(0'f, world.villagers[i].fear - Dt)
+      world.villagers[i].retry = max(0'f, world.villagers[i].retry - Dt)
+      if world.villagers[i].task != FleeTask or
+        (world.villagers[i].waypoint >= world.villagers[i].path.len and
+        world.villagers[i].retry <= 0 and
+        length(world.villagers[i].position - world.creature.position) < 5):
+          world.flee(i)
+      world.villagers[i].moving = walk(
+        world.villagers[i].position, world.villagers[i].facing,
+        world.villagers[i].path, world.villagers[i].waypoint, Dt * 2.6'f
+      )
+      if not world.villagers[i].moving:
+        world.villagers[i].activity = "Hiding from Moss"
+      continue
+    if not receivingGift and world.villagers[i].trust < 20 and
+      world.villagers[i].fearLevel >= 20 and distance < 2 and
+      world.map.clearReach(world.creature.position, world.villagers[i].position):
+        world.villagers[i].sleeping = false
+        if world.villagers[i].task != FleeTask:
+          world.flee(i)
+        world.villagers[i].moving = walk(world.villagers[i].position,
+          world.villagers[i].facing, world.villagers[i].path,
+          world.villagers[i].waypoint, Dt * 1.7'f)
+        world.villagers[i].activity = "Keeping a wary distance from Moss"
+        continue
+    if world.villagers[i].sleeping:
+      if world.villagers[i].hunger >= UrgentHunger or
+        (not night and world.villagers[i].sleepiness <= 10):
+          world.villagers[i].clearVillagerTask()
+      else:
+        world.villagers[i].sleepiness = max(0'f,
+          world.villagers[i].sleepiness - Dt * 0.8'f)
+        world.villagers[i].activity =
+          if world.households[world.villagers[i].home].integrity > 0:
+            "Sleeping at home"
+          elif world.villages[
+            world.households[world.villagers[i].home].village].health > 0:
+              "Sleeping at the hall"
+          else: "Sleeping outside"
+        continue
+    if world.villagers[i].task == FleeTask:
+      world.villagers[i].clearVillagerTask()
+    let
+      person = world.villagers[i]
+      findingMeal = person.task == EatTask or
+        (person.task in {GatherTask, WithdrawTask} and
+        person.resource in {BerriesResource, GrainResource, FishResource} and
+        not person.supplyingHall)
+      freeingSpace = person.task == DeliverTask and
+        person.cargo.total() >= VillagerCarryLimit
+      hungry = person.hunger >= UrgentHunger and
+        not findingMeal and not freeingSpace
+      tired = person.hunger < UrgentHunger and person.wantsSleep(night) and
+        person.task notin {SleepTask, EatTask}
+    if person.task != IdleTask and (hungry or tired):
+      world.villagers[i].clearVillagerTask()
     if world.villagers[i].task == IdleTask:
       world.villagers[i].retry = max(0'f, world.villagers[i].retry - Dt)
       if world.villagers[i].retry <= 0:
@@ -624,6 +1048,10 @@ proc stepVillage(world: var World) =
       world.villagers[i].path, world.villagers[i].waypoint, Dt * 1.7'f
     )
     if world.villagers[i].moving:
+      continue
+    if world.villagers[i].task == SleepTask:
+      world.villagers[i].sleeping = true
+      world.villagers[i].activity = "Sleeping"
       continue
     world.villagers[i].elapsed += Dt
     let duration = case world.villagers[i].task
@@ -648,12 +1076,40 @@ proc step*(world: var World) =
       world.stop()
   if not world.active:
     return
+  world.actionTime += Dt
   let person = world.villagerIndex(world.current.target)
-  if person >= 0 and world.current.kind in {MoveAction, GiveAction}:
+  if world.current.kind in {AttackAction, GatherAction, GiveAction} and
+    world.targetDestroyed(world.current.target):
+      world.reportProblem(world.current,
+        world.targetName(world.current.target) & " is already gone.")
+      world.stop()
+      return
+  if world.current.kind == AttackAction and world.actionTime > AttackTimeout:
+    world.reportProblem(world.current,
+      "I could not get close enough to " & world.targetName(world.current.target) & ".")
+    world.stop()
+    return
+  if person >= 0 and world.current.kind in {GiveAction, AttackAction} and
+    world.villagers[person].health <= 0:
+      world.reportProblem(world.current,
+        world.villagers[person].name & " is already dead.")
+      world.stop()
+      return
+  if person >= 0 and world.current.kind in {MoveAction, GiveAction, AttackAction}:
     let target = world.villagers[person].position
-    if length(target - world.creature.position) <= 1.25'f:
-      world.path.setLen(0)
+    let reach = if world.current.kind == AttackAction: AttackRange else: 1.25'f
+    if length(target - world.creature.position) <= reach and
+      (world.current.kind notin {AttackAction, GiveAction} or
+      world.map.clearReach(world.creature.position, target)):
+      if world.current.kind in {AttackAction, GiveAction} and
+        world.villagers[person].moving:
+        world.path = @[target]
+      else:
+        world.path.setLen(0)
       world.waypoint = 0
+      let delta = target - world.creature.position
+      if lengthSq(delta) > 0.001'f:
+        world.creature.facing = arctan2(delta.x, delta.y)
     else:
       world.elapsed = 0
       if world.path.len == 0 or world.waypoint >= world.path.len or
@@ -682,8 +1138,20 @@ proc step*(world: var World) =
       distance = 0
   if world.waypoint < world.path.len:
     world.creature.energy = max(0'f, world.creature.energy - Dt * 0.08'f)
-    return
-  world.creature.moving = false
+    if world.current.kind notin {AttackAction, GiveAction} or
+      (world.current.kind == GiveAction and person < 0) or
+      length(world.destination(world.current) - world.creature.position) >
+        (if world.current.kind == AttackAction: AttackRange else: 1.25'f) or
+        not world.map.clearReach(world.creature.position,
+        world.destination(world.current)):
+          return
+  world.creature.moving = world.waypoint < world.path.len
+  if world.current.kind == AttackAction:
+    let target = world.destination(world.current)
+    if length(target - world.creature.position) > AttackRange or
+      not world.map.clearReach(world.creature.position, target):
+        world.elapsed = 0
+        return
   world.elapsed += Dt
   let duration =
     if world.current.duration > 0:
@@ -698,6 +1166,8 @@ proc step*(world: var World) =
         6'f
       of DanceAction, WaitAction:
         3'f
+      of AttackAction:
+        AttackWindup
   world.status = case world.current.kind
     of GatherAction: "Gathering " &
       world.sources[world.sourceIndex(world.current.target)].resource.resourceName()
@@ -706,6 +1176,7 @@ proc step*(world: var World) =
     of EatAction: "Having a snack"
     of DanceAction: "Dancing for you"
     of WaitAction: "Waiting here"
+    of AttackAction: "Attacking " & world.targetName(world.current.target)
     else: "Listening"
   if world.elapsed >= duration:
     world.finishAction()
@@ -717,19 +1188,29 @@ proc observation*(world: World): string =
       id, name: string
       x, z: float32
     Supply = object
-      id, name, resource: string
+      id, name, resource, owner: string
       x, z: float32
       amount: int
+      destroyed: bool
     Home = object
-      id, name, supplies: string
+      id, name, supplies, village: string
       x, z, condition, warmth: float32
+      destroyed: bool
     Person = object
-      id, name, home, carrying, activity: string
-      x, z, hunger: float32
+      id, name, home, village, carrying, activity, attitude: string
+      x, z, hunger, sleepiness, health, fear, trust, fearLevel: float32
+      alive, sleeping: bool
+    Settlement = object
+      id, name, hallSupplies, totalSupplies: string
+      x, z, alarm, health: float32
+      wellbeing, harvested, gifts, living, casualties: int
+      destroyed: bool
     Observation = object
-      x, z, energy: float32
-      carrying, hallSupplies, status, note: string
-      carryLimit: int
+      x, z, energy, health, mapHalf, hour: float32
+      carrying, status, note: string
+      carryLimit, day: int
+      night: bool
+      villages: seq[Settlement]
       places: seq[Place]
       sources: seq[Supply]
       households: seq[Home]
@@ -738,37 +1219,90 @@ proc observation*(world: World): string =
     x: world.creature.position.x,
     z: world.creature.position.y,
     energy: world.creature.energy,
+    health: world.creature.health,
     carrying: world.creature.cargo.inventoryText(),
     carryLimit: CarryLimit,
-    hallSupplies: world.stock.inventoryText(),
+    mapHalf: MapHalf,
+    hour: clockHour(world.tick, TickRate.int32),
+    day: hudClock(world.tick, TickRate.int32).day,
+    night: isNight(clockHour(world.tick, TickRate.int32)),
     status: world.status,
     note: "Gather fills remaining carrying space from a named source. " &
       "Farm grain belongs to the villagers; berries and fish are wild. " &
       "Pine and oak are fallen wood; stone is loose quarry stone. " &
       "Give transfers all carried supplies to hall/village, a hut, or a " &
       "named person. People take materials home and eat when hungry. " &
+      "Hunger and sleepiness fill toward 100 when needs go unmet. " &
+      "Villagers go home to sleep much sooner at night, from 18:00 to 06:00. " &
+      "Homeless residents seek shelter at an intact hall or sleep outside. " &
+      "Sleepiness falls while sleeping; urgent hunger or " &
+      "danger wakes them. One full day lasts five real minutes. " &
       "Huts consume food and firewood; pine gives 35 warmth, oak 50. " &
       "Each repair uses two stone and one oak wood for 35 condition. " &
       "Villagers act independently; you cannot order them around. " &
+      "Attack strikes one named living villager, hut, or village hall once " &
+      "for 35 damage after walking within reach. Huts use condition as " &
+      "health. Zero health is permanent death or destruction. Attack a " &
+      "resource source once to destroy its stock and stop its regrowth. " &
+      "Destroyed buildings lose stored supplies and cannot receive gifts, " &
+      "shelter residents, or be rebuilt yet. Injured villagers and nearby " &
+      "witnesses flee; their fear rises quickly and trust falls. " &
+      "Villagers start wary of Moss. Real gifts to them, their household, " &
+      "or village hall raise trust and reduce fear. Fear fades slowly; " &
+      "trust does not recover without help. High-fear villagers flee when " &
+      "Moss approaches. Neutral trust begins at 20, friendly at 45, " &
+      "and allied at 75. " &
+      "Dead villagers cannot work or receive gifts; their cargo stays " &
+      "with their body. There is no healing or revival yet. Stop cancels " &
+      "the current plan before any unfinished strike lands. " &
+      "Our village means Willow. Bracken and Reedbank are independent " &
+      "neighbors competing for the same wild supplies and finite stone. " &
+      "People use only their own village hall and farms, but everyone " &
+      "can gather shared resources. Supplied households gather communal " &
+      "reserves of 12 food, 8 wood, and 6 stone. Wellbeing averages actual " &
+      "hunger, home condition, and warmth, not military strength. " &
       "Berries, grain, fish and fallen wood replenish slowly; stone is finite. " &
       "North is negative z, east is positive x."
   )
+  for i, village in world.villages:
+    var living, casualties: int
+    for person in world.villagers:
+      if world.households[person.home].village == i:
+        if person.health > 0: inc living
+        else: inc casualties
+    state.villages.add Settlement(id: village.id, name: village.name,
+      hallSupplies: village.stock.inventoryText(),
+      totalSupplies: world.villageSupplies(i).inventoryText(),
+      x: village.position.x, z: village.position.y,
+      wellbeing: world.villageWellbeing(i), harvested: village.harvested,
+      gifts: village.gifts, alarm: village.alarm, health: village.health,
+      living: living, casualties: casualties, destroyed: village.health <= 0)
   for place in world.map.landmarks:
     state.places.add Place(id: place.id, name: place.name,
       x: place.position.x, z: place.position.y)
   for source in world.sources:
     state.sources.add Supply(id: source.id, name: source.name,
       resource: source.resource.resourceName(), amount: source.amount,
+      destroyed: source.destroyed,
+      owner: (if source.owner < 0: "shared"
+        else: world.villages[source.owner].id),
       x: source.position.x, z: source.position.y)
   for house in world.households:
     state.households.add Home(id: house.id, name: house.name,
       supplies: house.stock.inventoryText(), condition: house.integrity,
+      destroyed: house.integrity <= 0,
+      village: world.villages[house.village].id,
       warmth: house.fuel, x: house.position.x, z: house.position.y)
   for person in world.villagers:
     state.villagers.add Person(id: person.id, name: person.name,
       home: world.households[person.home].id,
+      village: world.villages[world.households[person.home].village].id,
       carrying: person.cargo.inventoryText(), activity: person.activity,
-      hunger: person.hunger, x: person.position.x, z: person.position.y)
+      hunger: person.hunger, sleepiness: person.sleepiness,
+      sleeping: person.sleeping, health: person.health, fear: person.fear,
+      trust: person.trust, fearLevel: person.fearLevel,
+      attitude: person.attitude(),
+      alive: person.health > 0, x: person.position.x, z: person.position.y)
   state.toJson()
 
 proc saveWorld*(world: World, path: string) =
@@ -776,8 +1310,9 @@ proc saveWorld*(world: World, path: string) =
   try:
     createDir(path.parentDir)
     var saved = WorldSave(
-      version: 2, seed: world.map.seed, creature: world.creature,
-      stock: world.stock, sources: world.sources,
+      version: 8, seed: world.map.seed, tick: world.tick,
+      creature: world.creature,
+      villages: world.villages, sources: world.sources,
       households: world.households, villagers: world.villagers
     )
     for person in saved.villagers.mitems:
@@ -826,6 +1361,68 @@ proc legacyPosition(map: MonsterMap, position: Vec2): Vec2 =
             discard
   raise newException(MonsterError, "Monster save has no nearby open ground.")
 
+proc validateCombatFields(body: string) =
+  ## Rejects missing combat state instead of turning absent health into death.
+  let document = parseJson(body)
+  if document.kind != JObject or not document.hasKey("villagers") or
+    not document.hasKey("villages") or
+    document["villagers"].kind != JArray or
+    document["villages"].kind != JArray:
+      raise newException(MonsterError, "Monster combat save is incomplete.")
+  for person in document["villagers"]:
+    if person.kind != JObject:
+      raise newException(MonsterError, "Monster combat save is incomplete.")
+    for field in ["health", "fear", "hitTime"]:
+      if not person.hasKey(field) or person[field].kind notin {JInt, JFloat}:
+        raise newException(MonsterError, "Monster combat save is incomplete.")
+  for village in document["villages"]:
+    if village.kind != JObject or not village.hasKey("alarm") or
+      village["alarm"].kind notin {JInt, JFloat}:
+        raise newException(MonsterError, "Monster combat save is incomplete.")
+
+proc validateNeedsFields(body: string) =
+  ## Requires an explicit clock and needs instead of accepting missing zeros.
+  let document = parseJson(body)
+  if not document.hasKey("tick") or document["tick"].kind != JInt or
+    document["tick"].getBiggestInt() < 0 or
+    document["tick"].getBiggestInt() > high(int32).int64:
+      raise newException(MonsterError, "Monster clock save is invalid.")
+  for person in document["villagers"]:
+    if not person.hasKey("sleepiness") or
+      person["sleepiness"].kind notin {JInt, JFloat} or
+      not person.hasKey("sleeping") or person["sleeping"].kind != JBool:
+        raise newException(MonsterError, "Monster needs save is incomplete.")
+
+proc validateHealthFields(body: string) =
+  ## Requires explicit health for Moss and each village hall in newer saves.
+  let document = parseJson(body)
+  if not document.hasKey("creature") or
+    document["creature"].kind != JObject or
+    not document["creature"].hasKey("health") or
+    document["creature"]["health"].kind notin {JInt, JFloat}:
+      raise newException(MonsterError, "Monster health save is incomplete.")
+  for village in document["villages"]:
+    if not village.hasKey("health") or
+      village["health"].kind notin {JInt, JFloat}:
+        raise newException(MonsterError, "Monster health save is incomplete.")
+
+proc validateRelationshipFields(body: string) =
+  ## Requires explicit destruction and relationship state in newer saves.
+  let document = parseJson(body)
+  if not document.hasKey("sources") or document["sources"].kind != JArray:
+    raise newException(MonsterError, "Monster destruction save is incomplete.")
+  for source in document["sources"]:
+    if source.kind != JObject or not source.hasKey("destroyed") or
+      source["destroyed"].kind != JBool:
+        raise newException(MonsterError,
+          "Monster destruction save is incomplete.")
+  for person in document["villagers"]:
+    for field in ["trust", "fearLevel"]:
+      if not person.hasKey(field) or
+        person[field].kind notin {JInt, JFloat}:
+          raise newException(MonsterError,
+            "Monster relationship save is incomplete.")
+
 proc restoreWorld*(world: var World, path: string) =
   ## Atomically restores physical state and resumes independent NPC needs.
   if not fileExists(path):
@@ -836,9 +1433,19 @@ proc restoreWorld*(world: var World, path: string) =
     let
       body = readFile(path)
       saved = body.fromJson(WorldSave)
-    if saved.seed != world.map.seed or saved.version notin [1, 2]:
+    if saved.seed != world.map.seed or saved.version notin 1 .. 8:
       raise newException(MonsterError, "Monster save version or seed differs.")
+    if saved.version >= 4:
+      validateCombatFields(body)
+    if saved.version >= 6:
+      validateNeedsFields(body)
+    if saved.version >= 7:
+      validateHealthFields(body)
+    if saved.version >= 8:
+      validateRelationshipFields(body)
     var restored = newWorld(world.map)
+    if saved.version >= 6:
+      restored.tick = saved.tick
     if saved.version == 1:
       let old = body.fromJson(LegacySave)
       if old.creature.food notin 0 .. CarryLimit or
@@ -852,8 +1459,8 @@ proc restoreWorld*(world: var World, path: string) =
       restored.creature.facing = old.creature.facing
       restored.creature.energy = old.creature.energy
       restored.creature.cargo[BerriesResource] = old.creature.food
-      restored.stock = default(Inventory)
-      restored.stock[BerriesResource] = old.villageFood
+      restored.villages[0].stock = default(Inventory)
+      restored.villages[0].stock[BerriesResource] = old.villageFood
       let
         berries = restored.sourceIndex("berries")
         farm = restored.sourceIndex("farm")
@@ -862,30 +1469,101 @@ proc restoreWorld*(world: var World, path: string) =
       if farm >= 0:
         restored.sources[farm].amount = old.farmFood
     else:
-      if not world.map.validPosition(saved.creature.position) or
-        not saved.creature.cargo.validInventory(CarryLimit) or
-        not (saved.creature.energy >= 0 and saved.creature.energy <= 100) or
-        classify(saved.creature.facing) in {fcNan, fcInf, fcNegInf} or
-        not saved.stock.validInventory() or
-        saved.sources.len != restored.sources.len or
-        saved.households.len != restored.households.len or
-        saved.villagers.len != restored.villagers.len:
+      let migrating = saved.version == 2
+      var state = saved
+      if migrating:
+        let old = body.fromJson(ResourceSave)
+        state.villages = restored.villages
+        state.villages[0].stock = old.stock
+        state.creature.position = world.map.legacyPosition(old.creature.position)
+        for person in state.villagers.mitems:
+          person.position = world.map.legacyPosition(person.position)
+          person.supplyingHall = false
+      elif saved.version < 5:
+        state.creature.position = world.map.legacyPosition(
+          state.creature.position)
+        for person in state.villagers.mitems:
+          person.position = world.map.legacyPosition(person.position)
+      if saved.version < 5:
+        for source in state.sources.mitems:
+          let index = restored.sourceIndex(source.id)
+          if index >= 0 and
+            ((source.id == "fish" and source.position == vec2(15, -6)) or
+            (source.id == "south_fish" and source.position == vec2(22, 30))):
+              source.position = restored.sources[index].position
+      if saved.version < 4:
+        for village in state.villages.mitems:
+          village.alarm = 0
+        for person in state.villagers.mitems:
+          person.health = 100
+          person.fear = 0
+          person.hitTime = 0
+      if saved.version < 6:
+        for person in state.villagers.mitems:
+          person.sleepiness = InitialSleepiness
+          person.sleeping = false
+      if saved.version < 7:
+        state.creature.health = 100
+        for village in state.villages.mitems:
+          village.health = 100
+      if saved.version < 8:
+        for source in state.sources.mitems:
+          source.destroyed = false
+        for village in state.villages.mitems:
+          if village.health <= 0:
+            village.stock = default(Inventory)
+        for house in state.households.mitems:
+          if house.integrity <= 0:
+            house.stock = default(Inventory)
+            house.fuel = 0
+        for person in state.villagers.mitems:
+          person.trust = 0
+          person.fearLevel = if person.fear > 0: 80'f else: InitialFear
+      if not world.map.validPosition(state.creature.position) or
+        not state.creature.cargo.validInventory(CarryLimit) or
+        not (state.creature.energy >= 0 and state.creature.energy <= 100) or
+        not (state.creature.health >= 0 and state.creature.health <= 100) or
+        classify(state.creature.facing) in {fcNan, fcInf, fcNegInf} or
+        state.villages.len != restored.villages.len or
+        state.sources.len !=
+          (if migrating: min(6, restored.sources.len) else: restored.sources.len) or
+        state.households.len !=
+          (if migrating: min(3, restored.households.len) else: restored.households.len) or
+        state.villagers.len !=
+          (if migrating: min(6, restored.villagers.len) else: restored.villagers.len):
           raise newException(MonsterError, "Monster save contains invalid state.")
-      restored.creature = saved.creature
-      restored.stock = saved.stock
-      for i, source in saved.sources:
+      restored.creature = state.creature
+      for i, village in state.villages:
+        let expected = restored.villages[i]
+        if village.id != expected.id or village.position != expected.position or
+          not village.stock.validInventory() or
+          village.harvested notin 0 .. 1000000000 or
+          village.gifts notin 0 .. 1000000000 or
+          not (village.health >= 0 and village.health <= 100) or
+          not (village.alarm >= 0 and village.alarm <= 30):
+            raise newException(MonsterError, "Monster village save is invalid.")
+        restored.villages[i].stock = village.stock
+        restored.villages[i].harvested = village.harvested
+        restored.villages[i].gifts = village.gifts
+        restored.villages[i].alarm = village.alarm
+        restored.villages[i].health = village.health
+      for i, source in state.sources:
         let expected = restored.sources[i]
         if source.id != expected.id or source.resource != expected.resource or
           source.position != expected.position or
           source.capacity != expected.capacity or
+          (not migrating and source.owner != expected.owner) or
           source.amount notin 0 .. expected.capacity or
+          (source.destroyed and source.amount != 0) or
           not (source.elapsed >= 0 and source.elapsed <= 50):
             raise newException(MonsterError, "Monster resource save is invalid.")
         restored.sources[i].amount = source.amount
         restored.sources[i].elapsed = source.elapsed
-      for i, house in saved.households:
+        restored.sources[i].destroyed = source.destroyed
+      for i, house in state.households:
         let expected = restored.households[i]
         if house.id != expected.id or house.position != expected.position or
+          (not migrating and house.village != expected.village) or
           not house.stock.validInventory() or
           not (house.integrity >= 0 and house.integrity <= 100) or
           not (house.fuel >= 0 and house.fuel <= 100):
@@ -893,18 +1571,52 @@ proc restoreWorld*(world: var World, path: string) =
         restored.households[i].stock = house.stock
         restored.households[i].integrity = house.integrity
         restored.households[i].fuel = house.fuel
-      for i, person in saved.villagers:
+      for i, person in state.villagers:
         let expected = restored.villagers[i]
         if person.id != expected.id or person.home != expected.home or
           not world.map.validPosition(person.position) or
           not person.cargo.validInventory(12) or
           not (person.hunger >= 0 and person.hunger <= 100) or
+          not (person.sleepiness >= 0 and person.sleepiness <= 100) or
+          not (person.health >= 0 and person.health <= 100) or
+          not (person.fear >= 0 and person.fear <= FrightDuration) or
+          not (person.trust >= 0 and person.trust <= 100) or
+          not (person.fearLevel >= 0 and person.fearLevel <= 100) or
+          not (person.hitTime >= 0 and person.hitTime <= HitDuration) or
           classify(person.facing) in {fcNan, fcInf, fcNegInf}:
             raise newException(MonsterError, "Monster villager save is invalid.")
+        let
+          house = restored.households[person.home]
+          hall = restored.villages[house.village]
+          restingPlace = if house.integrity > 0: house.position
+            elif hall.health > 0: hall.position else: person.position
+        if person.sleeping and (person.health <= 0 or person.fear > 0 or
+          length(person.position - restingPlace) > 1.1'f):
+            raise newException(MonsterError, "Monster sleeping save is invalid.")
         restored.villagers[i].position = person.position
         restored.villagers[i].facing = person.facing
         restored.villagers[i].cargo = person.cargo
         restored.villagers[i].hunger = person.hunger
+        restored.villagers[i].sleepiness = person.sleepiness
+        restored.villagers[i].sleeping = person.sleeping
+        restored.villagers[i].supplyingHall = person.supplyingHall
+        restored.villagers[i].health = person.health
+        restored.villagers[i].fear = person.fear
+        restored.villagers[i].trust = person.trust
+        restored.villagers[i].fearLevel = person.fearLevel
+        restored.villagers[i].hitTime = person.hitTime
+        if person.sleeping:
+          restored.villagers[i].task = SleepTask
+          restored.villagers[i].target = if house.integrity > 0: house.id
+            elif hall.health > 0: hall.id else: person.id
+          restored.villagers[i].activity = if house.integrity > 0:
+            "Sleeping at home"
+          elif hall.health > 0: "Sleeping at the hall"
+          else: "Sleeping outdoors"
+        if person.health <= 0:
+          restored.villagers[i].activity = "Dead"
+          restored.villagers[i].fear = 0
+          restored.villagers[i].supplyingHall = false
     restored.creature.moving = false
     world = restored
   except IOError, OSError, ValueError:

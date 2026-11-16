@@ -49,6 +49,8 @@ proc serve() {.thread.} =
       body.add socket.recv(length - body.len, timeout = 3000)
     requests.send(body)
     let current = parseDocument(body)["input"].elems[^1]{"content"}.getStr()
+    if current.contains("delayed-attack-fixture"):
+      sleep(120)
     if current.contains("service-failure"):
       socket.send("HTTP/1.1 429 Too Many Requests\r\n" &
         "Content-Length: 2\r\nConnection: close\r\n\r\n{}")
@@ -58,6 +60,18 @@ proc serve() {.thread.} =
         response(Explanation, newJArray())
       elif current.contains("conversation-only"):
         response("I'm listening.", newJArray())
+      elif current.contains("attack-fixture"):
+        response("I'll hit Ada once.", %*[{
+          "kind": "attack", "target": "ada", "x": 0,
+          "z": 0, "duration": 0
+        }])
+      elif current.contains("rival-delivery"):
+        response("I'll bring some stone to Bracken's hall.", %*[
+          {"kind": "gather", "target": "stone", "x": 0,
+            "z": 0, "duration": 0},
+          {"kind": "give", "target": "bracken", "x": 0,
+            "z": 0, "duration": 0}
+        ])
       elif current.contains("resource-delivery"):
         response("I'll bring some stone to the village hall.", %*[
           {"kind": "gather", "target": "stone", "x": 0,
@@ -97,10 +111,11 @@ proc fixture(disconnected: bool): World =
       Landmark(id: "river", position: vec2(6.5'f, 0.5'f))
     ]
   )
-  map.blocked[32 * MapSize + 32] = true
+  let middle = MapSize div 2
+  map.blocked[middle * MapSize + middle] = true
   if disconnected:
     for z in 0 ..< MapSize:
-      map.blocked[z * MapSize + 32] = true
+      map.blocked[z * MapSize + middle] = true
   newWorld(map)
 
 proc frame(world: var World, brain: Brain) =
@@ -108,6 +123,24 @@ proc frame(world: var World, brain: Brain) =
   world.step()
   discard world.receive(brain)
   world.outcomes(brain, "")
+
+proc attackFixture(): World =
+  ## Provides a real target while keeping unrelated NPC errands idle.
+  result = newWorld(MonsterMap(
+    seed: 42,
+    blocked: newSeq[bool](MapSize * MapSize),
+    landmarks: @[
+      Landmark(id: "home", name: "Sleeping glade",
+        position: vec2(-6.5'f, 0.5'f)),
+      Landmark(id: "village", name: "Willow village hall",
+        position: vec2(0.5'f, 6.5'f)),
+      Landmark(id: "miller_hut", name: "Miller's hut",
+        position: vec2(6.5'f, 0.5'f))
+    ]
+  ))
+  for person in result.villagers.mitems:
+    person.hunger = 0
+    person.retry = 1000
 
 proc settle(brain: Brain, tick: var int32) =
   ## Completes one model request without automatically sending queued feedback.
@@ -190,7 +223,7 @@ block:
     doAssert not brain.pending and not brain.explanationPending
     doAssert not world.active and world.actions.len == 0
 
-  block resourceDelivery:
+  for recipient in ["hall", "bracken"]:
     var world = newWorld(MonsterMap(
       seed: 42,
       blocked: newSeq[bool](MapSize * MapSize),
@@ -199,6 +232,8 @@ block:
           position: vec2(-6.5'f, 0.5'f)),
         Landmark(id: "village", name: "Willow village hall",
           position: vec2(0.5'f, 6.5'f)),
+        Landmark(id: "bracken", name: "Bracken hall",
+          position: vec2(40.5'f, 6.5'f)),
         Landmark(id: "stone", name: "Loose stone",
           position: vec2(6.5'f, 0.5'f))
       ]
@@ -206,13 +241,22 @@ block:
     let
       brain = fixtureBrain()
       source = world.sourceIndex("stone")
-      originalStock = world.stock[StoneResource]
+      destination = world.villageIndex(recipient)
+      other = world.villageIndex(
+        if recipient == "hall": "bracken" else: "village")
       deadline = getMonoTime() + initDuration(seconds = 5)
-    doAssert source >= 0
-    let originalStone = world.sources[source].amount
+    doAssert source >= 0 and destination >= 0 and other >= 0
+    let
+      originalStone = world.sources[source].amount
+      originalStock = world.villages[destination].stock[StoneResource]
+      otherStock = world.villages[other].stock
+      destinationPosition = world.villages[destination].position
     defer:
       brain.close()
-    doAssert world.speak(brain, "resource-delivery: bring stone to the hall")
+    let instruction =
+      if recipient == "hall": "resource-delivery: bring stone to our hall"
+      else: "rival-delivery: bring stone to Bracken's hall"
+    doAssert world.speak(brain, instruction)
     while true:
       world.frame(brain)
       doAssert brain.failure.len == 0, brain.failure
@@ -222,18 +266,130 @@ block:
       doAssert getMonoTime() < deadline, "resource delivery did not settle"
       sleep(2)
     doAssert world.creature.cargo.total() == 0
-    doAssert world.stock[StoneResource] == originalStock + CarryLimit
+    doAssert world.villages[destination].stock[StoneResource] ==
+      originalStock + CarryLimit
+    doAssert world.villages[other].stock == otherStock,
+      "A delivery must not affect the other village's stock."
     doAssert world.sources[source].amount == originalStone - CarryLimit
-    doAssert world.creature.position == vec2(0.5'f, 6.5'f)
+    doAssert world.creature.position == destinationPosition
     doAssert requests.peek() == 1
-    let request = receiveRequest()
-    doAssert request.contains("Loose stone")
+    let
+      request = parseDocument(receiveRequest())
+      current = request["input"].elems[^1]{"content"}.getStr()
+      observation = parseDocument(current.split("\n[Teacher says]\n")[0]
+        .split('\n', 1)[1])
+    doAssert observation["villages"].len == 2
+    doAssert current.contains("Willow") and current.contains("Bracken"),
+      "The model must observe separate village destinations."
+    doAssert observation["sources"][0]["name"].getStr() == "Loose stone"
+    doAssert observation["sources"][0].hasKey("owner"),
+      "The model must observe source ownership."
     var deliveryRecorded = false
     for message in brain.messages:
       if message.role == EventMessage and message.text.contains("stone") and
-        message.text.contains("hall"):
+        message.text.contains(
+          if recipient == "hall": "Willow" else: "Bracken"):
           deliveryRecorded = true
     doAssert deliveryRecorded, "The model must receive the actual delivery."
+
+  block singleStrike:
+    var world = attackFixture()
+    let
+      brain = fixtureBrain()
+      target = world.villagerIndex("ada")
+      deadline = getMonoTime() + initDuration(seconds = 5)
+    doAssert target >= 0
+    doAssert world.villagers[target].health == 100
+    defer:
+      brain.close()
+    doAssert world.speak(brain, "attack-fixture: hit Ada once")
+    while true:
+      world.frame(brain)
+      doAssert brain.failure.len == 0, brain.failure
+      if not brain.pending and not brain.explanationPending and
+        not world.active and world.actions.len == 0:
+          break
+      doAssert getMonoTime() < deadline, "single attack did not settle"
+      sleep(2)
+    doAssert world.villagers[target].health == 100 - AttackDamage
+    doAssert world.villagers[target].fear > 0
+    doAssert world.villages[0].alarm > 0
+    doAssert requests.peek() == 1
+    let
+      request = parseDocument(receiveRequest())
+      current = request["input"].elems[^1]{"content"}.getStr()
+      observation = parseDocument(current.split("\n[Teacher says]\n")[0]
+        .split('\n', 1)[1])
+      schema = request["text"]["format"]["schema"]["properties"]
+      actionKinds = schema["actions"]["items"]["properties"]["kind"]["enum"]
+    doAssert %"attack" in actionKinds.elems,
+      "The structured output schema must allow the attack action."
+    doAssert observation["villagers"][target]["health"].getFloat() == 100
+    doAssert observation["villagers"][target]["alive"].getBool()
+    var hits = 0
+    for message in brain.messages:
+      if message.role == EventMessage and
+        message.text.startsWith("Struck Ada for 35 damage."):
+          inc hits
+    doAssert hits == 1, "The actual hit must reach creature memory once."
+    let messageCount = brain.messages.len
+    for tick in 0 ..< TickRate * 5:
+      world.frame(brain)
+    doAssert world.villagers[target].health == 100 - AttackDamage,
+      "One instruction must not start automatic follow-up attacks."
+    doAssert brain.messages.len == messageCount
+    doAssert requests.peek() == 0
+    doAssert not world.active and world.actions.len == 0
+
+  block stopPendingAttack:
+    var world = attackFixture()
+    let
+      brain = fixtureBrain()
+      target = world.villagerIndex("ada")
+      deadline = getMonoTime() + initDuration(seconds = 5)
+    defer:
+      brain.close()
+    doAssert world.speak(brain, "delayed-attack-fixture: hit Ada once")
+    while requests.peek() == 0:
+      world.frame(brain)
+      doAssert getMonoTime() < deadline, "attack request was not sent"
+      sleep(2)
+    doAssert brain.pending
+    doAssert world.speak(brain, "stop"),
+      "Stop must interrupt a pending model request immediately."
+    doAssert not brain.pending
+    doAssert not world.active and world.actions.len == 0
+    discard receiveRequest()
+    let drainUntil = getMonoTime() + initDuration(milliseconds = 300)
+    while getMonoTime() < drainUntil:
+      world.frame(brain)
+      sleep(2)
+    doAssert world.villagers[target].health == 100,
+      "An interrupted model reply must never start its attack."
+    doAssert not world.active and world.actions.len == 0
+    doAssert requests.peek() == 0
+
+  block stopOfflineAttack:
+    var world = attackFixture()
+    let
+      brain = newBrain("", enabled = false)
+      target = world.villagerIndex("ada")
+    defer:
+      brain.close()
+    world.instruct(@[CreatureAction(kind: AttackAction, target: "ada")])
+    for tick in 0 ..< TickRate * 30:
+      world.step()
+      if world.active and world.elapsed > 0:
+        break
+    doAssert world.active and world.elapsed > 0,
+      "The offline stop check must interrupt an actual attack windup."
+    doAssert world.speak(brain, "stop"),
+      "Stop must work even when the model connection is disabled."
+    doAssert not world.active and world.actions.len == 0
+    for tick in 0 ..< TickRate * 2:
+      world.frame(brain)
+    doAssert world.villagers[target].health == 100
+    doAssert requests.peek() == 0
 
   block serviceFailure:
     var world = fixture(true)

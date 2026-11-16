@@ -7,14 +7,20 @@ when not defined(headless):
     std/unicode,
     opengl, pixie, silky, vmath, windy,
     polyworld/[assets, rtscameras, viewers],
-    scenes, ui
+    scenes, ui, hudassets, selections
 
 const RepositoryRoot = currentSourcePath().parentDir.parentDir.parentDir
+
+when not defined(headless):
+  const
+    CameraDistanceMin = 12'f
+    CameraDistanceMax = 50'f
+    CameraDistanceDefault = 34'f
 
 type Options = object
   seed, width, height, frames: int
   offline: bool
-  saveDir, screenshot, prompt, model: string
+  saveDir, screenshot, prompt, model, selection: string
 
 proc options(): Options =
   ## Reads a small native launcher interface and explicit capture options.
@@ -46,6 +52,8 @@ proc options(): Options =
           customSave = true
         of "screenshot":
           result.screenshot = absolutePath(value)
+        of "select":
+          result.selection = value
         of "prompt":
           result.prompt = value
         of "model":
@@ -57,8 +65,11 @@ proc options(): Options =
           echo "Run from the repository: nim r games/monster/monster.nim"
           echo "Options: --model:ID --seed:N --save-dir:PATH --offline"
           echo "Hidden capture: --screenshot:PATH [--prompt:TEXT] [--frames:N]"
+          echo "Inspect a profile on launch: --select:moss or a person/place ID."
           echo "Or compile with -d:takeScreenshot (default: output/monster.png)."
           echo "Camera: right-drag to pan, wheel to zoom, F to find Moss."
+          echo "Click or drag the minimap to look around; click Moss to follow."
+          echo "Left-click a villager, house, or stash to inspect it."
           echo "Conversation: Enter to speak, Escape to release focus."
           quit(0)
         else:
@@ -162,8 +173,9 @@ else:
     var world = newWorld(generateMap(settings.seed))
     world.restoreWorld(savePath)
     createDir(atlasPath.parentDir)
-    let builder = newHudAtlas(2048)
+    let builder = newHudAtlas(4096)
     builder.addFonts()
+    builder.addHudAssets()
     builder.write(atlasPath)
     let (window, sk) = initGameWindow(
       "Monster / Polyworld", atlasPath,
@@ -184,7 +196,7 @@ else:
       chat = initChatUi()
       clock: ViewingClock
       accumulator = 0'f
-      cameraDistance = 34'f
+      cameraDistance = CameraDistanceDefault
       cameraTarget = rtsFollowFrame(
         vec3(world.creature.position.x, 0, world.creature.position.y),
         cameraDistance, 0.23'f
@@ -193,6 +205,13 @@ else:
       frame = 0
       autoSent = false
       lastSave = epochTime()
+    if settings.selection.len > 0:
+      let selected = world.selectionById(settings.selection)
+      if selected.kind == NoSelection:
+        raise newException(MonsterError,
+          "Unknown selection: " & settings.selection)
+      discard chat.select(world, selected)
+      following = selected.kind == MossSelection
     let started = epochTime()
     window.installInput(chat.addr)
     while not window.closeRequested:
@@ -210,11 +229,13 @@ else:
       discard world.receive(brain)
       world.outcomes(brain, savePath)
       discard world.sendPrompt(brain, settings.prompt, autoSent)
-      chat.scale = clamp(window.size.y.float32 / 900'f, 0.75'f, 2'f)
+      chat.scale = chatScale(window.size.vec2)
+      chat.updateMinimapCamera(window, world, cameraTarget, following)
       let blocked = chat.mouseOverUi(window)
       if not blocked:
         cameraDistance = clamp(
-          cameraDistance - window.scrollDelta.y * 2, 12'f, 80'f
+          cameraDistance - window.scrollDelta.y * 2,
+          CameraDistanceMin, CameraDistanceMax
         )
         if window.buttonDown[MouseRight] or window.buttonDown[MouseMiddle]:
           let movement = window.mouseDelta.vec2 * cameraDistance * 0.0016'f
@@ -231,7 +252,9 @@ else:
         if window.buttonPressed[KeyF]:
           chat.focusRequested = true
       if chat.focusRequested:
+        discard chat.select(world, Selection())
         following = true
+        cameraDistance = CameraDistanceDefault
         chat.focusRequested = false
       if following:
         let target = rtsFollowFrame(
@@ -241,17 +264,26 @@ else:
         cameraTarget = mix(cameraTarget, target, damping(8, dt))
       cameraTarget.x = clamp(cameraTarget.x, -MapHalf + 3, MapHalf - 3)
       cameraTarget.z = clamp(cameraTarget.z, -MapHalf + 3, MapHalf - 3)
+      let renderTime = (world.tick.float32 +
+        accumulator * TickRate.float32) / TickRate.float32
+      if not blocked and window.buttonPressed[MouseLeft] and
+        not window.buttonDown[MouseRight] and
+        not window.buttonDown[MouseMiddle]:
+          let picked = scene.pickSelection(window, world, cameraTarget,
+            cameraDistance, renderTime)
+          if chat.select(world, picked):
+            following = chat.selection.kind == MossSelection
       scene.drawScene(
         window, world, cameraTarget, cameraDistance,
-        (world.tick.float32 + accumulator * TickRate.float32) /
-          TickRate.float32
+        renderTime, chat.selection
       )
       sk.uiScale = chat.scale
       sk.beginUi(window, window.size)
       let spoken = sk.drawUi(
         window, world, chat, brain.messages,
         brain.pending or brain.explanationPending,
-        brain.available(), brain.failure
+        brain.available(), brain.failure, cameraTarget, cameraDistance,
+        following
       )
       sk.endUi()
       window.syncInput(chat)

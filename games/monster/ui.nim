@@ -1,8 +1,10 @@
 import
   std/[strutils, times, unicode],
   bumpy, chroma, pixie, silky, vmath,
-  polyworld/gameuis,
-  common, resources
+  polyworld/[gameuis, rtscameras],
+  common, minimaps, hudlayouts, hudassets, selections
+
+export hudlayouts
 
 when defined(silkyTesting):
   import silky/testwindow
@@ -17,11 +19,13 @@ const
 
 type
   ChatUi* = object
+    selection*: Selection
     scale*: float32 = 1
     typing*: bool
     input*: string
     scroll*: float32
     focusRequested*: bool
+    minimapPanning*: bool
     cursor: int
     selected: bool
     inputScroll: float32
@@ -30,12 +34,25 @@ type
     historyLines: seq[seq[string]]
     historyHeights: seq[float32]
     localError: string
-  ChatLayout = object
-    panel, history, input, send, focus, stats, village: GameUiPanel
+    historyFrame*: FrameState
+    utilityFrame*: FrameState
+    utilitySelection: Selection
 
 proc initChatUi*(): ChatUi {.raises: [].} =
   ## Begins with the creature's conversation ready for typing.
-  ChatUi(scale: 1, typing: true)
+  ChatUi(scale: 1, typing: true, historyFrame: FrameState(),
+    utilityFrame: FrameState())
+
+proc select*(ui: var ChatUi, world: World, picked: Selection): bool =
+  ## Inspects a picked entity without issuing orders or changing the draft.
+  if picked.kind == NoSelection:
+    return false
+  let selected = world.resolveSelection(picked)
+  if selected != ui.selection:
+    ui.utilityFrame = FrameState()
+    ui.utilitySelection = selected
+  ui.selection = selected
+  true
 
 proc restoreInput*(ui: var ChatUi, text: string) =
   ## Restores an unsent message with its caret ready for a retry.
@@ -54,48 +71,54 @@ proc drawLabel(
   align = LeftAlign
 ) =
   ## Places a clipped label within an explicit UI rectangle.
+  when defined(silkyTesting):
+    sk.beginWidget("label", text = text,
+      rect = rect(origin.x, origin.y, size.x, size.y))
   discard sk.drawText(
     font, text, origin, tint,
     maxWidth = size.x, maxHeight = size.y,
     hAlign = align, vAlign = MiddleAlign
   )
-
-proc layout(size: Vec2): ChatLayout {.raises: [].} =
-  ## Keeps the conversation centered with clear space above for the creature.
-  let
-    width = min(760'f, max(280'f, size.x - 32))
-    height = min(310'f, max(220'f, size.y * 0.35'f))
-    origin = vec2((size.x - width) / 2, max(140'f, size.y - height - 20))
-  result.panel = GameUiPanel(origin: origin, size: vec2(width, height))
-  result.history = GameUiPanel(
-    origin: origin + vec2(24, 18),
-    size: vec2(width - 48, height - 98)
-  )
-  result.input = GameUiPanel(
-    origin: origin + vec2(18, height - 66),
-    size: vec2(width - 126, 44)
-  )
-  result.send = GameUiPanel(
-    origin: origin + vec2(width - 96, height - 66),
-    size: vec2(78, 44)
-  )
-  result.stats = GameUiPanel(
-    origin: vec2(size.x - 320, 20), size: vec2(300, 126)
-  )
-  result.focus = GameUiPanel(
-    origin: vec2(size.x - 172, 158), size: vec2(152, 30)
-  )
-  if size.x >= 960 and result.panel.origin.y >= 430:
-    result.village = GameUiPanel(origin: vec2(20, 20), size: vec2(286, 390))
+  when defined(silkyTesting):
+    sk.endWidget()
 
 proc mouseOverUi*(ui: ChatUi, window: Window): bool =
-  ## Prevents camera gestures from stealing conversation and button input.
+  ## Reserves the panels and an active minimap drag from world gestures.
   let
     scale = max(0.1'f, ui.scale)
-    boxes = layout(window.size.vec2 / scale)
+    boxes = chatLayout(window.size.vec2 / scale)
     mouse = window.mousePos.vec2 / scale
-  boxes.panel.contains(mouse) or boxes.focus.contains(mouse) or
-    boxes.stats.contains(mouse) or boxes.village.contains(mouse)
+  ui.minimapPanning or
+    (not ui.historyFrame.isNil and ui.historyFrame.scrollingY) or
+    (not ui.utilityFrame.isNil and ui.utilityFrame.scrollingY) or
+    boxes.frame.contains(mouse)
+
+proc updateMinimapCamera*(
+  ui: var ChatUi,
+  window: Window,
+  world: World,
+  cameraTarget: var Vec3,
+  following: var bool
+) =
+  ## Navigates the map by dragging, or follows Moss when its icon is clicked.
+  let
+    scale = max(0.1'f, ui.scale)
+    panel = chatLayout(window.size.vec2 / scale).minimap
+    area = panel.minimapArea()
+    mouse = window.mousePos.vec2 / scale
+  if window.buttonPressed[MouseLeft] and area.contains(mouse):
+    if creatureHit(mouse, panel, world):
+      ui.minimapPanning = false
+      discard ui.select(world, Selection())
+      ui.focusRequested = true
+    else:
+      ui.minimapPanning = true
+      following = false
+  if not window.buttonDown[MouseLeft]:
+    ui.minimapPanning = false
+  if ui.minimapPanning:
+    let point = minimapWorldPoint(mouse, area.origin, area.size, MapHalf)
+    cameraTarget = vec3(point.x, 0, point.y)
 
 proc previousRune(text: string, cursor: int): int {.raises: [].} =
   ## Moves to the previous UTF-8 boundary without cutting a character.
@@ -212,23 +235,17 @@ proc button(
   window: Window,
   panel: GameUiPanel,
   text: string,
-  enabled = true,
-  accent = false
+  enabled = true
 ): bool =
-  ## Draws and activates one explicit panel button.
-  let over = panel.contains(window.mousePos.vec2 / sk.uiScale)
-  sk.drawRect(
-    panel.origin,
-    panel.size,
-    if not enabled: rgbx(0, 0, 0, 80)
-    elif over: rgbx(0, 0, 0, 200)
-    else: Panel
-  )
-  sk.outline(panel,
-    if enabled and accent: rgbx(150, 150, 150, 150) else: Line)
-  sk.drawLabel(
-    text, panel.origin, panel.size, Ink, "Hud", CenterAlign
-  )
+  ## Activates the carved button without painting over its illustrated rim.
+  let
+    hit = GameUiPanel(origin: panel.origin - vec2(8, 7),
+      size: panel.size + vec2(16, 14))
+    over = hit.contains(window.mousePos.vec2 / sk.uiScale)
+    font = if panel.size.y >= 17: "Hud" else: "Small"
+  if over and enabled:
+    sk.drawRect(panel.origin, panel.size, rgbx(110, 91, 51, 90))
+  sk.drawLabel(text, panel.origin, panel.size, Ink, font, CenterAlign)
   enabled and over and window.buttonPressed[MouseLeft]
 
 proc keyboard(ui: var ChatUi, window: Window): bool =
@@ -291,41 +308,34 @@ proc keyboard(ui: var ChatUi, window: Window): bool =
     ui.selected = false
 
 proc drawInput(sk: Silky, panel: GameUiPanel, ui: var ChatUi) =
-  ## Keeps the caret visible while clipping long text to the editor bounds.
-  sk.drawRect(panel.origin, panel.size, rgbx(0, 0, 0, 80))
-  sk.outline(panel, if ui.typing: Ink else: Line)
+  ## Keeps editable text and its caret inside the artwork's narrow input well.
   let
-    origin = panel.origin + vec2(12, 12)
-    width = panel.size.x - 24
-    caret = sk.getTextSize("Default", ui.input[0 ..< ui.cursor]).x
+    font = if panel.size.y >= 17: "Hud" else: "Small"
+    origin = panel.origin + vec2(3, 0)
+    width = max(1'f, panel.size.x - 6)
+    caret = sk.getTextSize(font, ui.input[0 ..< ui.cursor]).x
   ui.inputScroll = max(0'f, min(ui.inputScroll, caret))
   if caret - ui.inputScroll > width - 4:
     ui.inputScroll = caret - width + 4
-  sk.pushClipRect(rect(origin - vec2(0, 3), vec2(width, 29)))
+  sk.pushClipRect(rect(origin, vec2(width, panel.size.y)))
   if ui.selected and ui.input.len > 0:
-    sk.drawRect(
-      origin - vec2(ui.inputScroll, 2),
-      vec2(sk.getTextSize("Default", ui.input).x, 25),
-      rgbx(55, 55, 55, 55)
-    )
-  if ui.input.len == 0:
-    discard sk.drawText(
-      "Default", "Tell me where to go, or teach me something...",
-      origin, Ink, maxWidth = width, maxHeight = 28
-    )
-  else:
-    discard sk.drawText(
-      "Default", ui.input, origin - vec2(ui.inputScroll, 0), Ink,
-      clip = false
-    )
+    sk.drawRect(origin - vec2(ui.inputScroll, 0),
+      vec2(sk.getTextSize(font, ui.input).x, panel.size.y),
+      rgbx(85, 107, 137, 150))
+  let value = if ui.input.len == 0: "Talk to Moss..." else: ui.input
+  discard sk.drawText(font, value,
+    origin - vec2(ui.inputScroll, 0), Ink,
+    maxWidth = max(width, sk.getTextSize(font, value).x),
+    maxHeight = panel.size.y, clip = false, vAlign = MiddleAlign)
   if ui.typing and (epochTime() * 2).int mod 2 == 0:
-    sk.drawRect(origin + vec2(caret - ui.inputScroll, 0), vec2(1, 20), Ink)
+    sk.drawRect(origin + vec2(caret - ui.inputScroll, 1),
+      vec2(1, max(1'f, panel.size.y - 2)), Ink)
   sk.popClipRect()
 
 proc drawHistory(
   sk: Silky,
   window: Window,
-  panel: GameUiPanel,
+  panel, scrollbar: GameUiPanel,
   ui: var ChatUi,
   messages: openArray[Message]
 ) =
@@ -345,16 +355,27 @@ proc drawHistory(
         continue
       let
         font = if message.role == EventMessage: "Hud" else: "Default"
-        wrapped = sk.textLines(message.text, panel.size.x - 18, font)
-        height = wrapped.len.float32 * 22 +
-          (if message.role == EventMessage: 8'f else: 28'f)
+        text =
+          case message.role
+          of PlayerMessage: "You: " & message.text
+          of CreatureMessage: "Moss: " & message.text
+          else: message.text
+        wrapped = sk.textLines(text, panel.size.x - 4, font)
+        height = wrapped.len.float32 * 22 + 8
       ui.historyLines.add wrapped
       ui.historyHeights.add height
       ui.historyTotal += height
-  let total = ui.historyTotal
-  if panel.contains(window.mousePos.vec2 / sk.uiScale):
-    ui.scroll += window.scrollDelta.y * 2 / sk.uiScale
-  ui.scroll = clamp(ui.scroll, 0'f, max(0'f, total - panel.size.y))
+  let
+    total = ui.historyTotal
+    frameRect = rect(panel.origin,
+      vec2(scrollbar.origin.x + scrollbar.size.x - panel.origin.x,
+        panel.size.y))
+  if ui.historyFrame.isNil:
+    ui.historyFrame = FrameState()
+  ui.historyFrame.scrollPos = vec2(0, ui.scroll)
+  sk.frameScrollbars(window, ui.historyFrame, frameRect,
+    vec2(frameRect.w, total), vec2(1, -1))
+  ui.scroll = ui.historyFrame.scrollPos.y
   var y = panel.origin.y + min(0'f, panel.size.y - total) + ui.scroll
   sk.pushClipRect(rect(panel.origin, panel.size))
   if messages.len == 0:
@@ -374,12 +395,7 @@ proc drawHistory(
     if y + ui.historyHeights[i] >= panel.origin.y and
       y < panel.origin.y + panel.size.y:
         let font = if message.role == EventMessage: "Hud" else: "Default"
-        if message.role != EventMessage:
-          discard sk.drawText(
-            "Small", if message.role == PlayerMessage: "YOU" else: "CREATURE",
-            vec2(panel.origin.x, y), Ink
-          )
-        let top = y + (if message.role == EventMessage: 0'f else: 19'f)
+        let top = y
         for j, line in ui.historyLines[i]:
           discard sk.drawText(
             font, line, vec2(panel.origin.x, top + j.float32 * 22),
@@ -388,45 +404,6 @@ proc drawHistory(
           )
     y += ui.historyHeights[i]
   sk.popClipRect()
-  if total > panel.size.y:
-    let
-      thumb = max(16'f, panel.size.y * panel.size.y / total)
-      fraction = 1 - ui.scroll / max(1'f, total - panel.size.y)
-    sk.drawRect(
-      panel.origin + vec2(panel.size.x - 3, fraction * (panel.size.y - thumb)),
-      vec2(2, thumb), rgbx(160, 160, 160, 160)
-    )
-
-proc drawVillage(sk: Silky, panel: GameUiPanel, world: World) =
-  ## Shows communal supplies, household needs, and residents' current work.
-  if panel.size.x <= 0:
-    return
-  sk.plate(panel)
-  let origin = panel.origin + vec2(14, 10)
-  sk.drawLabel("VILLAGE HALL", origin, vec2(258, 18), Ink, "Small")
-  let supplies = [
-    "Berries " & $world.stock[BerriesResource] & "   Grain " &
-      $world.stock[GrainResource] & "   Fish " & $world.stock[FishResource],
-    "Pine " & $world.stock[SoftwoodResource] & "   Oak " &
-      $world.stock[HardwoodResource] & "   Stone " & $world.stock[StoneResource]
-  ]
-  for i, text in supplies:
-    sk.drawLabel(text, origin + vec2(0, (25 + i * 22).float32),
-      vec2(258, 20), Ink, "Small")
-  var y = 80'f
-  for household in world.households:
-    sk.drawLabel(household.name, origin + vec2(0, y),
-      vec2(258, 18), Ink, "Small")
-    sk.drawLabel("Food " & $household.stock.foodTotal() &
-      "   Warmth " & $int(household.fuel) & "%   Home " &
-      $int(household.integrity) & "%", origin + vec2(0, y + 18),
-      vec2(258, 18), Ink, "Small")
-    y += 42
-  y += 8
-  for villager in world.villagers:
-    sk.drawLabel(villager.name & ": " & villager.activity,
-      origin + vec2(0, y), vec2(258, 20), Ink, "Small")
-    y += 23
 
 proc drawUi*(
   sk: Silky,
@@ -436,43 +413,44 @@ proc drawUi*(
   messages: openArray[Message],
   pending: bool,
   available: bool,
-  failure: string
+  failure: string,
+  cameraTarget = vec3(0),
+  cameraDistance = 34'f,
+  following = true
 ): string =
   ## Draws the creature's conversation and returns a newly submitted message.
   let
     size = window.size.vec2 / sk.uiScale
-    boxes = layout(size)
+    boxes = chatLayout(size)
   ui.cursor = clamp(ui.cursor, 0, ui.input.len)
   var submit = ui.keyboard(window)
+  let inputHit = GameUiPanel(origin: boxes.input.origin - vec2(6, 7),
+    size: boxes.input.size + vec2(12, 14))
   if window.buttonPressed[MouseLeft] and
-    boxes.input.contains(window.mousePos.vec2 / sk.uiScale):
+    inputHit.contains(window.mousePos.vec2 / sk.uiScale):
       ui.typing = true
       ui.cursor = ui.input.len
       ui.selected = false
-  let stats = boxes.stats
-  sk.plate(stats)
-  sk.drawLabel("YOUR CREATURE", stats.origin + vec2(16, 10),
-    vec2(268, 18), Ink, "Small")
-  sk.drawLabel("Energy " & $int(world.creature.energy) & "%",
-    stats.origin + vec2(16, 31), vec2(128, 24), Ink)
-  sk.drawLabel("Carrying " & $world.creature.cargo.total() & "/6",
-    stats.origin + vec2(151, 31), vec2(133, 24), Ink)
-  sk.drawLabel(world.creature.cargo.inventoryText(),
-    stats.origin + vec2(16, 61), vec2(268, 20), Ink, "Small")
-  sk.drawLabel(world.status,
-    stats.origin + vec2(16, 91), vec2(268, 20), Ink, "Small")
-  sk.drawVillage(boxes.village, world)
-  if sk.button(window, boxes.focus, "Find my creature"):
-    ui.focusRequested = true
-  sk.plate(boxes.panel)
-  sk.drawHistory(window, boxes.history, ui, messages)
+  sk.drawRect(boxes.frame.origin + vec2(460, 110) * boxes.artScale,
+    vec2(1115, 545) * boxes.artScale, rgbx(0, 0, 0, 205))
+  sk.drawRect(boxes.frame.origin + vec2(1575, 160) * boxes.artScale,
+    vec2(435, 480) * boxes.artScale, rgbx(0, 0, 0, 205))
+  sk.drawMinimap(boxes.minimap, world, cameraTarget, cameraDistance,
+    size.x / max(1'f, size.y), following)
+  sk.drawHudFrame(boxes.frame)
+  ui.selection = world.resolveSelection(ui.selection)
+  if ui.utilityFrame.isNil or ui.utilitySelection != ui.selection:
+    ui.utilityFrame = FrameState()
+    ui.utilitySelection = ui.selection
+  sk.drawSelectionStats(window, world, boxes, ui.selection, ui.utilityFrame)
   sk.drawInput(boxes.input, ui)
+  let stopping = ui.input.isStopCommand()
   submit = sk.button(window, boxes.send, "Send",
-    available and not pending, accent = true) or submit
+    stopping or (available and not pending)) or submit
   if submit and ui.input.strip().len > 0:
-    if not available:
+    if not available and not stopping:
       ui.localError = "Connect the creature before sending a message."
-    elif pending:
+    elif pending and not stopping:
       ui.localError = "Your creature is still thinking. Your next message is ready."
     else:
       result = ui.input.strip()
@@ -484,11 +462,18 @@ proc drawUi*(
       ui.localError.setLen(0)
       ui.typing = true
   let error = if failure.len > 0: failure else: ui.localError
+  var history = boxes.history
   if error.len > 0:
-    let box = GameUiPanel(
-      origin: boxes.panel.origin - vec2(0, 62),
-      size: vec2(boxes.panel.size.x, 52)
-    )
+    let
+      height = min(62'f, history.size.y)
+      box = GameUiPanel(
+        origin: history.origin + vec2(0, history.size.y - height),
+        size: vec2(history.size.x, height)
+      )
+    history.size.y = max(0'f, history.size.y - height - 10)
     sk.plate(box, rgbx(0, 0, 0, 190))
-    discard sk.drawText("Hud", error, box.origin + vec2(14, 9), Ink,
-      maxWidth = box.size.x - 28, maxHeight = 36, wordWrap = true)
+    discard sk.drawText("Hud", error, box.origin + vec2(8, 3), Ink,
+      maxWidth = box.size.x - 16, maxHeight = box.size.y - 6,
+      wordWrap = true)
+  if history.size.y > 0:
+    sk.drawHistory(window, history, boxes.scrollbar, ui, messages)

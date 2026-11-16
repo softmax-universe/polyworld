@@ -4,13 +4,25 @@ import
   ../[brains, common]
 
 const
-  Observation = """{"x":0,"z":0,"energy":90,"cargo":{},
+  Observation = """{"x":0,"z":0,"energy":90,"carrying":"empty","mapHalf":64,
     "places":[{"id":"village","name":"Willow hall","x":8,"z":2},
-    {"id":"berries","name":"Wild berry patch","x":-7,"z":5}],
+    {"id":"berries","name":"Wild berry patch","x":-7,"z":5},
+    {"id":"bracken","name":"Bracken hall","x":-32,"z":-30}],
+    "villages":[{"id":"village","name":"Willow","hallSupplies":"2 grain",
+    "alarm":0,"living":6,"casualties":0,"health":100,"destroyed":false},
+    {"id":"bracken","name":"Bracken","hallSupplies":"4 pine wood"},
+    {"id":"reedbank","name":"Reedbank","hallSupplies":"empty"}],
+    "sources":[{"id":"quarry","name":"Shared quarry","resource":"stone",
+    "amount":12,"owner":"shared","destroyed":false},{"id":"bracken_farm",
+    "name":"Bracken farm","resource":"grain","owner":"bracken",
+    "amount":0,"destroyed":true}],
     "households":[{"id":"mason_hut","name":"Mason's hut",
-    "integrity":45,"stock":{"stone":0,"oak":0}}],
+    "village":"village","condition":45,"warmth":20,"supplies":"empty",
+    "destroyed":false}],
     "villagers":[{"id":"eli","name":"Eli","hunger":70,
-    "activity":"Gathering stone"}]}"""
+    "health":65,"alive":true,"fear":10,"trust":20,"fearLevel":60,
+    "attitude":"Terrified",
+    "village":"village","activity":"Gathering stone"}]}"""
   Lesson = "I gather wild berries when helping hungry villagers."
   Explanation = "I can't find a way across the river from here."
   InventedLesson = "I should always swim across rivers."
@@ -155,8 +167,8 @@ block:
     action("order", "ada"),
     action("repair", "mason_hut"),
     action("move", "missing"),
-    action("move", "", 32, 0),
-    action("move", "", 0, -32),
+    action("move", "", MapHalf, 0),
+    action("move", "", 0, -MapHalf),
     action("gather", "village"),
     action("gather", "miller_hut"),
     action("gather", "ada"),
@@ -194,7 +206,7 @@ block:
 
 echo "Testing resource sources and individual delivery targets"
 block:
-  for source in ["berries", "farm", "fish", "pine", "oak", "stone"]:
+  for source in SourceIds:
     var reply = answer()
     reply["actions"] = %*[action("move", source), action("gather", source)]
     let parsed = parseReply($reply)
@@ -202,10 +214,7 @@ block:
     doAssert parsed.actions[0].kind == MoveAction
     doAssert parsed.actions[1].kind == GatherAction
     doAssert parsed.actions[1].target == source
-  for recipient in [
-    "village", "hall", "miller_hut", "weaver_hut", "mason_hut",
-    "ada", "ben", "clara", "dara", "eli", "finn"
-  ]:
+  for recipient in DeliveryIds:
     var reply = answer()
     reply["actions"] = %*[
       action("gather", "stone"), action("move", recipient),
@@ -216,6 +225,76 @@ block:
     doAssert parsed.actions[1].kind == MoveAction
     doAssert parsed.actions[2].kind == GiveAction
     doAssert parsed.actions[2].target == recipient
+
+echo "Testing neighboring villages and the larger map"
+block:
+  for target in ["bracken", "reedbank", "north_ford", "south_ford"]:
+    var reply = answer()
+    reply["actions"] = %*[action("move", target)]
+    doAssert parseReply($reply).actions[0].target == target
+  var reply = answer()
+  reply["actions"] = %*[
+    action("move", "", 40, 22), action("move", "", -40, -35)
+  ]
+  let parsed = parseReply($reply)
+  doAssert parsed.actions[0].x == 40
+  doAssert parsed.actions[1].z == -35
+  for invalid in [
+    action("give", "quarry"), action("gather", "bracken"),
+    action("order", "bracken_iris"), action("attack", "unknown_hall"),
+    action("move", "unknown_ford")
+  ]:
+    reply["actions"] = %*[invalid]
+    rejects(reply)
+
+echo "Testing strikes against named people, buildings, and resources"
+block:
+  for target in @DeliveryIds & @SourceIds:
+    var reply = answer()
+    reply["actions"] = %*[action("attack", target)]
+    let parsed = parseReply($reply)
+    doAssert parsed.actions.len == 1
+    doAssert parsed.actions[0].kind == AttackAction
+    doAssert parsed.actions[0].target == target
+    doAssert parsed.actions[0].duration == 0
+  for invalid in [
+    action("attack", ""), action("attack", "river"),
+    action("attack", "forest"), action("attack", "home"),
+    action("attack", "north_ford"), action("attack", "unknown_person"),
+    action("attack", "ada", 1, 0), action("attack", "ada", 0, 1),
+    action("attack", "hall", 1, 0), action("attack", "stone", 0, 1)
+  ]:
+    var reply = answer()
+    reply["actions"] = %*[invalid]
+    rejects(reply)
+  var reply = answer()
+  reply["actions"] = %*[action("attack", "ada")]
+  reply["actions"][0]["duration"] = %2
+  rejects(reply)
+  reply["actions"] = %*[
+    action("attack", "bracken_iris"),
+    action("attack", "bracken_iris"),
+    action("attack", "bracken_iris"),
+    action("stop", "")
+  ]
+  let parsed = parseReply($reply)
+  doAssert parsed.actions.len == 4
+  doAssert parsed.actions[^1].kind == StopAction
+  reply["actions"] = %*[
+    action("attack", "miller_hut"), action("attack", "miller_hut"),
+    action("attack", "miller_hut"), action("attack", "hall"),
+    action("attack", "hall"), action("attack", "hall"),
+    action("attack", "stone")
+  ]
+  let destruction = parseReply($reply)
+  doAssert destruction.actions.len == 7
+  doAssert destruction.actions[0].target == "miller_hut"
+  doAssert destruction.actions[3].target == "hall"
+  doAssert destruction.actions[^1].target == "stone"
+  reply["actions"] = newJArray()
+  for i in 0 .. MaxActions:
+    reply["actions"].add action("attack", "village")
+  rejects(reply)
 
 echo "Testing the direct OpenAI endpoint remains narrowly allowed"
 block:
@@ -368,12 +447,38 @@ block:
   let request = parseDocument(first.split('\n', 1)[1])
   doAssert request["model"].getStr() == "fixture-model"
   doAssert request["text"]["format"]["strict"].getBool()
+  let
+    properties = request["text"]["format"]["schema"]["properties"]
+    kinds = properties["actions"]["items"]["properties"]["kind"]["enum"]
+    targets = properties["actions"]["items"]["properties"]["target"]["enum"]
+  doAssert %"attack" in kinds.elems
+  for target in @DeliveryIds & @SourceIds:
+    doAssert %target in targets.elems
+  doAssert %"unknown_hall" notin targets.elems
+  doAssert properties["actions"]["maxItems"].getInt() == MaxActions
+  let instructions = request["input"][0]["content"].getStr()
+  doAssert instructions.contains("For an explicit\nkill or destroy request")
+  doAssert instructions.contains("a resource source always takes one")
+  doAssert instructions.contains("Never claim an attack landed")
+  doAssert instructions.contains(
+    "Trust does not recover just because time passes")
   doAssert not request["store"].getBool()
   doAssert first.contains("Always gather wild food")
   let context = request["input"].elems[^1]["content"].getStr()
   doAssert context.contains(Observation)
   doAssert context.contains("Mason's hut")
   doAssert context.contains("Gathering stone")
+  doAssert context.contains("Bracken")
+  doAssert context.contains("Reedbank")
+  doAssert context.contains("Shared quarry")
+  doAssert context.contains("\"owner\":\"bracken\"")
+  doAssert context.contains("\"health\":65")
+  doAssert context.contains("\"alive\":true")
+  doAssert context.contains("\"fear\":10")
+  doAssert context.contains("\"fearLevel\":60")
+  doAssert context.contains("\"trust\":20")
+  doAssert context.contains("\"destroyed\":true")
+  doAssert context.contains("\"casualties\":0")
 
   brain.addEvent("Moss gathered six berries.")
   doAssert brain.submit("What should you do next?", Observation)
@@ -579,6 +684,37 @@ block:
     discard requests.receiveCopy()
     doAssert credentials.receiveCopy() == "Bearer fixture-working-key"
     doAssert brain.messages.len == 4
+
+  block canceledAuthentication:
+    let
+      brain = fixtureBrain(keyPath)
+      deadline = getMonoTime() + initDuration(seconds = 5)
+    defer:
+      brain.close()
+    var tick: int32
+    doAssert brain.submit("auth-cancel", Observation)
+    while requests.peek() == 0:
+      doAssert getMonoTime() < deadline
+      sleep(2)
+    discard requests.receiveCopy()
+    brain.stopConversation("stop")
+    doAssert not brain.pending and not brain.explanationPending
+    doAssert brain.reply.actions.len == 0 and brain.lessons.len == 0
+    doAssert credentials.receiveCopy() == "Bearer fixture-initial-key"
+    while true:
+      inc tick
+      doAssert not brain.pollBrain(tick)
+      if brain.submit("conversation-only after stopping", Observation):
+        break
+      doAssert getMonoTime() < deadline, "Canceled request did not drain"
+      sleep(2)
+    doAssert settle(brain, tick), brain.failure
+    doAssert requests.peek() == 1,
+      "A canceled authentication failure must not retry the old command."
+    doAssert requests.receiveCopy().contains("conversation-only after stopping")
+    doAssert credentials.peek() == 0
+    doAssert brain.messages[1].text == "stop"
+    doAssert brain.messages[2].text == "I stopped."
 
   for (name, contents, prompt, count, error) in [
     ("rejected", "fixture-rejected-key", "auth-retry", 2, "401"),

@@ -15,8 +15,8 @@ proc fixture(): World =
       Landmark(id: "village", position: vec2(0.5'f, 6.5'f))
     ]
   )
-  for z in 28 .. 35:
-    map.blocked[z * MapSize + 32] = true
+  for z in MapSize div 2 - 4 .. MapSize div 2 + 3:
+    map.blocked[z * MapSize + MapSize div 2] = true
   newWorld(map)
 
 proc finish(world: var World) =
@@ -45,7 +45,7 @@ block:
   world.finish()
   doAssert world.sources[world.sourceIndex("berries")].amount == 18
   doAssert world.sources[world.sourceIndex("farm")].amount == 12
-  doAssert world.stock.foodTotal() == 6
+  doAssert world.villages[0].stock.foodTotal() == 6
   doAssert world.creature.cargo[BerriesResource] == 0
 
 block:
@@ -128,7 +128,7 @@ echo "Testing failed actions become private creature feedback"
 block:
   var world = fixture()
   for z in 0 ..< MapSize:
-    world.map.blocked[z * MapSize + 32] = true
+    world.map.blocked[z * MapSize + MapSize div 2] = true
   let start = world.creature.position
   doAssert world.map.walkable(vec2(6.5'f, 0.5'f))
   world.instruct(@[
@@ -163,6 +163,6 @@ for (action, food, berries, reason) in [
   doAssert world.problems[0].contains(reason)
   doAssert world.creature.cargo[BerriesResource] == food
   doAssert world.sources[world.sourceIndex("berries")].amount == berries
-  doAssert world.stock.foodTotal() == 0
+  doAssert world.villages[0].stock.foodTotal() == 0
 
 echo "Monster simulation passed"

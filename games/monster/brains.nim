@@ -11,8 +11,10 @@ const
   MaxMessageBytes = 4096
   MaxLessonBytes = 320
   MaxSaveBytes = MaxResponseBytes
+  CanceledRequestMessage =
+    "Moss stopped. The previous request is still settling."
   BrainInstructions = """
-You are Moss, a curious young elemental creature in a small living landscape.
+You are Moss, a curious young elemental creature in a living valley.
 The player is your teacher and communicates with you in English. Speak briefly,
 warmly, and in character. Understand language while learning the teacher's
 preferences. You have a physical body with a limited set of real game actions.
@@ -35,36 +37,99 @@ abilities, supplies, other creatures, or interactions. Ask a short question if
 the request is ambiguous or cannot be performed with the available actions.
 
 Actions execute in order and replace the previous plan when nonempty. Available
-actions are move, gather, give, eat, rest, dance, stop, and wait. Every action has
-kind, target, x, z, and duration fields. Use an empty target and zero values for
-unused fields. Move to any observed place, household, or villager ID, or use
-explicit x/z coordinates inside (-32, 32). Places include village (the shared
-hall), home (your sleeping glade), river, and forest, plus the resource sources
-and households below. Use the names from the observation in your speech.
+actions are move, gather, give, eat, rest, dance, stop, wait, and attack. Every
+action has kind, target, x, z, and duration fields. Use an empty target and zero
+values for unused fields. Move to any observed place, household, or villager ID, or use
+explicit x/z coordinates within the map bounds in the observation. Places
+include home (your sleeping glade), river, forest, north_ford, and south_ford,
+plus the village halls, resource sources, and households in the observation.
+Use the names from the observation in your speech. Walking automatically
+finds a route through available crossings; you cannot swim or build bridges.
 
-Gather from berries (wild berries), farm (the villagers' grain), fish (fish at
-the riverbank), pine (softwood), oak (hardwood), or stone (loose stone).
+Willow is your home village. Unless your teacher names another village,
+"our village", "the village", and "the hall" mean Willow. Its hall IDs are
+village or hall. Bracken and Reedbank are independent neighboring villages;
+their hall IDs are bracken and reedbank. Each has its own residents, homes,
+and supplies. A gift to one village does not stock another village's hall.
+
+Gather from an observed source ID. Sources provide berries, grain, fish,
+pine (softwood), oak (hardwood), or stone. Read each source's ownership:
+farm, bracken_farm, and reedbank_farm are crops belonging to that village;
+taking their grain reduces its crop. Shared woods, berries, fishing banks,
+and quarries are used by people from several villages.
 Gathering fills your remaining carrying capacity from that source; it does
 not take supplies from a house, the hall, or a person. You can carry six units
 total, including any mixture of food, wood, and stone. Give delivers ALL your
-carried supplies to village or hall (shared storage), miller_hut, weaver_hut,
-or mason_hut (household storage), or directly to ada, ben, clara, dara, eli, or
-finn. Check observed cargo before promising to give a particular resource.
+carried supplies to an observed village hall, household, or named person.
+Use the recipient's exact ID from the observation, including village prefixes
+for neighboring households and people. Check observed cargo before promising
+to give a particular resource.
 For different recipients, collect and deliver each load separately. Gather
 and give automatically walk to the source or recipient before interacting.
 An eat action consumes one carried food, never wood or stone. Rest at home or
 where you are. Dance and wait can last up to 30 seconds. Stop cancels the
 current plan. Rest at home automatically moves there first.
 
+Attack targets ONE observed living villager, undestroyed household, village
+hall, or resource source ID, including those in Willow. A hall ID means
+that hall building, not every person or building in its village. One attack
+action approaches the target and attempts one melee strike for 35 damage after
+a short windup. Use zero duration, x, and z for attacks. Villagers and halls
+use health; households use condition as their health. Zero means dead or
+destroyed. A source has no health bar: one strike destroys it and its remaining
+resources. Destroyed sources do not regrow. Do not target the river, woods,
+crossings, or scenery that has no observed attackable entity ID.
+
+A request to hit or attack a target means one strike unless the teacher asks
+for repeated blows, to kill a person, or to destroy a structure. For an explicit
+kill or destroy request, queue enough strikes to finish the named target:
+round its current health or condition divided by 35 up to a whole number.
+Thus a healthy 100-health target takes three strikes, while a 30-health target
+takes one; a resource source always takes one. Keep the whole plan within
+12 actions. Check current observed health and destroyed state; do not plan
+extra attacks against a dead person or ruins. Stop interrupts pursuit or
+windup and cancels queued strikes. Dead villagers cannot work, receive gifts,
+or be attacked again; their carried goods stay with them and cannot be looted
+yet. Destroyed buildings lose their stored supplies, no longer accept supplies
+or provide shelter, and cannot be rebuilt yet. Do not invent healing,
+respawning, retaliation, rebuilding, or looting.
+
+Only attack when the teacher explicitly orders an attack. Rivalry, a shortage,
+a standing preference for Willow, or a villager's presence does not authorize
+violence. Questions and lessons about attacks need no attack action. If an
+attack request does not identify a person or object clearly, ask what to target.
+There is no village-wide attack action. Acknowledge the intended action in your
+normal brief voice; actual damage, death, or destruction is established only
+by later world events. Never claim an attack landed just because it was queued.
+
+People begin wary of Moss. Their observed trust and fearLevel are persistent
+relationships, both from 0 to 100; fear is a brief flight timer, not trust.
+Actual delivered gifts improve the recipients' trust and reduce fearLevel.
+Helping a household affects its residents; helping a hall affects its village.
+Words or promised deliveries do not change those values. Violence rapidly
+raises fearLevel and damages trust in victims and witnesses, who run away
+when frightened. Read the observed attitude, activity, trust, and fearLevel
+to explain their response naturally: "They're scared of me" or "They're
+starting to trust me." Do not treat fleeing as obedience or invent loyalty
+from a single gift. Trust does not recover just because time passes.
+
 Villagers are independent people. They walk to gather or withdraw supplies,
-eat when hungry, carry supplies home, fuel their hearths with pine or oak,
-and repair their homes using stone and oak. They consume household and shared
-stocks as needed. Food given to a person can feed them; other supplies go home
-with them. Helping a named household means delivering to its hut, not merely
-leaving resources in the hall. There are no actions to order villagers, repair
-their homes yourself, build, craft, or fight. Use observed household needs,
-resource availability, and your teacher's lessons when deciding how to help.
-Do not assume a delivery has already been eaten, burned, or used for repairs.
+eat when hungry, carry supplies home, and fuel their hearths with pine or oak.
+They repair damaged, surviving homes using stone and oak. They consume
+household and shared stocks as needed. Food given to a person can feed them;
+other supplies go home with them. Helping a named household means delivering
+to its hut, not merely leaving resources in the hall. There are no actions to
+order villagers, repair their homes yourself, build, or craft. Use observed
+household needs, resource availability, and your teacher's lessons when deciding
+how to help. Do not assume a delivery has already been eaten, burned, or used
+for repairs.
+
+Villages compete by gathering shared supplies and building communal reserves
+after meeting their household needs. Other gatherers can reach a source first
+and leave less for you. Their hall reserves and wellbeing reflect actual
+supplies, hunger, warmth, and home condition; never invent victories, combat
+outcomes, or shortages. You may help any village when asked, and remember
+preferences for supporting your home or sharing with neighbors when taught.
 
 Lessons are only NEW lasting preferences explicitly taught or reinforced by
 the player, expressed as concise first-person memories. Do not turn a one-time
@@ -100,7 +165,7 @@ type
     reply*: BrainReply
     client: LlmClient
     savePath: string
-    request: int32
+    request, canceledRequest: int32
     requestBody, fallbackKeyFile: string
     triedFileKey: bool
     explaining: bool
@@ -155,6 +220,7 @@ proc parseAction(node: JsonNode): CreatureAction
     of "dance": DanceAction
     of "stop": StopAction
     of "wait": WaitAction
+    of "attack": AttackAction
     else:
       raise newException(MonsterError, "Unknown creature action: " & kind)
   result.target = node.stringField("target", 64)
@@ -170,7 +236,8 @@ proc parseAction(node: JsonNode): CreatureAction
         raise newException(MonsterError, "Move coordinates leave the map")
     elif result.target notin SourceIds and
       result.target notin DeliveryIds and
-      result.target notin ["home", "river", "forest"]:
+      result.target notin ["home", "river", "forest", "north_ford",
+        "south_ford"]:
         raise newException(MonsterError, "Unknown move target: " & result.target)
   of GatherAction:
     if result.target notin SourceIds:
@@ -179,6 +246,13 @@ proc parseAction(node: JsonNode): CreatureAction
     if result.target notin DeliveryIds:
       raise newException(MonsterError, "Unknown delivery recipient: " &
         result.target)
+  of AttackAction:
+    if result.target notin DeliveryIds and result.target notin SourceIds:
+      raise newException(MonsterError,
+        "Attack target must be a named villager, building, or resource source")
+    if result.duration != 0 or result.x != 0 or result.z != 0:
+      raise newException(MonsterError,
+        "An attack is one strike with zero duration and coordinates")
   of RestAction:
     if result.target notin ["", "home"]:
       raise newException(MonsterError, "Rest target must be home or empty")
@@ -412,6 +486,11 @@ proc available*(brain: Brain): bool {.raises: [].} =
 
 proc replySchema(): JsonNode =
   ## Defines the narrow physical action vocabulary for structured generation.
+  var targets = %*["", "home", "river", "forest", "north_ford", "south_ford"]
+  for target in SourceIds:
+    targets.add %target
+  for target in DeliveryIds:
+    targets.add %target
   %*{
     "type": "object",
     "properties": {
@@ -422,9 +501,10 @@ proc replySchema(): JsonNode =
           "type": "object",
           "properties": {
             "kind": {"type": "string", "enum": [
-              "move", "gather", "give", "eat", "rest", "dance", "stop", "wait"
+              "move", "gather", "give", "eat", "rest", "dance", "stop", "wait",
+              "attack"
             ]},
-            "target": {"type": "string"},
+            "target": {"type": "string", "enum": targets},
             "x": {"type": "number"},
             "z": {"type": "number"},
             "duration": {"type": "number"}
@@ -502,6 +582,26 @@ proc saveVisible(brain: Brain) =
   except MonsterError:
     brain.failure = getCurrentExceptionMsg()
 
+proc stopConversation*(brain: Brain, text: string) =
+  ## Acknowledges an immediate stop and ignores unfinished model decisions.
+  if brain == nil:
+    return
+  if brain.pending:
+    brain.canceledRequest = brain.request
+  brain.pending = false
+  brain.request = 0
+  brain.requestBody.setLen(0)
+  brain.explaining = false
+  brain.explanationPending = false
+  brain.failure.setLen(0)
+  brain.reply = BrainReply(speech: "I stopped.")
+  if brain.messages.len <= MaxMessages - 2:
+    brain.messages.add Message(role: PlayerMessage, text: text.strip())
+    brain.messages.add Message(role: CreatureMessage, text: brain.reply.speech)
+  else:
+    brain.failure = "Stopped. Conversation memory is full; no history was discarded."
+  brain.saveVisible()
+
 proc requestFailure(brain: Brain): string =
   ## Explains service failures without exposing raw provider bodies or keys.
   case brain.client.status(brain.request)
@@ -549,6 +649,9 @@ proc submit*(brain: Brain, text, observation: string): bool =
     return false
   if brain.pending:
     brain.failure = "Moss is still thinking. Wait for the current reply."
+    return false
+  if brain.canceledRequest != 0:
+    brain.failure = CanceledRequestMessage
     return false
   if not brain.available():
     if brain.failure.len == 0:
@@ -600,8 +703,9 @@ proc reportProblem*(brain: Brain, text: string) =
 
 proc explainProblems*(brain: Brain, observation: string): bool =
   ## Sends pending feedback once inference is ready without inventing a turn.
-  if brain == nil or not brain.explanationPending or brain.pending:
-    return false
+  if brain == nil or not brain.explanationPending or brain.pending or
+    brain.canceledRequest != 0:
+      return false
   if brain.failure.len > 0:
     brain.explanationPending = false
     brain.saveVisible()
@@ -641,6 +745,12 @@ proc pollBrain*(brain: Brain, tick: int32): bool =
   if brain == nil:
     return false
   brain.client.beginTick(tick)
+  if brain.canceledRequest != 0:
+    if brain.client.poll(brain.canceledRequest) != 0:
+      brain.canceledRequest = 0
+      if brain.failure == CanceledRequestMessage:
+        brain.failure.setLen(0)
+    return false
   if not brain.pending:
     return false
   let state = brain.client.poll(brain.request)
@@ -722,4 +832,5 @@ proc close*(brain: Brain) =
   brain.client.close()
   brain.pending = false
   brain.request = 0
+  brain.canceledRequest = 0
   brain.requestBody.setLen(0)

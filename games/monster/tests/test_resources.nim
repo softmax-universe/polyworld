@@ -31,7 +31,9 @@ proc quietWorld(): World =
 
 proc allUnits(world: World, kind: ResourceKind): int =
   ## Counts each physical location that can own a resource unit.
-  result = world.stock[kind] + world.creature.cargo[kind]
+  result = world.creature.cargo[kind]
+  for village in world.villages:
+    result += village.stock[kind]
   for source in world.sources:
     if source.resource == kind:
       result += source.amount
@@ -69,10 +71,10 @@ for sourceId in SourceIds:
   world.finish()
   doAssert world.creature.cargo[kind] == CarryLimit
   doAssert world.creature.cargo.total() == CarryLimit
-  let before = world.stock[kind]
+  let before = world.villages[0].stock[kind]
   world.instruct(@[CreatureAction(kind: GiveAction, target: "hall")])
   world.finish()
-  doAssert world.stock[kind] == before + CarryLimit
+  doAssert world.villages[0].stock[kind] == before + CarryLimit
   doAssert world.creature.cargo.total() == 0
 
 block:
@@ -150,7 +152,7 @@ block:
 block:
   var world = newWorld(generateMap())
   world.villagers.setLen(1)
-  world.stock = default(Inventory)
+  world.villages[0].stock = default(Inventory)
   let home = world.villagers[0].home
   world.households[home].stock = default(Inventory)
   world.villagers[0].position =
@@ -165,14 +167,14 @@ block:
 echo "Testing autonomous villager needs and home maintenance"
 block:
   var world = newWorld(generateMap())
-  doAssert world.villagers.len == 6
-  doAssert world.households.len == 3
+  doAssert world.villagers.len == VillagerIds.len
+  doAssert world.households.len == HouseholdIds.len
   let
     hungry = world.villagers[0].hunger
     condition = world.households[2].integrity
-  var walked: array[6, bool]
+  var walked = newSeq[bool](world.villagers.len)
   for second in 0 ..< 600:
-    var positions: array[6, Vec2]
+    var positions = newSeq[Vec2](world.villagers.len)
     for i in 0 ..< world.villagers.len:
       positions[i] = world.villagers[i].position
     world.run(1)
@@ -195,6 +197,10 @@ block:
     house.stock[GrainResource] = 4
     house.fuel = 100
     house.integrity = 100
+  for village in world.villages.mitems:
+    village.stock[GrainResource] = 20
+    village.stock[SoftwoodResource] = 20
+    village.stock[StoneResource] = 20
   for person in world.villagers.mitems:
     person.position = world.households[person.home].position
     person.hunger = 0
@@ -209,7 +215,8 @@ block:
   for source in world.sources.mitems:
     source.amount = 0
     source.capacity = 0
-  world.stock = default(Inventory)
+  for village in world.villages.mitems:
+    village.stock = default(Inventory)
   for house in world.households.mitems:
     house.stock = default(Inventory)
   for villager in world.villagers.mitems:
@@ -226,7 +233,8 @@ block:
 
 block:
   var world = newWorld(generateMap())
-  world.stock = default(Inventory)
+  for village in world.villages.mitems:
+    village.stock = default(Inventory)
   for house in world.households.mitems:
     house.stock = default(Inventory)
   for source in world.sources:
@@ -265,7 +273,7 @@ block:
   var world = newWorld(generateMap())
   world.run(20)
   world.creature.cargo[FishResource] = 2
-  world.stock[HardwoodResource] = 7
+  world.villages[0].stock[HardwoodResource] = 7
   world.households[1].stock[StoneResource] = 9
   world.villagers[0].cargo[SoftwoodResource] = 1
   let villagersBefore = world.villagers.toJson()
@@ -275,7 +283,7 @@ block:
   var restored = newWorld(generateMap())
   restored.restoreWorld(path)
   doAssert restored.creature.cargo == world.creature.cargo
-  doAssert restored.stock == world.stock
+  doAssert restored.villages[0].stock == world.villages[0].stock
   for i in 0 ..< world.sources.len:
     doAssert restored.sources[i].amount == world.sources[i].amount
   for i in 0 ..< world.households.len:
@@ -289,16 +297,16 @@ block:
   restored.run(90)
   doAssert restored.problems.len == 0
   var invalid = parseJson(readFile(path))
-  invalid["stock"].elems[0] = %(-1)
+  invalid["villages"][0]["stock"].elems[0] = %(-1)
   writeFile(path, $invalid)
-  let stockBefore = restored.stock
+  let stockBefore = restored.villages[0].stock
   var rejected = false
   try:
     restored.restoreWorld(path)
   except MonsterError:
     rejected = true
   doAssert rejected
-  doAssert restored.stock == stockBefore
+  doAssert restored.villages[0].stock == stockBefore
 
 block:
   type
@@ -331,13 +339,13 @@ block:
   world.restoreWorld(path)
   doAssert world.creature.cargo.foodTotal() == 4
   doAssert world.creature.energy == 73
-  doAssert world.stock.foodTotal() == 7
+  doAssert world.villages[0].stock.foodTotal() == 7
   doAssert world.sources[world.sourceIndex("berries")].amount == 11
   doAssert world.sources[world.sourceIndex("farm")].amount == 8
-  doAssert world.villagers.len == 6
-  doAssert world.households.len == 3
+  doAssert world.villagers.len == VillagerIds.len
+  doAssert world.households.len == HouseholdIds.len
   world.saveWorld(path)
-  doAssert parseJson(readFile(path))["version"].getInt() == 2
+  doAssert parseJson(readFile(path))["version"].getInt() == 8
   let oldPosition = vec2(-3, -5)
   doAssert not world.map.walkable(oldPosition)
   legacy.creature.position = oldPosition

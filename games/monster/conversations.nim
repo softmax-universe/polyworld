@@ -30,9 +30,14 @@ proc receive*(world: var World, brain: Brain): bool =
   true
 
 proc speak*(world: var World, brain: Brain, text: string): bool =
-  ## Sends teacher speech with the latest grounded state of the world.
+  ## Handles urgent stops locally before sending other speech to inference.
   if text.strip().len == 0:
     return false
+  if text.isStopCommand():
+    world.stop()
+    world.problems.setLen(0)
+    brain.stopConversation(text)
+    return true
   brain.submit(text, world.observation())
 
 proc sendPrompt*(
@@ -42,7 +47,10 @@ proc sendPrompt*(
   attempted: var bool
 ): bool =
   ## Waits for restored feedback before attempting one automatic instruction.
-  if attempted or prompt.len == 0 or brain.pending or brain.explanationPending:
+  if attempted or prompt.len == 0:
     return false
+  if not prompt.isStopCommand() and
+    (brain.pending or brain.explanationPending):
+      return false
   attempted = true
   world.speak(brain, prompt)

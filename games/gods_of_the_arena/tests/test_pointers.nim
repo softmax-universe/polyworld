@@ -4,7 +4,7 @@ import
   vmath,
   polyworld/rtscameras,
   ../cameras
-include ../pointers
+include polyworld/pointers
 
 echo "Testing confinement follows the edge-scrolling preference and focus"
 for mode in EdgeScrollMode:

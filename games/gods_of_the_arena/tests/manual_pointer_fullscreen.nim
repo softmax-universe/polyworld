@@ -2,7 +2,7 @@
 import
   std/[monotimes, os, strformat, times],
   opengl, vmath
-include ../pointers
+include polyworld/pointers
 
 when defined(macosx) and not defined(emscripten):
   const LogPath = currentSourcePath().parentDir.parentDir.parentDir.parentDir /

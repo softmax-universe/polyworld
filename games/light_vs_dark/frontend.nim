@@ -2,7 +2,7 @@ import
   std/[os, random, strutils, uri],
   bumpy, chroma, jsony, silky, vmath, windy,
   polyworld/[displays, chrome, connections, menus, roomclients, rooms, policies,
-    sounds, viewers],
+    pointers, sounds, viewers],
   content, controls, game, graphics, homes, lobbies, multiplayer, presets,
   rosterstate, participantcontext, lobbyreadiness
 
@@ -60,6 +60,7 @@ proc runFrontend*() =
     error = getCurrentExceptionMsg()
   preferences = effectivePreferences(preferences, inviteServer, serverAddress)
   preferences.applyPreferences(window)
+  window.updateCursorConfinement(preferences.edgeScrolling)
   roomName = defaultGameName(preferences.name)
   let bots = @[
     bundledBot("Base bot", "base")
@@ -200,13 +201,15 @@ proc runFrontend*() =
       continue
 
     window.onButtonPress = proc(button: Button) =
-      ## Adjusts UI scale with the same shortcuts as a browser.
+      ## Captures on clicks and adjusts UI scale with browser-style shortcuts.
+      window.captureCursorConfinement(button)
       discard window.scaleKey(
         button, preferences, sk.uiScale, AppName
       )
     window.onFrame = proc() =
       ## Draws this lifecycle state without constructing a hidden match.
       updateSounds()
+      window.updateCursorConfinement(preferences.edgeScrolling)
       var contextInputBlocked = false
       if page != LobbyMenu:
         participantMenu.dismiss()

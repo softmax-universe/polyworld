@@ -15,8 +15,8 @@ when defined(headless):
       outcome: "winner_" & $run.world.winner
     ))
 else:
-  import windy, polyworld/[menus, sounds], game, graphics, frontend, lobbies,
-    assets
+  import windy, polyworld/[menus, pointers, sounds], game, graphics, frontend,
+    lobbies, assets
   initializeOptions()
   configureSoundLaunch(options.soundMuted, options.soundOverride)
   try:
@@ -36,4 +36,5 @@ else:
     if window == nil or not window.closeRequested:
       runFrontend()
   finally:
+    releaseCursorConfinement()
     closeSounds()

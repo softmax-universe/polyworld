@@ -44,6 +44,7 @@ suite "LvD double-left-click selection":
     world.units[world.unitIndex(mined)].state = UnitInMine
     var
       matchMenu = HiddenMatchMenu
+      preferences: Preferences
       actionCam = initActionCam(subjectMode = true)
       buildingArt: BuildingArt
     actionCam.takeManual()

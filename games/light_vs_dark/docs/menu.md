@@ -7,6 +7,7 @@ Run `nim c -r games/light_vs_dark/lvd.nim` from the Polyworld root to open the m
 - `src/polyworld/homes.nim`: centered main menu layout, keyboard navigation, atlas packing, and backdrop drawing.
 - `src/polyworld/lobbies.nim`: common lobby layout, buttons, panels, fonts, inputs, seat picker, and readiness indicators.
 - `src/polyworld/menus.nim`: persisted display/sound/network preferences and configurable control-binding profiles.
+- `src/polyworld/pointers.nim`: shared click-initiated cursor confinement for LvD and GotA.
 - `src/polyworld/connections.nim`, `rooms.nim`, `roomclients.nim`: unchanged universal transport and room protocol.
 - `games/light_vs_dark`: independent-player roster, map preview/settings, diplomacy, controls profile, match lifecycle, and game-owned packet/replay payloads.
 - GotA retains its teams, draft, arena presets, map previews, and game commands in its own directory.
@@ -21,7 +22,14 @@ Multiplayer connects to the **same universal relay as GotA**. Game identity filt
 
 Roster capacity is 64, subject to a combined map/roster budget. Validation uses the generator's actual seeded growth before allocating cells: at most 262,144 map cells and 8,388,608 player×map cells. Large configurations report a validation error rather than exhausting browser memory.
 
-The Sound tab uses the same controls as GotA, with preferences saved separately for each game. It controls master, effects, and interface volume, plus mute. CC0 effects cover selections, accepted orders, production, weapons, spells, hits, deaths, and match results. Combat follows current visibility and camera distance, and stays silent while seeking, fast-forwarding, paused, or unfocused.
+The Sound tab uses the same controls as GotA, with preferences saved separately for each game. It controls master, music, effects, and interface volume; Master 0 mutes all audio. CC0 effects cover selections, accepted orders, production, weapons, spells, hits, deaths, and match results. Combat follows current visibility and camera distance, and stays silent while seeking, fast-forwarding, paused, or unfocused.
+
+Settings > Display > Edge scrolling also controls macOS cursor confinement.
+Always confines the visible cursor on the first click inside the focused game
+window, including menus. Fullscreen only uses the same rule in fullscreen;
+Off releases it. Switching apps, resizing, or changing fullscreen releases the
+cursor, and another click is required to confine it again. This shares GotA's
+implementation, including restoring window drag and resize controls on release.
 
 ## Playing
 

@@ -11,7 +11,8 @@ import
   std/[math, strformat, tables, times, unicode],
   chroma, fixxy, opengl, pixie, vmath, windy, silky,
   polyworld/[actioncam, assets, characters, chargen, chrome, clickmarks, common,
-    inputs, lighting, particles, particleshaders, pathing, player, profiles, gameuis,
+    inputs, lighting, particles, particleshaders, pathing, player, pointers,
+    profiles, gameuis,
     quadterrain, rtscameras, selectionoutlines, shapes, shadows, tapes, toon,
     viewers, visions, worldbars, worldtexts, menus, connections, roomclients, rooms, displays, sounds],
   appearances, assets, backpacks, buildings, content, factions, groves, teamlooks,
@@ -346,6 +347,12 @@ proc initializeGraphics*(visible = true) =
   (window, sk) = initGameWindow(WindowTitle, AtlasPath,
     gameWindowSize(options.windowWidth, options.windowHeight),
     options.vsync, msaa = msaa4x, visible = visible)
+  window.onFocusChange = proc() =
+    ## Releases confinement immediately when switching to another app.
+    window.updateCursorConfinement()
+  window.onCloseRequest = proc() =
+    ## Restores the pointer before closing the game window.
+    releaseCursorConfinement()
 
 proc initCaptureTarget(size: IVec2): CaptureTarget =
   ## Allocates color and depth without relying on a visible Cocoa drawable.
@@ -391,7 +398,9 @@ proc runGraphics*(network: NetworkMatch = nil,
   window.onButtonPress = nil
   window.onButtonRelease = nil
   window.onRune = nil
-  window.onFocusChange = nil
+  window.onFocusChange = proc() =
+    ## Keeps pointer release active while match resources load.
+    window.updateCursorConfinement()
   window.runeInputEnabled = false
   shortcutState.resetShortcut()
   shortcutHeldButtons = {}
@@ -409,7 +418,9 @@ proc runGraphics*(network: NetworkMatch = nil,
     window.onButtonPress = nil
     window.onButtonRelease = nil
     window.onRune = nil
-    window.onFocusChange = nil
+    window.onFocusChange = proc() =
+      ## Preserves focus-based release when returning to the main menu.
+      window.updateCursorConfinement()
     window.runeInputEnabled = false
   startGameProfile()
   var
@@ -420,6 +431,7 @@ proc runGraphics*(network: NetworkMatch = nil,
     preferences = readLvdPreferences()
     saveError: string
   preferences.applyPreferences(window, configureDisplay = not hidden)
+  window.updateCursorConfinement(preferences.edgeScrolling)
   let previousBindings = customBindingsEnabled
   customBindingsEnabled = true
   bindingCapture = false
@@ -1072,7 +1084,8 @@ proc runGraphics*(network: NetworkMatch = nil,
     if not minimapPanning and
         applyRtsPan(
           cameraTarget,
-          rtsPanDir(window),
+          rtsPanDir(window, preferences.edgeScrolling,
+            pointerConfined = window.cursorConfined),
           dt,
           cameraDistance,
           mapHalf()
@@ -1909,6 +1922,7 @@ proc runGraphics*(network: NetworkMatch = nil,
   window.onFrame = proc() =
     profileBlock "frame":
       updateSounds()
+      window.updateCursorConfinement(preferences.edgeScrolling)
       if hooks.reload != nil and hooks.reload():
         reloadMatch()
       let dt = frameDelta(lastFrameTime, Step)
@@ -2297,6 +2311,7 @@ proc runGraphics*(network: NetworkMatch = nil,
         window.closeRequested = true
 
   window.onButtonPress = proc(button: Button) =
+    window.captureCursorConfinement(button)
     if bindingCapture: return
     if matchMenu == HiddenMatchMenu and humanCommunicationKey(button):
       shortcutState.resetShortcut()
@@ -2404,6 +2419,7 @@ proc runGraphics*(network: NetworkMatch = nil,
       discard humanCommunicationRune(rune)
 
   window.onFocusChange = proc() =
+    window.updateCursorConfinement()
     if not window.focused:
       stopSounds()
       resetHudTooltips()

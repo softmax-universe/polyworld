@@ -47,8 +47,12 @@ proc setupEmscripten*(gameDir: string, game = "") =
         "fetchpriority=\"high\">"
       preload = "--preload-file " & quoteShell(cache / "stage" & "@/polyworld_art")
     if game in ["gota", "lvd"]:
-      let bots = if game == "gota": @["base", "rusher", "puller", "jev"]
-        else: @["base"]
+      let bots =
+        if game == "gota":
+          @["base", "rusher", "puller", "jev", "khors", "lane_sustain",
+            "red-kite", "black-kite", "cogas"]
+        else:
+          @["base"]
       for bot in bots:
         preload.add " --preload-file " & quoteShell(
           gameDir / "players" / (bot & ".bas") &

@@ -49,7 +49,7 @@ proc assertResultViewExits(network: NetworkMatch) =
   proc updateWindowSettings(window: tuple[closeRequested: bool]) = discard
   proc waitForDisplay() = discard
   resultViewLoop()
-proc readPreferences(name: string): string = "preserved preferences"
+proc readGotaPreferences(): string = "preserved preferences"
 const AppName = "test"
 
 proc sameRoomRematch() =

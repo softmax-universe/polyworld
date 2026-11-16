@@ -11,6 +11,7 @@ import
   test_cameras,
   test_camps,
   test_content,
+  test_cogas,
   test_tooltips,
   test_controls,
   test_shop_backend,

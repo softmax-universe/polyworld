@@ -2,12 +2,20 @@ import
   std/[os, random, strutils, uri],
   bumpy, chroma, jsony, silky, vmath, windy,
   polyworld/[displays, chrome, connections, menus, roomclients, rooms, policies, viewers],
-  content, controls, game, graphics, homes, lobbies, multiplayer, pointers, presets, replays
+  content, controls, game, graphics, homes, lobbies, multiplayer, playernames, pointers, presets, replays
 
 const AppName = "Polyworld GotA"
 
+proc readGotaPreferences(): Preferences =
+  ## Shared presentation normalization must not turn an invalid saved identity
+  ## into a different, eligible name by truncating it before GotA's prompt gate.
+  result = readPreferences(AppName)
+  let bytes = getConfig(AppName, "settings.json")
+  if bytes.len > 0:
+    result.name = bytes.fromJson(Preferences).name
+
 proc bundledBot(name, file: string): LocalPolicy =
-  ## Loads the base bot from the native checkout or the web data bundle.
+  ## Loads a bundled bot from the native checkout or the web data bundle.
   let path =
     when defined(emscripten):
       "/policies/gota/" & file & ".bas"
@@ -47,8 +55,9 @@ proc runFrontend*() =
     playerName: string
     editingPlayer: bool
     connectRequested: bool
+    localLaunchRequested: bool
   try:
-    preferences = readPreferences(AppName)
+    preferences = readGotaPreferences()
   except MenusError, IOError, OSError:
     error = getCurrentExceptionMsg()
   roomName = defaultGameName(preferences.name)
@@ -58,7 +67,12 @@ proc runFrontend*() =
     bundledBot("Base bot", "base"),
     bundledBot("Rusher", "rusher"),
     bundledBot("Puller", "puller"),
-    bundledBot("Jev", "jev")
+    bundledBot("Jev", "jev"),
+    bundledBot("Khors", "khors"),
+    bundledBot("Lane Sustain", "lane_sustain"),
+    bundledBot("Red Kite", "red-kite"),
+    bundledBot("Black Kite", "black-kite"),
+    bundledBot("Co-gas", "cogas")
   ]
   let base = bots[0]
   chosenPolicy = base
@@ -81,8 +95,7 @@ proc runFrontend*() =
       window.updateWindowSettings()
     launchLocal = false
     launchNetwork = false
-    if connectRequested and preferences.name.len <= 64 and
-      validName(preferences.name):
+    if connectRequested and eligiblePlayerName(preferences.name):
         connectRequested = false
         try:
           preferences.server = serverUrl(preferences.server)
@@ -172,7 +185,7 @@ proc runFrontend*() =
         connection.client.send(RoomMessage(kind: ReturnLobby))
         connection.client.error = ""
         error = ""
-      preferences = readPreferences(AppName)
+      preferences = readGotaPreferences()
       if quitToMenu:
         connection.close()
         connection = nil
@@ -195,8 +208,7 @@ proc runFrontend*() =
     window.onFrame = proc() =
       ## Draws this lifecycle state without constructing a hidden match.
       window.updateCursorConfinement(preferences.edgeScrolling)
-      let needsPlayerName = preferences.name.len > 64 or
-        not validName(preferences.name)
+      let needsPlayerName = not eligiblePlayerName(preferences.name)
       if editingPlayer or (page == MultiplayerMenu and needsPlayerName):
           sk.textStyle = "Default"
           discard sk.beginSettings(window)
@@ -204,8 +216,8 @@ proc runFrontend*() =
           let
             view = window.size.vec2 / sk.uiScale
             at = (view - vec2(620, 260)) * 0.5'f
-            name = playerName.strip()
-            valid = name.len <= 64 and validName(name)
+            name = playerName
+            valid = eligiblePlayerName(name)
           sk.drawRect(vec2(0), view, rgbx(0, 0, 0, 110))
           sk.lobbyPanel(at, vec2(620, 260))
           sk.drawLabel(if needsPlayerName: "Please enter your player name"
@@ -215,7 +227,7 @@ proc runFrontend*() =
           sk.menuInput(window, "newPlayerName", playerName,
             at + vec2(24, 80), 572, 44)
           if playerName.len > 0 and not valid:
-            sk.drawLabel("Enter a shorter name without line breaks.",
+            sk.drawLabel("Use 1–64 bytes, no controls; choose a name other than Player.",
               at + vec2(24, 128), vec2(572, 28),
               sk.theme.disabledTextColor)
           if sk.lobbyButton("Cancel", at + vec2(24, 188), 180) or
@@ -224,6 +236,7 @@ proc runFrontend*() =
                 page = HomeMenu
                 connectRequested = false
               editingPlayer = false
+              localLaunchRequested = false
               playerName = ""
               error = ""
           elif sk.lobbyButton(if needsPlayerName: "Continue" else: "Save",
@@ -235,6 +248,9 @@ proc runFrontend*() =
                 updated.savePreferences(AppName)
                 preferences = updated
                 editingPlayer = false
+                if localLaunchRequested:
+                  launchLocal = true
+                  localLaunchRequested = false
                 if connection != nil and connection.client.name != name:
                   connection.client.name = name
                   connection.reconnectAfter(0)
@@ -455,7 +471,8 @@ proc runFrontend*() =
             var
               name = if empty: "Add player"
                 elif human:
-                  if preferences.name.len > 0: preferences.name else: "Player"
+                  if eligiblePlayerName(preferences.name): preferences.name
+                  else: "Choose name"
                 elif online: seat.name else: localPolicies[i].name
               controller = if empty: "Empty slot" elif human: "HUMAN" else: "BOT"
             if online and not empty:
@@ -492,8 +509,15 @@ proc runFrontend*() =
               botNames.add bot.name
             if chosenPolicy.name notin botNames:
               botNames.add chosenPolicy.name
-            sk.lobbySelect(window, lobbyUi.selectedBot, botNames, fill + vec2(216, 0),
-              botWidth, editable and not modal)
+            sk.lobbyBotSelect(
+              window,
+              lobbyUi.selectedBot,
+              botNames,
+              lobbyUi.fillBotMenu,
+              fill + vec2(216, 0),
+              botWidth,
+              editable and not modal
+            )
             for bot in bots:
               if bot.name == lobbyUi.selectedBot:
                 chosenPolicy = bot
@@ -603,7 +627,11 @@ proc runFrontend*() =
               250, "arrow_right", emptyCount < HeroClassCount and not modal,
               tint = StartGameGreen):
                 discard parseConfig(config.toJson())
-                launchLocal = true
+                if humanSeat >= 0 and not eligiblePlayerName(preferences.name):
+                  editingPlayer = true
+                  localLaunchRequested = true
+                else:
+                  launchLocal = true
             sk.lobbyLabel(if humanSeat < 0: "Spectating bots"
               else: "Playing seat " & $(humanSeat + 1),
               layout.left + vec2(22, layout.panelHeight - 74), 800, tint = LobbyMuted)
@@ -694,7 +722,7 @@ proc runFrontend*() =
       try:
         initializeLocalMatch(config, sources, humanSeat)
         runGraphics()
-        preferences = readPreferences(AppName)
+        preferences = readGotaPreferences()
       except CatchableError as problem:
         error = problem.msg
       page = HomeMenu

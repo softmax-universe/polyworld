@@ -21,6 +21,10 @@ const
   TreeBlocker* = -1'i32
   NoTile* = Tile2(x: -1, y: -1)
   UnitBodyRadius = 0.22'fx
+  MovingContactPadding = 0.12'fx
+  IdleContactPadding = 0.04'fx
+  ContactPasses = 2
+  ContactPushPerPass = 0.04'fx
   BodyTurnRate = 0.35'fx
   PathArrive = 0.35'fx
   RangedRevealTicks* = TickRate * 2
@@ -88,9 +92,6 @@ type
     blockedEndpointValid*: bool
     blockedEndpointRevision*: int32
     blockedTicks*, repathCooldown*: int32
-    passingPeer*, passingTicks*: int32
-      ## Temporary local yield; never replaces the resource/order destination.
-    passingPoint*, passingForward*: FixedVec2
     carryGold*, carryWood*: int32
     orderFailed*: bool
       ## Set when an order fails. Cleared by the next accepted unit order.
@@ -590,6 +591,7 @@ var
   pathTiles: seq[PathTile]
   trafficGrid: LocalGrid
   softPush: seq[FixedVec2]
+  trafficDirections, trafficSteering: seq[FixedVec2]
 
 proc rebuildTrafficGrid(w: World) =
   trafficGrid.reset(w.map.side, w.units.len)
@@ -650,80 +652,34 @@ proc diagonalAllowed(w: World, x, y, dx, dy: int32): bool =
   ## so units never squeeze through the corner between two structures.
   dx == 0 or dy == 0 or (w.tileOpen(x + dx, y) and w.tileOpen(x, y + dy))
 
-proc occupancyOnSegment(
-    w: World, a, b: PathTile, ignoreId: int32
+proc footprintLineClear(
+    start, finish: FixedVec2, radius: Fixed, walkable: PathWalkable
 ): bool =
-  ## True when a standing unit sits on the straight tile line from a to b.
-  ## A diagonal DDA step also checks both orthogonal tiles so a corner clip
-  ## of an occupied cell cannot be pulled through.
-  var
-    x = a.x
-    z = a.z
-    ix = 0
-    iz = 0
+  ## Traces the same radius-offset footprint used by physical movement.
+  ## Exact grid crossings keep long shortcuts from grazing building corners.
   let
-    dx = b.x - a.x
-    dz = b.z - a.z
-    stepX = cmp(dx, 0)
-    stepZ = cmp(dz, 0)
-    adx = abs(dx)
-    adz = abs(dz)
-  while x != b.x or z != b.z:
-    let
-      left = int64(1 + 2 * ix) * int64(adz)
-      right = int64(1 + 2 * iz) * int64(adx)
-      takeX = stepX != 0 and (stepZ == 0 or left <= right)
-      takeZ = stepZ != 0 and (stepX == 0 or left >= right)
-    if takeX and takeZ:
-      if w.tileHoldsOther(x + int32(stepX), z, ignoreId) or
-          w.tileHoldsOther(x, z + int32(stepZ), ignoreId):
-        return true
-    if takeX:
-      x += int32(stepX)
-      inc ix
-    if takeZ:
-      z += int32(stepZ)
-      inc iz
-    if w.tileHoldsOther(x, z, ignoreId):
-      return true
-  false
+    originX = int64(layers[0].originX) * FixedScale
+    originZ = int64(layers[0].originZ) * FixedScale
+  for dx in [-radius, radius]:
+    for dy in [-radius, radius]:
+      let
+        first = start + fixedVec2(dx, dy)
+        last = finish + fixedVec2(dx, dy)
+        a = cell(first)
+        b = cell(last)
+      if not lineClear(
+        PathTile(layer: 0, x: a.x, z: a.z),
+        PathTile(layer: 0, x: b.x, z: b.z),
+        (int64(int32(first.x)) + originX, int64(int32(first.y)) + originZ),
+        (int64(int32(last.x)) + originX, int64(int32(last.y)) + originZ),
+        FixedScale,
+        walkable
+      ):
+        return false
+  true
 
-proc terrainBlockedOnSegment(w: World, a, b: PathTile): bool =
-  ## True when the centre-to-centre line clips a blocked tile.
-  var
-    x = a.x
-    z = a.z
-    ix = 0
-    iz = 0
-  let
-    dx = b.x - a.x
-    dz = b.z - a.z
-    stepX = cmp(dx, 0)
-    stepZ = cmp(dz, 0)
-    adx = abs(dx)
-    adz = abs(dz)
-  while x != b.x or z != b.z:
-    let
-      left = int64(1 + 2 * ix) * int64(adz)
-      right = int64(1 + 2 * iz) * int64(adx)
-      takeX = stepX != 0 and (stepZ == 0 or left <= right)
-      takeZ = stepZ != 0 and (stepX == 0 or left >= right)
-    if takeX and takeZ:
-      if not w.tileOpen(x + int32(stepX), z) or
-          not w.tileOpen(x, z + int32(stepZ)):
-        return true
-    if takeX:
-      x += int32(stepX)
-      inc ix
-    if takeZ:
-      z += int32(stepZ)
-      inc iz
-    if not w.tileOpen(x, z):
-      return true
-  false
-
-proc lvdSmoothPath(tiles: seq[PathTile], ignoreId: int32): seq[PathTile] =
-  ## String-pulls a route without skipping through units or blocked ground.
+proc lvdSmoothPath(tiles: seq[PathTile], radius: Fixed): seq[PathTile] =
+  ## String-pulls only shortcuts with room for the entire unit footprint.
   if tiles.len <= 2:
     return tiles
   result.add tiles[0]
@@ -731,13 +687,16 @@ proc lvdSmoothPath(tiles: seq[PathTile], ignoreId: int32): seq[PathTile] =
   while anchor < tiles.len - 1:
     var reach = anchor + 1
     for candidate in countdown(tiles.len - 1, anchor + 2):
-      if lineClear(tiles[anchor], tiles[candidate]) and
-          not occupancyOnSegment(
-            pathWorld, tiles[anchor], tiles[candidate], ignoreId
-          ) and
-          not terrainBlockedOnSegment(
-            pathWorld, tiles[anchor], tiles[candidate]
-          ):
+      let
+        first = fixedVec2(
+          fixed(tiles[anchor].x) + FixedHalf,
+          fixed(tiles[anchor].z) + FixedHalf
+        )
+        last = fixedVec2(
+          fixed(tiles[candidate].x) + FixedHalf,
+          fixed(tiles[candidate].z) + FixedHalf
+        )
+      if footprintLineClear(first, last, radius, lvdPathWalkable):
         reach = candidate
         break
     result.add tiles[reach]
@@ -776,7 +735,7 @@ proc findPath(
     partial: true
   ), pathTiles)
   pathExpansions += found.expansions
-  let pulled = lvdSmoothPath(pathTiles, ignoreId)
+  let pulled = lvdSmoothPath(pathTiles, w.units[w.unitIndex(ignoreId)].body.radius)
   path.setLen(pulled.len)
   for i, tile in pulled:
     path[i] = tile2(tile.x, tile.z)
@@ -784,14 +743,7 @@ proc findPath(
 
 ## Order bookkeeping
 
-proc clearPassing(unit: Unit) =
-  unit.passingPeer = NoEntity
-  unit.passingTicks = 0
-  unit.passingPoint = FixedVec2Zero
-  unit.passingForward = FixedVec2Zero
-
 proc clearPath(unit: Unit) =
-  unit.clearPassing()
   unit.path.setLen(0)
   unit.pathIndex = 0
   unit.pathGoal = NoTile
@@ -836,12 +788,42 @@ proc requestPath(w: World, index: int32) =
       w.units[droppedIndex].orderFailed = true
   w.pathQueue.add PathRequest(unitId: id, goal: w.units[index].goal)
 
+proc legalGoalOffset(
+    w: World, unit: Unit, goal: Tile2, offset: FixedVec2
+): FixedVec2 =
+  ## Keeps precise clicks when possible, fitting wall-adjacent goals to the body.
+  if not w.tileOpen(goal):
+    return offset
+  let
+    limit = max(FixedZero, FixedHalf - unit.body.radius - Fixed(1))
+    inset = fixedVec2(
+      clamp(offset.x, -limit, limit), clamp(offset.y, -limit, limit)
+    )
+    center = fixedVec2(
+      fixed(goal.x.int32) + FixedHalf, fixed(goal.y.int32) + FixedHalf
+    )
+  var best = int64.high
+  result = inset
+  for x in [offset.x, inset.x]:
+    for y in [offset.y, inset.y]:
+      let candidate = fixedVec2(x, y)
+      var open = true
+      for dx in [-unit.body.radius, unit.body.radius]:
+        for dy in [-unit.body.radius, unit.body.radius]:
+          let corner = cell(center + candidate + fixedVec2(dx, dy))
+          if not w.tileOpen(corner.x, corner.z):
+            open = false
+      let distance = lengthSquared(candidate - offset)
+      if open and distance < best:
+        best = distance
+        result = candidate
+
 proc setGoal(w: World, index: int32, goal: Tile2,
     offset = FixedVec2Zero) =
   ## Points a unit at a destination tile and asks for a route.
   w.units[index].goal = goal
   w.units[index].blockedEndpointValid = false
-  w.units[index].goalOffset = offset
+  w.units[index].goalOffset = w.legalGoalOffset(w.units[index], goal, offset)
   w.units[index].hasGoal = true
   w.units[index].blockedTicks = 0
   w.units[index].repathCooldown = 0
@@ -1305,17 +1287,24 @@ proc acquireTarget(w: World, unit: Unit, defend = false): int32 =
 ## The body is the planar authority. Tiles and occupancy are derived after
 ## each steer so harvest, combat, and vision keep their integer queries.
 
-proc lvdTilesWalkable(pos: FixedVec2): bool {.nimcall.} =
-  ## Terrain and structures only; other units separate as circles.
-  let (x, z) = cell(pos)
-  walkWorld != nil and walkWorld.tileOpen(x, z)
+proc lvdTerrainWalkable(layer, x, z: int): bool {.nimcall.} =
+  ## Checks static movement obstacles without turning crowds into walls.
+  layer == 0 and walkWorld.tileOpen(int32(x), int32(z))
+
+proc routeSegmentOpen(w: World, unit: Unit, finish: FixedVec2): bool =
+  ## Validates a route shortcut from the body's actual, possibly pushed position.
+  installImmutableLayers(w.map.terrain)
+  walkWorld = w
+  footprintLineClear(
+    unit.body.pos, finish, unit.body.radius, lvdTerrainWalkable
+  )
 
 proc moveSpeed(w: World, unit: Unit): Fixed =
   ## Never round the research bonus to whole step ticks.
   w.unitMoveSpeed(unit.owner, unit.kind)
 
 proc waypointPosition(unit: Unit, tile: Tile2): FixedVec2 =
-  ## Uses the exact destination for the last tile of a route.
+  ## Returns the exact order destination when this is the active goal tile.
   result = tileCenter(tile)
   if unit.hasGoal and tile == unit.goal:
     result += unit.goalOffset
@@ -1323,57 +1312,81 @@ proc waypointPosition(unit: Unit, tile: Tile2): FixedVec2 =
 proc arrivedAt(unit: Unit, tile: Tile2): bool =
   ## Keeps fractional destinations precise while allowing broad path turns.
   let radius =
-    if unit.hasGoal and tile == unit.goal and
-        unit.goalOffset != FixedVec2Zero:
-      0.001'fx
+    if unit.hasGoal and tile == unit.goal:
+      if unit.goalOffset != FixedVec2Zero: 0.001'fx
+      else: 0.1'fx
     else:
       PathArrive
   length(unit.waypointPosition(tile) - unit.body.pos) <= radius
 
-proc passingSegmentOpen(w: World, unit: Unit, finish: FixedVec2,
+proc canAdvanceWaypoint(w: World, unit: Unit): bool =
+  ## Turns early only when the next segment clears the whole body.
+  let waypoint = unit.path[unit.pathIndex]
+  if length(tileCenter(waypoint) - unit.body.pos) > PathArrive:
+    return false
+  if unit.pathIndex + 1 < int32(unit.path.len):
+    return w.routeSegmentOpen(
+      unit, tileCenter(unit.path[unit.pathIndex + 1])
+    )
+  true
+
+proc bodySegmentOpen(w: World, unit: Unit, finish: FixedVec2,
     checkBodies = true): bool
 
 proc steerUnit(w: World, index: int32, toward: FixedVec2) =
-  ## Turns and slides one unit, then syncs its tile.
-  walkWorld = w
-  let before = w.units[index].body.pos
-  steer(
-    w.units[index].body,
-    toward,
-    w.moveSpeed(w.units[index]),
-    BodyTurnRate,
-    lvdTilesWalkable
-  )
-  let after = w.units[index].body.pos
-  w.units[index].body.pos = before
-  if w.passingSegmentOpen(w.units[index], after):
-    w.units[index].body.pos = after
+  ## Walks continuously while facing catches up to the local travel direction.
+  let
+    unit = w.units[index]
+    before = unit.body.pos
+    distance = length(toward)
+    speed = w.moveSpeed(unit)
+  var direction = normalize(toward)
+  # Resolve exact arrivals directly. Local traffic must not orbit a waypoint
+  # or pull a unit away from its own final formation slot.
+  if distance > 0.75'fx and index < trafficSteering.len.int32:
+    direction = normalize(direction + trafficSteering[index])
+  if direction != FixedVec2Zero:
+    turnToward(unit.body.facing, angle(direction), BodyTurnRate)
+  let delta =
+    if distance <= speed: toward
+    else: direction * speed
+  let after = before + delta
+  if w.bodySegmentOpen(unit, after):
+    unit.body.pos = after
   else:
-    # Center-line A* smoothing may graze a corner within the circle radius.
-    # Slide the actual swept body, not just its center point.
-    let onlyX = fixedVec2(after.x, before.y)
-    let onlyY = fixedVec2(before.x, after.y)
-    if onlyX != before and w.passingSegmentOpen(w.units[index], onlyX):
-      w.units[index].body.pos = onlyX
-    elif onlyY != before and w.passingSegmentOpen(w.units[index], onlyY):
-      w.units[index].body.pos = onlyY
-  w.units[index].applyBody()
-  if w.units[index].body.pos == before:
-    inc w.units[index].blockedTicks
-    if w.units[index].blockedTicks >= AbandonAfterTicks:
-      w.units[index].clearOrder(true)
+    # Slide the swept footprint, then try the unmodified route direction.
+    # A crowd suggestion may never trap a unit beside otherwise clear terrain.
+    let
+      onlyX = fixedVec2(after.x, before.y)
+      onlyY = fixedVec2(before.x, after.y)
+      direct = before + desiredStep(
+        FixedVec2Zero, toward, speed, FixedZero
+      )
+    if onlyX != before and w.bodySegmentOpen(unit, onlyX):
+      unit.body.pos = onlyX
+    elif onlyY != before and w.bodySegmentOpen(unit, onlyY):
+      unit.body.pos = onlyY
+    elif direct != before and w.bodySegmentOpen(unit, direct):
+      unit.body.pos = direct
+  unit.applyBody()
+  if unit.body.pos == before:
+    inc unit.blockedTicks
+    if unit.blockedTicks >= AbandonAfterTicks:
+      unit.clearOrder(true)
   else:
-    w.units[index].blockedTicks = 0
-    w.units[index].animation = RunAnimation
+    unit.blockedTicks = 0
+    unit.animation = RunAnimation
 
 proc movementDirection(unit: Unit): FixedVec2 =
   if not unit.hasGoal: return FixedVec2Zero
   let target =
-    if unit.pathIndex < int32(unit.path.len): unit.path[unit.pathIndex]
-    else: unit.goal
-  normalize(unit.waypointPosition(target) - unit.body.pos)
+    if unit.tile != unit.goal and unit.pathIndex < int32(unit.path.len):
+      tileCenter(unit.path[unit.pathIndex])
+    else:
+      unit.waypointPosition(unit.goal)
+  normalize(target - unit.body.pos)
 
-proc passingSegmentOpen(w: World, unit: Unit, finish: FixedVec2,
+proc bodySegmentOpen(w: World, unit: Unit, finish: FixedVec2,
     checkBodies: bool): bool =
   ## Short swept corridor, including the body radius and diagonal corners.
   ## Sampling is finer than a body radius; no tile-sized jumps are permitted.
@@ -1404,71 +1417,67 @@ proc passingSegmentOpen(w: World, unit: Unit, finish: FixedVec2,
         return false
   true
 
-proc preparePassing(w: World) =
-  ## Moving circles can undo every steer in separation, so blockedTicks is
-  ## not a contact detector. Reserve one lateral yield before they overlap.
-  ## Higher ID yields, and keeps its chosen side until the peer has passed.
-  for i in 0 ..< w.units.len:
-    let unit = w.units[i]
-    if not unit.hasGoal or unit.passingTicks > 0:
+proc prepareTraffic(w: World) =
+  ## Samples local flow before anyone moves, with bounded deterministic work.
+  trafficDirections.setLen(w.units.len)
+  trafficSteering.setLen(w.units.len)
+  for i, unit in w.units:
+    trafficDirections[i] = FixedVec2Zero
+    trafficSteering[i] = FixedVec2Zero
+    if unit.hasGoal and not unit.arrivedAt(unit.goal) and
+        (unit.tile == unit.goal or
+          unit.pathIndex < unit.path.len.int32) and
+        unit.state notin {UnitDying, UnitInMine, UnitBuilding} and
+        not (unit.blockedEndpointValid and
+          unit.arrivedAt(unit.blockedEndpoint)):
+      trafficDirections[i] = unit.movementDirection()
+  for i, unit in w.units:
+    let forward = trafficDirections[i]
+    if forward == FixedVec2Zero:
       continue
-    let forward = unit.movementDirection()
-    if forward == FixedVec2Zero: continue
+    let lateral = fixedVec2(-forward.y, forward.x)
+    var
+      avoidance = FixedZero
+      alignment = FixedZero
+      aligned = 0'i32
     for j in trafficGrid.neighbors(unit.body.pos):
-      if j >= i: continue
+      if j == i:
+        continue
       let peer = w.units[j]
-      if peer.owner != unit.owner or not peer.hasGoal or peer.passingTicks > 0:
+      if peer.owner != unit.owner:
         continue
-      let offset = peer.body.pos - unit.body.pos
-      if lengthSquared(offset) > int64(FixedScale) * FixedScale or
-          dot(offset, forward) <= FixedZero or
-          dot(forward, peer.movementDirection()) >
-            (if unit.kind == PeonUnit: -0.5'fx else: 0.5'fx):
+      let
+        offset = peer.body.pos - unit.body.pos
+        squared = lengthSquared(offset)
+      # Length rounds down, so retain exactly the same one-tile neighborhood.
+      if squared == 0 or
+          squared >= int64(FixedScale + 1) * int64(FixedScale + 1):
         continue
-      let lateral = fixedVec2(-forward.y, forward.x)
-      for side in [FixedOne, -FixedOne]:
-        let point = unit.body.pos + lateral * side
-        if w.passingSegmentOpen(unit, point):
-          unit.passingPeer = peer.id
-          unit.passingTicks = TickRate * 3
-          unit.passingPoint = point
-          unit.passingForward = forward
-          break
-      break
-
-proc advancePassing(w: World, index: int32): bool =
-  let unit = w.units[index]
-  if unit.passingTicks > 0:
-    dec unit.passingTicks
-    let peer = w.unitIndex(unit.passingPeer)
-    if unit.passingTicks == 0 or peer < 0 or not w.units[peer].hasGoal or
-        dot(w.units[peer].body.pos - unit.body.pos, unit.passingForward) < -0.6'fx:
-      if unit.kind == PeonUnit:
-        # Resource approach rings can have changed while another miner exits.
-        unit.clearPath()
-        w.requestPath(index)
-      else:
-        # No global search for routine combat-unit local passing.
-        unit.clearPassing()
-      return false
-    let toward = unit.passingPoint - unit.body.pos
-    if length(toward) > 0.01'fx:
-      # Rotate normally, but validate the actual short sweep before accepting
-      # movement. Do not count a temporary yield as an abandoned work order.
-      let before = unit.body.pos
-      walkWorld = w
-      steer(unit.body, toward, w.moveSpeed(unit), BodyTurnRate, lvdTilesWalkable)
-      let after = unit.body.pos
-      unit.body.pos = before
-      if w.passingSegmentOpen(unit, after): unit.body.pos = after
-      unit.applyBody()
-      unit.animation = if before == unit.body.pos: IdleAnimation else: RunAnimation
-    else:
-      unit.animation = IdleAnimation
-    return true
-  # Soft bodies keep advancing while a peer yields; a reciprocal wait can
-  # lock a whole choke behind a stalled lateral reservation.
-  false
+      let
+        distance = length(offset)
+        peerDirection = trafficDirections[j]
+        agreement = dot(forward, peerDirection)
+        ahead = dot(offset, forward)
+      if peerDirection != FixedVec2Zero and agreement > 0.5'fx:
+        # Alignment is a small lateral bias among compatible moving neighbors.
+        # It never attracts a unit toward somebody else's destination.
+        alignment += dot(peerDirection, lateral)
+        inc aligned
+      if ahead <= FixedZero:
+        continue
+      let across = dot(offset, lateral)
+      if peerDirection != FixedVec2Zero and agreement < -0.25'fx:
+        # Both sides keep right while retaining forward motion. No actor waits
+        # for one peer to complete a reserved tile-sized sidestep.
+        avoidance -= (1'fx - distance) * 0.6'fx
+      elif abs(across) < 0.44'fx and distance < 0.65'fx:
+        let side = if across > FixedZero: -FixedOne else: FixedOne
+        avoidance += side * (0.65'fx - distance) * 0.3'fx
+    if aligned > 0:
+      alignment = alignment / fixed(aligned) * 0.15'fx
+    trafficSteering[i] = lateral * clamp(
+      avoidance + alignment, -0.45'fx, 0.45'fx
+    )
 
 proc retainedBlockedEndpoint(w: World, unit: Unit): bool =
   ## This is order state, not occupancy: friendly pressure may move the body
@@ -1506,7 +1515,6 @@ proc advanceMovement(w: World, index: int32) =
   if retained and w.units[index].arrivedAt(w.units[index].blockedEndpoint):
     w.units[index].animation = IdleAnimation
     return
-  if w.advancePassing(index): return
   if w.units[index].arrivedAt(w.units[index].goal):
     ## Stay on the order. Clearing the goal here left harvest and build
     ## peons idle-not-idle after a shove off the ring.
@@ -1520,10 +1528,23 @@ proc advanceMovement(w: World, index: int32) =
     return
   while w.units[index].pathIndex < int32(w.units[index].path.len):
     let waypoint = w.units[index].path[w.units[index].pathIndex]
-    if w.units[index].arrivedAt(waypoint):
+    if w.canAdvanceWaypoint(w.units[index]):
       inc w.units[index].pathIndex
       continue
-    w.steerUnit(index, w.units[index].waypointPosition(waypoint) - w.units[index].body.pos)
+    let
+      unit = w.units[index]
+      toward = tileCenter(waypoint) - unit.body.pos
+      direct = unit.body.pos + desiredStep(
+        FixedVec2Zero, toward, w.moveSpeed(unit), FixedZero
+      )
+    if not w.bodySegmentOpen(unit, direct, checkBodies = false):
+      # Pressure can move a body off a previously clear pulled segment. Route
+      # from its new position before wall sliding and crowd pressure cancel.
+      unit.clearPath()
+      w.requestPath(index)
+      unit.repathCooldown = RepathCooldownTicks
+      return
+    w.steerUnit(index, toward)
     if w.units[index].blockedTicks >= RepathAfterTicks:
       w.units[index].blockedTicks = 0
       w.units[index].clearPath()
@@ -1576,12 +1597,10 @@ proc servePathQueue(w: World) {.measure.} =
         w.units[index].blockedEndpointRevision = w.pathTerrainRevision
     w.units[index].pathIndex = 0
     while w.units[index].pathIndex < int32(w.units[index].path.len) and
-        w.units[index].arrivedAt(
-          w.units[index].path[w.units[index].pathIndex]
-        ):
+        w.canAdvanceWaypoint(w.units[index]):
       inc w.units[index].pathIndex
     if w.units[index].pathIndex < int32(w.units[index].path.len):
-      let toward = w.units[index].waypointPosition(
+      let toward = tileCenter(
         w.units[index].path[w.units[index].pathIndex]
       ) - w.units[index].body.pos
       if toward != FixedVec2Zero:
@@ -1688,7 +1707,7 @@ proc mineExitTile(w: World, unit: Unit, mine: Building): Tile2 =
         continue
       let point = tileCenter(tile)
       unit.body.pos = point
-      let allowed = w.passingSegmentOpen(unit, point)
+      let allowed = w.bodySegmentOpen(unit, point)
       unit.body.pos = before
       if allowed: return tile
   NoTile
@@ -2973,12 +2992,6 @@ proc hashWorld(w: World): uint64 =
     hash.addHashy(unit.blockedEndpointValid)
     hash.addHashy(unit.blockedEndpointRevision)
     hash.addHashy(unit.blockedTicks)
-    hash.addHashy(unit.passingPeer)
-    hash.addHashy(unit.passingTicks)
-    hash.addHashy(int32(unit.passingPoint.x))
-    hash.addHashy(int32(unit.passingPoint.y))
-    hash.addHashy(int32(unit.passingForward.x))
-    hash.addHashy(int32(unit.passingForward.y))
     hash.addHashy(unit.repathCooldown)
     hash.addHashy(unit.carryGold)
     hash.addHashy(unit.carryWood)
@@ -3134,64 +3147,83 @@ proc tickWorld*(w: World, decide: proc(w: World) {.closure.}) {.measure.} =
     w.servePathQueue()
   profileBlock "units":
     w.rebuildTrafficGrid()
-    w.preparePassing()
+    w.prepareTraffic()
     for index in 0 ..< w.units.len:
       w.advanceUnit(int32(index))
   profileBlock "separate":
     walkWorld = w
-    w.rebuildTrafficGrid()
-    softPush.setLen(w.units.len)
-    for push in softPush.mitems: push = FixedVec2Zero
-    for i in 0 ..< w.units.len:
-      let unit = w.units[i]
-      if unit.state in {UnitDying, UnitInMine, UnitBuilding} or
-          unit.constructionSiteId != NoEntity:
-        continue
-      # Directed, bounded gather from a frozen grid. Even an omitted high ID
-      # receives pressure from the retained prefix; no all-pairs dense fallback.
-      for j in trafficGrid.neighbors(unit.body.pos):
-        if j == i: continue
-        let peer = w.units[j]
-        if peer.state in {UnitDying, UnitInMine}:
+    # Two bounded passes transmit pressure through a clump without a large
+    # correction in one frame or changing clearance against static terrain.
+    for contactPass in 0 ..< ContactPasses:
+      w.rebuildTrafficGrid()
+      softPush.setLen(w.units.len)
+      for push in softPush.mitems: push = FixedVec2Zero
+      for i in 0 ..< w.units.len:
+        let unit = w.units[i]
+        if unit.state in {UnitDying, UnitInMine, UnitBuilding} or
+            unit.constructionSiteId != NoEntity:
           continue
-        let offset = unit.body.pos-peer.body.pos
-        let need = unit.body.radius+peer.body.radius
-        if lengthSquared(offset) >= int64(int32(need))*int64(int32(need)):
-          continue
-        let dist = length(offset)
-        var normal: FixedVec2
-        if dist > FixedZero:
-          normal = normalize(offset)
-        else:
-          # Stable anti-symmetric tie break, including coincident omitted IDs.
-          const directions = [(1,0), (1,1), (0,1), (-1,1),
-            (-1,0), (-1,-1), (0,-1), (1,-1)]
-          let axis = directions[int((int64(min(unit.id,peer.id))*3+
-            int64(max(unit.id,peer.id))*5) mod 8)]
-          normal = normalize(fixedVec2(fixed(axis[0].int32),fixed(axis[1].int32)))
-          if i > j: normal = normal * -FixedOne
-        let friendly = unit.owner == peer.owner
-        var share = 0.5'fx
-        if peer.state == UnitBuilding: share = FixedOne
-        elif friendly and unit.hasGoal != peer.hasGoal:
-          share = if unit.hasGoal: 0.1'fx else: FixedOne
-          if not unit.hasGoal:
+        # Directed, bounded gather from a frozen grid. Even an omitted high ID
+        # receives pressure from the retained prefix; no all-pairs dense fallback.
+        for j in trafficGrid.neighbors(unit.body.pos):
+          if j == i: continue
+          let peer = w.units[j]
+          if peer.state in {UnitDying, UnitInMine}:
+            continue
+          let
+            offset = unit.body.pos - peer.body.pos
+            friendly = unit.owner == peer.owner
+            core = unit.body.radius + peer.body.radius
+            need = core +
+              (if not friendly: FixedZero
+                elif unit.hasGoal and peer.hasGoal: MovingContactPadding
+                elif unit.hasGoal or peer.hasGoal: IdleContactPadding
+                else: FixedZero)
+          if lengthSquared(offset) >= int64(int32(need))*int64(int32(need)):
+            continue
+          let dist = length(offset)
+          var normal: FixedVec2
+          if dist > FixedZero:
+            normal = normalize(offset)
+          else:
+            # Stable anti-symmetric tie break, including coincident omitted IDs.
+            const directions = [(1,0), (1,1), (0,1), (-1,1),
+              (-1,0), (-1,-1), (0,-1), (1,-1)]
+            let axis = directions[int((int64(min(unit.id,peer.id))*3+
+              int64(max(unit.id,peer.id))*5) mod 8)]
+            normal = normalize(fixedVec2(fixed(axis[0].int32),fixed(axis[1].int32)))
+            if i > j: normal = normal * -FixedOne
+          var share = 0.5'fx
+          if peer.state == UnitBuilding: share = FixedOne
+          elif friendly and not unit.hasGoal and peer.hasGoal:
             # Give the idle circle a lateral component rather than endlessly
             # bulldozing it along the mover's exact center line.
             let forward = peer.movementDirection()
             let side = fixedVec2(-forward.y, forward.x)
             let sign = if dot(normal, side) < FixedZero: -FixedOne else: FixedOne
             normal = normalize(normal + side*sign)
-        softPush[i] += normal * ((need-dist) *
-          (if friendly: 0.35'fx else: FixedOne) * share)
-    for i, unit in w.units:
-      var push = softPush[i]
-      if lengthSquared(push) > int64(int32(0.08'fx))*int64(int32(0.08'fx)):
-        push = normalize(push)*0.08'fx
-      if push != FixedVec2Zero:
-        let next = unit.body.pos+push
-        if w.passingSegmentOpen(unit, next):
-          unit.body.pos = next
+          # Moving bodies start yielding before their visible shoulders meet.
+          # The outer shell compresses gently; real overlap receives full force.
+          let pressure = max(FixedZero, core - dist) +
+            max(FixedZero, need - max(core, dist)) * 0.25'fx
+          softPush[i] += normal * (pressure * share)
+      for i, unit in w.units:
+        var push = softPush[i]
+        if lengthSquared(push) >
+          int64(int32(ContactPushPerPass)) * int64(int32(ContactPushPerPass)):
+            push = normalize(push) * ContactPushPerPass
+        if push != FixedVec2Zero:
+          let next = unit.body.pos+push
+          if w.bodySegmentOpen(unit, next):
+            unit.body.pos = next
+          else:
+            let
+              onlyX = fixedVec2(next.x, unit.body.pos.y)
+              onlyY = fixedVec2(unit.body.pos.x, next.y)
+            if onlyX != unit.body.pos and w.bodySegmentOpen(unit, onlyX):
+              unit.body.pos = onlyX
+            elif onlyY != unit.body.pos and w.bodySegmentOpen(unit, onlyY):
+              unit.body.pos = onlyY
     for i in 0 ..< w.occupancy.len:
       w.occupancy[i] = 0
     for unit in w.units:

@@ -174,7 +174,7 @@ proc applyPreferences*(
   interpolateVisuals = preferences.interpolation
   configureSounds(
     preferences.soundMuted, preferences.mainVolume,
-    preferences.fxVolume, preferences.uiVolume
+    preferences.fxVolume, preferences.uiVolume, preferences.musicVolume
   )
 
 proc customScale(preferences: var Preferences, percent: int) =
@@ -505,26 +505,29 @@ proc settingsPanel*(
     sk.at = origin + vec2(0, 64)
     checkBox "Mute all sound", preferences.soundMuted
     sk.percentageSlider(
-      window, "Main", preferences.mainVolume, origin + vec2(0, 120)
+      window, "Main", preferences.mainVolume, origin + vec2(0, 112)
     )
     sk.percentageSlider(
-      window, "FX", preferences.fxVolume, origin + vec2(0, 176)
+      window, "Music", preferences.musicVolume, origin + vec2(0, 160)
     )
     sk.percentageSlider(
-      window, "UI", preferences.uiVolume, origin + vec2(0, 232)
+      window, "FX", preferences.fxVolume, origin + vec2(0, 208)
+    )
+    sk.percentageSlider(
+      window, "UI", preferences.uiVolume, origin + vec2(0, 256)
     )
     if preferences != previous:
       configureSounds(
         preferences.soundMuted, preferences.mainVolume,
-        preferences.fxVolume, preferences.uiVolume
+        preferences.fxVolume, preferences.uiVolume, preferences.musicVolume
       )
       preferences.savePreferences(app)
-    sk.at = origin + vec2(0, 292)
+    sk.at = origin + vec2(0, 312)
     soundButton "Test combat sound":
       playSound(SwordSound)
     sk.drawLabel(
-      "FX controls battles and workers. UI controls menus, orders, and notices.",
-      origin + vec2(0, 352),
+      "Music: soundtrack. FX: battles and workers. UI: menus, orders, notices.",
+      origin + vec2(0, 360),
       vec2(720, 36),
       sk.theme.disabledTextColor
     )

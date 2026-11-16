@@ -15,11 +15,16 @@ when defined(headless):
       outcome: "winner_" & $run.world.winner
     ))
 else:
-  import windy, polyworld/[menus, sounds], game, graphics, frontend, lobbies
+  import windy, polyworld/[menus, sounds], game, graphics, frontend, lobbies,
+    assets
   initializeOptions()
-  initSounds()
   try:
     var preferences = readLvdPreferences()
+    configureSounds(
+      preferences.soundMuted, preferences.mainVolume,
+      preferences.fxVolume, preferences.uiVolume, preferences.musicVolume
+    )
+    initSounds(MusicPath)
     if playerNameOverride.len > 0:
       preferences.name = playerNameOverride
       preferences.savePreferences("Polyworld LvD")

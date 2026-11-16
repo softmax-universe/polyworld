@@ -1,7 +1,8 @@
 import
   std/[os, random, strutils, uri],
   bumpy, chroma, jsony, silky, vmath, windy,
-  polyworld/[displays, chrome, connections, menus, roomclients, rooms, policies, viewers],
+  polyworld/[displays, chrome, connections, menus, roomclients, rooms, policies,
+    sounds, viewers],
   content, controls, game, graphics, homes, lobbies, multiplayer, presets,
   rosterstate, participantcontext, lobbyreadiness
 
@@ -205,6 +206,7 @@ proc runFrontend*() =
       )
     window.onFrame = proc() =
       ## Draws this lifecycle state without constructing a hidden match.
+      updateSounds()
       var contextInputBlocked = false
       if page != LobbyMenu:
         participantMenu.dismiss()

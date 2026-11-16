@@ -1908,6 +1908,7 @@ proc runGraphics*(network: NetworkMatch = nil,
     hooks.ready(actionCam)
   window.onFrame = proc() =
     profileBlock "frame":
+      updateSounds()
       if hooks.reload != nil and hooks.reload():
         reloadMatch()
       let dt = frameDelta(lastFrameTime, Step)

@@ -33,6 +33,7 @@ var
   available = false
   muted = false
   masterVolume = 1.0'f
+  musicVolume = 1.0'f
   effectsVolume = 1.0'f
   interfaceVolume = 1.0'f
   cueVariants: array[SoundCue, SoundVariants]
@@ -137,13 +138,15 @@ proc cueGain(cue: SoundCue): float32 =
   else:
     0.36'f
 
-proc configureSounds*(silent: bool, main, effects, ui: int) =
+proc configureSounds*(silent: bool, main, effects, ui: int, music = 100) =
   ## Applies persisted mixer settings to active and future voices.
   muted = silent
   masterVolume = clamp(main, 0, 100).float32 / 100
+  musicVolume = clamp(music, 0, 100).float32 / 100
   effectsVolume = clamp(effects, 0, 100).float32 / 100
   interfaceVolume = clamp(ui, 0, 100).float32 / 100
   if available:
+    setMusicVolume(musicVolume)
     setSoundVolumes(
       if muted: 0.0'f else: masterVolume,
       effectsVolume,
@@ -152,10 +155,12 @@ proc configureSounds*(silent: bool, main, effects, ui: int) =
     if muted or masterVolume == 0:
       stopSoundVoices()
 
-proc initSounds*() =
+proc initSounds*(musicPath = "") =
   ## Preloads the curated library once without changing simulation state.
   when not defined(headless):
     if initialized:
+      if available and musicPath.len > 0 and not loadMusic(musicPath):
+        echo "Cannot load soundtrack: ", musicPath
       return
     initialized = true
     available = openSoundDevice()
@@ -192,9 +197,17 @@ proc initSounds*() =
       effectsVolume,
       interfaceVolume
     )
+    setMusicVolume(musicVolume)
+    if musicPath.len > 0 and not loadMusic(musicPath):
+      echo "Cannot load soundtrack: ", musicPath
+
+proc updateSounds*() =
+  ## Keeps requested music running after a browser unlock or device interruption.
+  if available:
+    updateMusic()
 
 proc stopSounds*() =
-  ## Clears audible tails and cooldowns when leaving or seeking a match.
+  ## Clears effect tails and cooldowns without interrupting the soundtrack.
   if available:
     stopSoundVoices()
   gate = SoundGate()

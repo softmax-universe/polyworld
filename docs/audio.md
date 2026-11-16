@@ -1,6 +1,6 @@
 # Game sounds
 
-Gota and Light vs Dark use a shared sound mixer with separate UI and effects
+Gota and Light vs Dark use a shared sound mixer with separate Music, UI and FX
 volumes. Slappy decodes OGG Vorbis recordings for native OpenAL and
 the browser's Web Audio implementation, resuming playback after a
 pointer or keyboard gesture. A missing output device disables playback
@@ -21,7 +21,7 @@ hashes and any audio processing. Browser asset manifests include these
 notices with the recordings. Full downloaded packs remain in
 `~/Downloads/polyworld-cc0-audio`, outside both repositories.
 
-The selection contains 42 mono OGG Vorbis files at 44.1 kHz, from
+The effects selection contains 42 mono OGG Vorbis files at 44.1 kHz, from
 twelve sources, encoded at quality 6 and occupying 523 KiB. Source recordings
 remain untouched in the download library. Per-file provenance records the
 crop, normalization, edge fades and encoding used for the imported clips.
@@ -96,9 +96,19 @@ initialization. Browser one-shot nodes, engine internals and audio-driver
 allocations are outside these measurements; match setup,
 replacement and teardown may allocate.
 
-Playback never queues events while browser audio is suspended. The Music
-preference is retained for settings-file compatibility. The games ship effects
-rather than a soundtrack, so the sound panel exposes Main, FX and UI controls.
+Effects never queue events while browser audio is suspended. Light vs Dark
+starts "Yearning of the Deep Woods" at application startup and loops it across
+menus, matches, pauses and replay seeks. In the browser, playback begins after
+the first pointer or keyboard gesture unlocks audio. One dedicated stereo source
+keeps music separate from the effects pool and its burst limits. Music volume
+changes apply immediately without restarting the song; Main and Mute also apply.
+
+The soundtrack is `polyworld_art/music/yearning-of-the-deep-woods.ogg`.
+The full 3:23 recording retains its stereo 48 kHz format, converted from WAV to
+OGG Vorbis quality 4: 39,097,348 bytes became 2,786,804 bytes. The adjacent JSON
+records source metadata, hashes and conversion details. LvD's asset declarations
+include both files in normal and replay WASM bundles. The original WAV stays in
+Downloads.
 
 Run the focused checks from the Polyworld repository root:
 
@@ -109,7 +119,9 @@ nim r -d:audioTest -d:nimAllocStats games/gods_of_the_arena/tests/test_audio.nim
 nim r -d:audioTest -d:nimAllocStats games/light_vs_dark/tests/test_battle_sounds.nim
 nim r -d:nimAllocStats tests/manual_sound_allocations.nim
 nim r tests/manual_sound_fanfares.nim
+nim r tests/manual_music.nim
 ```
 
 To audition a mix, run either game normally, open Settings > Sound, and use
-Test combat sound. Main, FX, UI and Mute apply immediately and persist.
+Test combat sound. Main, Music, FX, UI and Mute apply immediately and persist.
+The native music check uses a muted device without opening a window.

@@ -22,7 +22,11 @@ when not (defined(headless) or defined(audioTest)):
     masterVolume = 1.0'f
     effectsVolume = 1.0'f
     interfaceVolume = 1.0'f
+    musicVolume = 1.0'f
     buffers: array[SoundBufferLimit, Sound]
+    musicBuffer: Sound
+    musicSource: Source
+    musicPath: string
 
   when defined(emscripten):
     {.passL: "-lopenal".}
@@ -93,6 +97,56 @@ proc prepareSoundDevice*() =
     if not opened or prepared:
       return
     prepared = true
+
+proc updateMusic*() =
+  ## Retries a stopped soundtrack once the browser audio context is unlocked.
+  when not (defined(headless) or defined(audioTest)):
+    if not opened or musicSource == nil or musicSource.playing:
+      return
+    when defined(emscripten):
+      if slappyReady() == 0:
+        return
+    musicSource.play()
+
+proc loadMusic*(path: string): bool =
+  ## Loads a stereo soundtrack into its own continuously looping voice.
+  when defined(headless) or defined(audioTest):
+    false
+  else:
+    if musicSource != nil and musicPath == path:
+      updateMusic()
+      return true
+    if not opened or not fileExists(path):
+      return false
+    var source: Source
+    try:
+      let buffer = newSound(path, forceMono = false)
+      source = newSource()
+      source.sound = buffer
+      source.rolloffFactor = 0
+      source.pos = vec3(0)
+      source.looping = true
+      source.gain = musicVolume
+      if musicSource != nil:
+        musicSource.close()
+      musicSource = source
+      musicBuffer = buffer
+      musicPath = path
+      # A suspended browser context starts this loop on its first gesture.
+      source.play()
+      return true
+    except IOError, ValueError:
+      if source != nil:
+        source.close()
+      echo "Cannot load music ", path, ": ", getCurrentExceptionMsg()
+      return false
+
+proc setMusicVolume*(volume: float32) =
+  ## Changes soundtrack gain independently from UI and world effects.
+  when not (defined(headless) or defined(audioTest)):
+    musicVolume = clamp(volume, 0.0'f, 1.0'f)
+    if musicSource != nil:
+      musicSource.gain = musicVolume
 
 proc startSoundVoice*(
     id: int, gain, pan: float32, ui: bool, fanfare = false
@@ -188,6 +242,11 @@ proc closeSoundDevice*() =
     if not opened:
       return
     stopSoundVoices()
+    if musicSource != nil:
+      musicSource.close()
+      musicSource = nil
+    musicBuffer = nil
+    musicPath.setLen(0)
     for voice in voices.mitems:
       if voice.source != nil:
         voice.source.close()

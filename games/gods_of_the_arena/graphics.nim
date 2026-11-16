@@ -1252,6 +1252,7 @@ proc runGraphics*(
   networkSpectator = network.isSpectator
 
   window.onButtonPress = proc(button: Button) =
+    window.captureCursorConfinement(button)
     if bindingCapture:
       return
     let wasTyping = chat.typing

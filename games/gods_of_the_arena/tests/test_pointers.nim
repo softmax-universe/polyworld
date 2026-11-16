@@ -17,7 +17,6 @@ doAssert not cursorConfinementAllowed(true, false, false, FullscreenEdgeScroll)
 doAssert cursorConfinementAllowed(true, true, false, FullscreenEdgeScroll)
 doAssert cursorConfinementAllowed(true, false, false, AlwaysEdgeScroll)
 doAssert cursorConfinementAllowed(true, true, false, AlwaysEdgeScroll)
-
 when defined(macosx) and not defined(emscripten):
   objc:
     proc delegate(self: NSWindow): ID
@@ -37,10 +36,6 @@ when defined(macosx) and not defined(emscripten):
       context: pointer
     )
       ## Verifies that pointer hooks preserve native observer registration.
-    proc windowDidEnterFullScreen(self: NSWindow, x: NSNotification)
-      ## Dispatches the registered native fullscreen completion callback.
-    proc windowDidExitFullScreen(self: NSWindow, x: NSNotification)
-      ## Dispatches the registered native windowed completion callback.
     proc firstResponder(self: NSWindow): ID
       ## Checks that style changes retain the game view as the input target.
     proc hasShadow(self: NSWindow): bool
@@ -78,6 +73,7 @@ when defined(macosx) and not defined(emscripten):
   type TestWindow = object
     window: Window
     focused, fullscreen, closeRequested: bool
+    settled: bool = true
 
   proc isFullscreen(window: TestWindow): bool =
     ## Supplies a display mode without changing the user's desktop.
@@ -93,13 +89,24 @@ when defined(macosx) and not defined(emscripten):
 
   proc updateCursorConfinement(window: TestWindow) =
     ## Tests production native updates with deterministic focus and mode flags.
-    updateNativeConfinement(window.nativeWindow, window.focused,
-      window.fullscreen, window.closeRequested, cursorEdgeScrolling)
+    updateNativeConfinement(
+      window.nativeWindow, window.focused, window.fullscreen,
+      window.closeRequested, cursorEdgeScrolling,
+      settled = window.settled
+    )
 
   proc updateCursorConfinement(window: TestWindow, mode: EdgeScrollMode) =
     ## Applies the same retained preference as the public window entry point.
     cursorEdgeScrolling = mode
     window.updateCursorConfinement()
+
+  proc clickCursorConfinement(window: TestWindow, button = MouseLeft) =
+    ## Sends a physical click through the production native latch decision.
+    updateNativeConfinement(
+      window.nativeWindow, window.focused, window.fullscreen,
+      window.closeRequested, cursorEdgeScrolling,
+      clicked = cursorConfinementClick(button), settled = window.settled
+    )
 
   proc rtsPointerInside(window: TestWindow): bool =
     ## Preserves Windy's exact native boundary containment in the camera test.
@@ -180,109 +187,121 @@ when defined(macosx) and not defined(emscripten):
     doAssert titleObservations == 2,
       "Removing a preexisting observer must succeed and stop its callbacks"
 
-    plain.nativeWindow.windowDidEnterFullScreen(NSNotification(0))
+    plain.fullscreen = true
     doAssert plain.fullscreen and not window.fullscreen,
-      "Other Windy windows must retain their original fullscreen callbacks"
-    plain.nativeWindow.windowDidExitFullScreen(NSNotification(0))
+      "Other Windy windows must retain their own fullscreen lifecycle"
+    doAssert not plain.visible and not window.visible
+    plain.fullscreen = false
     doAssert not plain.fullscreen
     echo "PASS native window classes, KVO observers and unchanged delegates"
 
   proc testConfinementLifecycle() =
-    ## Verifies real native apply/release across focus, settings, and resize.
+    ## Requires fresh clicks after focus, preference, resize and close changes.
     let window = newWindow(
-      "GotA confinement lifecycle",
-      ivec2(800, 600),
-      visible = false
+      "GotA confinement lifecycle", ivec2(800, 600), visible = false
     )
     defer:
       releaseCursorConfinement()
       window.close()
     installPointerHooks(window)
     let
-      originalMask = window.nativeWindow.styleMask
-      originalFrame = window.nativeWindow.frame
+      native = window.nativeWindow
+      originalMask = native.styleMask
+      originalFrame = native.frame
       originalBounds = window.nativeView.bounds
-    doAssert window.nativeWindow.isMovable
+    doAssert native.isMovable
     var state = TestWindow(window: window, focused: true)
     state.updateCursorConfinement(AlwaysEdgeScroll)
-    doAssert window.nativeWindow.mouseConfinementRect() ==
+    doAssert native.mouseConfinementRect() == NSRect(),
+      "Startup and preference application must leave the cursor free"
+    state.clickCursorConfinement()
+    doAssert native.mouseConfinementRect() ==
       cursorConfinementBounds(window.nativeView)
     doAssert not window.mouseCaptured,
       "Confinement must preserve absolute pointer input for edge scrolling"
-    doAssert not window.nativeWindow.isMovable,
+    doAssert not native.isMovable,
       "Captured windowed play must disable native dragging"
-    doAssert window.nativeWindow.firstResponder().int == window.nativeView.int,
+    doAssert native.firstResponder().int == window.nativeView.int,
       "Resize locking must retain the game view as the native input target"
-    doAssert (window.nativeWindow.styleMask and NSWindowStyleMaskResizable) == 0,
-      "Captured windowed play must disable native resizing"
-    doAssert window.nativeWindow.styleMask ==
+    doAssert native.styleMask ==
       (originalMask and not NSWindowStyleMaskResizable)
-    doAssert window.nativeWindow.frame == originalFrame and
+    doAssert native.frame == originalFrame and
       window.nativeView.bounds == originalBounds,
-      "Locking resize controls must preserve the geometry checked before capture"
+      "Locking controls must preserve the geometry checked before capture"
 
     state.focused = false
     state.updateCursorConfinement()
-    doAssert window.nativeWindow.mouseConfinementRect() == NSRect(),
+    doAssert native.mouseConfinementRect() == NSRect(),
       "Switching apps must immediately release the native cursor restriction"
-    doAssert window.nativeWindow.isMovable
-    doAssert window.nativeWindow.styleMask == originalMask,
-      "Focus loss must restore the window's original resize permission"
-    doAssert window.nativeWindow.firstResponder().int == window.nativeView.int
+    doAssert native.isMovable and native.styleMask == originalMask
+    doAssert native.firstResponder().int == window.nativeView.int
+    state.clickCursorConfinement()
+    doAssert native.mouseConfinementRect() == NSRect(),
+      "Unfocused input must not grant a future capture"
     state.focused = true
     state.updateCursorConfinement()
-    doAssert window.nativeWindow.mouseConfinementRect() != NSRect(),
-      "Refocusing must restore the retained Always preference in windowed mode"
+    doAssert native.mouseConfinementRect() == NSRect(),
+      "Refocusing must wait for a new click"
+    state.clickCursorConfinement(MouseRight)
+    doAssert native.mouseConfinementRect() != NSRect()
 
-    let beforeResize = window.nativeWindow.mouseConfinementRect()
+    let beforeResize = native.mouseConfinementRect()
     window.size = ivec2(1200, 900)
     state.updateCursorConfinement()
-    doAssert window.nativeWindow.mouseConfinementRect() != beforeResize
-    doAssert window.nativeWindow.mouseConfinementRect() ==
+    doAssert native.mouseConfinementRect() == NSRect(),
+      "A resized window must release rather than replace its clip"
+    state.updateCursorConfinement()
+    doAssert native.mouseConfinementRect() == NSRect()
+    state.clickCursorConfinement(MouseMiddle)
+    doAssert native.mouseConfinementRect() != beforeResize
+    doAssert native.mouseConfinementRect() ==
       cursorConfinementBounds(window.nativeView)
 
     state.updateCursorConfinement(NoEdgeScroll)
-    doAssert window.nativeWindow.mouseConfinementRect() == NSRect()
-    doAssert window.nativeWindow.isMovable
-    doAssert window.nativeWindow.styleMask == originalMask
+    state.clickCursorConfinement()
+    doAssert native.mouseConfinementRect() == NSRect()
+    doAssert native.isMovable and native.styleMask == originalMask
     state.focused = false
     state.updateCursorConfinement()
     state.focused = true
     state.updateCursorConfinement()
-    doAssert window.nativeWindow.mouseConfinementRect() == NSRect(),
-      "Refocusing must not reenable confinement after edge scrolling is Off"
+    doAssert native.mouseConfinementRect() == NSRect()
 
     state.updateCursorConfinement(FullscreenEdgeScroll)
-    doAssert window.nativeWindow.mouseConfinementRect() == NSRect()
+    state.clickCursorConfinement()
+    doAssert native.mouseConfinementRect() == NSRect()
     state.fullscreen = true
     state.updateCursorConfinement()
-    doAssert window.nativeWindow.mouseConfinementRect() != NSRect()
+    doAssert native.mouseConfinementRect() == NSRect(),
+      "Enabling the current mode must not reuse an earlier rejected click"
+    state.clickCursorConfinement()
+    doAssert native.mouseConfinementRect() != NSRect()
     state.fullscreen = false
     state.updateCursorConfinement()
-    doAssert window.nativeWindow.mouseConfinementRect() == NSRect()
+    doAssert native.mouseConfinementRect() == NSRect()
 
     state.updateCursorConfinement(AlwaysEdgeScroll)
+    state.clickCursorConfinement()
     state.closeRequested = true
     state.updateCursorConfinement()
-    doAssert window.nativeWindow.mouseConfinementRect() == NSRect(),
-      "Closing must release confinement even before focus changes"
+    state.clickCursorConfinement()
+    doAssert native.mouseConfinementRect() == NSRect(),
+      "Closing must release confinement and reject further capture"
     doAssert confinedWindow.int == 0 and confinedBounds == NSRect()
-    doAssert window.nativeWindow.isMovable
-    doAssert window.nativeWindow.styleMask == originalMask
+    doAssert native.isMovable and native.styleMask == originalMask
     doAssert not controlsLocked
     releaseCursorConfinement()
 
-    window.nativeWindow.setMovable(false)
-    window.nativeWindow.setStyleMask(
-      originalMask and not NSWindowStyleMaskResizable
-    )
+    native.setMovable(false)
+    native.setStyleMask(originalMask and not NSWindowStyleMaskResizable)
     state.closeRequested = false
     state.updateCursorConfinement(AlwaysEdgeScroll)
+    state.clickCursorConfinement()
     state.updateCursorConfinement(NoEdgeScroll)
-    doAssert not window.nativeWindow.isMovable
-    doAssert (window.nativeWindow.styleMask and NSWindowStyleMaskResizable) == 0,
+    doAssert not native.isMovable
+    doAssert (native.styleMask and NSWindowStyleMaskResizable) == 0,
       "Release must not enable controls that were disabled before capture"
-    echo "PASS native confinement settings, focus/refocus, resize and close"
+    echo "PASS click latch, focus/refocus, resize, preferences and close"
 
   proc testDesktopFullscreen() =
     ## Checks real borderless transitions while leaving the window hidden.
@@ -308,6 +327,7 @@ when defined(macosx) and not defined(emscripten):
       originalClass = object_getClass(native.ID)
     var state = TestWindow(window: window, focused: true)
     state.updateCursorConfinement(AlwaysEdgeScroll)
+    state.clickCursorConfinement()
     doAssert controlsLocked
     window.configureWindow(Fullscreen, CurrentResolution)
     window.updateWindowSettings()
@@ -332,6 +352,9 @@ when defined(macosx) and not defined(emscripten):
     doAssert object_getClass(native.ID).int == originalClass.int
     state.fullscreen = true
     state.updateCursorConfinement()
+    doAssert native.mouseConfinementRect() == NSRect(),
+      "Fullscreen completion must wait for a fresh click"
+    state.clickCursorConfinement()
     doAssert native.mouseConfinementRect() ==
       cursorConfinementBounds(window.nativeView)
     doAssert not controlsLocked and not window.mouseCaptured
@@ -350,6 +373,10 @@ when defined(macosx) and not defined(emscripten):
     doAssert native.firstResponder().int == window.nativeView.int
     state.fullscreen = false
     state.updateCursorConfinement()
+    doAssert native.mouseConfinementRect() == NSRect()
+    doAssert not controlsLocked,
+      "Windowed completion must not re-lock resize controls before a click"
+    state.clickCursorConfinement()
     doAssert controlsLocked
     doAssert (native.styleMask and NSWindowStyleMaskResizable) == 0
     state.updateCursorConfinement(NoEdgeScroll)
@@ -365,8 +392,10 @@ when defined(macosx) and not defined(emscripten):
     )
     defer: window.close()
     window.style = Undecorated
-    doAssert not window.nativeWindow.canBecomeMainWindow,
-      "Fullscreen input overrides must not affect unrelated borderless windows"
+    let mainEligible = window.nativeWindow.canBecomeMainWindow
+    installPointerHooks(window)
+    doAssert window.nativeWindow.canBecomeMainWindow == mainEligible,
+      "Pointer hooks must preserve Windy's borderless main-window eligibility"
     echo "PASS unrelated borderless main-window eligibility"
 
   proc testControlOwners() =
@@ -384,9 +413,11 @@ when defined(macosx) and not defined(emscripten):
       second.close()
     secondNative.setMovable(false)
     secondNative.setStyleMask(secondMask)
-    updateNativeConfinement(firstNative, true, false, false, AlwaysEdgeScroll)
+    updateNativeConfinement(firstNative, true, false, false,
+      AlwaysEdgeScroll, clicked = true)
     doAssert controlsWindow.int == firstNative.int
-    updateNativeConfinement(secondNative, true, false, false, AlwaysEdgeScroll)
+    updateNativeConfinement(secondNative, true, false, false,
+      AlwaysEdgeScroll, clicked = true)
     doAssert firstNative.isMovable and firstNative.styleMask == firstMask,
       "Changing owners must restore the original window's controls"
     doAssert controlsWindow.int == secondNative.int
@@ -409,7 +440,6 @@ when defined(macosx) and not defined(emscripten):
     observedConfinementWindow: NSWindow
     originalConfinementSetter: IMP
     confinementWrites: seq[NSRect]
-    deferredApplications: int
 
   proc observeConfinement(
       self: ID, cmd: SEL, bounds: NSRect
@@ -421,80 +451,74 @@ when defined(macosx) and not defined(emscripten):
       originalConfinementSetter
     )(self, cmd, bounds)
 
-  proc observeDeferredConfinement(
-      self: ID, cmd: SEL, unused: ID
-  ) {.cdecl.} =
-    ## Counts actual queued AppKit selector delivery before running production.
-    inc deferredApplications
-    applyDeferredConfinement(self, cmd, unused)
-
-  proc drainConfinementRequest() =
-    ## Services the real native event loop without making the hidden window key.
-    for i in 0 ..< 100:
-      pollEvents()
-      if not confinementScheduled:
-        return
-      sleep(2)
-    doAssert not confinementScheduled,
-      "Deferred confinement must run through Windy's ordinary event polling"
-
-  proc testDeferredConfinement() =
-    ## Coalesces requests and rejects stale capture after release, close or Off.
-    let
-      first = newWindow("GotA deferred first", ivec2(800, 600), visible = false)
-      second = newWindow("GotA deferred latest", ivec2(800, 600), visible = false)
-    defer:
-      releaseCursorConfinement()
-      drainConfinementRequest()
-      first.close()
-      second.close()
-    cursorEdgeScrolling = AlwaysEdgeScroll
-    deferCursorConfinement(first)
-    let
-      cls = object_getClass(confinementUpdater)
-      selector = s("applyConfinement:")
-      original = testMethodImplementation(cls, selector)
-    discard replaceTestMethod(
-      cls, selector, cast[IMP](observeDeferredConfinement), "v@:@"
+  proc testClickLatch() =
+    ## Leaves startup and rejected clicks inert until a stable physical click.
+    const Encoding = "v@:{CGRect={CGPoint=dd}{CGSize=dd}}"
+    let window = newWindow(
+      "GotA click latch", ivec2(800, 600), visible = false
     )
     defer:
-      discard replaceTestMethod(cls, selector, original, "v@:@")
-    deferredApplications = 0
-    for i in 0 ..< 20:
-      deferCursorConfinement(first)
-    deferCursorConfinement(second)
-    doAssert confinementScheduled and deferredWindow == second,
-      "One queued update must retain only the newest window request"
-    doAssert deferredApplications == 0,
-      "Scheduling must not capture while the resize callback is still running"
-    drainConfinementRequest()
-    doAssert deferredApplications == 1 and deferredWindow == nil,
-      "Repeated requests must produce one native event-loop callback"
-    doAssert confinedWindow.int == 0 and not controlsLocked,
-      "The deferred callback must recheck actual focus before capturing"
-    doAssert not first.visible and not second.visible
+      releaseCursorConfinement()
+      window.close()
+    installPointerHooks(window)
+    let
+      native = window.nativeWindow
+      cls = object_getClass(native.ID)
+      selector = s("setMouseConfinementRect:")
+    observedConfinementWindow = native
+    originalConfinementSetter = testMethodImplementation(cls, selector)
+    discard replaceTestMethod(
+      cls, selector, cast[IMP](observeConfinement), Encoding
+    )
+    defer:
+      discard replaceTestMethod(
+        cls, selector, originalConfinementSetter, Encoding
+      )
+      observedConfinementWindow = NSWindow(0)
+    confinementWrites.setLen(0)
+    var state = TestWindow(window: window, focused: true)
+    state.updateCursorConfinement(AlwaysEdgeScroll)
+    for frame in 0 ..< 20:
+      state.updateCursorConfinement()
+    for button in [KeySpace, KeyEnter, DoubleClick, TripleClick, QuadrupleClick]:
+      state.clickCursorConfinement(button)
+    doAssert confinementWrites.len == 0 and not controlsLocked,
+      "Startup, frames, keys and click notifications must not create a clip"
 
-    deferCursorConfinement(first)
+    state.settled = false
+    state.clickCursorConfinement()
+    state.settled = true
+    for frame in 0 ..< 20:
+      state.updateCursorConfinement()
+    pollEvents()
+    doAssert confinementWrites.len == 0,
+      "A click during resize must not schedule capture after the resize ends"
+    state.clickCursorConfinement(MouseButton4)
+    doAssert native.mouseConfinementRect() ==
+      cursorConfinementBounds(window.nativeView)
+    doAssert confinementWrites.len > 0
+    let writes = confinementWrites.len
+    for frame in 0 ..< 20:
+      state.updateCursorConfinement()
+    doAssert confinementWrites.len == writes,
+      "Passive frames must retain the existing clip without reapplying it"
+
+    state.settled = false
+    state.updateCursorConfinement()
+    doAssert native.mouseConfinementRect() == NSRect()
+    state.settled = true
+    state.updateCursorConfinement()
+    doAssert native.mouseConfinementRect() == NSRect(),
+      "Leaving a native transition must keep confinement unlatched"
+    state.clickCursorConfinement(MouseButton5)
+    doAssert native.mouseConfinementRect() != NSRect()
     releaseCursorConfinement()
-    doAssert deferredWindow == nil and confinementScheduled
-    drainConfinementRequest()
-    doAssert deferredApplications == 2 and confinedWindow.int == 0,
-      "Releasing capture must invalidate already queued work"
-
-    deferCursorConfinement(first)
-    first.updateCursorConfinement(NoEdgeScroll)
-    doAssert deferredWindow == nil
-    drainConfinementRequest()
-    doAssert deferredApplications == 3 and confinedWindow.int == 0,
-      "Turning edge scrolling Off must cancel the pending owner"
-
-    deferCursorConfinement(first)
-    first.close()
-    drainConfinementRequest()
-    doAssert deferredApplications == 4 and deferredWindow == nil,
-      "Closing a queued window must be safe before native callback delivery"
-    doAssert confinedWindow.int == 0 and not controlsLocked
-    echo "PASS deferred confinement coalescing, focus and cancellation"
+    state.updateCursorConfinement()
+    pollEvents()
+    doAssert native.mouseConfinementRect() == NSRect(),
+      "Explicit release must not leave any deferred capture request behind"
+    doAssert not window.visible
+    echo "PASS physical click latch, stable geometry and no deferred capture"
 
   proc testConfinementGeometry() =
     ## Keeps window-point bounds distinct from Retina pixels and native position.
@@ -522,6 +546,7 @@ when defined(macosx) and not defined(emscripten):
       observedConfinementWindow = NSWindow(0)
     var state = TestWindow(window: window, focused: true)
     state.updateCursorConfinement(AlwaysEdgeScroll)
+    state.clickCursorConfinement()
     let
       initialPoints = native.contentLayoutRect
       initialBacking = view.convertRectToBacking(view.bounds)
@@ -542,16 +567,20 @@ when defined(macosx) and not defined(emscripten):
     doAssert native.confinementGeometryChanged(),
       "Native window movement must invalidate a same-sized confinement cache"
     state.updateCursorConfinement()
-    doAssert confinementWrites == @[NSRect(), initialPoints],
-      "Reapplying after movement must first clear AppKit's stale restriction"
+    doAssert confinementWrites == @[NSRect()],
+      "Movement must release AppKit's stale restriction without recapturing"
+    state.clickCursorConfinement()
+    doAssert confinementWrites[^1] == initialPoints
     doAssert not native.confinementGeometryChanged()
 
     confinementWrites.setLen(0)
     window.size = ivec2(2560, 1440)
     state.updateCursorConfinement()
     let resizedPoints = native.contentLayoutRect
-    doAssert confinementWrites == @[NSRect(), resizedPoints],
-      "Growing the window must clear the old clip before setting the larger one"
+    doAssert confinementWrites == @[NSRect()],
+      "Growing the window must clear the old clip and await a new click"
+    state.clickCursorConfinement()
+    doAssert confinementWrites[^1] == resizedPoints
     doAssert resizedPoints.size.width * scale == window.size.x.float64
     doAssert resizedPoints.size.height * scale == window.size.y.float64
 
@@ -562,7 +591,9 @@ when defined(macosx) and not defined(emscripten):
         "A backing-scale change must invalidate otherwise identical point bounds"
       confinementWrites.setLen(0)
       state.updateCursorConfinement()
-      doAssert confinementWrites == @[NSRect(), resizedPoints]
+      doAssert confinementWrites == @[NSRect()]
+      state.clickCursorConfinement()
+      doAssert confinementWrites[^1] == resizedPoints
       doAssert not native.confinementGeometryChanged()
 
     let originalBounds = view.bounds
@@ -648,6 +679,7 @@ when defined(macosx) and not defined(emscripten):
     for size in [ivec2(800, 600), ivec2(1200, 900)]:
       window.size = size
       state.updateCursorConfinement(AlwaysEdgeScroll)
+      state.clickCursorConfinement()
       let
         view = window.nativeView
         bounds = view.bounds
@@ -715,7 +747,7 @@ when defined(macosx) and not defined(emscripten):
   testDesktopFullscreen()
   testMainWindowOwnership()
   testControlOwners()
-  testDeferredConfinement()
+  testClickLatch()
   testConfinementGeometry()
   testCommittedWindowGeometry()
   testConfinement()

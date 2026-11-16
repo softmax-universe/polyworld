@@ -77,11 +77,13 @@ when defined(macosx) and not defined(emscripten):
       ## Counts movement delivered through Windy's native mouse-event path.
       inc mouseEvents
     window.onFocusChange = proc() =
-      ## Exercises the same release and restoration callback as the game.
+      ## Exercises the same release and rearm callback as the game.
       window.updateCursorConfinement()
       recordState(true)
     window.onButtonPress = proc(button: Button) =
-      ## Toggles fullscreen with F11 and closes the test with Escape.
+      ## Captures on click, toggles with F11 and closes with Escape.
+      window.captureCursorConfinement(button)
+      recordState(true)
       if button == KeyF11:
         window.setFullscreen(not window.isFullscreen)
         recordState(true)
@@ -101,7 +103,8 @@ when defined(macosx) and not defined(emscripten):
     window.updateWindowSettings()
     recordState(true)
     echo "READY pid=", getCurrentProcessId(), " log=", LogPath
-    echo "Hover and push at all edges; Cmd-Tab away and back; F11; Escape."
+    echo "Click to confine, then hover and push at all edges."
+    echo "Cmd-Tab or F11 releases; click again to confine. Escape closes."
     while not window.closeRequested and getMonoTime() < deadline:
       window.updateWindowSettings()
       pollEvents()

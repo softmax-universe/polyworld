@@ -5,13 +5,17 @@ import
 var cursorEdgeScrolling = FullscreenEdgeScroll
 
 proc updateCursorConfinement*(window: Window)
-  ## Refreshes native confinement after focus and fullscreen changes.
+  ## Releases an existing clip when focus, policy or native geometry changes.
+
+proc cursorConfinementClick*(button: Button): bool =
+  ## Recognizes physical mouse presses without treating scroll or keys as clicks.
+  button in {MouseLeft, MouseRight, MouseMiddle, MouseButton4, MouseButton5}
 
 proc cursorConfinementAllowed*(
     focused, fullscreen, closing: bool,
     mode: EdgeScrollMode
 ): bool =
-  ## Keeps the visible pointer confined whenever edge scrolling is enabled.
+  ## Allows click-initiated confinement only while edge scrolling is enabled.
   focused and not closing and
     rtsEdgePanAllowed(fullscreen, true, false, mode)
 
@@ -25,8 +29,8 @@ when defined(macosx) and not defined(emscripten):
       ## Confines the visible cursor using AppKit's window-relative rectangle.
     proc convertRect(self: NSView, x: NSRect, toView: NSView): NSRect
       ## Converts the complete view rectangle into window points.
-    proc performSelector(self: ID, x: SEL, withObject: ID, afterDelay: float64)
-      ## Defers confinement until AppKit services its next event-loop turn.
+    proc inLiveResize(self: NSView): bool
+      ## Rejects clicks while AppKit is still resizing the content view.
     proc windowNumber(self: NSWindow): int
       ## Identifies only this application's window in WindowServer metadata.
     proc objectForKey(self: NSDictionary, x: ID): ID
@@ -53,10 +57,8 @@ when defined(macosx) and not defined(emscripten):
     kCGWindowIsOnscreen {.importc.}: pointer
     confinedWindow: NSWindow
     confinedBounds, confinedFrame, confinedBacking: NSRect
+    confinedFullscreen: bool
     pointerWindow: Window
-    deferredWindow: Window
-    confinementUpdater: ID
-    confinementScheduled: bool
     updatingPointer: bool
     controlsLocked, previousMovable, previousResizable: bool
     controlsWindow: NSWindow
@@ -157,77 +159,78 @@ when defined(macosx) and not defined(emscripten):
       discard confinedWindow.makeFirstResponder(confinedWindow.contentView)
 
 proc releaseCursorConfinement*() =
-  ## Restores normal pointer movement when GotA loses focus or closes.
+  ## Clears the click latch and native clip before restoring window controls.
   when defined(macosx) and not defined(emscripten):
     let wasUpdating = updatingPointer
     updatingPointer = true
     defer: updatingPointer = wasUpdating
-    deferredWindow = nil
+    let native = confinedWindow
+    confinedWindow = NSWindow(0)
+    confinedBounds = NSRect()
+    confinedFrame = NSRect()
+    confinedBacking = NSRect()
+    confinedFullscreen = false
+    if native.int != 0:
+      native.setMouseConfinementRect(NSRect())
     restoreWindowControls()
-    if confinedWindow.int != 0:
-      confinedWindow.setMouseConfinementRect(NSRect())
-      confinedWindow.ID.release()
-      confinedWindow = NSWindow(0)
-      confinedBounds = NSRect()
-      confinedFrame = NSRect()
-      confinedBacking = NSRect()
+    if native.int != 0:
+      native.ID.release()
 
 when defined(macosx) and not defined(emscripten):
   proc updateNativeConfinement(
       native: NSWindow, focused, fullscreen, closing: bool,
-      mode: EdgeScrollMode
+      mode: EdgeScrollMode, clicked = false, settled = true,
+      owner: Window = nil
   ) =
-    ## Applies one native capture state without changing relative mouse input.
+    ## Only a settled click creates a clip; passive updates can only release it.
     if updatingPointer:
       return
     updatingPointer = true
     defer: updatingPointer = false
     if controlsLocked and controlsWindow.int != native.int:
-      restoreWindowControls()
+      releaseCursorConfinement()
     if not cursorConfinementAllowed(focused, fullscreen, closing, mode) or
-      native.int == 0:
+      native.int == 0 or not settled:
         releaseCursorConfinement()
         return
-    if native.int != confinedWindow.int:
-      releaseCursorConfinement()
-      confinedWindow = native
-      confinedWindow.ID.retain()
+    if confinedWindow.int != 0 and
+      (native.int != confinedWindow.int or
+      fullscreen != confinedFullscreen or native.confinementGeometryChanged()):
+        releaseCursorConfinement()
+    if not clicked or confinedWindow.int != 0:
+      return
+    let
+      view = native.contentView
+      frame = native.frame
+      bounds = cursorConfinementBounds(view)
+      backing = view.convertRectToBacking(view.bounds)
+    if bounds.size.width <= 0 or bounds.size.height <= 0:
+      return
+    view.ID.retain()
+    defer: view.ID.release()
+    confinedWindow = native
+    native.ID.retain()
     if not fullscreen:
       lockWindowControls()
-    if native.confinementGeometryChanged():
-      # AppKit can retain the pre-resize clip despite reporting the new rect.
-      native.setMouseConfinementRect(NSRect())
-      confinedBounds = cursorConfinementBounds(native.contentView)
-      confinedFrame = native.frame
-      confinedBacking =
-        native.contentView.convertRectToBacking(native.contentView.bounds)
-      native.setMouseConfinementRect(confinedBounds)
-
-  proc refreshCursorConfinement(window: Window, afterEvents: bool)
-    ## Rechecks capture policy and native geometry after deferred work.
-
-  proc applyDeferredConfinement(self: ID, cmd: SEL, unused: ID) {.cdecl.} =
-    ## Applies only the latest request after the native resize has been serviced.
-    let window = deferredWindow
-    deferredWindow = nil
-    confinementScheduled = false
-    if window != nil and not window.closed:
-      refreshCursorConfinement(window, true)
-
-  proc deferCursorConfinement(window: Window) =
-    ## Coalesces geometry changes without pumping events inside game callbacks.
-    if deferredWindow == window:
+    if confinedWindow.int != native.int:
       return
-    releaseCursorConfinement()
-    deferredWindow = window
-    if confinementUpdater.int == 0:
-      var cls: Class
-      addClass "GotaConfinementUpdater", "NSObject", cls:
-        addMethod "applyConfinement:", applyDeferredConfinement
-      confinementUpdater = cls.new()
-    if not confinementScheduled:
-      confinementScheduled = true
-      confinementUpdater.performSelector(s("applyConfinement:"), ID(0), 0)
+    if owner != nil and
+      (owner.closed or owner.closeRequested or not owner.focused or
+      not NSApp.isActive or owner.desktopFullscreenChanging):
+        releaseCursorConfinement()
+        return
+    if native.contentView.int != view.int or native.frame != frame or
+      cursorConfinementBounds(view) != bounds or
+      view.convertRectToBacking(view.bounds) != backing:
+        # Control changes can resize the window; wait for another real click.
+        releaseCursorConfinement()
+        return
+    confinedBounds = bounds
+    confinedFrame = frame
+    confinedBacking = backing
+    confinedFullscreen = fullscreen
+    native.setMouseConfinementRect(NSRect())
+    native.setMouseConfinementRect(bounds)
 
   proc installPointerHooks(window: Window) =
     ## Connects cursor capture to the shared fullscreen lifecycle.
@@ -242,12 +245,14 @@ when defined(macosx) and not defined(emscripten):
     )
     pointerWindow = window
 
-  proc refreshCursorConfinement(window: Window, afterEvents: bool) =
-    ## Waits for AppKit before rebuilding confinement after native resizes.
-    if updatingPointer or window.closed or window.desktopFullscreenChanging:
+  proc refreshCursorConfinement(window: Window) =
+    ## Maintains a click latch without ever acquiring confinement from a frame.
+    if updatingPointer:
+      return
+    if window == nil or window.closed or window.desktopFullscreenChanging:
+      releaseCursorConfinement()
       return
     installPointerHooks(window)
-    let previousFrame = window.nativeWindow.frame
     updatingPointer = true
     try:
       window.updateDesktopFullscreen()
@@ -259,26 +264,15 @@ when defined(macosx) and not defined(emscripten):
     let
       native = window.nativeWindow
       focused = window.focused and NSApp.isActive
-    if not cursorConfinementAllowed(focused, window.isFullscreen,
-        window.closeRequested, cursorEdgeScrolling):
-      releaseCursorConfinement()
-      return
-    if native.confinementGeometryChanged() and
-      (not afterEvents or native.frame != previousFrame):
-        deferCursorConfinement(window)
-        return
-    if native.confinementGeometryChanged() and
-      not native.nativeWindowGeometryCommitted():
-        # Retry on the next game frame, letting AppKit commit this run-loop turn.
-        # Requeuing a zero-delay selector here can prevent that commit entirely.
-        return
     updateNativeConfinement(native, focused, window.isFullscreen,
-      window.closeRequested, cursorEdgeScrolling)
+      window.closeRequested, cursorEdgeScrolling,
+      settled = not native.contentView.inLiveResize, owner = window)
 
 proc cursorConfined*(window: Window): bool =
   ## Includes the full native boundary when deciding whether edge pan is active.
   when defined(macosx) and not defined(emscripten):
-    window.focused and NSApp.isActive and
+    window != nil and not window.closed and not window.closeRequested and
+      window.focused and NSApp.isActive and
       not window.desktopFullscreenChanging and
       confinedWindow.int != 0 and
       window.nativeWindow.int == confinedWindow.int
@@ -286,11 +280,35 @@ proc cursorConfined*(window: Window): bool =
     false
 
 proc updateCursorConfinement*(window: Window) =
-  ## Refreshes confinement using the current setting, including focus changes.
+  ## Validates an existing click latch without recapturing after a release.
   when defined(macosx) and not defined(emscripten):
-    refreshCursorConfinement(window, false)
+    refreshCursorConfinement(window)
+
+proc captureCursorConfinement*(window: Window, button: Button) =
+  ## Confines only on a real click in an active window with committed geometry.
+  when defined(macosx) and not defined(emscripten):
+    if not button.cursorConfinementClick or updatingPointer or
+      window == nil or window.closed:
+        return
+    window.updateCursorConfinement()
+    if window.closed or window.desktopFullscreenChanging:
+      return
+    let
+      native = window.nativeWindow
+      focused = window.focused and NSApp.isActive
+    if not cursorConfinementAllowed(focused, window.isFullscreen,
+        window.closeRequested, cursorEdgeScrolling):
+      return
+    updateNativeConfinement(
+      native, focused, window.isFullscreen, window.closeRequested,
+      cursorEdgeScrolling,
+      clicked = true,
+      settled = not native.contentView.inLiveResize and
+        native.nativeWindowGeometryCommitted(),
+      owner = window
+    )
 
 proc updateCursorConfinement*(window: Window, mode: EdgeScrollMode) =
-  ## Remembers the preference so focus callbacks restore the same confinement.
+  ## Remembers policy while leaving acquisition to the next eligible click.
   cursorEdgeScrolling = mode
   window.updateCursorConfinement()

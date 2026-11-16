@@ -202,7 +202,8 @@ proc runFrontend*() =
       continue
 
     window.onButtonPress = proc(button: Button) =
-      ## Adjusts UI scale with the same shortcuts as a browser.
+      ## Captures on clicks and adjusts UI scale with browser-style shortcuts.
+      window.captureCursorConfinement(button)
       discard window.scaleKey(
         button, preferences, sk.uiScale, AppName
       )

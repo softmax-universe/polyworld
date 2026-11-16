@@ -324,7 +324,21 @@ proc main() =
     var sk = (uiScale: 1'f32,)
     var shopResets = 0
     proc resetShopUi() = inc shopResets
+    var confinementButtons: seq[Button]
+    proc captureCursorConfinement(window: Window, button: Button) =
+      ## Records clicks routed through the production callback before UI gates.
+      confinementButtons.add button
     buttonCallback()
+    bindingCapture = true
+    window.onButtonPress(MouseLeft)
+    bindingCapture = false
+    doAssert confinementButtons == @[MouseLeft],
+      "A click must reach confinement even when a UI capture consumes input"
+    matchMenu = PauseMenu
+    window.onButtonPress(MouseRight)
+    doAssert confinementButtons == @[MouseLeft, MouseRight],
+      "A click over the match menu must still reach confinement"
+    matchMenu = HiddenMatchMenu
     shopOpen = true
     armedAbility = 1
     window.onButtonPress(KeyEscape)
@@ -358,7 +372,7 @@ proc main() =
     window.onButtonPress(KeySpace)
     doAssert not transport.playing, "Space must not pause/resume drafts"
     run.world.phase = Playing
-    echo "PASS production callbacks: human Space camera-only, replay pause, A-move, chat/menu/draft"
+    echo "PASS production callbacks: confinement click, human Space, replay pause, A-move, chat/menu/draft"
   block abilityReadiness:
     var matchMenu = 0
     const HiddenMatchMenu = 0

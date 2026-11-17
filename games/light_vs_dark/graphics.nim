@@ -2217,7 +2217,7 @@ proc runGraphics*(network: NetworkMatch = nil,
             else:
               let at = vec2(max(12.0'f, window.size.x.float32 / sk.uiScale / 2 - 220), 78)
               sk.drawRect(at, vec2(440, 40), rgbx(40, 8, 8, 225))
-              sk.menuLabel("ATTACK: click or right-drag / Shift queues / Esc cancels", at + vec2(8, 4), 424)
+              sk.menuLabel("ATTACK: click or right-drag / Shift queues / X cancels", at + vec2(8, 4), 424)
           drawSelectionBox(
             sk,
             window,
@@ -2323,11 +2323,36 @@ proc runGraphics*(network: NetworkMatch = nil,
     if matchMenu == HiddenMatchMenu and humanCommunicationBlocksGameplay():
       cancelGameplayGestures()
       return
+    if button == KeyX:
+      # Text fields own their letters; everywhere else X stays Cancel.
+      if matchMenu != HiddenMatchMenu and window.runeInputEnabled: return
+      let matched = shortcutState.pressShortcut(DefaultShortcuts, 'X',
+        epochTime(), actions = {CancelSiteShortcut})
+      shortcutHeldButtons.incl button
+      shortcutFrameButtons.incl button
+      if matched.action < 0: return
+      if matchMenu != HiddenMatchMenu:
+        matchMenu = if matchMenu == MatchSettings: PauseMenu else: HiddenMatchMenu
+        cancelGameplayGestures()
+        return
+      let targeting = pendingBuild >= 0 or attackMoveArmed or
+        lineGesture.active or rightOrderStarted or selectionStarted
+      cancelGameplayGestures()
+      pendingBuild = -1
+      if not targeting and playerMode():
+        let player = options.playerSlot - 1
+        var cancelled = false
+        for id in selectedIds:
+          if run.world.unitOwner(id) == player or
+              run.world.buildingOwner(id) == player:
+            queueCancel(player, id)
+            cancelled = true
+        if cancelled: playSound(CancelSound)
+      return
     if matchMenu == HiddenMatchMenu and hooks.key != nil:
       if hooks.key(button, actionCam):
         return
-    # Combat owns its configured attack key whenever eligible units are selected,
-    # even when the selected producer union offers Archer on A.
+    # Combat owns its configured attack key whenever units are selected.
     if matchMenu == HiddenMatchMenu and playerMode() and
         AttackMoveInput.matches(button) and not window.scaleModifier and
         not window.actionDown(ControlInput) and
@@ -2393,8 +2418,7 @@ proc runGraphics*(network: NetworkMatch = nil,
     elif CameraInput.matches(button): actionCam.toggle(followSelection)
     elif ShadingInput.matches(button): scene.toggleShading()
     elif StopInput.matches(button):
-      lineGesture.cancelLine()
-      rightOrderStarted = false
+      cancelGameplayGestures()
       if playerMode():
         let player = options.playerSlot - 1
         for id in selectedIds:
@@ -2404,7 +2428,7 @@ proc runGraphics*(network: NetworkMatch = nil,
             playSound(CancelSound)
         pendingBuild = -1
         attackMoveArmed = false
-    elif button == KeyE: showTiles = not showTiles
+    elif button == KeyF6: showTiles = not showTiles
     elif button == KeyV and not playerMode():
       viewMode = (viewMode + 1) mod int32(run.world.players.len + 1)
 

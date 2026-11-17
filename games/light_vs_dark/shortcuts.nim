@@ -21,10 +21,16 @@ type
     consumed*: bool
     action*: int
 
-const DefaultShortcuts*: ShortcutBindings = [
-  "H", "F", "B", "L", "T", "U", "C", "K",
-  "P", "S", "A", "M", "K", "C", "H", "E", "Q", "W", "R", "V", "X"
-]
+const
+  DefaultShortcuts*: ShortcutBindings = [
+    "Q", "W", "E", "R", "F", "Z", "V", "T",
+    "Q", "W", "E", "R", "F", "Z", "V", "T", "G", "B", "H", "Y", "X"
+  ]
+  LegacyShortcuts: ShortcutBindings = [
+    "H", "F", "B", "L", "T", "U", "C", "K",
+    "P", "S", "A", "M", "K", "C", "H", "E", "Q", "W", "R", "V", "X"
+  ]
+  ReservedShortcutKeys* = "ASDCX"
 const ShortcutLabels*: array[ShortcutAction, string] = [
   "Build Town Hall", "Build Farm", "Build Barracks", "Build Lumber Mill",
   "Build Tower", "Build Stables", "Build Church", "Build Blacksmith",
@@ -35,7 +41,9 @@ const ShortcutLabels*: array[ShortcutAction, string] = [
 ]
 var shortcutMigrationReport*: string
 
-proc shortcutLabel*(action: ShortcutAction): string = ShortcutLabels[action]
+proc shortcutLabel*(action: ShortcutAction): string =
+  ## Returns the human-readable name of a contextual command.
+  ShortcutLabels[action]
 
 proc sharesContext(a, b: ShortcutAction): bool =
   ## Worker builds and producer actions are separate palettes. All producers
@@ -43,68 +51,106 @@ proc sharesContext(a, b: ShortcutAction): bool =
   (a <= BuildBlacksmithShortcut) == (b <= BuildBlacksmithShortcut)
 
 proc normalizeKey(text: string): string =
+  ## Normalizes a single letter or digit without accepting modifiers.
   result = text.strip.toUpperAscii
   if result.len != 1 or result[0] notin {'A'..'Z', '0'..'9'}:
     raise newException(ValueError, "Use one letter or digit.")
 
+proc shortcutKeyError(action: ShortcutAction, key: string): string =
+  ## Keeps global action keys and the fixed cancel key out of other commands.
+  if action == CancelSiteShortcut:
+    if key != "X":
+      return "X is always Cancel and cannot be reassigned."
+  elif key[0] in ReservedShortcutKeys:
+    return key & " is reserved for a game action; X is always Cancel."
+
 proc setShortcut*(bindings: var ShortcutBindings, action: ShortcutAction,
     text: string): string =
+  ## Assigns a valid command key without displacing another command.
   var key: string
   try: key = normalizeKey(text)
   except ValueError: return getCurrentExceptionMsg()
-  if action <= BuildBlacksmithShortcut and key == "S":
-    return "S is reserved for Stop while units are selected."
+  result = shortcutKeyError(action, key)
+  if result.len > 0:
+    return
   for other in ShortcutAction:
     if other != action and action.sharesContext(other) and bindings[other] == key:
       return "Already assigned to " & shortcutLabel(other) & " in this palette."
   bindings[action] = key
 
-proc resetShortcuts*(bindings: var ShortcutBindings) = bindings = DefaultShortcuts
+proc resetShortcuts*(bindings: var ShortcutBindings) =
+  ## Restores the left-hand command layout.
+  bindings = DefaultShortcuts
 
 proc encodeShortcuts*(bindings: ShortcutBindings): string =
+  ## Saves the current single-key layout and its migration version.
   var root = newJObject()
-  root["version"] = %2
+  root["version"] = %3
   var rows = newJObject()
   for action in ShortcutAction: rows[$action] = %bindings[action]
   root["bindings"] = rows
   $root
 
 proc decodeShortcuts*(bytes: string): ShortcutBindings =
+  ## Migrates older defaults while preserving valid custom assignments.
   result = DefaultShortcuts
   shortcutMigrationReport = ""
   if bytes.len == 0: return
   try:
     let root = parseJson(bytes)
-    if root.kind != JObject or root["version"].getInt notin [1, 2] or
+    if root.kind != JObject or root["version"].getInt notin [1, 2, 3] or
         root["bindings"].kind != JObject:
       raise newException(ValueError, "Unsupported shortcut settings format.")
-    let legacy = root["version"].getInt == 1
+    let
+      version = root["version"].getInt
+      migrating = version < 3
+    var
+      custom: ShortcutActions
+      defaultsUpdated = false
     for action in ShortcutAction:
       if root["bindings"].hasKey($action):
         var value = root["bindings"][$action].getStr
-        if legacy:
+        if version == 1:
           value = value.splitWhitespace.join("").toUpperAscii
           if value.len != 2 or value[0] notin {'A'..'Z', '0'..'9'}:
             raise newException(ValueError, "Invalid legacy shortcut: " & value)
           value = $value[1]
-        result[action] = normalizeKey(value)
-    # Catalog order wins. Reassign only collisions, prefer the original default
-    # when unclaimed, otherwise first free A-Z/0-9. Never silently drop edits.
-    var accepted: ShortcutActions
+        value = normalizeKey(value)
+        if migrating and value == LegacyShortcuts[action]:
+          if value != DefaultShortcuts[action]:
+            defaultsUpdated = true
+        else:
+          result[action] = value
+          custom.incl action
+    if defaultsUpdated:
+      shortcutMigrationReport = "Updated default commands to the left-hand layout. "
+    # Preserve custom keys before assigning migrated defaults. Repairs avoid
+    # both accepted keys and keys still needed by later commands.
+    var order: seq[ShortcutAction]
     for action in ShortcutAction:
-      var conflict = action <= BuildBlacksmithShortcut and result[action] == "S"
+      if action in custom: order.add action
+    for action in ShortcutAction:
+      if action notin custom: order.add action
+    var accepted: ShortcutActions
+    for action in order:
+      var conflict = shortcutKeyError(action, result[action]).len > 0
       for other in accepted:
         if action.sharesContext(other) and result[action] == result[other]: conflict = true
       if conflict:
-        if not legacy: raise newException(ValueError, "Duplicate shortcut: " & result[action])
+        if not migrating:
+          raise newException(ValueError,
+            "Reserved or duplicate shortcut: " & result[action])
         let previous = result[action]
         var candidates = @[DefaultShortcuts[action]]
-        for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789": candidates.add $c
+        if action != CancelSiteShortcut:
+          for c in "QWERFZVTGBHYUIOPJKLNM0123456789": candidates.add $c
         for candidate in candidates:
-          var used = action <= BuildBlacksmithShortcut and candidate == "S"
-          for other in ShortcutAction:
-            if action != other and action.sharesContext(other) and result[other] == candidate:
-              used = true
+          var used = shortcutKeyError(action, candidate).len > 0
+          if action != CancelSiteShortcut:
+            for other in ShortcutAction:
+              if action != other and action.sharesContext(other) and
+                  result[other] == candidate:
+                used = true
           if not used:
             result[action] = candidate
             break

@@ -14,6 +14,7 @@ macro production(name: static[string]): untyped =
   error("Missing production routine: " & name)
 
 proc main() =
+  let hooks = GraphicsHooks()
   window = newWindow("LvD attack input contract", ivec2(1600, 1000), visible = false)
   window.makeContextCurrent()
   loadExtensions()

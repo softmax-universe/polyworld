@@ -180,7 +180,8 @@ proc humanCommunicationKey*(button: Button): bool =
   ## Call before shortcuts, pause, chrome and every other gameplay callback.
   if button in {MouseLeft, MouseRight, MouseMiddle}: return false
   if button in communicationHeld: return true # repeated Enter cannot double-send
-  if button == KeyEscape and commState.cancelCommunication():
+  if (button == KeyEscape or (button == KeyX and not commState.typing)) and
+      commState.cancelCommunication():
     result = true
   elif button == KeyEnter and run != nil and options.playerSlot > 0 and
       not run.replayMode:

@@ -4,18 +4,19 @@ import windy/internal
 include ../games/light_vs_dark/graphics
 privateAccess(Window)
 
-macro keyHandler(): untyped =
+macro keyHandler(name: static[string]): untyped =
+  ## Extracts production callbacks for invisible-window testing.
   let source = parseStmt(staticRead("../games/light_vs_dark/graphics.nim"))
   for node in source:
     if node.kind == nnkProcDef and node[0].repr == "runGraphics*":
       for child in node[^1]:
-        if child.kind == nnkAsgn and child[0].repr == "window.onButtonPress" and
+        if child.kind == nnkAsgn and child[0].repr == "window." & name and
             child[1].kind == nnkLambda:
           return child
   error("missing production key handler")
 
 suite "LvD production shortcut routing":
-  test "single B/P actions, combat A wins over Archer, menus and Ctrl stay isolated":
+  test "left-hand commands preserve actions, cancellation and text input":
     window = newWindow("LvD shortcuts", ivec2(1600, 1000), visible = false)
     defer:
       window.close()
@@ -35,17 +36,21 @@ suite "LvD production shortcut routing":
       scene: CharacterScene
       actionCam = initActionCam(subjectMode = true)
     proc playerMode(): bool = options.playerSlot > 0 and not run.replayMode
-    keyHandler()
+    let hooks = GraphicsHooks()
+    keyHandler("onButtonPress")
+    keyHandler("onButtonRelease")
     inputBindings = LvdControlProfile.defaults
     bindingCapture = false
+    currentShortcuts = DefaultShortcuts
+    resetHumanCommunication()
     selectedIds = @[run.world.units[0].id]
-    window.onButtonPress(KeyB)
+    window.onButtonPress(KeyE)
     check pendingBuild == BarracksBuilding.ord
     pendingBuild = -1
-    window.onButtonPress(KeyB)
+    window.onButtonPress(KeyE)
     check pendingBuild == -1 # repeat suppression
-    shortcutState.releaseShortcut('B')
-    window.onButtonPress(KeyF)
+    shortcutState.releaseShortcut('E')
+    window.onButtonPress(KeyW)
     check pendingBuild == FarmBuilding.ord
     pendingBuild = -1
     shortcutState.resetShortcut()
@@ -53,7 +58,7 @@ suite "LvD production shortcut routing":
     for building in run.world.buildings:
       if building.owner == 0 and building.kind == TownHallBuilding: hall = building.id
     selectedIds = @[hall]
-    window.onButtonPress(KeyP)
+    window.onButtonPress(KeyQ)
     run.flushPlayerCommands()
     check run.world.buildings[run.world.buildingIndex(hall)].queueLength == 1
     shortcutState.resetShortcut()
@@ -63,19 +68,23 @@ suite "LvD production shortcut routing":
     attackMoveArmed = false
     shortcutState.resetShortcut()
     matchMenu = MatchSettings
-    window.onButtonPress(KeyB)
-    shortcutState.releaseShortcut('B')
-    window.onButtonPress(KeyB)
+    window.onButtonPress(KeyE)
+    shortcutState.releaseShortcut('E')
+    window.onButtonPress(KeyE)
     check pendingBuild == -1
     matchMenu = HiddenMatchMenu
     shortcutState.resetShortcut()
+    let priorSelection = selectedIds
+    selectedIds = @[hall]
     window.state.buttonDown = {KeyLeftSuper}
+    window.onButtonPress(KeyQ)
+    window.onButtonRelease(KeyQ)
     window.state.buttonDown = {}
-    window.onButtonPress(KeyP)
+    selectedIds = priorSelection
     run.flushPlayerCommands()
     check run.world.buildings[run.world.buildingIndex(hall)].queueLength == 1
 
-    # T S must train, whereas standalone S stops current and queued moves.
+    # W trains, whereas S stops current and queued moves.
     shortcutState.resetShortcut()
     let soldier = selectedIds[0]
     let worker = run.world.units[0].id
@@ -85,7 +94,7 @@ suite "LvD production shortcut routing":
     for id in [soldier, worker]:
       require run.world.applyMove(0, id, 40, 40)
       require run.world.applyMove(0, id, 41, 40, append = true)
-    window.onButtonPress(KeyS)
+    window.onButtonPress(KeyW)
     run.flushPlayerCommands()
     check run.world.buildings[run.world.buildingIndex(barracks)].queueLength == 2
     for id in [soldier, worker]:
@@ -106,23 +115,23 @@ suite "LvD production shortcut routing":
     check not attackMoveArmed
     check matchMenu == HiddenMatchMenu
     shortcutState.resetShortcut()
-    inputBindings[AttackMoveInput] = [KeyF, ButtonUnknown]
+    inputBindings[AttackMoveInput] = [KeyW, ButtonUnknown]
     window.onButtonPress(KeyA)
     check not attackMoveArmed
-    window.onButtonPress(KeyF)
+    window.onButtonPress(KeyW)
     check attackMoveArmed
     inputBindings[StopInput] = [KeyJ, ButtonUnknown]
     window.onButtonPress(KeyJ)
     check not attackMoveArmed
     inputBindings = LvdControlProfile.defaults
 
-    # Producer-only selection retains Archer; combat selection owns A instead.
+    # E trains an Archer without stealing attack move from A.
     shortcutState.resetShortcut()
     run.world.buildings.add Building(owner: 0, kind: LumberMillBuilding,
       state: BuildingComplete, hp: 100)
     require run.world.canTrain(barracks, ArcherUnit)
     selectedIds = @[barracks]
-    window.onButtonPress(KeyA)
+    window.onButtonPress(KeyE)
     run.flushPlayerCommands()
     check not attackMoveArmed
     check run.world.buildings[run.world.buildingIndex(barracks)].queueLength == 3
@@ -133,7 +142,7 @@ suite "LvD production shortcut routing":
     selectedIds = @[soldier]
     window.onButtonPress(KeyEnter)
     require humanCommunicationBlocksGameplay()
-    for key in [KeyB, KeyT, KeyA]: window.onButtonPress(key)
+    for key in [KeyE, KeyT, KeyA]: window.onButtonPress(key)
     check not attackMoveArmed
     check pendingBuild == -1
     resetHumanCommunication()
@@ -145,3 +154,80 @@ suite "LvD production shortcut routing":
     window.onButtonPress(KeyA)
     check not attackMoveArmed
     bindingCapture = false
+
+    # X abandons previews without clearing the worker's actual orders.
+    resetHumanCommunication()
+    window.runeInputEnabled = false
+    shortcutState.resetShortcut()
+    pendingBuild = -1
+    cancelGameplayGestures()
+    selectedIds = @[worker]
+    require run.world.applyMove(0, worker, 40, 40)
+    for intent in 0 .. 2:
+      case intent
+      of 0:
+        window.onButtonPress(KeyW)
+        window.onButtonRelease(KeyW)
+        require pendingBuild == FarmBuilding.ord
+      of 1:
+        window.onButtonPress(KeyA)
+        require attackMoveArmed
+      else:
+        lineGesture = LineGesture(active: true, dragging: true)
+        rightOrderStarted = true
+      window.onButtonPress(KeyX)
+      window.onButtonRelease(KeyX)
+      run.flushPlayerCommands()
+      check pendingBuild == -1
+      check not attackMoveArmed
+      check attackHeldButtons == {}
+      check not lineGesture.active
+      check not rightOrderStarted
+      check matchMenu == HiddenMatchMenu
+      check run.world.units[run.world.unitIndex(worker)].state == UnitMoving
+      window.onButtonRelease(KeyA)
+
+    # Holding X removes one queued unit, even with malformed custom bindings.
+    selectedIds = @[barracks]
+    let index = run.world.buildingIndex(barracks)
+    require run.world.buildings[index].queueLength == 3
+    inputBindings[AttackMoveInput] = [KeyX, ButtonUnknown]
+    currentShortcuts[TrainSoldierShortcut] = "X"
+    for i in 0 .. 4: window.onButtonPress(KeyX)
+    run.flushPlayerCommands()
+    check run.world.buildings[index].queueLength == 2
+    window.onButtonRelease(KeyX)
+    window.onButtonPress(KeyX)
+    window.onButtonRelease(KeyX)
+    run.flushPlayerCommands()
+    check run.world.buildings[index].queueLength == 1
+    inputBindings = LvdControlProfile.defaults
+    currentShortcuts = DefaultShortcuts
+
+    # Mixed selection cancels construction and stops units with the same X.
+    run.world.buildings[index].state = BuildingUnderConstruction
+    selectedIds = @[worker, barracks]
+    window.onButtonPress(KeyX)
+    window.onButtonRelease(KeyX)
+    run.flushPlayerCommands()
+    check run.world.buildings[index].state == BuildingDying
+    check run.world.units[run.world.unitIndex(worker)].state == UnitIdle
+
+    # X closes menus, but remains a letter in text fields.
+    matchMenu = MatchSettings
+    window.onButtonPress(KeyX)
+    window.onButtonRelease(KeyX)
+    check matchMenu == PauseMenu
+    window.onButtonPress(KeyX)
+    window.onButtonRelease(KeyX)
+    check matchMenu == HiddenMatchMenu
+    window.onButtonPress(KeyEnter)
+    window.onButtonRelease(KeyEnter)
+    require humanCommunicationTyping()
+    window.onButtonPress(KeyX)
+    window.onButtonRelease(KeyX)
+    check humanCommunicationTyping()
+    window.onButtonPress(KeyEscape)
+    window.onButtonRelease(KeyEscape)
+    finishHumanCommunicationFrame()
+    check not window.visible

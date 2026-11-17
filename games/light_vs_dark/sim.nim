@@ -1030,16 +1030,63 @@ proc place*(w: World, unit: Unit, at: Tile2) =
   if w.map.inGrid(at) and unit.state != UnitInMine and unit.state != UnitDying:
     w.occupancy[w.map.tileIndex(at)] = unit.id
 
-proc releaseConstructionOccupant(w: World, unit: Unit): bool =
+proc overlapsFootprint(unit: Unit, structure: Building): bool =
+  ## Includes the body radius when testing a structure's solid rectangle.
+  let
+    lowX = fixed(structure.origin.x.int32)
+    lowY = fixed(structure.origin.y.int32)
+    highX = lowX + fixed(structure.footprint.width)
+    highY = lowY + fixed(structure.footprint.depth)
+  unit.body.pos.x + unit.body.radius >= lowX and
+    unit.body.pos.x - unit.body.radius < highX and
+    unit.body.pos.y + unit.body.radius >= lowY and
+    unit.body.pos.y - unit.body.radius < highY
+
+proc bodyGroundOpen(w: World, unit: Unit, point: FixedVec2,
+    allowed: openArray[int32] = []): bool =
+  ## Allows only named initial overlaps during a corrective sweep.
+  for y in whole(point.y - unit.body.radius) .. whole(point.y + unit.body.radius):
+    for x in whole(point.x - unit.body.radius) .. whole(point.x + unit.body.radius):
+      if not w.terrainOpen(x, y): return false
+      let blocker = w.blocker[w.map.tileIndex(x, y)]
+      if blocker != 0 and blocker notin allowed: return false
+  true
+
+proc overlappingBuildings(w: World, unit: Unit): seq[int32] =
+  ## Looks up only cells touched by the body instead of scanning all buildings.
+  for y in whole(unit.body.pos.y - unit.body.radius) ..
+      whole(unit.body.pos.y + unit.body.radius):
+    for x in whole(unit.body.pos.x - unit.body.radius) ..
+        whole(unit.body.pos.x + unit.body.radius):
+      if not w.map.inGrid(x, y): continue
+      let
+        id = w.blocker[w.map.tileIndex(x, y)]
+        index = w.buildingIndex(id)
+      if index >= 0 and w.buildings[index].state != BuildingDying and
+          id notin result:
+        result.add id
+
+proc workingConstructionOccupant(w: World, unit: Unit): bool =
+  ## Only the active assigned builder may deliberately remain inside a site.
+  let index = w.buildingIndex(unit.constructionSiteId)
+  index >= 0 and w.buildings[index].state == BuildingUnderConstruction and
+    w.buildings[index].builderId == unit.id and unit.hp > 0 and
+    unit.owner == w.buildings[index].owner and unit.kind == PeonUnit and
+    unit.state == UnitBuilding and unit.targetId == unit.constructionSiteId and
+    covers(w.buildings[index].origin, w.buildings[index].footprint,
+      unit.tile.x.int32, unit.tile.y.int32)
+
+proc releaseConstructionOccupant(w: World, unit: Unit,
+    siteId = NoEntity): bool =
   ## Like exiting a mine, release only onto free legal ground. A full ring
   ## waits rather than clipping terrain, a structure, or another body.
-  let index = w.buildingIndex(unit.constructionSiteId)
+  let index = w.buildingIndex(
+    if siteId != NoEntity: siteId else: unit.constructionSiteId)
   if index < 0 or unit.state in {UnitDying, UnitInMine}:
     unit.constructionSiteId = NoEntity
     return true
   let site = w.buildings[index]
-  if site.state == BuildingDying or not covers(site.origin, site.footprint,
-      unit.tile.x.int32, unit.tile.y.int32):
+  if site.state == BuildingDying or not unit.overlapsFootprint(site):
     unit.constructionSiteId = NoEntity
     return true
   for y in site.origin.y.int32 - 1 .. site.origin.y.int32 + site.footprint.depth:
@@ -1047,6 +1094,7 @@ proc releaseConstructionOccupant(w: World, unit: Unit): bool =
       if not adjacentToFootprint(site.origin, site.footprint, x, y) or
           not w.tileFree(x, y): continue
       let at = tile2(x, y)
+      if not w.bodyGroundOpen(unit, tileCenter(at)): continue
       var free = true
       for other in w.units:
         if other.id != unit.id and other.state notin {UnitDying, UnitInMine} and
@@ -1060,6 +1108,90 @@ proc releaseConstructionOccupant(w: World, unit: Unit): bool =
         unit.clearPath()
         return true
   false
+
+proc recoverySegmentOpen(w: World, unit: Unit, finish: FixedVec2,
+    overlaps: openArray[int32]): bool =
+  ## Escapes initial structures without crossing unrelated static or enemy bodies.
+  if not w.bodyGroundOpen(unit, finish): return false
+  for other in w.units:
+    if other.id == unit.id or other.hp <= 0 or
+        other.state in {UnitDying, UnitInMine}: continue
+    let clearance = int64(int32(unit.body.radius + other.body.radius))
+    if lengthSquared(finish - other.body.pos) < clearance * clearance:
+      return false
+  let
+    start = unit.body.pos
+    steps = max(1, whole(length(finish - start) * 16) + 1)
+  for step in 1 .. steps:
+    let point = start + (finish - start) * (fixed(step) / fixed(steps))
+    if not w.bodyGroundOpen(unit, point, overlaps): return false
+    for other in w.units:
+      if other.owner == unit.owner or other.hp <= 0 or
+          other.state in {UnitDying, UnitInMine}: continue
+      let clearance = int64(int32(unit.body.radius + other.body.radius))
+      if lengthSquared(point - other.body.pos) < clearance * clearance:
+        return false
+  true
+
+proc recoverBuildingOverlaps(w: World) =
+  ## Restores legal body clearance before a blocked start can lose its order.
+  var moved = false
+  for i, unit in w.units:
+    if unit.hp <= 0 or unit.state in {UnitDying, UnitInMine} or
+        w.workingConstructionOccupant(unit): continue
+    let overlaps = w.overlappingBuildings(unit)
+    if overlaps.len == 0: continue
+    let before = unit.body.pos
+    if unit.constructionSiteId != NoEntity:
+      if not w.releaseConstructionOccupant(unit): continue
+    if unit.body.pos == before:
+      var
+        best = int64.high
+        destination = before
+      proc consider(point: FixedVec2) =
+        ## Keeps the closest valid candidate with deterministic tie order.
+        let distance = lengthSquared(point - before)
+        if distance < best and w.recoverySegmentOpen(unit, point, overlaps):
+          best = distance
+          destination = point
+      for id in overlaps:
+        let
+          site = w.buildings[w.buildingIndex(id)]
+          left = fixed(site.origin.x.int32) - unit.body.radius - Fixed(1)
+          top = fixed(site.origin.y.int32) - unit.body.radius - Fixed(1)
+          right = fixed(site.origin.x.int32 + site.footprint.width) +
+            unit.body.radius + Fixed(1)
+          bottom = fixed(site.origin.y.int32 + site.footprint.depth) +
+            unit.body.radius + Fixed(1)
+        consider(fixedVec2(left, before.y))
+        consider(fixedVec2(right, before.y))
+        consider(fixedVec2(before.x, top))
+        consider(fixedVec2(before.x, bottom))
+        for tile in footprintPerimeter(site.origin, site.footprint):
+          if not w.tileOpen(tile): continue
+          let inset = unit.body.radius + Fixed(1)
+          consider(fixedVec2(
+            clamp(before.x, fixed(tile.x.int32) + inset,
+              fixed(tile.x.int32 + 1) - inset),
+            clamp(before.y, fixed(tile.y.int32) + inset,
+              fixed(tile.y.int32 + 1) - inset)))
+      if best == int64.high: continue
+      unit.body.pos = destination
+      unit.applyBody()
+    if unit.body.pos == before: continue
+    moved = true
+    unit.clearPath()
+    unit.blockedEndpointValid = false
+    unit.blockedTicks = 0
+    unit.repathCooldown = 0
+    if unit.hasGoal: w.requestPath(i.int32)
+  if moved:
+    for cell in w.occupancy.mitems: cell = 0
+    for unit in w.units:
+      if unit.state in {UnitDying, UnitInMine} or not w.map.inGrid(unit.tile):
+        continue
+      let cell = w.map.tileIndex(unit.tile)
+      if w.occupancy[cell] == 0: w.occupancy[cell] = unit.id
 
 ## Spawning
 
@@ -1604,6 +1736,9 @@ proc servePathQueue(w: World) {.measure.} =
         not w.releaseConstructionOccupant(w.units[index]):
       w.pathQueue.add request
       break
+    if w.overlappingBuildings(w.units[index]).len > 0:
+      w.pathQueue.add request
+      continue
     let retained = w.retainedBlockedEndpoint(w.units[index])
     let routeGoal = if retained: w.units[index].blockedEndpoint else: w.units[index].goal
     let complete = w.findPath(
@@ -2022,15 +2157,12 @@ proc advanceUnit(w: World, index: int32) =
   ## Runs one unit for one tick.
   let unit = w.units[index]
   if unit.constructionSiteId != NoEntity:
-    let site = w.buildingIndex(unit.constructionSiteId)
-    let working = site >= 0 and
-      w.buildings[site].state == BuildingUnderConstruction and
-      w.buildings[site].builderId == unit.id and unit.hp > 0 and
-      unit.owner == w.buildings[site].owner and unit.kind == PeonUnit and
-      unit.state == UnitBuilding and unit.targetId == unit.constructionSiteId and
-      covers(w.buildings[site].origin, w.buildings[site].footprint,
-        unit.tile.x.int32, unit.tile.y.int32)
-    if not working and not w.releaseConstructionOccupant(unit): return
+    if not w.workingConstructionOccupant(unit) and
+        not w.releaseConstructionOccupant(unit): return
+  if unit.state notin {UnitDying, UnitInMine} and
+      not w.workingConstructionOccupant(unit) and
+      w.overlappingBuildings(unit).len > 0:
+    return
   if w.units[index].state == UnitDying:
     inc w.units[index].animationTicks
     dec w.units[index].deathTicks
@@ -2167,7 +2299,8 @@ proc advanceBuilding(w: World, index: int32) =
         not constructionInRange(w.buildings[index], w.units[builderIndex]):
       return
     if w.buildings[index].buildTicks <= 1 and
-        not w.releaseConstructionOccupant(w.units[builderIndex]): return
+        not w.releaseConstructionOccupant(w.units[builderIndex],
+          w.buildings[index].id): return
     dec w.buildings[index].buildTicks
     let
       stats = BuildingTable[w.buildings[index].kind]
@@ -3227,6 +3360,9 @@ proc tickWorld*(w: World, decide: proc(w: World) {.closure.}) {.measure.} =
   if w.tick mod DecisionTicks == 0 and decide != nil:
     profileBlock "decisions":
       decide(w)
+
+  profileBlock "buildingClearance":
+    w.recoverBuildingOverlaps()
 
   profileBlock "searchPath":
     w.servePathQueue()

@@ -72,6 +72,8 @@ type
     targetTile*: Tile2
       ## Tree being chopped, when the resource is terrain rather than an
       ## entity. Also survives the round trip.
+    harvestCenter*: Tile2
+      ## Original woodcutting assignment, retained after its tree is gone.
     goal*: Tile2
     goalOffset*: FixedVec2
     hasGoal*: bool
@@ -760,6 +762,7 @@ proc clearOrder(unit: Unit, failed: bool) =
   unit.targetId = NoEntity
   unit.sourceId = NoEntity
   unit.targetTile = NoTile
+  unit.harvestCenter = NoTile
   unit.blockedTicks = 0
   unit.animation = IdleAnimation
   unit.clearPath()
@@ -829,6 +832,13 @@ proc setGoal(w: World, index: int32, goal: Tile2,
   w.units[index].clearPath()
   w.requestPath(index)
 
+proc treeDistanceSquared(first, second: Tile2): int64 =
+  ## Ranks tree locations by physical distance without floating point.
+  let
+    dx = int64(first.x) - int64(second.x)
+    dy = int64(first.y) - int64(second.y)
+  dx * dx + dy * dy
+
 proc recoverTreeApproach(w: World, index: int32): bool =
   ## Flood only reachable ground, bounded like an ordinary path search. A
   ## geometric nearest ring tile can be on the wrong side of a wall/crowd.
@@ -839,6 +849,7 @@ proc recoverTreeApproach(w: World, index: int32): bool =
     seen = newSeq[bool](w.map.passable.len)
     head = 0
     fallbackTree, fallbackGoal = NoTile
+    bestDistance = int64.high
   seen[w.map.tileIndex(unit.tile)] = true
   while head < frontier.len and head < MaxPathExpansions:
     let tile = frontier[head]
@@ -848,19 +859,24 @@ proc recoverTreeApproach(w: World, index: int32): bool =
           w.treeWood[w.map.tileIndex(unit.targetTile)] > 0:
         w.setGoal(index, tile)
         return true
-      if fallbackTree == NoTile:
-        # Unlike the legacy depletion scan, congestion must not discover
-        # unseen resources. Keep the explicit assignment as first choice.
-        for dy in -1'i32 .. 1'i32:
-          for dx in -1'i32 .. 1'i32:
-            let x = int32(tile.x) + dx
-            let y = int32(tile.y) + dy
-            if w.explored(unit.owner, x, y) and
-                w.treeWood[w.map.tileIndex(x, y)] > 0:
-              fallbackTree = tile2(x, y)
-              fallbackGoal = tile
-              break
-          if fallbackTree != NoTile: break
+      # A blocked route may change the current tree, never the grove center.
+      # Only known reachable trees qualify as congestion fallbacks.
+      for dy in -1'i32 .. 1'i32:
+        for dx in -1'i32 .. 1'i32:
+          let
+            x = int32(tile.x) + dx
+            y = int32(tile.y) + dy
+          if not w.explored(unit.owner, x, y) or
+              w.treeWood[w.map.tileIndex(x, y)] <= 0:
+            continue
+          let
+            candidate = tile2(x, y)
+            distance = treeDistanceSquared(unit.harvestCenter, candidate)
+          if distance < bestDistance or (distance == bestDistance and
+              w.map.tileIndex(candidate) < w.map.tileIndex(fallbackTree)):
+            bestDistance = distance
+            fallbackTree = candidate
+            fallbackGoal = tile
     for dy in -1'i32 .. 1'i32:
       for dx in -1'i32 .. 1'i32:
         if dx == 0 and dy == 0: continue
@@ -944,24 +960,34 @@ proc nearestDropOff*(w: World, player: int32, origin: Tile2,
       result = structure.id
 
 proc nearestTree*(w: World, origin: Tile2): int32 =
-  ## Returns the flat tile index of the closest standing tree, or -1. Rings
-  ## are scanned outward and ties inside a ring go to the lowest index, so
-  ## two peons asking from the same tile always get the same answer.
+  ## Finds the closest standing tree by distance, breaking ties by tile index.
   result = -1
-  for radius in 1'i32 ..< w.map.side:
-    for dy in -radius .. radius:
-      for dx in -radius .. radius:
-        if max(abs(dx), abs(dy)) != radius:
-          continue
-        let
-          x = int32(origin.x) + dx
-          y = int32(origin.y) + dy
-        if not w.map.inGrid(x, y):
-          continue
-        let index = w.map.tileIndex(x, y)
-        if w.treeWood[index] > 0 and (result < 0 or index < result):
-          result = index
-    if result >= 0:
+  if not w.map.inGrid(origin): return
+  var bestDistance = int64.high
+  template consider(x, y: int32) =
+    ## Examines one perimeter tile without revisiting the ring interior.
+    if w.map.inGrid(x, y):
+      let candidate = w.map.tileIndex(x, y)
+      if w.treeWood[candidate] > 0:
+        let distance = treeDistanceSquared(origin, tile2(x, y))
+        if distance < bestDistance or (distance == bestDistance and
+            candidate < result):
+          bestDistance = distance
+          result = candidate
+  for radius in 0'i32 ..< w.map.side:
+    let
+      left = int32(origin.x) - radius
+      right = int32(origin.x) + radius
+      top = int32(origin.y) - radius
+      bottom = int32(origin.y) + radius
+    for y in max(0'i32, top) .. min(w.map.side - 1, bottom):
+      if y == top or y == bottom:
+        for x in max(0'i32, left) .. min(w.map.side - 1, right):
+          consider(x, y)
+      else:
+        consider(left, y)
+        consider(right, y)
+    if result >= 0 and int64(radius + 1) * int64(radius + 1) > bestDistance:
       return
 
 ## Terrain edits
@@ -1226,6 +1252,7 @@ proc spawnUnit*(w: World, owner: int32, kind: UnitKind,
     targetId: NoEntity,
     sourceId: NoEntity,
     targetTile: NoTile,
+    harvestCenter: NoTile,
     goal: tile,
     attackMoveGoal: NoTile,
     pathGoal: NoTile,
@@ -1798,6 +1825,7 @@ proc beginMineTrip(w: World, index, mineId: int32) =
   w.units[index].targetId = mineId
   w.units[index].sourceId = mineId
   w.units[index].targetTile = NoTile
+  w.units[index].harvestCenter = NoTile
 
 proc beginTreeTrip(w: World, index, treeIndex: int32) =
   ## Sends a peon to a standing tree.
@@ -1840,17 +1868,12 @@ proc beginDropOff(w: World, index: int32, wantWood: bool,
   w.units[index].sourceId = keepSource
 
 proc resumeTreeWork(w: World, index: int32) =
-  ## Returns a peon to its tree, or the nearest standing tree in that grove.
+  ## Returns to the current tree or expands around the original assignment.
   let tile = w.units[index].targetTile
   if w.map.inGrid(tile) and w.treeWood[w.map.tileIndex(tile)] > 0:
     w.beginTreeTrip(index, w.map.tileIndex(tile))
     return
-  let fromTile =
-    if w.map.inGrid(tile):
-      tile
-    else:
-      w.units[index].tile
-  let next = w.nearestTree(fromTile)
+  let next = w.nearestTree(w.units[index].harvestCenter)
   if next >= 0:
     w.beginTreeTrip(index, next)
     return
@@ -2226,15 +2249,15 @@ proc advanceUnit(w: World, index: int32) =
       w.handleMineArrival(index)
       return
   of UnitToTree:
+    let treeIndex = w.map.tileIndex(w.units[index].targetTile)
+    if w.treeWood[treeIndex] <= 0:
+      w.resumeTreeWork(index)
+      return
     if tileDistance(tile, w.units[index].targetTile) <= 1:
-      let treeIndex = w.map.tileIndex(w.units[index].targetTile)
-      if w.treeWood[treeIndex] <= 0:
-        w.units[index].clearOrder(true)
-      else:
-        w.units[index].state = UnitChopping
-        w.units[index].stateTicks = ChopTicks
-        w.units[index].hasGoal = false
-        w.units[index].clearPath()
+      w.units[index].state = UnitChopping
+      w.units[index].stateTicks = ChopTicks
+      w.units[index].hasGoal = false
+      w.units[index].clearPath()
       return
   of UnitToDropGold, UnitToDropWood:
     let wantWood = w.units[index].state == UnitToDropWood
@@ -2637,18 +2660,21 @@ proc applyHarvest*(w: World, player, unitId, target, isTree: int32,
     if carrying:
       w.units[index].sourceId = target
       w.units[index].targetTile = NoTile
+      w.units[index].harvestCenter = NoTile
       w.beginDropOff(index, w.units[index].carryWood > 0)
     else:
       w.units[index].clearOrder(false)
       w.beginMineTrip(index, target)
   else:
+    let center = tile2(target mod w.map.side, target div w.map.side)
     if carrying:
       w.units[index].sourceId = NoEntity
-      w.units[index].targetTile =
-        tile2(target mod w.map.side, target div w.map.side)
+      w.units[index].targetTile = center
+      w.units[index].harvestCenter = center
       w.beginDropOff(index, w.units[index].carryWood > 0)
     else:
       w.units[index].clearOrder(false)
+      w.units[index].harvestCenter = center
       w.beginTreeTrip(index, target)
   ## The unit may still fail to reach it, which shows up as `orderFailed`
   ## rather than as a refusal, because the command itself was accepted.
@@ -2668,12 +2694,14 @@ proc applyDeposit*(w: World, player, unitId, depotId: int32,
   let
     source = unit.sourceId
     tree = unit.targetTile
+    center = unit.harvestCenter
     wantWood = w.acceptsDeposit(unit, depotId, true)
   unit.orderQueue.setLen(0)
   unit.orderFailed = false
   unit.clearOrder(false)
   unit.sourceId = source
   unit.targetTile = tree
+  unit.harvestCenter = center
   w.beginDropOff(index, wantWood, depotId)
   true
 
@@ -3182,6 +3210,7 @@ proc hashWorld(w: World): uint64 =
     hash.addHashy(unit.constructionSiteId)
     hash.addHashy(unit.sourceId)
     hash.mixTile(unit.targetTile)
+    hash.mixTile(unit.harvestCenter)
     hash.addHashy(int32(unit.body.pos.x))
     hash.addHashy(int32(unit.body.pos.y))
     hash.addHashy(int32(unit.body.facing))

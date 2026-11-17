@@ -8,7 +8,7 @@ when not defined(headless):
     std/unicode,
     opengl, pixie, silky, vmath, windy,
     polyworld/[assets, rtscameras, viewers],
-    scenes, ui, hudassets, selections
+    scenes, ui, hudassets, selections, voices, launches
 
 const RepositoryRoot = currentSourcePath().parentDir.parentDir.parentDir
 
@@ -20,8 +20,7 @@ when not defined(headless):
 
 type Options = object
   seed, width, height, frames: int
-  offline: bool
-  soundMuted: bool = true
+  offline, noVoice, soundMuted: bool
   saveDir, screenshot, prompt, model, selection: string
 
 proc options(): Options =
@@ -67,11 +66,14 @@ proc options(): Options =
             result.model = value
           of "offline":
             result.offline = true
+          of "no-voice":
+            result.noVoice = true
           of "help", "h":
             echo "Monster / Polyworld"
             echo "Run from the repository: nim r games/monster/monster.nim"
             echo "Options: --model:ID --seed:N --save-dir:PATH --offline"
-            echo "Audio: --mute[=BOOL] (default true), --unmute"
+            echo "Voice connects on startup. Click Talk, then Finish to send."
+            echo "Audio: --mute[=BOOL], --unmute, --no-voice"
             echo "Hidden capture: --screenshot:PATH [--prompt:TEXT] [--frames:N]"
             echo "Inspect a profile on launch: --select:moss or a person/place ID."
             echo "Or compile with -d:takeScreenshot (default: output/monster.png)."
@@ -200,6 +202,15 @@ else:
     )
     defer:
       scene.close()
+    let voice = newMonsterVoice(
+      historyCount = brain.messages.len,
+      enabled = not settings.offline and not settings.noVoice and
+        not capturing and getEnv("COGAME_LLM").toLowerAscii() != "off",
+      muted = settings.soundMuted
+    )
+    defer:
+      voice.close()
+    voice.connect()
     var
       chat = initChatUi()
       clock: ViewingClock
@@ -224,6 +235,7 @@ else:
     window.installInput(chat.addr)
     while not window.closeRequested:
       pollEvents()
+      voice.poll(window.focused)
       if window.size.x <= 0 or window.size.y <= 0:
         sleep(20)
         continue
@@ -236,6 +248,8 @@ else:
         accumulator -= 1'f / TickRate.float32
       discard world.receive(brain)
       world.outcomes(brain, savePath)
+      voice.observe(brain.messages)
+      voice.submitPending(world, brain)
       discard world.sendPrompt(brain, settings.prompt, autoSent)
       chat.scale = chatScale(window.size.vec2)
       chat.updateMinimapCamera(window, world, cameraTarget, following)
@@ -286,6 +300,14 @@ else:
         renderTime, chat.selection
       )
       sk.uiScale = chat.scale
+      chat.voiceEnabled = voice.enabled
+      chat.voiceConnected = voice.client.state == Connected
+      chat.voiceConnecting = voice.client.state == Connecting
+      chat.voiceListening = voice.listening()
+      chat.voiceSpeaking = voice.speaking()
+      chat.voiceMuted = voice.muted
+      chat.voiceStatus = voice.status()
+      chat.voiceError = voice.error
       sk.beginUi(window, window.size)
       let spoken = sk.drawUi(
         window, world, chat, brain.messages,
@@ -295,9 +317,21 @@ else:
       )
       sk.endUi()
       window.syncInput(chat)
+      if chat.voiceToggleRequested:
+        voice.toggleListening()
+        chat.voiceToggleRequested = false
+      if chat.voiceMuteRequested:
+        voice.setMuted(not voice.muted)
+        chat.voiceMuteRequested = false
+      if chat.voiceReconnectRequested:
+        voice.connect()
+        chat.voiceReconnectRequested = false
       if spoken.len > 0:
+        voice.interrupt()
         if not world.speak(brain, spoken):
           chat.restoreInput(spoken)
+      voice.observe(brain.messages)
+      voice.poll(window.focused)
       if epochTime() - lastSave > 10:
         world.saveWorld(savePath)
         lastSave = epochTime()
@@ -316,11 +350,21 @@ else:
 proc main() =
   ## Resolves repository assets and reports actionable startup failures.
   try:
+    when not defined(headless):
+      restoreMonsterDirectory()
     let settings = options()
+    when not defined(headless):
+      if not settings.offline and not settings.noVoice and
+        settings.screenshot.len == 0 and
+        getEnv("COGAME_LLM").toLowerAscii() != "off":
+          if launchMonster():
+            return
     setCurrentDir(RepositoryRoot)
     createDir(settings.saveDir)
     runGame(settings)
-  except MonsterError:
+    when not defined(headless):
+      finishMonster()
+  except MonsterError, IOError:
     stderr.writeLine("Monster: " & getCurrentExceptionMsg())
     quit(1)
 

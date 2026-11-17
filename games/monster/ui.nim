@@ -26,6 +26,10 @@ type
     scroll*: float32
     focusRequested*: bool
     minimapPanning*: bool
+    voiceEnabled*, voiceConnected*, voiceConnecting*: bool
+    voiceListening*, voiceSpeaking*, voiceMuted*: bool
+    voiceStatus*, voiceError*: string
+    voiceToggleRequested*, voiceMuteRequested*, voiceReconnectRequested*: bool
     cursor: int
     selected: bool
     inputScroll: float32
@@ -405,6 +409,60 @@ proc drawHistory(
     y += ui.historyHeights[i]
   sk.popClipRect()
 
+proc voiceButton(
+  sk: Silky,
+  window: Window,
+  panel: GameUiPanel,
+  text: string,
+  enabled = true
+): bool =
+  ## Reserves an exact voice-control hit area without overlapping the input.
+  let over = panel.contains(window.mousePos.vec2 / sk.uiScale)
+  sk.plate(panel,
+    if over and enabled: rgbx(110, 91, 51, 130)
+    else: rgbx(0, 0, 0, 150))
+  sk.drawLabel(text, panel.origin, panel.size, Ink, "Hud", CenterAlign)
+  enabled and over and window.buttonPressed[MouseLeft]
+
+proc drawVoice(
+  sk: Silky,
+  window: Window,
+  ui: var ChatUi,
+  history: var GameUiPanel
+) =
+  ## Places voice controls beneath the transcript while keeping its draft intact.
+  if not ui.voiceEnabled:
+    return
+  let
+    height = min(30'f, history.size.y)
+    origin = history.origin + vec2(0, history.size.y - height)
+    talk = GameUiPanel(origin: origin, size: vec2(66, height))
+    mute = GameUiPanel(origin: origin + vec2(72, 0), size: vec2(88, height))
+  history.size.y = max(0'f, history.size.y - height - 6)
+  if sk.voiceButton(window, talk,
+    if ui.voiceListening: "Finish" else: "Talk",
+    ui.voiceConnected or ui.voiceListening):
+      ui.voiceToggleRequested = true
+  if sk.voiceButton(window, mute,
+    if ui.voiceMuted: "Voice off" else: "Voice on"):
+      ui.voiceMuteRequested = true
+  var statusX = 168'f
+  if not ui.voiceConnected and not ui.voiceConnecting:
+    let retry = GameUiPanel(origin: origin + vec2(statusX, 0),
+      size: vec2(58, height))
+    if sk.voiceButton(window, retry, "Retry"):
+      ui.voiceReconnectRequested = true
+    statusX += 66
+  let status =
+    if ui.voiceStatus.len > 0: ui.voiceStatus
+    elif ui.voiceConnecting: "Connecting voice..."
+    elif ui.voiceListening: "Listening..."
+    elif ui.voiceSpeaking: "Moss is speaking..."
+    elif ui.voiceConnected: "Ready"
+    else: "Voice disconnected"
+  sk.drawLabel(status, origin + vec2(statusX, 0),
+    vec2(max(0'f, history.size.x - statusX), height), Ink)
+
 proc drawUi*(
   sk: Silky,
   window: Window,
@@ -461,8 +519,12 @@ proc drawUi*(
       ui.inputScroll = 0
       ui.localError.setLen(0)
       ui.typing = true
-  let error = if failure.len > 0: failure else: ui.localError
+  let error =
+    if failure.len > 0: failure
+    elif ui.localError.len > 0: ui.localError
+    else: ui.voiceError
   var history = boxes.history
+  sk.drawVoice(window, ui, history)
   if error.len > 0:
     let
       height = min(62'f, history.size.y)

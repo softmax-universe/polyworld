@@ -125,6 +125,77 @@ proc main() =
     inputFrame(released = {MouseRight})
     run.flushPlayerCommands()
 
+  proc depotFixture(kind: BuildingKind): int32 =
+    ## Places a visible owned depot and selects one peon for real right clicks.
+    fixture()
+    let half = run.world.map.side div 2
+    result = run.world.spawnUnit(0, PeonUnit, tile2(half-5, half))
+    selectedIds = @[result]
+    primaryId = result
+    run.world.buildings.add Building(id: FirstBuildingId, owner: 0,
+      kind: kind, hp: 500, state: BuildingComplete,
+      footprint: BuildingTable[kind].footprint,
+      origin: tile2(half+2, half-1))
+    run.world.buildingSlot.setLen(run.world.map.mines.len + 1)
+    run.world.buildingSlot[run.world.map.mines.len] = 0
+    let size = BuildingTable[kind].footprint
+    pointAtTile(tile2(half+2+size.width div 2, half-1+size.depth div 2))
+
+  suite "LvD right-click resource delivery":
+    test "town hall accepts either cargo and mill accepts wood":
+      for kind in [TownHallBuilding, LumberMillBuilding]:
+        for wood in [false, true]:
+          if kind == LumberMillBuilding and not wood: continue
+          for append in [false, true]:
+            let peon = depotFixture(kind)
+            let unit = run.world.units[run.world.unitIndex(peon)]
+            if wood: unit.carryWood = 13
+            else: unit.carryGold = 17
+            if append: inputFrame({KeyLeftShift})
+            let before = run.stateHash()
+            rightClick()
+            require run.submissions.len == 1
+            let action = run.submissions[0]
+            check action.kind == ActionDeposit
+            check action.entityId == peon
+            check action.first == FirstBuildingId
+            check action.append == append
+            check selectedIds == @[peon]
+            check run.stateHash() == before
+            check targetFlash.kind == HarvestEntityFlash
+            check targetFlash.target == FirstBuildingId
+
+    test "gold at a lumber mill stays carried and never queues delivery":
+      let peon = depotFixture(LumberMillBuilding)
+      let unit = run.world.units[run.world.unitIndex(peon)]
+      unit.carryGold = 17
+      rightClick()
+      require run.submissions.len == 1
+      check run.submissions[0].kind == ActionMove
+      check unit.carryGold == 17
+
+    test "mixed selection sends only wood carriers to a mill":
+      let woodPeon = depotFixture(LumberMillBuilding)
+      run.world.units[run.world.unitIndex(woodPeon)].carryWood = 13
+      let half = run.world.map.side div 2
+      let goldPeon = run.world.spawnUnit(0, PeonUnit, tile2(half-5, half+2))
+      let emptyPeon = run.world.spawnUnit(0, PeonUnit, tile2(half-5, half+3))
+      run.world.units[run.world.unitIndex(goldPeon)].carryGold = 17
+      selectedIds = @[woodPeon, goldPeon, emptyPeon, soldier]
+      rightClick()
+      require run.submissions.len == 1
+      check run.submissions[0].kind == ActionDeposit
+      check run.submissions[0].entityId == woodPeon
+
+    test "cancelling a blueprint at a depot still means movement":
+      let peon = depotFixture(TownHallBuilding)
+      run.world.units[run.world.unitIndex(peon)].carryGold = 17
+      pendingBuild = FarmBuilding.ord.int32
+      rightClick()
+      check pendingBuild == -1
+      require run.submissions.len == 1
+      check run.submissions[0].kind == ActionMove
+
   suite "LvD production attack input contract":
     test "tap A then right ground attacks once; following right click moves":
       fixture()

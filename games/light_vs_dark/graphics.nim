@@ -1421,6 +1421,13 @@ proc runGraphics*(network: NetworkMatch = nil,
               clickMarks.emitClickMark(buildingCentre(structure))
               return
           return
+        if structure.owner == player and run.world.queueFeedbackDeposit(
+            player, selectedIds, target, append = window.actionDown(ShiftInput)):
+          targetFlash.flashTarget(HarvestEntityFlash, target, player)
+          playSound(MoveOrderSound)
+          clickMarks.emitClickMark(buildingCentre(structure))
+          attackMoveArmed = false
+          return
         if structure.kind == GoldMineBuilding:
           if run.world.queueFeedbackHarvest(player, selectedIds, target, tree = false,
               append = window.actionDown(ShiftInput)):

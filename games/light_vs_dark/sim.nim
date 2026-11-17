@@ -899,6 +899,31 @@ proc footprintGoal(w: World, index: int32, origin: Tile2,
 
 ## Resource queries
 
+proc acceptsDeposit(w: World, unit: Unit, depotId: int32,
+    wantWood: bool): bool =
+  ## Revalidates a live owned depot and the specific cargo being delivered.
+  let index = w.buildingIndex(depotId)
+  if index < 0: return false
+  let depot = w.buildings[index]
+  if depot.owner != unit.owner or depot.hp <= 0 or
+      depot.state != BuildingComplete:
+    return false
+  let stats = BuildingTable[depot.kind]
+  if wantWood: unit.carryWood > 0 and stats.dropOffWood
+  else: unit.carryGold > 0 and stats.dropOffGold
+
+proc canDeposit*(w: World, player, unitId, depotId: int32): bool =
+  ## Checks whether an owned peon can deliver any cargo to this exact depot.
+  if w == nil or player < 0 or player >= w.players.len: return false
+  let index = w.unitIndex(unitId)
+  if index < 0: return false
+  let unit = w.units[index]
+  if unit.owner != player or unit.kind != PeonUnit or unit.hp <= 0 or
+      unit.state in {UnitDying, UnitInMine}:
+    return false
+  w.acceptsDeposit(unit, depotId, true) or
+    w.acceptsDeposit(unit, depotId, false)
+
 proc nearestDropOff*(w: World, player: int32, origin: Tile2,
     wantWood: bool): int32 =
   ## Returns the closest completed structure that accepts a resource.
@@ -906,7 +931,8 @@ proc nearestDropOff*(w: World, player: int32, origin: Tile2,
   result = NoEntity
   var best = int32.high
   for structure in w.buildings:
-    if structure.owner != player or structure.state != BuildingComplete:
+    if structure.owner != player or structure.hp <= 0 or
+        structure.state != BuildingComplete:
       continue
     let stats = BuildingTable[structure.kind]
     if (wantWood and not stats.dropOffWood) or
@@ -1657,15 +1683,16 @@ proc beginTreeTrip(w: World, index, treeIndex: int32) =
   elif not w.recoverTreeApproach(index):
     w.units[index].clearOrder(true)
 
-proc beginDropOff(w: World, index: int32, wantWood: bool) =
-  ## Sends a loaded peon to the nearest structure that accepts its cargo,
-  ## keeping hold of which mine or tree it should return to afterwards.
+proc beginDropOff(w: World, index: int32, wantWood: bool,
+    depotId = NoEntity) =
+  ## Delivers to a chosen or nearest depot, preserving the harvest assignment.
   let
     owner = w.units[index].owner
     keepTile = w.units[index].targetTile
     keepSource = w.units[index].sourceId
-    target = w.nearestDropOff(owner, w.units[index].tile, wantWood)
-  if target == NoEntity:
+    target = if depotId != NoEntity: depotId
+      else: w.nearestDropOff(owner, w.units[index].tile, wantWood)
+  if not w.acceptsDeposit(w.units[index], target, wantWood):
     w.units[index].clearOrder(true)
     return
   let structure = w.buildingIndex(target)
@@ -1763,9 +1790,18 @@ proc resumeHarvest(w: World, index: int32) =
   w.resumeTreeWork(index)
 
 proc handleDeposit(w: World, index: int32) =
-  ## Credits a delivered load and sends the peon straight back out. Peons
-  ## repeat their round trip until told otherwise, as they do in the game
-  ## this borrows from.
+  ## Credits accepted cargo at a live depot, then resumes assigned work.
+  let
+    unit = w.units[index]
+    wantWood = unit.state == UnitDepositWood
+  if not w.acceptsDeposit(unit, unit.targetId, wantWood):
+    w.beginDropOff(index, wantWood)
+    return
+  let depot = w.buildings[w.buildingIndex(unit.targetId)]
+  if not adjacentToFootprint(depot.origin, depot.footprint,
+      int32(unit.tile.x), int32(unit.tile.y)):
+    w.beginDropOff(index, wantWood, depot.id)
+    return
   if w.units[index].stateTicks > 0:
     dec w.units[index].stateTicks
     return
@@ -1773,7 +1809,7 @@ proc handleDeposit(w: World, index: int32) =
   w.trace("unit " & $w.units[index].id & " deposits " &
     $w.units[index].carryGold & " gold and " & $w.units[index].carryWood &
     " wood")
-  if w.units[index].carryGold > 0:
+  if not wantWood:
     w.players[owner].gold += w.units[index].carryGold
     w.players[owner].goldGathered += w.units[index].carryGold
     w.units[index].carryGold = 0
@@ -1781,11 +1817,18 @@ proc handleDeposit(w: World, index: int32) =
     w.players[owner].wood += w.units[index].carryWood
     w.players[owner].woodGathered += w.units[index].carryWood
     w.units[index].carryWood = 0
-  if w.units[index].orderQueue.len > 0:
+  if unit.carryGold > 0 or unit.carryWood > 0:
+    let remainingWood = unit.carryWood > 0
+    let target = if w.acceptsDeposit(unit, depot.id, remainingWood): depot.id
+      else: NoEntity
+    w.beginDropOff(index, remainingWood, target)
+  elif unit.orderQueue.len > 0:
     # Finish a harvest cycle at its deposit, never strand a miner or lose cargo.
     w.units[index].clearOrder(false)
-  else:
+  elif unit.sourceId != NoEntity or w.map.inGrid(unit.targetTile):
     w.resumeHarvest(index)
+  else:
+    unit.clearOrder(false)
 
 proc handleMineArrival(w: World, index: int32) =
   ## Puts a peon inside a mine when there is room, or leaves it queuing.
@@ -2062,15 +2105,16 @@ proc advanceUnit(w: World, index: int32) =
         w.units[index].clearPath()
       return
   of UnitToDropGold, UnitToDropWood:
+    let wantWood = w.units[index].state == UnitToDropWood
     let structure = w.buildingIndex(w.units[index].targetId)
-    if structure < 0:
+    if not w.acceptsDeposit(w.units[index], w.units[index].targetId, wantWood):
       ## The depot went down mid-trip; look for another one.
-      w.beginDropOff(index, w.units[index].carryWood > 0)
+      w.beginDropOff(index, wantWood)
       return
     if adjacentToFootprint(w.buildings[structure].origin,
         w.buildings[structure].footprint, int32(tile.x), int32(tile.y)):
       w.units[index].state =
-        if w.units[index].carryWood > 0: UnitDepositWood else: UnitDepositGold
+        if wantWood: UnitDepositWood else: UnitDepositGold
       w.units[index].stateTicks = DepositTicks
       w.units[index].hasGoal = false
       w.units[index].clearPath()
@@ -2477,6 +2521,29 @@ proc applyHarvest*(w: World, player, unitId, target, isTree: int32,
   ## rather than as a refusal, because the command itself was accepted.
   true
 
+proc applyDeposit*(w: World, player, unitId, depotId: int32,
+    append = false): bool =
+  ## Sends a loaded peon to a chosen depot without changing its resource job.
+  if not w.canDeposit(player, unitId, depotId): return false
+  let
+    index = w.unitIndex(unitId)
+    unit = w.units[index]
+  if append and (unit.state != UnitIdle or unit.orderQueue.len > 0):
+    if unit.orderQueue.len >= MaxUnitOrders: return false
+    unit.orderQueue.add UnitOrder(kind: ActionDeposit, first: depotId)
+    return true
+  let
+    source = unit.sourceId
+    tree = unit.targetTile
+    wantWood = w.acceptsDeposit(unit, depotId, true)
+  unit.orderQueue.setLen(0)
+  unit.orderFailed = false
+  unit.clearOrder(false)
+  unit.sourceId = source
+  unit.targetTile = tree
+  w.beginDropOff(index, wantWood, depotId)
+  true
+
 proc startNextOrder(w: World, index: int32) =
   ## Revalidate on activation; rejected stale orders cannot stall the FIFO.
   let unit = w.units[index]
@@ -2498,6 +2565,8 @@ proc startNextOrder(w: World, index: int32) =
       discard w.applyAttack(unit.owner, unit.id, order.first)
     of ActionHarvest:
       discard w.applyHarvest(unit.owner, unit.id, order.first, order.second)
+    of ActionDeposit:
+      discard w.applyDeposit(unit.owner, unit.id, order.first)
     else: discard
     unit.orderQueue = remaining
 
@@ -2703,6 +2772,11 @@ proc applyReplayAction*(w: World, action: ReplayAction): bool {.discardable.} =
   of ActionHarvest:
     w.applyHarvest(player, action.entityId, action.first,
       action.second, action.append)
+  of ActionDeposit:
+    if action.offset != FixedVec2Zero or action.second != 0 or
+        action.third != 0:
+      return false
+    w.applyDeposit(player, action.entityId, action.first, action.append)
   of ActionBuild:
     w.applyBuild(player, action.entityId, action.first,
       action.second, action.third)
@@ -2810,6 +2884,18 @@ proc applyHarvest*(
   if result:
     game.metrics.command(int(player), game.world.tick)
     game.record(ActionHarvest, player, unitId, target, isTree, append = append)
+
+proc applyDeposit*(
+    game: Game, player, unitId, depotId: int32, append = false
+): bool =
+  ## Records or submits a return-cargo order through the authoritative path.
+  if game.networked:
+    return game.queueNetworkAction(ActionDeposit, player, unitId, depotId,
+      append = append)
+  result = game.world.applyDeposit(player, unitId, depotId, append)
+  if result:
+    game.metrics.command(int(player), game.world.tick)
+    game.record(ActionDeposit, player, unitId, depotId, append = append)
 
 proc applyBuild*(
     game: Game, player, peonId, kindValue, x, y: int32

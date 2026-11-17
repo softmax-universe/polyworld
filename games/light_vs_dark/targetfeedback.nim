@@ -68,3 +68,11 @@ proc queueFeedbackHarvest*(world: World, player: int32, selected: openArray[int3
     if world.units[world.unitIndex(id)].kind == PeonUnit:
       queueHarvest(player, id, target, tree.int32, append = append)
       result = true
+
+proc queueFeedbackDeposit*(world: World, player: int32,
+    selected: openArray[int32], target: int32, append = false): bool =
+  ## Routes only loaded peons whose cargo is accepted by the clicked depot.
+  for id in world.targetOrderUnits(player, selected, append):
+    if world.canDeposit(player, id, target):
+      queueDeposit(player, id, target, append = append)
+      result = true

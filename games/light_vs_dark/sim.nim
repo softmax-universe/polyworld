@@ -85,6 +85,10 @@ type
     attackMoveGoal*: Tile2
     attackMoveOffset*: FixedVec2
       ## The destination to resume after a fight, or off-map when unset.
+    autoAttacking*: bool
+      ## Automatic engagement remains active until the return trip finishes.
+    autoAttackOrigin*: FixedVec2
+      ## Exact idle position to return to after an automatic engagement.
     path*: seq[Tile2]
       ## String-pulled waypoints in walk order.
     pathIndex*: int32
@@ -759,6 +763,8 @@ proc clearOrder(unit: Unit, failed: bool) =
   unit.attackMove = false
   unit.attackMoveGoal = NoTile
   unit.attackMoveOffset = FixedVec2Zero
+  unit.autoAttacking = false
+  unit.autoAttackOrigin = FixedVec2Zero
   unit.targetId = NoEntity
   unit.sourceId = NoEntity
   unit.targetTile = NoTile
@@ -1023,6 +1029,22 @@ proc tileCenter(tile: Tile2): FixedVec2 =
     fixed(int32(tile.x)) + 0.5'fx,
     fixed(int32(tile.y)) + 0.5'fx
   )
+
+proc returnFromAutoAttack(w: World, index: int32): bool =
+  ## Ends automatic combat with ordinary movement back to the saved position.
+  let unit = w.units[index]
+  if not unit.autoAttacking or unit.state notin {UnitChasing, UnitAttacking}:
+    return false
+  let
+    origin = unit.autoAttackOrigin
+    destination = tile2(whole(origin.x), whole(origin.y))
+  unit.clearOrder(false)
+  if length(unit.body.pos - origin) > 0.001'fx:
+    unit.autoAttacking = true
+    unit.autoAttackOrigin = origin
+    unit.state = UnitMoving
+    w.setGoal(index, destination, origin - tileCenter(destination))
+  true
 
 proc bindBody(tile: Tile2, facingX, facingY: int8): Body =
   ## Builds a body standing on the centre of a tile.
@@ -1497,7 +1519,8 @@ proc arrivedAt(unit: Unit, tile: Tile2): bool =
   ## Keeps fractional destinations precise while allowing broad path turns.
   let radius =
     if unit.hasGoal and tile == unit.goal:
-      if unit.goalOffset != FixedVec2Zero: 0.001'fx
+      if unit.goalOffset != FixedVec2Zero or
+          (unit.autoAttacking and unit.state == UnitMoving): 0.001'fx
       else: 0.1'fx
     else:
       PathArrive
@@ -1556,7 +1579,7 @@ proc steerUnit(w: World, index: int32, toward: FixedVec2) =
   if unit.body.pos == before:
     inc unit.blockedTicks
     if unit.blockedTicks >= AbandonAfterTicks:
-      unit.clearOrder(true)
+      if not w.returnFromAutoAttack(index): unit.clearOrder(true)
   else:
     unit.blockedTicks = 0
     unit.animation = RunAnimation
@@ -1801,8 +1824,9 @@ proc servePathQueue(w: World) {.measure.} =
         ## Genuinely nowhere to go. An empty path with `complete` set just
         ## means the unit is already standing on its goal, which is success.
         let hold = w.units[index].holdPosition
-        w.units[index].clearOrder(true)
-        w.units[index].holdPosition = hold
+        if not w.returnFromAutoAttack(index):
+          w.units[index].clearOrder(true)
+          w.units[index].holdPosition = hold
       else:
         w.units[index].repathCooldown =
           if w.tileOpen(w.units[index].goal.x, w.units[index].goal.y):
@@ -2026,10 +2050,13 @@ proc autoAcquire(w: World, index: int32) =
   ## Unassigned soldiers defend themselves; workers and direct moves stay put.
   if w.units[index].kind == PeonUnit or w.units[index].holdPosition:
     return
-  discard w.tryAcquire(index, defend = true)
+  if w.tryAcquire(index, defend = true):
+    w.units[index].autoAttacking = true
+    w.units[index].autoAttackOrigin = w.units[index].body.pos
 
 proc finishCombat(w: World, index: int32, failed: bool) =
-  ## Resumes an attack-move destination after a fight, or returns to idle.
+  ## Returns an idle defender home or resumes its explicit attack-move order.
+  if w.returnFromAutoAttack(index): return
   let
     dest = w.units[index].attackMoveGoal
     radius =
@@ -2104,6 +2131,18 @@ proc handleCombat(w: World, index: int32) =
   let
     stats = unitOf(w.units[index].owner, w.units[index].kind)
     distance = w.rangeToTarget(w.units[index], target)
+  if w.units[index].autoAttacking:
+    let
+      origin = w.units[index].autoAttackOrigin
+      home = tile2(whole(origin.x), whole(origin.y))
+      distanceFromHome =
+        if target.isBuildingId:
+          w.footprintDistance(home, w.buildings[w.buildingIndex(target)])
+        else:
+          tileDistance(home, w.entityTile(target))
+    if distanceFromHome > stats.sightTiles:
+      w.finishCombat(index, false)
+      return
   if distance <= stats.rangeTiles:
     w.units[index].state = UnitAttacking
     w.units[index].hasGoal = false
@@ -2129,10 +2168,15 @@ proc handleCombat(w: World, index: int32) =
       not w.map.inGrid(w.units[index].pathGoal) or
       tileDistance(targetTile, w.units[index].pathGoal) > 4:
     if target.isBuildingId:
-      let structure = w.buildingIndex(target)
-      if not w.footprintGoal(index, w.buildings[structure].origin,
-          w.buildings[structure].footprint):
+      let
+        structure = w.buildingIndex(target)
+        approach = w.approachTile(w.buildings[structure].origin,
+          w.buildings[structure].footprint, w.units[index].tile,
+          w.units[index].id)
+      if not w.map.inGrid(approach):
+        w.finishCombat(index, true)
         return
+      w.setGoal(index, approach)
       w.units[index].state = UnitChasing
       w.units[index].targetId = target
     else:
@@ -3223,6 +3267,9 @@ proc hashWorld(w: World): uint64 =
     hash.mixTile(unit.attackMoveGoal)
     hash.addHashy(int32(unit.attackMoveOffset.x))
     hash.addHashy(int32(unit.attackMoveOffset.y))
+    hash.addHashy(unit.autoAttacking)
+    hash.addHashy(int32(unit.autoAttackOrigin.x))
+    hash.addHashy(int32(unit.autoAttackOrigin.y))
     hash.addHashy(unit.orderQueue.len)
     for order in unit.orderQueue:
       hash.addHashy(order.kind)

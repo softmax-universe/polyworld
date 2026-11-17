@@ -11,7 +11,7 @@ type
     TrainMageShortcut, TrainKnightShortcut, TrainCatapultShortcut,
     TrainClericShortcut, TrainSummonShortcut,
     ResearchArrowsShortcut, ResearchEdgesShortcut, ResearchPlatingShortcut,
-    ResearchWindrunnerShortcut, CancelSiteShortcut
+    ResearchWindrunnerShortcut, CancelSiteShortcut, IdlePeonShortcut
   ShortcutBindings* = array[ShortcutAction, string]
   ShortcutActions* = set[ShortcutAction]
   ShortcutState* = object
@@ -24,11 +24,11 @@ type
 const
   DefaultShortcuts*: ShortcutBindings = [
     "Q", "W", "E", "R", "F", "Z", "V", "T",
-    "Q", "W", "E", "R", "F", "Z", "V", "T", "G", "B", "H", "Y", "X"
+    "Q", "W", "E", "R", "F", "Z", "V", "T", "G", "B", "H", "Y", "X", "."
   ]
   LegacyShortcuts: ShortcutBindings = [
     "H", "F", "B", "L", "T", "U", "C", "K",
-    "P", "S", "A", "M", "K", "C", "H", "E", "Q", "W", "R", "V", "X"
+    "P", "S", "A", "M", "K", "C", "H", "E", "Q", "W", "R", "V", "X", "."
   ]
   ReservedShortcutKeys* = "ASDCX"
 const ShortcutLabels*: array[ShortcutAction, string] = [
@@ -37,7 +37,8 @@ const ShortcutLabels*: array[ShortcutAction, string] = [
   "Train Peon", "Train Swordsman", "Train Archer", "Train Mage",
   "Train Knight", "Train Catapult", "Train Cleric", "Train Elemental",
   "Research Keenflight Arrows", "Research Tempered Edges",
-  "Research Runed Plating", "Research Windrunner Training", "Cancel construction"
+  "Research Runed Plating", "Research Windrunner Training", "Cancel construction",
+  "Select next idle peon"
 ]
 var shortcutMigrationReport*: string
 
@@ -48,13 +49,14 @@ proc shortcutLabel*(action: ShortcutAction): string =
 proc sharesContext(a, b: ShortcutAction): bool =
   ## Worker builds and producer actions are separate palettes. All producers
   ## can coexist in a mixed selection, so their keys must remain distinct.
-  (a <= BuildBlacksmithShortcut) == (b <= BuildBlacksmithShortcut)
+  a == IdlePeonShortcut or b == IdlePeonShortcut or
+    (a <= BuildBlacksmithShortcut) == (b <= BuildBlacksmithShortcut)
 
 proc normalizeKey(text: string): string =
-  ## Normalizes a single letter or digit without accepting modifiers.
+  ## Normalizes a single command key without accepting modifiers.
   result = text.strip.toUpperAscii
-  if result.len != 1 or result[0] notin {'A'..'Z', '0'..'9'}:
-    raise newException(ValueError, "Use one letter or digit.")
+  if result.len != 1 or result[0] notin {'A'..'Z', '0'..'9', '.', ','}:
+    raise newException(ValueError, "Use one letter, digit, period, or comma.")
 
 proc shortcutKeyError(action: ShortcutAction, key: string): string =
   ## Keeps global action keys and the fixed cancel key out of other commands.

@@ -231,3 +231,112 @@ suite "LvD production shortcut routing":
     window.onButtonRelease(KeyEscape)
     finishHumanCommunicationFrame()
     check not window.visible
+
+  test "idle peon shortcut cycles focuses and respects input owners":
+    window = newWindow("LvD idle peon shortcut", ivec2(1600, 1000),
+      visible = false)
+    defer:
+      window.close()
+      window = nil
+      run = nil
+      clearPlayerCommands()
+      currentShortcuts = DefaultShortcuts
+      resetHumanCommunication()
+    sk = Silky(uiScale: 1)
+    options.playerSlot = 1
+    run = newGame(generateMap(DefaultSeed), TickRate * 60)
+    var
+      matchMenu = HiddenMatchMenu
+      preferences = Preferences()
+      network: NetworkMatch
+      scene: CharacterScene
+      actionCam = initActionCam(subjectMode = true)
+    proc playerMode(): bool =
+      ## Mirrors the ordinary client ownership gate for the real callback.
+      options.playerSlot > 0 and not run.replayMode
+    let hooks = GraphicsHooks()
+    keyHandler("onButtonPress")
+    keyHandler("onButtonRelease")
+    inputBindings = LvdControlProfile.defaults
+    currentShortcuts = DefaultShortcuts
+    bindingCapture = false
+    resetHumanCommunication()
+    shortcutState.resetShortcut()
+    var workers: seq[int32]
+    for unit in run.world.units:
+      if unit.owner == 0 and unit.kind == PeonUnit: workers.add unit.id
+    require workers.len >= 2
+    selectedIds = @[]
+    primaryId = NoEntity
+    pendingBuild = FarmBuilding.ord
+    attackMoveArmed = true
+    lineGesture = LineGesture(active: true, dragging: true)
+    let before = run.stateHash()
+    window.onButtonPress(KeyPeriod)
+    check selectedIds == @[workers[0]] and primaryId == workers[0]
+    check cameraTarget == renderPoint(run.world.units[run.world.unitIndex(primaryId)])
+    check pendingBuild == -1 and not attackMoveArmed and not lineGesture.active
+    check not followSelection
+    window.onButtonPress(KeyPeriod)
+    check primaryId == workers[0]
+    window.onButtonRelease(KeyPeriod)
+    for id in workers[1 .. ^1]:
+      window.onButtonPress(KeyPeriod)
+      window.onButtonRelease(KeyPeriod)
+      check selectedIds == @[id] and primaryId == id
+    window.onButtonPress(KeyPeriod)
+    window.onButtonRelease(KeyPeriod)
+    check primaryId == workers[0]
+    run.flushPlayerCommands()
+    check run.stateHash() == before
+
+    for id in workers:
+      run.world.units[run.world.unitIndex(id)].state = UnitMoving
+    let priorSelection = selectedIds
+    window.onButtonPress(KeyPeriod)
+    window.onButtonRelease(KeyPeriod)
+    check selectedIds == priorSelection
+    for id in workers:
+      run.world.units[run.world.unitIndex(id)].state = UnitIdle
+
+    for menu in [PauseMenu, MatchSettings]:
+      matchMenu = menu
+      window.onButtonPress(KeyPeriod)
+      window.onButtonRelease(KeyPeriod)
+      check selectedIds == priorSelection
+    matchMenu = HiddenMatchMenu
+    bindingCapture = true
+    window.onButtonPress(KeyPeriod)
+    window.onButtonRelease(KeyPeriod)
+    check selectedIds == priorSelection
+    bindingCapture = false
+    for modifier in [KeyLeftControl, KeyLeftSuper, KeyLeftAlt]:
+      window.state.buttonDown = {modifier}
+      window.onButtonPress(KeyPeriod)
+      window.onButtonRelease(KeyPeriod)
+      check selectedIds == priorSelection
+    window.state.buttonDown = {}
+    window.onButtonPress(KeyEnter)
+    window.onButtonRelease(KeyEnter)
+    require humanCommunicationTyping()
+    window.onButtonPress(KeyPeriod)
+    window.onButtonRelease(KeyPeriod)
+    check humanCommunicationTyping() and selectedIds == priorSelection
+    resetHumanCommunication()
+    for replay in [false, true]:
+      options.playerSlot = if replay: 1 else: 0
+      run.replayMode = replay
+      window.onButtonPress(KeyPeriod)
+      window.onButtonRelease(KeyPeriod)
+      check selectedIds == priorSelection
+    options.playerSlot = 1
+    run.replayMode = false
+
+    check currentShortcuts.setShortcut(IdlePeonShortcut, ",") == ""
+    window.onButtonPress(KeyPeriod)
+    window.onButtonRelease(KeyPeriod)
+    check selectedIds == priorSelection
+    window.onButtonPress(KeyComma)
+    window.onButtonRelease(KeyComma)
+    check selectedIds == @[workers[1]]
+    check not window.visible

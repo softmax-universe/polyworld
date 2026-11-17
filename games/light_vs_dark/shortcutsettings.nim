@@ -39,6 +39,8 @@ proc shortcutKey*(button: Button): char =
       name[3] in {'A'..'Z', '0'..'9'}:
     return name[3]
   if button == KeyEscape: return '\e'
+  if button == KeyPeriod: return '.'
+  if button == KeyComma: return ','
 
 proc shortcutInputConflict*(controls: InputBindings, key: char): string =
   ## Reject keys already used by an active LvD gameplay action.
@@ -98,7 +100,7 @@ proc editKey*(editor: var ShortcutEditor, bindings: var ShortcutBindings,
     editor.active = false
     editor.draft = ""
     return false
-  if key notin {'A'..'Z', '0'..'9'}: return false
+  if key notin {'A'..'Z', '0'..'9', '.', ','}: return false
   editor.draft = $key
   editor.error = controls.shortcutInputConflict(key)
   if editor.error.len == 0:
@@ -129,9 +131,9 @@ proc drawShortcutRows(sk: Silky, window: Window, origin: Vec2) =
         if not shortcutEditor.active:
           bindingCapture = false
           break
-  sk.drawLabel("CONTEXTUAL ACTION KEYS", origin, vec2(720, 36),
+  sk.drawLabel("ACTION KEYS", origin, vec2(720, 36),
     sk.theme.defaultTextColor)
-  sk.drawLabel("One key per action. Select a worker or producer to see its actions.",
+  sk.drawLabel("Cycle idle peons anywhere. Other commands use the selection.",
     origin + vec2(0, 36), vec2(720, 36), sk.theme.defaultTextColor)
   let message =
     if shortcutEditor.active: "Type one key for " & shortcutLabel(shortcutEditor.action) & "; Esc cancels."

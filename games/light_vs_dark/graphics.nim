@@ -2394,10 +2394,23 @@ proc runGraphics*(network: NetworkMatch = nil,
         gameplay = matchMenu == HiddenMatchMenu and playerMode(),
         modified = window.scaleModifier or window.actionDown(ControlInput) or
           window.buttonDown[KeyLeftAlt] or window.buttonDown[KeyRightAlt],
-        actions = run.world.contextualActions(options.playerSlot - 1, selectedIds))
+        actions = run.world.contextualActions(options.playerSlot - 1, selectedIds) +
+          {IdlePeonShortcut})
       if matched.consumed:
         shortcutHeldButtons.incl button
         shortcutFrameButtons.incl button
+        if matched.action == IdlePeonShortcut.ord:
+          let id = run.world.nextIdlePeon(options.playerSlot - 1, primaryId)
+          if id != NoEntity:
+            cancelGameplayGestures()
+            pendingBuild = -1
+            selectedIds = @[id]
+            primaryId = id
+            followSelection = false
+            actionCam.takeManual()
+            cameraTarget = renderPoint(run.world.units[run.world.unitIndex(id)])
+            playSound(SelectSound)
+          return
         if matched.action >= 0 and performAudibleShortcut(run.world,
             options.playerSlot - 1, selectedIds, ShortcutAction(matched.action)):
           selectionStarted = false

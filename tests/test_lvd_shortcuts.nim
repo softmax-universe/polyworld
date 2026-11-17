@@ -66,6 +66,21 @@ suite "LvD single contextual shortcuts":
     invalid[TrainPeonShortcut] = bindings[ResearchArrowsShortcut]
     expect ValueError: discard decodeShortcuts(encodeShortcuts(invalid))
 
+  test "idle peon key is global rebindable and compatible with saved layouts":
+    var bindings = DefaultShortcuts
+    check bindings[IdlePeonShortcut] == "."
+    check bindings.setShortcut(IdlePeonShortcut, "Q").len > 0
+    check bindings.setShortcut(BuildFarmShortcut, ".").len > 0
+    check bindings.setShortcut(TrainPeonShortcut, ".").len > 0
+    check bindings.setShortcut(IdlePeonShortcut, ",") == ""
+    check decodeShortcuts(encodeShortcuts(bindings)) == bindings
+    var saved = parseJson(encodeShortcuts(bindings))
+    saved["bindings"].delete($IdlePeonShortcut)
+    saved["bindings"][$BuildBarracksShortcut] = %"7"
+    let migrated = decodeShortcuts($saved)
+    check migrated[IdlePeonShortcut] == "."
+    check migrated[BuildBarracksShortcut] == "7"
+
 suite "LvD shortcut migration":
   setup:
     let oldKeys = [
@@ -75,14 +90,14 @@ suite "LvD shortcut migration":
     var saved = newJObject()
     saved["version"] = %2
     saved["bindings"] = newJObject()
-    for action in ShortcutAction:
+    for action in ShortcutAction.low .. CancelSiteShortcut:
       saved["bindings"][$action] = %oldKeys[action.ord]
 
   test "both older default formats become the current left-hand layout":
     check decodeShortcuts($saved) == DefaultShortcuts
     check shortcutMigrationReport.len > 0
     saved["version"] = %1
-    for action in ShortcutAction:
+    for action in ShortcutAction.low .. CancelSiteShortcut:
       saved["bindings"][$action] = %("B " & oldKeys[action.ord])
     check decodeShortcuts($saved) == DefaultShortcuts
 

@@ -2,7 +2,7 @@
 ## on the simulation.
 
 import
-  std/math,
+  std/[math, sets, sha1, strutils, tables],
   bassy, fixxy,
   polyworld/[policyhosts, llms, mailboxes, metrics, bodies, cli, controllers,
     pathing, profiles, tapes, tensors],
@@ -1041,6 +1041,97 @@ proc initHeroHost(
     richardRunner(context), davidRunner(context), andreRunner(context),
     flyRunner(context)
   )
+  let slot = heroIndex(activeGame.world, heroId)
+  discard result.addQuery("checkpointRestored", 0, proc(args: openArray[int32]): int32 =
+    if slot < 0 or slot >= activeGame.heroVms.len or activeGame.heroVms[slot] == nil: return 0
+    int32(ord(activeGame.heroVms[slot].restoredFromCheckpoint)))
+  discard result.addFunction("saveSlot", 2, proc(args: openArray[int32]): int32 =
+    if slot < 0 or slot >= activeGame.heroVms.len or activeGame.heroVms[slot] == nil: return 0
+    let vm = activeGame.heroVms[slot]
+    if vm.savedSlots.len >= 4096 and args[0] notin vm.savedSlots: return 0
+    vm.savedSlots[args[0]] = args[1]
+    1'i32)
+  discard result.addQuery("loadSlot", 2, proc(args: openArray[int32]): int32 =
+    if slot < 0 or slot >= activeGame.heroVms.len or activeGame.heroVms[slot] == nil: return args[1]
+    activeGame.heroVms[slot].savedSlots.getOrDefault(args[0], args[1]))
+  discard result.addFunction("persist", 1, proc(runtime: Runtime, args: openArray[Value]): Value =
+    if slot < 0 or slot >= activeGame.heroVms.len or activeGame.heroVms[slot] == nil: return toValue(0'i32)
+    let vm = activeGame.heroVms[slot]
+    let key = runtime.getString(args[0]).toLowerAscii()
+    if key notin vm.persistedNames: vm.persistedNames.add(key)
+    if vm.persistLoader != nil and vm.persistLoader(key): toValue(1'i32) else: toValue(0'i32), 16)
+  discard result.addFunction("saveState", 2, proc(runtime: Runtime, args: openArray[Value]): Value =
+    if slot < 0 or slot >= activeGame.heroVms.len or activeGame.heroVms[slot] == nil: return toValue(0'i32)
+    let vm = activeGame.heroVms[slot]
+    let key = runtime.getString(args[0])
+    if key.len == 0 or key.len > 128 or vm.savedStates.len >= 1024: return toValue(0'i32)
+    vm.savedStates[key] = args[1].asInt
+    toValue(1'i32), 16)
+  discard result.addFunction("loadState", 2, proc(runtime: Runtime, args: openArray[Value]): Value =
+    if slot < 0 or slot >= activeGame.heroVms.len or activeGame.heroVms[slot] == nil: return toValue(args[1].asInt)
+    let key = runtime.getString(args[0])
+    toValue(activeGame.heroVms[slot].savedStates.getOrDefault(key, args[1].asInt)), 16)
+  discard result.addFunction("saveText", 2, proc(runtime: Runtime, args: openArray[Value]): Value =
+    if slot < 0 or slot >= activeGame.heroVms.len or activeGame.heroVms[slot] == nil: return toValue(0'i32)
+    let vm = activeGame.heroVms[slot]
+    let key = runtime.getString(args[0])
+    let val = runtime.getString(args[1])
+    if key.len == 0 or key.len > 128 or val.len > 1024 or vm.savedTexts.len >= 256: return toValue(0'i32)
+    vm.savedTexts[key] = val
+    toValue(1'i32), 32)
+  discard result.addFunction("loadText$", 2, proc(runtime: Runtime, args: openArray[Value]): Value =
+    var rt = runtime
+    if slot < 0 or slot >= activeGame.heroVms.len or activeGame.heroVms[slot] == nil:
+      return rt.putString(runtime.getString(args[1]))
+    let key = runtime.getString(args[0])
+    let fallback = runtime.getString(args[1])
+    rt.putString(activeGame.heroVms[slot].savedTexts.getOrDefault(key, fallback)), 32)
+
+proc discoverVmSymbols(vm: HeroVm, userSource: string) =
+  var seen = initHashSet[string]()
+  var i = 0
+  while i < userSource.len:
+    let ch = userSource[i]
+    if ch == '\'':
+      while i < userSource.len and userSource[i] != '\n': inc i
+      continue
+    if ch == '"':
+      inc i
+      while i < userSource.len and userSource[i] != '"': inc i
+      if i < userSource.len: inc i
+      continue
+    if ch in {'A'..'Z', 'a'..'z', '_'}:
+      let start = i
+      inc i
+      while i < userSource.len and userSource[i] in {'A'..'Z', 'a'..'z', '0'..'9', '_', '.'}:
+        inc i
+      if i < userSource.len and userSource[i] in {'$', '%', '#'}:
+        inc i
+      let raw = userSource[start ..< i].toLowerAscii()
+      let ident = if raw.endsWith("%") or raw.endsWith("#"): raw[0 ..< raw.len - 1] else: raw
+      if '.' in ident or ident in seen:
+        continue
+      seen.incl(ident)
+      try:
+        let len = vm.runtime.arrayLength(ident)
+        if len > 0:
+          if ident.endsWith("$"):
+            let v = vm.runtime.getStringArray(ident, 0)
+            vm.runtime.setArray(ident, 0, v)
+          else:
+            let v = vm.runtime.getArrayValue(ident, 0)
+            vm.runtime.setArray(ident, 0, v)
+          vm.arrayNames.add(ident)
+          continue
+      except BasicError:
+        discard
+      try:
+        discard vm.runtime.getGlobalValue(ident)
+        vm.globalNames.add(ident)
+      except BasicError:
+        discard
+    else:
+      inc i
 
 proc neuralLimits(): Limits =
   ## Reserves native model storage independently of ordinary BASIC limits.
@@ -1091,6 +1182,7 @@ proc loadBots*(
     game.heroVms[i] = HeroVm(
       structured: structured,
       legacyHeroData: not structured or program.usesHeroData(),
+      sourceSha256: $secureHash(policy.source),
       runtime: initRuntime(
         program,
         initHeroHost(game.world.heroes[i].id, policy, llm, i),
@@ -1106,6 +1198,7 @@ proc loadBots*(
       game.world,
       game.world.heroes[i].id
     )
+    game.heroVms[i].discoverVmSymbols(policy.source)
     llm.bindRuntime(game.heroVms[i].runtime)
     when defined(coworld):
       game.heroVms[i].output = playerPrinter(int(i))

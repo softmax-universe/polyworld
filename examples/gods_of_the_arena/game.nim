@@ -12,7 +12,8 @@ import
   sim,
   bots,
   controls,
-  replays
+  replays,
+  checkpoints
 
 when defined(coworld):
   import polyworld/coworld
@@ -310,6 +311,8 @@ when defined(headless):
     let started = epochTime()
     if not run.replayMode:
       startReplayRecording(uint32(options.maximumTicks))
+      restoreCheckpointIfRequested(run)
+    let checkpointSchedule = parseCheckpointSchedule()
     startGameProfile()
     defer:
       finishGameProfile()
@@ -326,6 +329,8 @@ when defined(headless):
         run.recordingError.len == 0:
       advanceGame()
       waitForRequests(pollers)
+      if not run.replayMode and checkpointSchedule.shouldSave(run.world.tick):
+        writeCheckpoint(run, checkpointSchedule)
       pacer.pace()
       inc steps
       if profileShouldDump(steps):

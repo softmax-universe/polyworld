@@ -69,6 +69,15 @@ type
     prepareDecision*: proc(tick: int32) {.closure.}
     pollRequests*: proc(): bool {.closure.}
     runtime*: Runtime
+    sourceSha256*: string
+    globalNames*: seq[string]
+    arrayNames*: seq[string]
+    restoredFromCheckpoint*: bool
+    savedSlots*: OrderedTable[int32, int32]
+    savedStates*: OrderedTable[string, int32]
+    savedTexts*: OrderedTable[string, string]
+    persistedNames*: seq[string]
+    persistLoader*: proc(name: string): bool {.closure.}
     structured*: bool
     legacyHeroData*: bool
     structureGlobals*: seq[GlobalView]

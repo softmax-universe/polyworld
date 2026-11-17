@@ -23,7 +23,7 @@ type
     edgeScrolling*: EdgeScrollMode = FullscreenEdgeScroll
     bindings*: InputBindings = DefaultBindings
     mainVolume*: int = 100
-    musicVolume*: int = 100
+    musicVolume*: int = 25
     fxVolume*: int = 100
     uiVolume*: int = 100
     uiScaleMode*: UiScaleMode

@@ -29,10 +29,25 @@ proc testSoundStartup() =
   echo "Testing a fresh launch uses audible default sliders"
   configureSoundLaunch(false, false)
   let defaults = readPreferences(app)
-  doAssert defaults.mainVolume == 100 and defaults.musicVolume == 100
+  doAssert defaults.mainVolume == 100 and defaults.musicVolume == 25
   doAssert defaults.fxVolume == 100 and defaults.uiVolume == 100
   defaults.applyPreferences(Window(nil), configureDisplay = false)
   doAssert not soundsMuted()
+
+  echo "Testing missing Music uses 25% without replacing saved channels"
+  setConfig(app, "settings.json",
+    """{"mainVolume":37,"fxVolume":61,"uiVolume":79}""")
+  let missingMusic = readPreferences(app)
+  doAssert missingMusic.musicVolume == 25
+  doAssert missingMusic.mainVolume == 37
+  doAssert missingMusic.fxVolume == 61 and missingMusic.uiVolume == 79
+
+  echo "Testing explicitly saved Music values keep their exact levels"
+  for music in [0, 25, 73, 100]:
+    var preferences = missingMusic
+    preferences.musicVolume = music
+    preferences.savePreferences(app)
+    doAssert readPreferences(app).musicVolume == music
 
   echo "Testing every saved slider survives launches and menu transitions"
   var saved = Preferences(

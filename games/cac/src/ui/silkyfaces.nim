@@ -115,8 +115,11 @@ proc everyFaceState*(cards: openArray[Card]): seq[FaceState] =
         # Below, at and above the printed value cover all three inks.
         result.add FaceState(card: card, power: value, toughness: value)
 
+proc fontKeyPrefix(semibold: bool): string =
+  if semibold: "face/semibold/" else: "face/regular/"
+
 proc fontKey(semibold: bool, size: int): string =
-  (if semibold: "face/semibold/" else: "face/regular/") & $size
+  fontKeyPrefix(semibold) & $size
 
 proc artKey(card: Card): string =
   "face/art/" & card.name.toLowerAscii().replace(" ", "-")
@@ -195,6 +198,20 @@ proc readStrikeout(path: string): (float32, float32) =
       let table = (u16(entry + 8) shl 16) or u16(entry + 10)
       return (s16(table + 28).float32, s16(table + 26).float32)
 
+proc loadFaceFontMetrics*(atlas: SilkyAtlas, cardAssets: string) =
+  for semibold in [false, true]:
+    let
+      prefix = fontKeyPrefix(semibold)
+      path = cardAssets / (if semibold: "fonts/Grenze-SemiBold.ttf"
+        else: "fonts/Grenze-Regular.ttf")
+    emSizes[semibold] = readTypeface(path).scale
+    strikeouts[semibold] = readStrikeout(path)
+    bakedSizes[semibold].setLen(0)
+    for name in atlas.fonts.keys:
+      if name.startsWith(prefix):
+        bakedSizes[semibold].add parseInt(name[prefix.len .. ^1])
+    bakedSizes[semibold].sort(Descending)
+
 proc addFaceAssets*(builder: AtlasBuilder,
     cardAssets = artworkRoot() / "cards") =
   ## What silky draws faces from, and the card back. The fonts are baked at
@@ -229,14 +246,10 @@ proc addFaceAssets*(builder: AtlasBuilder,
   for semibold in [false, true]:
     let path = cardAssets / (if semibold: "fonts/Grenze-SemiBold.ttf"
       else: "fonts/Grenze-Regular.ttf")
-    emSizes[semibold] = readTypeface(path).scale
-    strikeouts[semibold] = readStrikeout(path)
-    bakedSizes[semibold].setLen(0)
     for size in sizes[semibold]:
       builder.addFont(path, fontKey(semibold, size.int), size.float32,
         subpixelSteps = SubpixelSteps)
-      bakedSizes[semibold].add size.int
-    bakedSizes[semibold].sort(Descending)
+  builder.atlas.loadFaceFontMetrics(cardAssets)
 
 proc advance(font: FontAtlas, text: string): float32 =
   ## The pen's travel over `text`, as silky's drawText moves it.

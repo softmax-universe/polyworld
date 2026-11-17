@@ -35,6 +35,7 @@ if [[ ! -d "$art_dir/cac" ]]; then
 fi
 mkdir -p "$web_dir"
 web_dir="$(cd -- "$web_dir" && pwd)"
+art_dir="$(cd -- "$art_dir" && pwd)"
 stage_dir="$web_dir/assets"
 art_stage="$stage_dir/polyworld_art"
 
@@ -52,8 +53,7 @@ cp "$art_dir"/cac/ui/hud/class-*.svg "$loading_dir/"
 # unrelated Polyworld games' models are deliberately outside the package.
 rm -rf "$art_stage"
 mkdir -p "$art_stage/fonts" "$art_stage/themes" "$art_stage/icons"
-mkdir -p "$art_stage/cac/cards" "$art_stage/cac/vfx" \
-  "$art_stage/cac/ui" "$art_stage/cac/battlefield"
+mkdir -p "$art_stage/cac/cards" "$art_stage/cac/vfx" "$art_stage/cac/battlefield"
 # Only the CharGen parts, palettes, rig and clips of the six hero looks.
 chargen_dir="$art_dir/characters/chargen"
 (cd "$project_dir" && "$nim_command" r --hints:off \
@@ -68,22 +68,25 @@ done
 cp -R "$art_dir/themes/main" "$art_stage/themes/"
 cp -R "$art_dir/ui" "$art_stage/"
 cp "$art_dir"/icons/*.png "$art_stage/icons/"
-for directory in fonts frames icons; do
-  cp -R "$art_dir/cac/cards/$directory" "$art_stage/cac/cards/"
-done
-# The game crops every illustration to the card's art window when it loads
-# it; stage them cropped already, so the download holds only what is drawn.
-(cd "$project_dir" && "$nim_command" r --hints:off \
-  --out:"$web_dir/stage_card_art" tools/stage_card_art.nim \
-  "$art_dir/cac/cards/art" "$art_stage/cac/cards/art")
+# Card art, frames, icons and HUD artwork are already in the baked atlas.
+# Keep the source fonts for card text layout metrics.
+cp -R "$art_dir/cac/cards/fonts" "$art_stage/cac/cards/"
 cp -R "$art_dir/cac/vfx/textures" "$art_stage/cac/vfx/"
-cp -R "$art_dir/cac/ui/hud" "$art_stage/cac/ui/"
 cp -R "$art_dir/cac/battlefield/textures" "$art_stage/cac/battlefield/"
 
 if [[ -d "$project_dir/players" ]]; then
   mkdir -p "$stage_dir/players"
   cp "$project_dir"/players/*.bas "$stage_dir/players/" 2>/dev/null || true
 fi
+
+# Generate the atlas from the source images so the browser does not rasterize
+# glyphs or rebuild and encode the texture before showing the first frame.
+atlas_work="$stage_dir/atlas-work"
+mkdir -p "$atlas_work"
+(cd "$project_dir" && "$nim_command" c --hints:off \
+  --out:"$web_dir/build_ui_atlas" "$@" tools/build_ui_atlas.nim)
+(cd "$atlas_work" && "$web_dir/build_ui_atlas" \
+  "$art_dir/cac/cards" "$art_stage/cac")
 
 cd "$project_dir"
 POLYWORLD_REPO="$polyworld_repo" CAC_WEB_DIR="$web_dir" \

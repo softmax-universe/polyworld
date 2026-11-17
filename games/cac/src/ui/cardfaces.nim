@@ -166,9 +166,7 @@ proc fitFaceText*(runs: openArray[TextRun], box: Rect,
 
 proc cropToArtWindow*(source: Image): Image =
   ## An illustration scaled to cover the face's art window and centered in
-  ## it. A source already the window's size comes back unchanged, so art the
-  ## browser build stages pre-cropped (tools/stage_card_art.nim) draws
-  ## exactly as the full-size original does.
+  ## it. A source already at the window's size draws without rescaling.
   let scaleFactor = max(ArtWidth.float32 / source.width.float32,
     ArtHeight.float32 / source.height.float32)
   result = newImage(ArtWidth, ArtHeight)

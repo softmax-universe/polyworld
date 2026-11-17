@@ -3,7 +3,7 @@
 ## with these.
 import std/[math, options, os]
 import chroma, opengl, pixie, silky, vmath, windy
-import core/sim, core/sessions, ui/cardfaces, scene/cardrenderer,
+import core/sim, core/sessions, ui/silkyfaces, scene/cardrenderer,
   vfx/vfxrenderer, scene/post, scene/table, scene/courtyard, scene/heroes,
   ui/hud, ui/heroselect, scene/heroselectstage, paths, replayer
 import polyworld/[assets, characters, chargen, chrome, common, viewers]
@@ -93,9 +93,9 @@ proc lightLikeCourtyard*(scene: CharacterScene, cameraSide: float32) =
 
 proc buildUiAtlas*(cardAssets: string): AtlasBuilder =
   ## The UI atlas: every card face part, the HUD's images and its fonts.
-  ## Raises when they outgrow it. Call initCardAssets first.
+  ## Raises when they outgrow it.
   result = newHudAtlas(5632)
-  result.addFaceAssets()
+  result.addFaceAssets(cardAssets)
   result.addCacHudAssets(cardAssets)
   when PostPanelControls:
     # Silky's widget images, for the screen-effects tuning window.
@@ -105,6 +105,44 @@ proc buildUiAtlas*(cardAssets: string): AtlasBuilder =
   result.addFont(DefaultFontPath, "Default", 34.5)
   result.addFont(DefaultFontPath, "Hud", 28.5)
   result.addFont(DefaultFontPath, "Small", 22.5)
+
+when defined(emscripten):
+  import jsony
+
+  {.emit: """
+  #include <emscripten.h>
+  EM_ASYNC_JS(int, cacInflateAtlas, (const char* path, void* pixels, int size), {
+    const compressed = FS.readFile(UTF8ToString(path));
+    const reader = new Blob([compressed]).stream()
+      .pipeThrough(new DecompressionStream("deflate")).getReader();
+    let offset = 0;
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) return offset === size;
+      if (offset + value.byteLength > size) {
+        await reader.cancel();
+        return 0;
+      }
+      HEAPU8.set(value, pixels + offset);
+      offset += value.byteLength;
+    }
+  });
+  """.}
+
+  proc inflateAtlas(path: cstring, pixels: pointer, size: cint): cint
+    {.importc: "cacInflateAtlas", nodecl.}
+
+  proc readBrowserAtlas(root: string): tuple[atlas: SilkyAtlas, image: Image] =
+    ## Decode the exact baked, premultiplied pixels through the browser's
+    ## asynchronous inflater, directly into the atlas buffer.
+    result.atlas = readFile(root / "ui.atlas.json").fromJson(SilkyAtlas)
+    result.atlas.rebuildGlyphLookups()
+    let size = result.atlas.size
+    result.image = newImage(size, size)
+    let pixelsPath = root / "ui.atlas.rgba.deflate"
+    if inflateAtlas(pixelsPath.cstring, result.image.data[0].addr,
+        (result.image.data.len * sizeof(ColorRGBX)).cint) == 0:
+      raise newException(IOError, "Invalid browser UI atlas pixel count")
 
 proc initApp*(sessionOptions: SessionOptions): App =
   ## Opens the window and loads everything the modes draw with.
@@ -125,20 +163,23 @@ proc initApp*(sessionOptions: SessionOptions): App =
         "Could not find Polyworld. Set POLYWORLD_REPO to its repository root.")
     setCurrentDir(root)
 
-  let
-    cardAssets = artworkRoot() / "cards"
-    atlasPath = appDir / "cac.atlas.png"
-  initCardAssets(cardAssets)
-  buildUiAtlas(cardAssets).write(atlasPath)
+  let cardAssets = artworkRoot() / "cards"
+  let atlas =
+    when defined(emscripten):
+      readBrowserAtlas(cardAssets.parentDir)
+    else:
+      let path = appDir / "cac.atlas.png"
+      buildUiAtlas(cardAssets).write(path)
+      path
 
-  var window: Window
-  var sk: Silky
-  (window, sk) = initGameWindow(
+  let (window, sk) = initGameWindow(
     WindowTitle,
-    atlasPath,
+    atlas,
     ivec2(3200, 2000),
     vsync = true
   )
+  when defined(emscripten):
+    sk.atlas.loadFaceFontMetrics(cardAssets)
 
   var
     solid = initSolidRenderer()

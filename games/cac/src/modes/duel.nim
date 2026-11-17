@@ -1,23 +1,28 @@
 ## The duel: two players across the courtyard. A client of the core that
 ## presents its match with the shared app, table and HUD.
-import std/[math, options, os, random, strformat, tables, times]
+import std/[math, options, os, random, strformat, times]
 when defined(takeScreenshot):
   import std/strutils
-import chroma, opengl, pixie, silky, vmath, windy
-import ../core/sim, ../core/sessions, ../core/bots, ../core/replays,
-  ../core/eventtext
-import ../app, ../bench, ../ui/hud, ../scene/table, ../play, ../ui/cardfaces,
-  ../scene/cardrenderer, ../vfx/vfxrenderer, ../scene/post, ../ui/postpanel,
-  ../scene/courtyard, ../scene/heroes, ../net/web, ../scene/placement,
-  ../ui/tuning, ../replayer
-import polyworld/[assets, characters, chrome, common, viewers]
+  import ../core/replays
+import opengl, pixie, silky, vmath, windy
+import ../core/sim, ../core/sessions, ../core/bots, ../core/eventtext
+import ../app, ../bench, ../ui/hud, ../scene/table, ../play,
+  ../scene/cardrenderer, ../vfx/vfxrenderer, ../scene/post,
+  ../scene/courtyard, ../scene/placement,
+  ../ui/tuning, ../ui/matchmenu, ../ui/controls, ../replayer
+import polyworld/[characters, chrome, menus, sounds, viewers]
+when defined(emscripten):
+  import ../net/web
+else:
+  import polyworld/displays
+when PostPanelControls:
+  import ../ui/postpanel
 
 const
   BoardWidth = 18.0'f32
   BoardDepth = 11.0'f32
   DuelCamera = Placement(lateral: 0.00, height: 12.05, distance: 13.08,
     pitch: 0.7659, yaw: 0.0000) # pitch 43.9 deg, yaw 0.0 deg
-  HeroTargetRadius = 0.95'f32 ## Matches the ring drawn around a hero.
   DuelPlayerHand = Placement(lateral: 0.00, height: 1.25, distance: 5.86,
     pitch: 0.0000, yaw: 0.0000) # pitch 0.0 deg, yaw 0.0 deg
   DuelOpponentHand = Placement(lateral: 0.00, height: 1.52, distance: 3.60,
@@ -181,10 +186,12 @@ proc drawCardReadingView(
 proc runDuel*(app: App) =
   ## Presents a duel using public replay names when they are available.
   bindApp(app)
+  app.setBattlefield(2, ringMode = false)
   let names = if app.replay != nil: app.replay.playerNames() else: @[]
   var
     phase = ChooseClasses
     game: GameState
+    menu: MatchMenu
     # Captures can replay a cast from its visual seed.
     play = when defined(takeScreenshot):
       initTablePlay(parseBiggestInt(getEnv("CAC_VFX_SEED", "20260909")))
@@ -200,20 +207,23 @@ proc runDuel*(app: App) =
     terminalLog: LogReader  ## Where the terminal's printout of events is.
     seedRng = initRand()
     uiCapturesMouse = false  ## The pointer is over a tuning window.
+    battleInputEnabled = true
     chooseCanceled = false  ## The choose screen's button, clicked last frame.
 
   template gamePressed(button: Button): bool =
     ## A press the board should react to (not one meant for a window).
-    window.buttonPressed[button] and not uiCapturesMouse
+    battleInputEnabled and window.battlePressed(button) and not uiCapturesMouse and
+      not menu.visible and not menu.paused
 
   proc gameSeed(): int64 =
     ## --seed replays one deal; otherwise every game gets a fresh one.
     when defined(takeScreenshot):
-      return sessionOptions.seed
-    if sessionOptions.seedGiven:
-      return sessionOptions.seed
-    result = seedRng.rand(high(int)).int64
-    echo "CaC seed ", result, " (replay with --seed ", result, ")"
+      result = sessionOptions.seed
+    else:
+      if sessionOptions.seedGiven:
+        return sessionOptions.seed
+      result = seedRng.rand(high(int)).int64
+      echo "CaC seed ", result, " (replay with --seed ", result, ")"
 
   proc cameraPlayer(): int =
     if sessionOptions.human or phase == ChooseClasses: 0
@@ -693,10 +703,23 @@ proc runDuel*(app: App) =
   when defined(cacLayoutTuning):
     tuner.announce(duelTuningTargets())
 
+  window.onButtonPress = proc(button: Button) =
+    ## Keep the shared UI size shortcuts available during a battle.
+    discard window.scaleKey(button, app.preferences, sk.uiScale, AppName)
   window.onFrame = proc() =
+    app.beginCaptureFrame()
+    when not defined(emscripten):
+      window.updateWindowSettings()
+    updateSounds()
     benchBeginFrame()
     var dt = frameDelta(lastFrameTime)
     hudTime += dt
+    let menuWasVisible = menu.visible
+    menu.handleEscape(window, play.pendingTargeting or
+      play.selectedAttacker != 0)
+    battleInputEnabled = not menuWasVisible and not menu.visible
+    if menu.paused:
+      dt = 0
     if app.replay != nil:
       dt *= app.replay.timeScale
     when defined(cacLayoutTuning):
@@ -728,7 +751,7 @@ proc runDuel*(app: App) =
     if phase == PlayGame:
       if app.replay != nil:
         discard app.replay.update(play, game, duelLayout, dt)
-      else:
+      elif not menu.paused:
         discard play.updateBots(game, duelLayout, botVms, botClock, humanActs,
           dt)
         for event in terminalLog.readNew(game):
@@ -754,8 +777,9 @@ proc runDuel*(app: App) =
       view = lookAt(cameraEye, cameraTarget, vec3(0, 1, 0))
       projection = perspective(42.0'f32, aspect, CameraNear, CameraFar)
       viewProjection = projection * view
-      classHover = if phase == ChooseClasses and sessionOptions.human and
-          not uiCapturesMouse: classSelectionHover(viewProjection)
+      classHover = if battleInputEnabled and phase == ChooseClasses and
+          sessionOptions.human and not uiCapturesMouse:
+        classSelectionHover(viewProjection)
         else: none(HeroClass)
 
     var
@@ -763,7 +787,7 @@ proc runDuel*(app: App) =
       chooseHover = -1
       hoveredTarget = Canceled
       hoveredBoard = Canceled
-    if phase == PlayGame:
+    if phase == PlayGame and battleInputEnabled:
       # The choose screen covers the table: nothing under it is hovered.
       if play.choosing:
         discard
@@ -787,7 +811,7 @@ proc runDuel*(app: App) =
           not game.gameOver:
         play.updateTossPicking(game, hoverIndex,
           pick = gamePressed(MouseLeft),
-          clear = window.buttonPressed[KeyEscape] or gamePressed(MouseRight))
+          clear = gamePressed(KeyEscape) or gamePressed(MouseRight))
       elif humanTurn() and play.presentationIdle(game) and
           not play.pendingTargeting and not play.attackActive and not game.gameOver:
         if hoverIndex >= 0 and
@@ -801,7 +825,7 @@ proc runDuel*(app: App) =
             pick = gamePressed(MouseLeft) and
               not finishRect(window).contains(sk.mousePos),
             cancel = gamePressed(MouseRight) or
-              window.buttonPressed[KeyEscape])
+              gamePressed(KeyEscape))
       elif humanActs() and play.choosing and play.presentationIdle(game) and
           not game.gameOver:
         hoverIndex = -1
@@ -813,8 +837,9 @@ proc runDuel*(app: App) =
         play.updateChoosing(game, duelLayout, chooseHover,
           pick = clicked and chooseHover >= 0,
           # Anywhere off the offered cards cancels, as does the button.
-          cancel = (clicked and chooseHover < 0) or chooseCanceled or
-            gamePressed(MouseRight) or window.buttonPressed[KeyEscape],
+          cancel = (clicked and chooseHover < 0) or
+            (chooseCanceled and not menu.visible) or
+            gamePressed(MouseRight) or gamePressed(KeyEscape),
           time = animationTime)
         if not play.choosing:
           play.chooseStart = 0
@@ -824,7 +849,7 @@ proc runDuel*(app: App) =
           viewProjection, hoverIndex,
           pick = gamePressed(MouseLeft) and
             not finishRect(window).contains(sk.mousePos),
-          cancel = window.buttonPressed[KeyEscape] or gamePressed(MouseRight))
+          cancel = gamePressed(KeyEscape) or gamePressed(MouseRight))
 
     when defined(takeScreenshot):
       if getEnv("CAC_CAPTURE_NO_HOVER") == "1":
@@ -863,7 +888,7 @@ proc runDuel*(app: App) =
 
     var attackHoverTarget = Canceled
     let attackChoices = play.attackChoices(game)
-    if humanTurn() and attackChoices.len > 0 and
+    if battleInputEnabled and humanTurn() and attackChoices.len > 0 and
         not play.pendingTargeting and play.presentationIdle(game):
       attackHoverTarget = hoveredWorldTarget(window, viewProjection, game, play,
         duelLayout, attackChoices)
@@ -874,7 +899,7 @@ proc runDuel*(app: App) =
     benchStart(CardsBuild)
     # Silky's frame starts here: it draws card faces into their textures as
     # the cards are built.
-    sk.beginUi(window, window.size)
+    menu.beginFrame(app)
     solid.clear()
     cardSurfaces.clear()
     vfx.clear()
@@ -887,11 +912,11 @@ proc runDuel*(app: App) =
         animationTime)
     benchStop(CardsBuild)
 
-    if window.buttonPressed[KeyF8]:
+    if battleInputEnabled and window.buttonPressed[KeyF8]:
       post.settings.enabled = not post.settings.enabled
     when PostLayerControls:
       for layer in PostLayer:
-        if window.buttonPressed[PostLayerKeys[layer]]:
+        if battleInputEnabled and window.buttonPressed[PostLayerKeys[layer]]:
           post.layer = layer
           post.settings.enabled = true
     post.beginScene(window.size, CameraNear, CameraFar)
@@ -966,7 +991,7 @@ proc runDuel*(app: App) =
       vfx.draw(viewProjection)
     elif classHover.isSome:
       vfx.draw(viewProjection)
-    post.present(window.size)
+    post.present(window.size, app.captureFramebuffer)
 
     glDisable(GL_DEPTH_TEST)
     glDisable(GL_CULL_FACE)
@@ -986,72 +1011,79 @@ proc runDuel*(app: App) =
           vec2(32, hudSize(window).y - 110), vec2(1200, 42),
           HudIvory, "Small")
 
-    if phase == ChooseClasses:
-      let picked = classSelection(viewProjection, sessionOptions.human, not uiCapturesMouse)
-      if picked.isSome:
-        let seed = gameSeed()
-        startDuel([precon(picked.get), botSeat(1, seed)], seed)
-        play.statusMessage = humanStatus()
-    else:
-      drawPlayerPanel(sk, window, game, 0, sessionOptions.human,
-        hudTime, names)
-      drawPlayerPanel(sk, window, game, 1, sessionOptions.human,
-        hudTime, names)
-      drawTurnHeader(sk, window, game, sessionOptions.human,
-        play.statusMessage, names)
-      let inspectingCard = drawCardReadingView(
-        sk,
-        window,
-        game,
-        viewProjection,
-        play,
-        duelLayout,
-        hoverIndex,
-        play.choosing,
-        handOwner =
-          if play.tossPicking: game.pendingToss.player else: cameraPlayer()
-      )
-      sk.drawPileTooltip(window, hoveredPile(window, viewProjection, game,
-        play, duelLayout), viewProjection,
-        avoid = cardReadingRect(window), avoiding = inspectingCard)
-      if app.replay == nil:
-        sk.drawLabel(
-          play.playHelp(sessionOptions.human),
-          vec2(32, hudSize(window).y - 66),
-          vec2(820, 42),
-          HudMuted,
-          "Small"
-        )
-        let canFinish = humanTurn() and not game.waitingChoice and
-          not play.pendingTargeting and not play.attackActive and not game.gameOver and
-          play.presentationIdle(game)
-        if drawEndTurnButton(sk, window,
-            (if game.gameOver: "MATCH ENDED"
-             elif not humanTurn(): "OPPONENT"
-             else: "END TURN"), canFinish):
-          play.selectedAttacker = 0
-          game.finishTurn()
-          botClock.wait = 1.2'f32
-          play.statusMessage = "Your opponent is thinking..."
-          play.pendingTargeting = false
-          play.pendingCardIndex = -1
-          play.pendingChoices.setLen(0)
-
-      if play.choosing:
-        chooseCanceled = drawChooseScreen(sk, window, play.pendingCard,
-          play.chooseOptions(game), chooseHover, play.choosePicked,
-          appear = animationTime - play.chooseStart,
-          sincePick = animationTime - play.choosePickedAt)
+    chooseCanceled = false
+    if not menu.visible:
+      if phase == ChooseClasses:
+        let picked = classSelection(viewProjection, sessionOptions.human,
+          battleInputEnabled and not uiCapturesMouse and not menu.paused)
+        if picked.isSome:
+          let seed = gameSeed()
+          startDuel([precon(picked.get), botSeat(1, seed)], seed)
+          play.statusMessage = humanStatus()
       else:
-        chooseCanceled = false
-      sk.drawTossPrompt(window, play, game)
-      sk.drawTargetPrompt(window, play, game)
+        drawPlayerPanel(sk, window, game, 0, sessionOptions.human,
+          hudTime, names)
+        drawPlayerPanel(sk, window, game, 1, sessionOptions.human,
+          hudTime, names)
+        drawTurnHeader(sk, window, game, sessionOptions.human,
+          play.statusMessage, names)
+        let inspectingCard = drawCardReadingView(
+          sk,
+          window,
+          game,
+          viewProjection,
+          play,
+          duelLayout,
+          hoverIndex,
+          play.choosing or not battleInputEnabled,
+          handOwner =
+            if play.tossPicking: game.pendingToss.player else: cameraPlayer()
+        )
+        if battleInputEnabled and not play.choosing and not uiCapturesMouse:
+          sk.drawPileTooltip(window, hoveredPile(window, viewProjection, game,
+            play, duelLayout, viewer = cameraPlayer(), hoverIndex = hoverIndex,
+            hoveredBoard = hoveredBoard, attackChoices = attackChoices),
+            viewProjection, avoid = cardReadingRect(window),
+            avoiding = inspectingCard)
+        if app.replay == nil:
+          sk.drawLabel(
+            play.playHelp(sessionOptions.human) & " " & menuShortcut() & ": menu.",
+            vec2(32, hudSize(window).y - 66),
+            vec2(820, 42),
+            HudMuted,
+            "Small"
+          )
+          let canFinish = humanTurn() and battleInputEnabled and not menu.paused and
+            not game.waitingChoice and
+            not play.pendingTargeting and not play.attackActive and not game.gameOver and
+            play.presentationIdle(game)
+          if drawEndTurnButton(sk, window,
+              (if game.gameOver: "MATCH ENDED"
+               elif not humanTurn(): "OPPONENT"
+               else: "END TURN"), canFinish):
+            play.selectedAttacker = 0
+            game.finishTurn()
+            botClock.wait = 1.2'f32
+            play.statusMessage = "Your opponent is thinking..."
+            play.pendingTargeting = false
+            play.pendingCardIndex = -1
+            play.pendingChoices.setLen(0)
 
-      sk.drawCombatPrompt(window, play, game)
+        if play.choosing:
+          chooseCanceled = drawChooseScreen(sk, window, play.pendingCard,
+            play.chooseOptions(game), chooseHover, play.choosePicked,
+            appear = animationTime - play.chooseStart,
+            sincePick = animationTime - play.choosePickedAt)
+        else:
+          chooseCanceled = false
+        sk.drawTossPrompt(window, play, game)
+        sk.drawTargetPrompt(window, play, game)
 
-      if not play.attackActive:
-        sk.drawMatchResult(window, play, game,
-          if sessionOptions.human: 0 else: -1, names = names)
+        sk.drawCombatPrompt(window, play, game)
+
+        if not play.attackActive:
+          sk.drawMatchResult(window, play, game,
+            if sessionOptions.human: 0 else: -1, names = names)
 
     when defined(emscripten):
       let role =
@@ -1076,11 +1108,13 @@ proc runDuel*(app: App) =
           summary.add " Ready for your action."
       publishStatus(summary.cstring)
 
-    if app.replay != nil and phase == PlayGame:
+    if not menu.visible and app.replay != nil and phase == PlayGame:
       app.replay.drawTransport(sk, window)
     when PostPanelControls:
-      drawPostPanel(sk, window, post, courtyard)
+      if not menu.visible:
+        drawPostPanel(sk, window, post, courtyard)
     benchQuads(cardSurfaces.quadCount, sk.instanceCount div 6)
+    menu.draw(app)
     sk.endUi()
     sk.drawHudFaces()
     benchStop(Ui)
@@ -1107,10 +1141,15 @@ proc runDuel*(app: App) =
             elif getEnv("CAC_CAPTURE_SETTLED") == "1": 80 else: 20),
           appDir / "cac_shot.png"
         )
-    window.swapBuffers()
+    window.presentFrame(framePaceHz)
     if app.replay != nil:
       app.replay.reportFrame()
 
-  while not window.closeRequested:
-    pollEvents()
-    waitForDisplay()
+  try:
+    while not window.closeRequested and not app.returnToMenu:
+      pollEvents()
+      waitForDisplay()
+  finally:
+    window.onFrame = nil
+    window.onButtonPress = nil
+    activeCameraPlayer = nil

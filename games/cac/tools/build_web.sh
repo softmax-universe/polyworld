@@ -53,7 +53,10 @@ cp "$art_dir"/cac/ui/hud/class-*.svg "$loading_dir/"
 rm -rf "$art_stage"
 mkdir -p "$art_stage/fonts" "$art_stage/themes" "$art_stage/icons"
 mkdir -p "$art_stage/cac/cards" "$art_stage/cac/vfx" \
-  "$art_stage/cac/ui" "$art_stage/cac/battlefield"
+  "$art_stage/cac/ui" "$art_stage/cac/battlefield" \
+  "$art_stage/cac/loading/source"
+cp "$art_dir/cac/loading/source/moonlit-table.png" \
+  "$art_stage/cac/loading/source/"
 # Only the CharGen parts, palettes, rig and clips of the six hero looks.
 chargen_dir="$art_dir/characters/chargen"
 (cd "$project_dir" && "$nim_command" r --hints:off \
@@ -66,6 +69,7 @@ for font in Rubik-Regular.ttf Rubik-Bold.ttf; do
   cp "$art_dir/fonts/$font" "$art_stage/fonts/"
 done
 cp -R "$art_dir/themes/main" "$art_stage/themes/"
+cp -R "$art_dir/sounds" "$art_stage/"
 cp -R "$art_dir/ui" "$art_stage/"
 cp "$art_dir"/icons/*.png "$art_stage/icons/"
 for directory in fonts frames icons; do
@@ -78,6 +82,8 @@ done
   "$art_dir/cac/cards/art" "$art_stage/cac/cards/art")
 cp -R "$art_dir/cac/vfx/textures" "$art_stage/cac/vfx/"
 cp -R "$art_dir/cac/ui/hud" "$art_stage/cac/ui/"
+mkdir -p "$art_stage/cac/ui/menu"
+cp "$project_dir"/assets/menu/button-*.png "$art_stage/cac/ui/menu/"
 cp -R "$art_dir/cac/battlefield/textures" "$art_stage/cac/battlefield/"
 
 if [[ -d "$project_dir/players" ]]; then

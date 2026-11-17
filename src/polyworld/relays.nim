@@ -727,7 +727,8 @@ proc receive*(
       reject("Seats can only change in the lobby")
     let owner = room.seats[message.seat].owner
     let hostBotRemoval = message.kind == ReleaseSeat and
-      room.identity.game in ["galcon", "gods_of_the_arena", "light_vs_dark"] and
+      room.identity.game in ["galcon", "gods_of_the_arena", "light_vs_dark",
+        "awm"] and
       guest.id == room.owner and room.seats[message.seat].name != "Human"
     if owner != 0 and owner != guest.id and not hostBotRemoval:
       reject("Seat belongs to another participant")
@@ -768,7 +769,7 @@ proc receive*(
   of StartMatch:
     if room.phase != Lobby or room.owner != guest.id:
       reject("Only the owner can start a lobby")
-    let hostPrepared = room.identity.game == "gods_of_the_arena"
+    let hostPrepared = room.identity.game in ["gods_of_the_arena", "awm"]
     let lvdAutomatic = room.identity.game == "light_vs_dark" and
       room.identity.protocol >= 3
     let automaticPreparation = lvdAutomatic or

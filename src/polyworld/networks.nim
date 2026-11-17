@@ -122,7 +122,7 @@ proc takeTick*(
   smooth: bool
 ): bool =
   ## Paces live ticks without delaying control packets or history catch-up.
-  if not smooth or client.catchupPending or
+  if not smooth or client.catchingUp or
     client.serverTick > client.applied + 8:
       playback = TickPlayback()
       return client.takeTick(packet)

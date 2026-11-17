@@ -836,8 +836,8 @@ void main() {}
       let light = normalize(vec3(-0.48'f32 * side, 0.85, 0.35'f32 * side))
       let
         extent = max(18.0'f32, result.arenaRadius + 3.0'f32)
-        distance = if playerCount > 2: extent * 2 else: 35.0'f32
-        farPlane = if playerCount > 2: max(70.0'f32, extent * 4) else: 70.0'f32
+        distance = if arenaRadius > 0: extent * 2 else: 35.0'f32
+        farPlane = if arenaRadius > 0: max(70.0'f32, extent * 4) else: 70.0'f32
       result.lightMatrices[seat] = ortho(-extent, extent, -extent,
         extent, 1.0'f32, farPlane) *
         lookAt(light * distance, vec3(0), vec3(0, 1, 0))
@@ -874,6 +874,16 @@ void main() {}
     glBindTexture(GL_TEXTURE_2D, 0)
     glBindVertexArray(0)
     glDeleteProgram(depthProgram)
+
+  proc dispose*(renderer: var CourtyardRenderer) =
+    ## Releases the battlefield resources before another layout replaces it.
+    glDeleteProgram(renderer.program)
+    glDeleteProgram(renderer.skyProgram)
+    glDeleteVertexArrays(1, renderer.vao.addr)
+    glDeleteBuffers(1, renderer.vbo.addr)
+    glDeleteTextures(1, renderer.normalMap.addr)
+    glDeleteTextures(2, renderer.shadows[0].addr)
+    renderer = CourtyardRenderer()
 
   proc initCourtyardRenderer*(playerCount = 2): CourtyardRenderer =
     if playerCount > 2:

@@ -34,6 +34,8 @@ type
     failed*: bool  ## Compilation or presentation failure stops this script.
     lastError*: string  ## Why the last decision (or the compile) failed.
     output*: PrintProc  ## Where the script's PRINT goes (nil: nowhere).
+    onSendChat*: proc(sender, target: int, text: openArray[char]): int32
+      ## A network match queues messages until the relay confirms them.
     player*: int  ## The seat that owns this VM.
     rng: Rand
     rngInitialized: bool
@@ -319,7 +321,11 @@ proc buildBotHost(playerId: int32, policySlot = -1): Host =
   let sendChatProc: NumericHostProc = proc(args: openArray[Value]): Value =
     ## Sends one explicit message from the owning seat.
     activeVm.runtime.withString(args[1], text):
-      result = sendChat(int(playerId), int(args[0].asInt), text)
+      if activeVm.onSendChat == nil:
+        result = sendChat(int(playerId), int(args[0].asInt), text)
+      else:
+        result = activeVm.onSendChat(
+          int(playerId), int(args[0].asInt), text)
   let pullMailboxProc: NumericHostProc = proc(args: openArray[Value]): Value =
     ## Pops the next message from the owning seat inbox.
     let inbox = inboxes[int(playerId)]

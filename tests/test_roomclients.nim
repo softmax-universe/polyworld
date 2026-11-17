@@ -88,10 +88,13 @@ block consumedEdgeDiscovery:
       doAssert edge.serverTick == edge.applied
       doAssert edge.catchups == 1, "Exhausting a stale known edge must discover history"
       doAssert edge.catchupPending
+      doAssert not edge.catchingUp,
+        "A live-edge request must not block game input"
       for frame in 0 ..< 200: doAssert not edge.takeTick(packet)
       doAssert edge.catchups == 1, "A pending request must suppress duplicates"
       edge.accept(RoomMessage(kind: CaughtUp, match: 2, tick: 2, number: 2).encode)
       doAssert not edge.catchupPending
+      doAssert not edge.catchingUp
       for frame in 0 ..< 200: doAssert not edge.takeTick(packet)
       doAssert edge.catchups == 1, "An empty CaughtUp reply must not cause polling loops"
       doAssert edge.applied == 2
@@ -132,3 +135,67 @@ block consumedEdgeDiscovery:
   noMatch.appliedTick(1)
   doAssert noMatch.catchups == 0
   echo "Consumed-edge discovery is bounded and preserves playback authority"
+
+block recoveryState:
+  echo "Testing initial, reconnect and incomplete history recovery"
+  let history = RoomClient(participant: 7, match: 3, began: true,
+    welcomed: true, snapshot: RoomMessage(phase: Playing))
+  history.requestHistory()
+  doAssert history.catchingUp
+  for tick in 1'u32 .. 2'u32:
+    history.accept(RoomMessage(kind: TickPacket, match: 3, tick: tick).encode)
+  history.accept(RoomMessage(kind: CaughtUp, match: 3, tick: 2, number: 2).encode)
+  doAssert history.catchingUp,
+    "Receiving a recovery reply does not apply its history"
+  var packet: RoomMessage
+  for tick in 1'u32 .. 2'u32:
+    doAssert history.takeTick(packet) and packet.tick == tick
+    history.appliedTick(tick)
+  doAssert not history.catchingUp and history.catchupPending,
+    "Reaching the recovery target permits play during the next edge probe"
+  history.accept(RoomMessage(kind: CaughtUp, match: 3, tick: 2, number: 2).encode)
+
+  history.lost()
+  doAssert history.catchingUp
+  history.opened()
+  history.accept(RoomMessage(kind: Welcome, participant: 7).encode)
+  doAssert history.catchingUp,
+    "Reconnect must await history even before the repeated BeginMatch"
+  history.accept(RoomMessage(kind: BeginMatch, match: 3).encode)
+  history.accept(RoomMessage(kind: CaughtUp, match: 3, tick: 2, number: 2).encode)
+  doAssert not history.catchingUp
+
+  # A missing known tick upgrades even an already pending probe to recovery.
+  history.requestHistory(recovery = false)
+  doAssert not history.catchingUp
+  history.accept(RoomMessage(kind: TickPacket, match: 3, tick: 4).encode)
+  doAssert not history.takeTick(packet) and history.catchingUp
+  history.accept(RoomMessage(kind: TickPacket, match: 3, tick: 3).encode)
+  history.accept(RoomMessage(kind: CaughtUp, match: 3, tick: 4, number: 4).encode)
+  for tick in 3'u32 .. 4'u32:
+    doAssert history.takeTick(packet) and packet.tick == tick
+    history.appliedTick(tick)
+  doAssert not history.catchingUp and history.catchupPending
+
+  # A speculative probe can discover a larger history than one bounded batch.
+  for tick in 5'u32 .. 20'u32:
+    history.accept(RoomMessage(kind: TickPacket, match: 3, tick: tick).encode)
+  history.accept(RoomMessage(kind: CaughtUp,
+    match: 3, tick: 20, number: 24).encode)
+  doAssert history.catchingUp
+  for tick in 5'u32 .. 20'u32:
+    doAssert history.takeTick(packet) and packet.tick == tick
+    history.appliedTick(tick)
+  doAssert history.catchingUp and history.catchupPending
+  for tick in 21'u32 .. 24'u32:
+    history.accept(RoomMessage(kind: TickPacket, match: 3, tick: tick).encode)
+  history.accept(RoomMessage(kind: CaughtUp,
+    match: 3, tick: 24, number: 24).encode)
+  doAssert history.catchingUp
+  for tick in 21'u32 .. 24'u32:
+    doAssert history.takeTick(packet) and packet.tick == tick
+    history.appliedTick(tick)
+  doAssert not history.catchingUp
+  history.accept(RoomMessage(kind: RoomState, phase: Lobby).encode)
+  doAssert not history.catchingUp and not history.catchupPending
+  echo "Only missing history blocks gameplay during recovery"

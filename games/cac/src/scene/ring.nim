@@ -49,8 +49,9 @@ proc toLocal*(balcony: PlayerBalcony, world: Vec3): Vec3 =
   rotateSeat(world - balcony.center, -balcony.yaw)
 
 proc buildMultiplayerLayout*(playerCount: int): MultiplayerLayout =
-  if playerCount < 3:
-    raise newException(ValueError, "A multiplayer battlefield needs at least 3 players")
+  ## Places two or more players on separate balconies around the arena.
+  if playerCount < 2:
+    raise newException(ValueError, "A multiplayer battlefield needs at least 2 players")
   result.playerCount = playerCount
   result.centerRadius = 3.0
   # Leave actual sky between the separate islands. Once the angular slice
@@ -156,10 +157,10 @@ const TunedViews: array[3 .. 7, MultiplayerView] = [
     handRoll: 0.0000)]
 
 proc multiplayerView*(layout: MultiplayerLayout, aspect: float32): MultiplayerView =
-  ## The tuned view for 3-7 seats. Larger rings keep the 7-seat hands and
+  ## The tuned view for 2-7 seats. Larger rings keep the 7-seat hands and
   ## fit the camera to the window, since no tuned camera covers them.
   if layout.playerCount <= TunedViews.high:
-    return TunedViews[layout.playerCount]
+    return TunedViews[max(TunedViews.low, layout.playerCount)]
   result = TunedViews[TunedViews.high]
   result.camera = layout.fittedCamera(aspect)
 

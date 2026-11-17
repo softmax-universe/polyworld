@@ -5,7 +5,7 @@ import std/[math, options, os, strformat, strutils, tables]
 import chroma, pixie, silky, vmath, windy
 import ../core/[explanations, sim], cardfaces, ../scene/cardrenderer, ../play,
   ../scene/table, ../vfx/vfxrenderer
-import polyworld/[assets, chrome, viewers]
+import polyworld/chrome
 
 const
   PlayerPanelWidth* = 680.0'f32
@@ -32,9 +32,10 @@ proc classUiColor*(heroClass: HeroClass): ColorRGBX =
     rgbx(76, 121, 236, 255)
 
 proc hudScale*(window: Window): float32 =
+  ## Applies the shared UI size preference to the card table's reference HUD.
   let density = when defined(emscripten): window.contentScale else: 1.0'f32
-  min(density, min(window.size.x.float32 / 2400.0'f32,
-    window.size.y.float32 / 1500.0'f32))
+  selectedUiScale(min(density, min(window.size.x.float32 / 2400.0'f32,
+    window.size.y.float32 / 1500.0'f32)), 1080.0'f / 1500)
 
 proc hudSize*(window: Window): Vec2 =
   window.size.vec2 / max(hudScale(window), 0.01'f32)
@@ -601,9 +602,8 @@ proc drawPileTooltip*(sk: Silky, window: Window,
       anchor: Vec3],
     viewProjection: Mat4, avoid = UiRect(), avoiding = false) =
   ## How many cards the hovered deck or discard pile holds, above the pile.
-  ## Nothing is drawn where it would lie across `avoid` (the inspector),
-  ## rather than leaving a cropped fragment beside the card.
-  if not pile.found:
+  ## The inspector blocks hover beneath it and labels across its card.
+  if not pile.found or (avoiding and avoid.contains(sk.mousePos)):
     return
   let origin = screenPosition(window, pile.anchor, viewProjection) /
     hudScale(window) + vec2(-77, -22)

@@ -1,5 +1,4 @@
-## The multiplayer game mode: three or more seats around the ring, playing
-## the core's game. Every seat but the human's is played by a bot script.
+## Local and network matches share the ring presentation for two to seven seats.
 import std/math
 import ../core/sim, ../core/bots, ../core/eventtext, ../scene/ring
 export ring
@@ -120,16 +119,28 @@ proc skipDeadTurn*(match: var MultiplayerMatch): bool =
   match.endTurn()
 
 when not defined(headless):
-  import std/[options, os, random, strformat, times]
+  import std/[options, os, random, times]
   when defined(takeScreenshot):
     import std/strutils
-  import chroma, opengl, silky, vmath, windy
+  when defined(emscripten) or defined(takeScreenshot):
+    import std/strformat
+  import opengl, silky, vmath, windy
   import ../app, ../bench, ../ui/hud, ../scene/table, ../play,
     ../scene/cardrenderer,
-    ../vfx/vfxrenderer, ../scene/post, ../ui/postpanel, ../scene/courtyard,
-    ../scene/heroes, ../net/web, ../ui/tuning
-  import polyworld/[characters, chrome, viewers]
+    ../vfx/vfxrenderer, ../scene/post, ../scene/courtyard,
+    ../scene/heroes, ../ui/tuning, ../ui/matchmenu, ../ui/controls,
+    ../net/multiplayer as networkplay
+  import polyworld/[characters, chrome, connections, menus,
+    roomclients, sounds, viewers]
+  import polyworld/rooms except Seat
+  import ../core/replays
   import ../replayer
+  when defined(emscripten):
+    import ../net/web
+  else:
+    import polyworld/displays
+  when PostPanelControls:
+    import ../ui/postpanel
 
   proc place(balcony: PlayerBalcony, local: CardPose): CardPose =
     ## A pose on a balcony, given in its local frame.
@@ -187,7 +198,7 @@ when not defined(headless):
       result.add balcony.place(pose)
 
   proc seatTable*(layout: MultiplayerLayout, view: MultiplayerView,
-      viewedSeat, humanSeat: int): TableLayout =
+      viewedSeat, humanSeat: int, hideHands = false): TableLayout =
     ## Where the shared table puts every seat's cards and hero: on its own
     ## balcony, in the ring's frame, each card facing its owner. Draw and
     ## hit-test it through stageRotation, like the balconies. Only the
@@ -209,21 +220,27 @@ when not defined(headless):
       heroPosition: proc(player: int): Vec3 =
         layout.balconies[player].toWorld(layout.balconies[player].heroZone),
       handVisible: proc(player: int): bool =
-        player == viewedSeat,
+        not hideHands and player == viewedSeat,
       drawVisible: proc(player: int): bool =
         player == humanSeat,
       overBoard: proc(point: Vec3): bool =
         length(vec2(point.x, point.z)) <= layout.outerRadius)
 
   proc runMultiplayer*(app: App) =
-    ## Presents a match through the shared table, like the duel. The camera
-    ## never moves. With --human P1 plays and nothing turns; otherwise we
-    ## spectate and the balconies turn around the static center to bring
-    ## whoever's turn it is in front of the camera.
+    ## Presents a local, replay, or confirmed network match around the ring.
+    ## Each human faces their own balcony; spectators follow the active seat.
     bindApp(app)
     let
-      layout = buildMultiplayerLayout(sessionOptions.playerCount)
-      names = if app.replay != nil: app.replay.playerNames() else: @[]
+      online = app.network != nil
+      playerCount =
+        if online: app.network.game.playerCount
+        elif app.configuredSeats.len > 0: app.configuredSeats.len
+        else: sessionOptions.playerCount
+      layout = buildMultiplayerLayout(playerCount)
+      names = if app.replay != nil: app.replay.playerNames()
+        elif online: app.network.playerNames
+        else: app.playerNames
+    app.setBattlefield(playerCount, ringMode = true)
     var
       previewTime = 0.0'f32
       hudTime = 0.0'f
@@ -234,7 +251,10 @@ when not defined(headless):
           initRand(sessionOptions.seed)
         else: initRand()
       match: MultiplayerMatch
+      menu: MatchMenu
       play = initTablePlay()
+      networkTable: TableLayout
+      networkBlocked = false
       choosingClasses = true
       botClassWait = 1.5'f32
       orbit = initSeatOrbit(layout.balconies[0].yaw)
@@ -244,12 +264,14 @@ when not defined(headless):
         ## The bot scripts for the seats that aren't the human's, taken in
         ## turn: the --bot scripts, else the reference bot.
       uiCapturesMouse = false  ## The pointer is over a tuning window.
+      battleInputEnabled = true
       chooseCanceled = false  ## The choose screen's button, clicked last frame.
     when defined(takeScreenshot):
       var playDemoDone = false
     template gamePressed(button: Button): bool =
       ## A press the table should react to (not one meant for a window).
-      window.buttonPressed[button] and not uiCapturesMouse
+      battleInputEnabled and window.battlePressed(button) and not uiCapturesMouse and
+        not menu.visible and not menu.paused and not networkBlocked
     proc startMatch(human: Option[Seat]) =
       ## The human's seat, if they play, and every bot's own pick.
       var seats = newSeq[Seat](layout.playerCount)
@@ -276,7 +298,48 @@ when not defined(headless):
       botSources.add readFile(path)
     if botSources.len == 0:
       botSources = defaultBotSources(appDir)
-    if app.humanSeat.isSome:
+    if online:
+      app.network.automaticBots = false
+      choosingClasses = false
+      match = MultiplayerMatch(game: app.network.game,
+        humanSeat: app.network.humanSeat)
+      orbit = initSeatOrbit(layout.balconies[match.viewedSeat].yaw)
+      play.statusMessage = match.turnStatus(names)
+      play.submitAction = proc(action: ReplayAction): bool =
+        ## Send an intent without applying it to the local game.
+        app.network.submitAction(action)
+      app.network.onAction = proc(before, after: GameState,
+          action: ReplayAction) =
+        ## Animate only actions accepted in the relay's confirmed order.
+        match.game = after
+        play.stopTargeting()
+        play.tossPicking = false
+        play.selectedAttacker = 0
+        if not app.network.client.catchingUp:
+          if action.kind == ActionAttack and action.choices.len > 0:
+            play.startAttack(before, networkTable, @[action.attacker.int],
+              action.choices[0].toChoice)
+            play.attackDamageApplied = true
+          elif action.kind == ActionPlayCard:
+            play.animateTransition(networkTable, before, after,
+              action.choices.toChoices, action.handIndex.int)
+          play.addActionArrows(networkTable, before, after, action)
+        turnPassed()
+      openingDraw = true
+    elif app.configuredSeats.len > 0:
+      choosingClasses = false
+      let seed = if sessionOptions.seedGiven: sessionOptions.seed
+        else: seatRng.rand(high(int)).int64
+      match = MultiplayerMatch(
+        game: newGame(app.configuredSeats, seed, recordEvents = true),
+        humanSeat: app.configuredHumanSeat,
+        bots: loadBots(app.configuredBotSources))
+      for bot in match.bots:
+        bot.ensureSeed(seed)
+      orbit = initSeatOrbit(layout.balconies[match.viewedSeat].yaw)
+      play.statusMessage = match.turnStatus(names)
+      openingDraw = true
+    elif app.humanSeat.isSome:
       # The human brought a deck: no class to choose.
       startMatch(app.humanSeat)
     elif getEnv("CAC_AUTOSTART") == "1":
@@ -305,10 +368,23 @@ when not defined(headless):
       tuner.announce([tuningTarget("player's hand", previewView.nearHand),
         tuningTarget("opponent's hand", previewView.farHand),
         tuningTarget("camera", previewView.camera)])
+    window.onButtonPress = proc(button: Button) =
+      ## Keep the shared UI size shortcuts available during a battle.
+      discard window.scaleKey(button, app.preferences, sk.uiScale, AppName)
     window.onFrame = proc() =
+      app.beginCaptureFrame()
+      when not defined(emscripten):
+        window.updateWindowSettings()
+      updateSounds()
       benchBeginFrame()
       var previewDt = frameDelta(previewLastFrame)
       hudTime += previewDt
+      let menuWasVisible = menu.visible
+      menu.handleEscape(window, play.pendingTargeting or
+        play.selectedAttacker != 0)
+      battleInputEnabled = not menuWasVisible and not menu.visible
+      if menu.paused and not online:
+        previewDt = 0
       if app.replay != nil:
         previewDt *= app.replay.timeScale
       previewTime += previewDt
@@ -336,15 +412,64 @@ when not defined(headless):
       when PostPanelControls:
         uiCapturesMouse = mouseOverPostPanel(sk.mousePos)
       let table = seatTable(layout, previewView, match.viewedSeat,
-        match.humanSeat)
-      if not choosingClasses and app.replay != nil:
+        match.humanSeat, hideHands = online and match.humanSeat < 0)
+      networkTable = table
+      if online:
+        app.connection.pump()
+        if app.network.returnedToLobby:
+          app.returnToMenu = true
+        var packet: RoomMessage
+        try:
+          while app.network.canApplyTick(
+              play.presentationIdle(match.game) and not play.attackActive) and
+              app.connection.takeTick(packet, CacNetworkTickRate):
+            app.network.applyPacket(packet)
+          if not openingDraw and play.presentationIdle(match.game) and
+              not play.attackActive:
+            app.network.pumpBots()
+        except RoomsError as error:
+          app.network.abort(error.msg)
+          app.network.client.error = error.msg
+        match.game = app.network.game
+        let client = app.network.client
+        networkBlocked = app.network.pendingAction or app.network.finished or
+          not client.connected or not client.welcomed or
+          client.catchingUp or client.snapshot.flag or
+          client.error.len > 0 or client.snapshot.phase != Playing
+        if not play.attackActive and play.presentationIdle(match.game) and
+            not networkBlocked and match.humanActs:
+          if match.game.pendingToss.count > 0 and not play.tossPicking:
+            play.startTossPicking(match.game)
+          elif match.game.pendingTriggers.len > 0 and not play.pendingTargeting:
+            play.startTriggerTargeting(match.game)
+        discard play.advanceAttack(match.game, previewDt)
+        orbit.advance(previewDt)
+        if client.error.len > 0:
+          play.statusMessage = client.error & " (" & menuShortcut() & " opens the menu.)"
+        elif not client.connected or not client.welcomed:
+          play.statusMessage = app.connection.status()
+        elif client.catchingUp:
+          play.statusMessage = "Catching up with the match..."
+        elif client.snapshot.flag:
+          play.statusMessage = client.snapshot.detail
+        elif app.network.finished and not match.game.gameOver:
+          play.statusMessage = "Action limit reached. " & menuShortcut() & " opens the menu."
+        elif client.snapshot.phase in {Ended, Desynced}:
+          play.statusMessage = client.snapshot.detail & " (" & menuShortcut() & " opens the menu.)"
+        elif app.network.pendingAction:
+          play.statusMessage = "Waiting for the server to confirm your action..."
+        elif match.humanSeat < 0:
+          play.statusMessage = "Watching multiplayer match..."
+        else:
+          play.statusMessage = match.turnStatus(names)
+      elif not choosingClasses and app.replay != nil:
         # The recording plays every seat; the ring turns to whoever acts.
         let viewed = match.viewedSeat
         if app.replay.update(play, match.game, table, previewDt) or
             match.viewedSeat != viewed:
           orbit.aimAt(layout.balconies[match.viewedSeat].yaw)
         orbit.advance(previewDt)
-      elif not choosingClasses:
+      elif not choosingClasses and not menu.paused:
         # The bots play their seats, the same way they play the duel.
         if play.updateBots(match.game, table, match.bots, botClock,
             proc(): bool = match.humanActs, previewDt,
@@ -451,8 +576,9 @@ when not defined(headless):
         farPlane = max(CameraFar, length(eye) * 3)
         projection = perspective(42.0'f32, aspect, CameraNear, farPlane)
         vp = projection * view
-        classHover = if choosingClasses and sessionOptions.human and
-            not uiCapturesMouse: classSelectionHover(vp)
+        classHover = if battleInputEnabled and choosingClasses and
+            sessionOptions.human and not uiCapturesMouse:
+          classSelectionHover(vp)
           else: none(HeroClass)
         # The balconies, their cards and heroes render through the stage
         # turn; the center island and the sky stay put.
@@ -470,7 +596,7 @@ when not defined(headless):
         chooseHover = -1
         hoveredTarget = Canceled
         hoveredBoard = Canceled
-      if not choosingClasses:
+      if not choosingClasses and battleInputEnabled:
         template game: untyped = match.game
         # Answering what the end of your turn asked for ends it.
         let turnBefore = game.turnNumber
@@ -480,8 +606,8 @@ when not defined(headless):
         elif play.tossPicking:
           hoverIndex = hoveredCard(window, stageVp, game, table,
             handOwner = game.pendingToss.player)
-        else:
-          # The hand facing the camera can be read on any turn.
+        elif not online or match.humanSeat >= 0:
+          # Only the local human can inspect their hand during online play.
           hoverIndex = hoveredCard(window, stageVp, game, table,
             handOwner = match.viewedSeat)
         if hoverIndex < 0 and not play.choosing:
@@ -496,8 +622,7 @@ when not defined(headless):
         let pick = gamePressed(MouseLeft) and
           not (match.humanSeat >= 0 and
             finishRect(window).contains(sk.mousePos))
-        let cancel = window.buttonPressed[KeyEscape] or
-          gamePressed(MouseRight)
+        let cancel = gamePressed(KeyEscape) or gamePressed(MouseRight)
         if play.tossPicking and match.humanActs and
             play.presentationIdle(game) and not game.gameOver:
           play.updateTossPicking(game, hoverIndex,
@@ -522,7 +647,8 @@ when not defined(headless):
           play.updateChoosing(game, table, chooseHover,
             pick = pick and chooseHover >= 0,
             # Anywhere off the offered cards cancels, as does the button.
-            cancel = (pick and chooseHover < 0) or chooseCanceled or cancel,
+            cancel = (pick and chooseHover < 0) or
+              (chooseCanceled and not menu.visible) or cancel,
             time = previewTime)
           if not play.choosing:
             play.chooseStart = 0
@@ -541,27 +667,31 @@ when not defined(headless):
               match.current == match.viewedSeat and
               game.players[match.viewedSeat].hand.len > 0:
             hoverIndex = 0
-        play.presentVisualEvents(game, table, previewTime)
+      if not choosingClasses:
+        play.presentVisualEvents(match.game, table, previewTime)
+        if online:
+          # Presentation events are consumed once, outside the state hash.
+          app.network.game.visualEvents = match.game.visualEvents
       var attackHoverTarget = Canceled
       let attackChoices =
         if choosingClasses: newSeq[Choice]()
         else: play.attackChoices(match.game)
-      if match.humanTurn and attackChoices.len > 0 and
+      if battleInputEnabled and match.humanTurn and attackChoices.len > 0 and
           not play.pendingTargeting and play.presentationIdle(match.game):
         attackHoverTarget = hoveredWorldTarget(window, stageVp, match.game,
           play, table, attackChoices)
       let inspected =
-        if choosingClasses or play.choosing:
+        if not battleInputEnabled or choosingClasses or play.choosing:
           InspectedCard(power: -1, toughness: -1)
         else: inspectedCard(window, stageVp, match.game, play, table,
           hoverIndex,
           if play.tossPicking: match.game.pendingToss.player
           else: match.viewedSeat)
-      if window.buttonPressed[KeyF8]:
+      if battleInputEnabled and window.buttonPressed[KeyF8]:
         post.settings.enabled = not post.settings.enabled
       when PostLayerControls:
         for layer in PostLayer:
-          if window.buttonPressed[PostLayerKeys[layer]]:
+          if battleInputEnabled and window.buttonPressed[PostLayerKeys[layer]]:
             post.layer = layer
             post.settings.enabled = true
       post.beginScene(window.size, CameraNear, farPlane)
@@ -571,7 +701,7 @@ when not defined(headless):
       glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT or GL_STENCIL_BUFFER_BIT)
       # Silky's frame starts here: it draws card faces into their textures as
       # the cards are built.
-      sk.beginUi(window, window.size)
+      menu.beginFrame(app)
       solid.clear()
       cardSurfaces.clear()
       vfx.clear()
@@ -641,7 +771,7 @@ when not defined(headless):
           hoveredTarget, stageEye, hudTime)
         vfx.addEffects(play.activeVfx, stageEye)
         vfx.draw(stageVp)
-        if not inspected.found:
+        if not menu.visible and not inspected.found:
           # The current player's panel glows like a hovered card. The
           # panels and their glow hide while the inspector is open.
           vfx.clear()
@@ -650,7 +780,7 @@ when not defined(headless):
           vfx.draw(hudHaloProjection(window.size.vec2), depthTest = false)
       elif classHover.isSome:
         vfx.draw(vp)
-      post.present(window.size)
+      post.present(window.size, app.captureFramebuffer)
 
       glDisable(GL_DEPTH_TEST)
       glDisable(GL_CULL_FACE)
@@ -660,70 +790,81 @@ when not defined(headless):
       glActiveTexture(GL_TEXTURE0)
       glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
       benchStart(Ui)
-      if choosingClasses:
-        let picked = classSelection(vp, sessionOptions.human, not uiCapturesMouse)
-        if picked.isSome:
-          startMatch(some(precon(picked.get)))
-      else:
-        # The inspector takes the panels' place while it is open.
-        if inspected.found:
-          discard sk.drawCardReading(
-            cardReadingColumnRect(window, panelsBottom), inspected.card,
-            inspected.power, inspected.toughness, inspected.rules,
-            inspected.extraCost)
+      chooseCanceled = false
+      if not menu.visible:
+        if choosingClasses:
+          let picked = classSelection(vp, sessionOptions.human,
+            battleInputEnabled and not uiCapturesMouse and not menu.paused)
+          if picked.isSome:
+            startMatch(some(precon(picked.get)))
         else:
-          sk.drawPlayerPanelColumn(window, match.seats, match.current,
-            match.humanSeat, panelsBottom, hudTime, names)
-        # The turn header and prompts center on the space left of the
-        # panels.
-        let
-          columnX = playerPanelColumnX(window)
-          centerX = columnX * 0.5'f32
-        sk.drawTurnHeader(
-          centerX,
-          min(920'f32, columnX - 104),
-          match.turnNumber,
-          match.turnLabel(names),
-          match.humanTurn,
-          if match.game.gameOver:
-            match.turnStatus(names)
+          # The inspector takes the panels' place while it is open.
+          if inspected.found:
+            discard sk.drawCardReading(
+              cardReadingColumnRect(window, panelsBottom), inspected.card,
+              inspected.power, inspected.toughness, inspected.rules,
+              inspected.extraCost)
           else:
-            play.statusMessage
-        )
-        chooseCanceled =
-          if play.choosing:
-            drawChooseScreen(sk, window, play.pendingCard,
-              play.chooseOptions(match.game), chooseHover, play.choosePicked,
-              appear = previewTime - play.chooseStart,
-              sincePick = previewTime - play.choosePickedAt)
-          else:
-            false
-        sk.drawTossPrompt(window, play, match.game, centerX)
-        sk.drawTargetPrompt(window, play, match.game, centerX)
-        sk.drawCombatPrompt(window, play, match.game, centerX)
-        sk.drawPileTooltip(window, hoveredPile(window, stageVp, match.game,
-          play, table), stageVp)
-        if not play.attackActive:
-          sk.drawMatchResult(window, play, match.game, match.humanSeat,
-            centerX, names)
-        if app.replay == nil:
-          sk.drawLabel(play.playHelp(match.humanSeat >= 0),
-            vec2(32, hudSize(window).y - 66), vec2(820, 42), HudMuted,
-            "Small")
-      if not choosingClasses and match.humanSeat >= 0:
-        let
-          yourTurn = match.humanTurn
-          canFinish = yourTurn and not match.game.waitingChoice and
-            not play.pendingTargeting and not play.attackActive and
-            not match.game.gameOver and play.presentationIdle(match.game) and
-            not openingDraw
-        if drawEndTurnButton(sk, window,
-            (if match.game.gameOver: "MATCH ENDED"
-             elif yourTurn: "END TURN" else: "WAITING"), canFinish):
-          play.stopTargeting()
-          play.selectedAttacker = 0
-          if match.endTurn():
-            turnPassed()
+            sk.drawPlayerPanelColumn(window, match.seats, match.current,
+              match.humanSeat, panelsBottom, hudTime, names)
+          # The turn header and prompts center on the space left of the
+          # panels.
+          let
+            columnX = playerPanelColumnX(window)
+            centerX = columnX * 0.5'f32
+          sk.drawTurnHeader(
+            centerX,
+            min(920'f32, columnX - 104),
+            match.turnNumber,
+            match.turnLabel(names),
+            match.humanTurn,
+            if match.game.gameOver:
+              match.turnStatus(names)
+            else:
+              play.statusMessage
+          )
+          chooseCanceled =
+            if play.choosing:
+              drawChooseScreen(sk, window, play.pendingCard,
+                play.chooseOptions(match.game), chooseHover, play.choosePicked,
+                appear = previewTime - play.chooseStart,
+                sincePick = previewTime - play.choosePickedAt)
+            else:
+              false
+          sk.drawTossPrompt(window, play, match.game, centerX)
+          sk.drawTargetPrompt(window, play, match.game, centerX)
+          sk.drawCombatPrompt(window, play, match.game, centerX)
+          if battleInputEnabled and not play.choosing and not uiCapturesMouse:
+            sk.drawPileTooltip(window, hoveredPile(window, stageVp, match.game,
+              play, table, viewer = match.viewedSeat, hoverIndex = hoverIndex,
+              hoveredBoard = hoveredBoard, attackChoices = attackChoices),
+              stageVp, avoid = cardReadingColumnRect(window, panelsBottom),
+              avoiding = inspected.found)
+          if not play.attackActive:
+            sk.drawMatchResult(window, play, match.game, match.humanSeat,
+              centerX, names)
+          if app.replay == nil:
+            sk.drawLabel(play.playHelp(match.humanSeat >= 0) & " " & menuShortcut() & ": menu.",
+              vec2(32, hudSize(window).y - 66), vec2(820, 42), HudMuted,
+              "Small")
+        if not choosingClasses and match.humanSeat >= 0:
+          let
+            yourTurn = match.humanTurn
+            canFinish = yourTurn and battleInputEnabled and not menu.paused and
+              not networkBlocked and not match.game.waitingChoice and
+              not play.pendingTargeting and not play.attackActive and
+              not match.game.gameOver and play.presentationIdle(match.game) and
+              not openingDraw
+          if drawEndTurnButton(sk, window,
+              (if match.game.gameOver: "MATCH ENDED"
+               elif yourTurn: "END TURN" else: "WAITING"), canFinish):
+            play.stopTargeting()
+            play.selectedAttacker = 0
+            if online:
+              discard app.network.submitAction(ReplayAction(
+                kind: ActionEndTurn, playerId: match.humanSeat.int32))
+            elif match.endTurn():
+              turnPassed()
       when defined(emscripten):
         # The same summary as the duel's, one line per seat.
         var summary = &"Multiplayer match: {layout.playerCount} players. " &
@@ -747,15 +888,18 @@ when not defined(headless):
               " " & player.heroClass.className() &
               (if game.dead(seat): ": dead." else:
                 &": life {player.life}, energy {player.energy}/{player.totalEnergy}, hand {player.hand.len}, board {player.board.len}, deck {player.deck.len}, discard {player.discardPile.len}.")
-          if match.humanTurn and not play.pendingTargeting and
+          if match.humanTurn and not networkBlocked and
+              not play.pendingTargeting and not play.attackActive and
               play.presentationIdle(game):
             summary.add " Ready for your action."
         publishStatus(summary.cstring)
-      if app.replay != nil and not choosingClasses:
+      if not menu.visible and app.replay != nil and not choosingClasses:
         app.replay.drawTransport(sk, window)
       when PostPanelControls:
-        drawPostPanel(sk, window, post, courtyard)
+        if not menu.visible:
+          drawPostPanel(sk, window, post, courtyard)
       benchQuads(cardSurfaces.quadCount, sk.instanceCount div 6)
+      menu.draw(app)
       sk.endUi()
       sk.drawHudFaces()
       benchStop(Ui)
@@ -764,10 +908,16 @@ when not defined(headless):
         captureScreenshot(window, previewScreenshotFrame,
           max(1, parseInt(getEnv("CAC_CAPTURE_FRAME", "20"))),
           appDir / &"cac_multiplayer_{layout.playerCount}.png")
-      window.swapBuffers()
+      window.presentFrame(framePaceHz)
       if app.replay != nil:
         app.replay.reportFrame()
-    while not window.closeRequested:
-      pollEvents()
-      waitForDisplay()
-    return
+    try:
+      while not window.closeRequested and not app.returnToMenu:
+        pollEvents()
+        waitForDisplay()
+    finally:
+      window.onFrame = nil
+      window.onButtonPress = nil
+      play.submitAction = nil
+      if online:
+        app.network.onAction = nil

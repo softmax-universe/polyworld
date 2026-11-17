@@ -56,13 +56,13 @@ iterator handCorners(balcony: PlayerBalcony): Vec3 =
         yield center + tilted
 
 suite "Multiplayer battlefield layout":
-  test "the multiplayer layout rejects duel and invalid seat counts":
-    for count in [-1, 0, 1, 2]:
+  test "the multiplayer layout rejects invalid seat counts":
+    for count in [-1, 0, 1]:
       expect ValueError:
         discard buildMultiplayerLayout(count)
 
   test "every requested seat has its own separated radial balcony":
-    for count in [3, 4, 5, 6, 8, 12, 24, 64]:
+    for count in [2, 3, 4, 5, 6, 8, 12, 24, 64]:
       let layout = buildMultiplayerLayout(count)
       check layout.playerCount == count
       check layout.balconies.len == count
@@ -83,7 +83,7 @@ suite "Multiplayer battlefield layout":
           check cosine < cos(layout.balconyHalfAngle * 2) + Tolerance
 
   test "all five zones follow their balcony transform":
-    for count in [3, 4, 5, 6, 8, 12, 24, 64]:
+    for count in [2, 3, 4, 5, 6, 8, 12, 24, 64]:
       let layout = buildMultiplayerLayout(count)
       for balcony in layout.balconies:
         let zones = [balcony.heroZone, balcony.deckZone,
@@ -116,7 +116,7 @@ suite "Multiplayer battlefield layout":
       previousInner = layout.innerRadius
 
 suite "Multiplayer battlefield geometry and framing":
-  for count in [3, 4, 6, 8]:
+  for count in [2, 3, 4, 6, 8]:
     let
       layout = buildMultiplayerLayout(count)
       mesh = buildMultiplayerCourtyardMesh(layout)

@@ -13,7 +13,7 @@ type
   VoiceAudio* = ref object
     microphone: Microphone
     speaker: StreamingSource
-    captureStarted, initialized, closed: bool
+    captureStarted, initialized, closed, closeDevice: bool
     level: float32
     chunkBytes: seq[int]
     queuedBytes, completedBytes: int
@@ -46,9 +46,9 @@ proc microphonePermission*(): string =
   else:
     "allowed"
 
-proc newVoiceAudio*(): VoiceAudio =
+proc newVoiceAudio*(closeDevice = true): VoiceAudio =
   ## Creates dormant audio state without opening or recording a microphone.
-  VoiceAudio()
+  VoiceAudio(closeDevice: closeDevice)
 
 proc pcmLevel*(pcm: string): float32 =
   ## Measures RMS amplitude in signed little-endian PCM16 mono samples.
@@ -84,14 +84,14 @@ proc startCapture*(audio: VoiceAudio) =
     of "unconfigured":
       raise newException(VoiceAudioError,
         "The executable is missing its microphone usage description. " &
-        "Rebuild with nim r experiments/voice/voice.nim.")
+        "Rebuild and launch the application through its native launcher.")
     of "pending":
       voiceRequestMicrophonePermission()
       raise newException(VoiceAudioError,
         "Allow microphone access in the macOS prompt, then use Talk again.")
     of "denied":
       raise newException(VoiceAudioError,
-        "Enable Voice Lab or your terminal in System Settings > " &
+        "Enable this app or your terminal in System Settings > " &
         "Privacy & Security > Microphone.")
     else:
       discard
@@ -234,7 +234,8 @@ proc close*(audio: VoiceAudio) =
     audio.speaker = nil
   if audio.initialized:
     try:
-      slappyClose()
+      if audio.closeDevice:
+        slappyClose()
     except SlappyError as error:
       message = error.msg
     audio.initialized = false

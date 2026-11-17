@@ -1,5 +1,6 @@
 import
   std/os,
+  openal, slappy,
   audios
 
 when defined(macosx):
@@ -60,6 +61,14 @@ if "--playback" in commandLineParams():
 
 audio.close()
 audio.close()
+if "--playback" in commandLineParams():
+  echo "Testing voice shutdown preserves a shared game audio device"
+  slappyInit()
+  let shared = newVoiceAudio(closeDevice = false)
+  shared.queuePcm(newString(VoiceBytesPerSecond div 100))
+  shared.close()
+  doAssert alcGetCurrentContext() != nil
+  slappyClose()
 rejected = false
 try:
   audio.queuePcm("\0\0")

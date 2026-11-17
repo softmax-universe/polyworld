@@ -4,12 +4,13 @@
 #include <unistd.h>
 
 // Distinguishes the launched app from a terminal's direct child process.
-bool voiceLaunchedApplication(void) {
+bool voiceLaunchedApplication(const char *identifier) {
   NSBundle *bundle = [NSBundle mainBundle];
   return [[[NSProcessInfo processInfo] environment]
     [@"POLYWORLD_VOICE_APPLICATION"] isEqualToString:@"1"] &&
     [[bundle bundlePath] hasSuffix:@".app"] &&
-    [[bundle bundleIdentifier] isEqualToString:@"org.polyworld.voicelab"];
+    [[bundle bundleIdentifier] isEqualToString:
+      [NSString stringWithUTF8String:identifier]];
 }
 
 // AppKit's Quit menu exits directly instead of returning to the Nim loop.
@@ -43,6 +44,8 @@ int voiceLaunchApplication(const char *path, const char *completion) {
     environment[@"POLYWORLD_VOICE_APPLICATION"] = @"1";
     environment[@"POLYWORLD_VOICE_COMPLETION"] =
       [NSString stringWithUTF8String:completion];
+    environment[@"POLYWORLD_VOICE_DIRECTORY"] =
+      [[NSFileManager defaultManager] currentDirectoryPath];
     configuration.environment = environment;
     [environment release];
     __block NSRunningApplication *application = nil;
@@ -53,7 +56,7 @@ int voiceLaunchApplication(const char *path, const char *completion) {
       configuration:configuration
       completionHandler:^(NSRunningApplication *launched, NSError *error) {
         if (error != nil) {
-          fprintf(stderr, "Voice Lab launch failed: %s\n",
+          fprintf(stderr, "Voice app launch failed: %s\n",
             [[error localizedDescription] UTF8String]);
         }
         application = [launched retain];
@@ -62,7 +65,7 @@ int voiceLaunchApplication(const char *path, const char *completion) {
     NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:30];
     while (!atomic_load(&completed)) {
       if ([deadline timeIntervalSinceNow] <= 0) {
-        fprintf(stderr, "Voice Lab launch timed out.\n");
+        fprintf(stderr, "Voice app launch timed out.\n");
         return 1;
       }
       [[NSRunLoop currentRunLoop] runUntilDate:

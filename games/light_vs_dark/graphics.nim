@@ -107,6 +107,7 @@ var
   shortcutHeldButtons, shortcutFrameButtons: set[Button]
   attackHeldButtons: set[Button]
   attackHoldConsumed = false
+  rightOrderFromBuild = false
 
 ## Presentation helpers
 
@@ -137,6 +138,7 @@ proc cancelGameplayGestures() =
   panning = false
   minimapPanning = false
   rightOrderStarted = false
+  rightOrderFromBuild = false
   lineGesture.cancelLine()
   cancelAttackModifier()
 
@@ -1249,22 +1251,32 @@ proc runGraphics*(network: NetworkMatch = nil,
               break
 
   proc updatePlayerOrder(viewProjection: Mat4, focused = window.focused) =
-    ## Armed right-click targets an enemy or attack-moves combat-capable units.
+    ## Left-click places; right-click cancels placement and issues movement.
     if refreshPendingBuild(): return
-    if not playerMode() or hudTooltipContains(sk.mousePos):
+    if not playerMode():
       lineGesture.cancelLine()
       rightOrderStarted = false
       return
     let
       rightOrder = window.mouseReleased(MouseRight)
-      buildClick = pendingBuild >= 0 and window.mousePressed(MouseLeft)
-      attackClick = pendingBuild < 0 and attackMoveArmed and rightOrder
       player = options.playerSlot - 1
       inside = window.mousePos.x >= 0 and window.mousePos.y >= 0 and
         window.mousePos.x < window.size.x and window.mousePos.y < window.size.y
       overUi = mouseOverUi(window, sk.mousePos)
       onMinimap = attackMinimapTile(currentLayout(window), sk.mousePos,
         run.world.map.side) != NoTile and not window.buttonDown[KeyTab]
+    if window.mousePressed(MouseRight):
+      rightOrderFromBuild = pendingBuild >= 0 and inside
+      if rightOrderFromBuild:
+        pendingBuild = -1
+        cancelAttackModifier()
+        selectionStarted = false
+        minimapPanning = false
+    if hudTooltipContains(sk.mousePos):
+      lineGesture.cancelLine()
+      rightOrderStarted = false
+      rightOrderFromBuild = false
+      return
     if window.mousePressed(MouseRight):
       rightOrderStarted = inside and (not overUi or onMinimap)
       if rightOrderStarted and not overUi and not onMinimap and pendingBuild < 0:
@@ -1273,6 +1285,11 @@ proc runGraphics*(network: NetworkMatch = nil,
         lineGesture.beginLine(run.world, player, selectedIds,
           linePoint(ground.x + mapHalf(), ground.z + mapHalf()),
           linePoint(window.mousePos.x, window.mousePos.y), attackMoveArmed)
+    let
+      buildClick = pendingBuild >= 0 and window.mousePressed(MouseLeft)
+      attackClick = pendingBuild < 0 and attackMoveArmed and rightOrder
+      moveOnly = rightOrderFromBuild
+    if rightOrder: rightOrderFromBuild = false
     if lineGesture.active:
       if not inside or not focused or pendingBuild >= 0:
         lineGesture.cancelLine()
@@ -1316,6 +1333,7 @@ proc runGraphics*(network: NetworkMatch = nil,
       if not rightOrderStarted or not inside: return
       rightOrderStarted = false
     if pendingBuild >= 0:
+      if not buildClick: return
       # Placement owns this press and its release, including invalid sites.
       # HUD chooses a blueprint after this pass; only a fresh world press places it.
       selectionStarted = false
@@ -1390,7 +1408,7 @@ proc runGraphics*(network: NetworkMatch = nil,
           under
         else:
           picked
-    if target != NoEntity:
+    if not moveOnly and target != NoEntity:
       if run.world.hasBuilding(target):
         let structure = run.world.buildings[run.world.buildingIndex(target)]
         if structure.owner == player and structure.state == BuildingUnderConstruction:
@@ -1428,7 +1446,7 @@ proc runGraphics*(network: NetworkMatch = nil,
           attackClickMarks.emitClickMark(renderPoint(run.world.units[run.world.unitIndex(target)]))
         attackMoveArmed = false
         return
-    if tree >= 0:
+    if not moveOnly and tree >= 0:
       if run.world.queueFeedbackHarvest(player, selectedIds, tree, tree = true,
           append = window.actionDown(ShiftInput)):
         targetFlash.flashTarget(HarvestTreeFlash, tree, player)

@@ -155,8 +155,8 @@ proc gameWindowSize*(width, height: int32): IVec2 =
     DefaultWindowSize
 
 proc initGameWindow*(
-    title,
-    atlasPath: string,
+    title: string,
+    atlas: string | tuple[atlas: SilkyAtlas, image: Image],
     size = DefaultWindowSize,
     vsync = true,
     msaa = msaaDisabled,
@@ -173,7 +173,9 @@ proc initGameWindow*(
   window.prepareDesktopFullscreen()
   window.makeContextCurrent()
   loadExtensions()
-  let sk = newSilky(window, atlasPath)
+  let sk =
+    when atlas is string: newSilky(window, atlas)
+    else: newSilky(window, atlas.image, atlas.atlas)
   sk.applyThemePatches()
   (window, sk)
 

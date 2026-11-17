@@ -74,6 +74,11 @@ proc shopInventoryPanels*(size: Vec2): array[InventorySlots, GameUiPanel] =
   for slot in 0..<InventorySlots:
     result[slot] = inventory.take(vec2(72), 8)
 
+proc sellButtonPanel(panel: GameUiPanel): GameUiPanel =
+  ## Keeps the sale hit target aligned with its visible button.
+  GameUiPanel(origin: panel.origin + vec2(12, 48),
+    size: vec2(panel.size.x - 24, 40))
+
 proc shopOwned(world: World, hero: Hero): bool =
   ## No alive-only gate: authority handles death/keep and item restrictions.
   run != nil and run.world == world and hero != nil and
@@ -184,9 +189,13 @@ proc drawShop*(sk: Silky, window: Window, world: World, hero: Hero,
   if shopTooltip.tooltipContains(sk.mousePos): target = -1
   let hadPopup = sellSlot >= 0
   if hadPopup:
-    target = if sellPanel.contains(sk.mousePos): SellTarget else: -1
+    target =
+      if sellPanel.sellButtonPanel.contains(sk.mousePos) and
+          world.sellReason(hero.id, sellSlot.int32).len == 0:
+        SellTarget
+      else: -1
     if (window.buttonPressed[MouseLeft] or window.buttonPressed[MouseRight]) and
-        target != SellTarget:
+        not sellPanel.contains(sk.mousePos):
       sellSlot = -1
       gestures.resetShopGesture()
   var occupied: array[InventorySlots, bool]
@@ -210,8 +219,8 @@ proc drawShop*(sk: Silky, window: Window, world: World, hero: Hero,
     sellCount = hero.itemCounts[sellSlot]
     sellPanel = GameUiPanel(origin: vec2(
       clamp(sk.mousePos.x, 8.0'f, max(8.0'f, size.x - 288)),
-      clamp(sk.mousePos.y - 88, 8.0'f, max(8.0'f, size.y - 96))),
-      size: vec2(280, 88))
+      clamp(sk.mousePos.y - 100, 8.0'f, max(8.0'f, size.y - 108))),
+      size: vec2(280, 100))
   of ShopSwapGesture:
     if world.swapItemsReason(hero.id, gesture.source.int32,
         gesture.target.int32).len == 0:
@@ -295,16 +304,25 @@ proc drawShop*(sk: Silky, window: Window, world: World, hero: Hero,
     sk.drawSprite(itemIconKey(hero.inventory[dragging]),
       sk.mousePos - vec2(24), vec2(48))
   if sellSlot >= 0:
-    let reason = world.sellReason(hero.id, sellSlot.int32)
+    let
+      reason = world.sellReason(hero.id, sellSlot.int32)
+      button = sellPanel.sellButtonPanel
+      hovered = button.contains(sk.mousePos)
+      patch =
+        if reason.len > 0: "button.disabled.9patch"
+        elif hovered and window.buttonDown[MouseLeft]: "button.down.9patch"
+        elif hovered: "button.hover.9patch"
+        else: "button.9patch"
     sk.draw9Patch("window.9patch", sk.theme.windowPatch,
       sellPanel.origin, sellPanel.size)
     sk.drawLabel("Sell " & sellItem.itemSpec.name,
-      sellPanel.origin + vec2(12, 8), sellPanel.size - vec2(24, 48),
+      sellPanel.origin + vec2(12, 8), vec2(sellPanel.size.x - 24, 32),
       sk.theme.defaultTextColor, "Bold")
+    sk.draw9Patch(patch, sk.theme.buttonPatch, button.origin, button.size)
     sk.drawLabel(if reason.len > 0: reason
-      else: "Sell  +" & $world.sellPrice(hero.id, sellSlot.int32) & " gold",
-      sellPanel.origin + vec2(12, 46), sellPanel.size - vec2(24, 50),
-      if reason.len == 0: Gold else: Muted, "Small")
+      else: "Sell (" & $world.sellPrice(hero.id, sellSlot.int32) & " gold)",
+      button.origin, button.size,
+      if reason.len == 0: Gold else: Muted, "Bold", CenterAlign)
 
   if sellSlot < 0:
     sk.drawShopTooltip(size)

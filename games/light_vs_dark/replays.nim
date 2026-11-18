@@ -1,22 +1,22 @@
-## Light vs Dark action-only replay format and playback cursor.
+## Light vs Dark command replay, chat transcript, and playback cursor.
 ##
-## A replay contains the match config, accepted commands, and one canonical
-## simulation hash per tick. It never stores bot source or private logs.
+## A replay contains the match config, accepted commands, player messages,
+## and one canonical simulation hash per tick. It never stores bot source.
 
 import
   std/os,
   fixxy,
-  polyworld/[bodies, tapes, metrics],
+  polyworld/[bodies, tapes, metrics, mailboxes],
   content, maps, diplomacies
 
 export fixxy
 
 const
   ReplayGame* = "light_vs_dark"
-  ReplayFormatVersion* = 7'u16
+  ReplayFormatVersion* = 8'u16
   ## This client supports only this gameplay version. Bump it when rules change.
   ## Older replays use their archived client; never add compatibility branches.
-  ReplayGameVersion* = 48'u16
+  ReplayGameVersion* = 49'u16
 
   ActionMove* = 1'u8
   ActionAttack* = 2'u8
@@ -34,6 +34,8 @@ const
   MaxReplayBytes* = 64 * 1024 * 1024
   MaxReplayActions* = 4_000_000
   MaxReplayHashes* = 10_000_000
+  MaxReplayChats* = 64 * 1024
+    ## Bounds transcript records; the full file also obeys MaxReplayBytes.
   MaxMatchTicks* = uint32(TickRate) * 60 * 60
     ## One hour, an absolute ceiling well above any configured match.
 
@@ -82,10 +84,27 @@ type
       ##   Cancel    unused, unused, unused
       ##   Diplomacy target player, command kind, offer ID
 
+  ReplayChat* = object
+    tick*: uint32
+    playerId*, target*: int32
+      ## Target is -2 for broadcasts or a zero-based direct recipient.
+    text*: string
+
   ReplayHeader* = TapeHeader[Setup]
-  ReplayData* = ActionTape[Setup, ReplayAction, ReplayMetrics]
-  ReplayRecorder* = TapeRecorder[Setup, ReplayAction, ReplayMetrics]
-  ReplayPlayer* = TapePlayer[Setup, ReplayAction, ReplayMetrics]
+  ReplayData* = object
+    header*: ReplayHeader
+    config*: GameConfig
+    actions*: seq[ReplayAction]
+    hashes*: seq[uint64]
+    metrics*: ReplayMetrics
+    chats*: seq[ReplayChat]
+
+  ReplayRecorder* = ref object
+    data*: ReplayData
+
+  ReplayPlayer* = ref object
+    data*: ReplayData
+    actionIndex*: int
 
 proc fail(message: string) {.noreturn.} =
   ## Raises one Light vs Dark replay error.
@@ -107,6 +126,30 @@ proc initReplayData*(setup: Setup): ReplayData =
 proc initReplayRecorder*(setup: Setup): ReplayRecorder =
   ## Creates an in-memory recorder owning the complete replay data.
   ReplayRecorder(data: initReplayData(setup))
+
+proc validateChat*(chat: ReplayChat, setup: Setup) =
+  ## Validates message routing and bytes independently of decision ticks.
+  if chat.playerId < 0 or int(chat.playerId) >= setup.players.len:
+    fail("replay chat names an unknown sender")
+  if chat.target < -2 or chat.target == -1 or
+    int(chat.target) >= setup.players.len:
+      fail("replay chat names an unknown target")
+  if chat.text.len == 0 or chat.text.len > MaxChatBytes:
+    fail("replay chat has an invalid message length")
+  if chat.tick > setup.maximumTicks:
+    fail("replay chat exceeds the configured duration")
+
+proc recordChat*(recorder: ReplayRecorder, chat: ReplayChat) =
+  ## Preserves one authoritative message without reading a bot mailbox.
+  if recorder == nil:
+    return
+  chat.validateChat(recorder.data.header.setup)
+  if recorder.data.chats.len >= MaxReplayChats:
+    fail("replay chat limit exceeded")
+  if recorder.data.chats.len > 0 and
+    chat.tick < recorder.data.chats[^1].tick:
+      fail("replay chats move backward in time")
+  recorder.data.chats.add chat
 
 proc record*(recorder: ReplayRecorder, action: ReplayAction) =
   ## Appends one accepted command in deterministic tick order.
@@ -152,7 +195,13 @@ proc recordAction*(
 
 proc recordHash*(recorder: ReplayRecorder, hash: uint64) =
   ## Appends the canonical simulation hash for one completed tick.
-  recordHash(recorder, hash, MaxReplayHashes)
+  if recorder == nil:
+    return
+  recorder.data.hashes.appendHash(
+    hash,
+    recorder.data.header.setup.maximumTicks,
+    MaxReplayHashes
+  )
 
 proc validateSetup(setup: Setup) =
   ## Validates the immutable match description.
@@ -276,7 +325,7 @@ proc validateAction*(action: ReplayAction, setup: Setup) =
     fail("replay action kind is invalid")
 
 proc validate*(data: ReplayData) =
-  ## Validates versions, setup bounds, command payloads, and hash coverage.
+  ## Validates setup, commands, message bounds, and recorded tick coverage.
   data.config.validateConfig(data.header.setup.players.len)
   if data.config.seed != data.header.setup.mapSeed or
     data.config.maxTicks != int32(data.header.setup.maximumTicks):
@@ -293,6 +342,8 @@ proc validate*(data: ReplayData) =
     fail("replay hash limit exceeded")
   if data.hashes.len > int(setup.maximumTicks):
     fail("replay hashes exceed the configured duration")
+  if data.chats.len > MaxReplayChats:
+    fail("replay chat limit exceeded")
   var lastTick = 0'u32
   for index, action in data.actions:
     if action.tick > uint32(data.hashes.len):
@@ -301,6 +352,14 @@ proc validate*(data: ReplayData) =
       fail("replay actions move backward in time")
     action.validateAction(setup)
     lastTick = action.tick
+  lastTick = 0
+  for index, chat in data.chats:
+    chat.validateChat(setup)
+    if chat.tick > uint32(data.hashes.len):
+      fail("replay chat exceeds the recorded duration")
+    if index > 0 and chat.tick < lastTick:
+      fail("replay chats move backward in time")
+    lastTick = chat.tick
   try:
     data.metrics.validate(
       data.config.players.len,
@@ -311,12 +370,12 @@ proc validate*(data: ReplayData) =
     fail(error.msg)
 
 proc encodeReplay*(data: ReplayData): string =
-  ## Encodes the action tape and its CPU telemetry in one payload.
+  ## Encodes commands, chat, and original CPU telemetry in one payload.
   data.validate()
   encodeReplayFile(ReplayGame, ReplayGameVersion, data, MaxReplayBytes)
 
 proc decodeReplay*(bytes: string): ReplayData =
-  ## Returns the complete replay, including its original CPU telemetry.
+  ## Returns the complete replay, including messages and CPU telemetry.
   result = decodeReplayFile(
     ReplayGame,
     ReplayGameVersion,
@@ -349,4 +408,41 @@ proc loadReplay*(path: string): ReplayData =
 proc initReplayPlayer*(data: ReplayData): ReplayPlayer =
   ## Creates a playback cursor over validated command data.
   data.validate()
-  initTapePlayer(data)
+  ReplayPlayer(data: data)
+
+proc finished*(player: ReplayPlayer): bool =
+  ## Returns whether every recorded command has been consumed.
+  player == nil or
+    replayFinished(player.actionIndex, player.data.actions.len)
+
+proc syncCursor*(player: ReplayPlayer, tick: uint32) =
+  ## Points the command cursor past every action at or before this tick.
+  if player == nil:
+    return
+  player.actionIndex = player.data.actions.actionIndexAfter(tick)
+
+proc takeActionAt*(
+    player: ReplayPlayer,
+    tick: uint32,
+    action: var ReplayAction
+): bool =
+  ## Consumes one command at an exact tick without allocating a sequence.
+  if player == nil:
+    return false
+  player.data.actions.takeActionAt(player.actionIndex, tick, action)
+
+proc hashAt*(
+    player: ReplayPlayer,
+    tick: uint32,
+    hash: var uint64
+): bool =
+  ## Reads the recorded hash for one completed tick.
+  if player == nil:
+    return false
+  player.data.hashes.hashAt(tick, hash)
+
+proc actionsAt*(player: ReplayPlayer, tick: uint32): seq[ReplayAction] =
+  ## Consumes every command recorded for one exact tick.
+  var action: ReplayAction
+  while player.takeActionAt(tick, action):
+    result.add action

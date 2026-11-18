@@ -324,25 +324,37 @@ proc scriptBuilding(w: World, player, id: int32): int32 =
   index
 
 proc deliverChat*(
-  game: Game, sender, target: int, text: openArray[char]
+  game: Game, sender, target: int, text: openArray[char], tick = -1'i32
 ): int32 =
-  ## Routes global broadcasts and direct messages between players.
+  ## Records authoritative chat and routes broadcasts and direct messages.
   if sender notin 0 ..< game.inboxes.len or
-    target < -2 or target == -1 or target >= game.inboxes.len:
+    target < -2 or target == -1 or target >= game.inboxes.len or
+    text.len == 0 or text.len > MaxChatBytes:
       return 0
   let id = int32(if target < 0: target else: sender)
   for recipient in 0 ..< game.inboxes.len:
-    case target
-    of -2:
-      discard
-    else:
-      if recipient != target:
-        continue
-    if game.inboxes[recipient].push(id, text):
-      inc result
+    if (target == -2 or recipient == target) and
+      game.inboxes[recipient].count < MaxMailboxMessages:
+        inc result
+  if game.recorder != nil and (result > 0 or game.networked):
+    var copy = newString(text.len)
+    for i, ch in text:
+      copy[i] = ch
+    game.recorder.recordChat(ReplayChat(
+      tick: uint32(if tick < 0: game.world.tick else: tick),
+      playerId: int32(sender),
+      target: int32(target),
+      text: copy
+    ))
+  for recipient in 0 ..< game.inboxes.len:
+    if target == -2 or recipient == target:
+      discard game.inboxes[recipient].push(id, text)
 
 proc sendChat*(game: Game, sender, target: int, text: openArray[char]): int32 =
   ## Networked mailboxes receive only authoritative relay deliveries.
+  if game.replayMode or game.historyPlayback or
+    (game.recorder != nil and game.recorder.data.chats.len >= MaxReplayChats):
+      return 0
   if not game.networked:
     return game.deliverChat(sender, target, text)
   if sender notin 0 ..< game.inboxes.len or target < -2 or target == -1 or

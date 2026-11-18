@@ -1,7 +1,7 @@
 ## Presentation-only human communication. Never drains simulation mailboxes.
 import std/unicode
 import polyworld/[mailboxes, rooms, roomclients, tapes, configs]
-import bots, sim, multiplayer, diplomacies
+import bots, sim, multiplayer, diplomacies, replays
 export diplomacies
 
 const MaxHumanChatLines* = 100
@@ -15,7 +15,9 @@ type
     typing*, diplomacyOpen*, blockedFrame*: bool
     draft*, status*: string
     feed*: seq[HumanChatLine]
-    observedTick: uint32
+    chatGame: Game
+    chatTick: uint32
+    chatIndex: int
     diplomacyPage*: int
 
 proc reset*(state: var HumanCommunication) =
@@ -31,6 +33,60 @@ proc addLine(state: var HumanCommunication, game: Game, sender: int32, text: str
   if state.feed.len >= MaxHumanChatLines: state.feed.delete(0)
   state.feed.add HumanChatLine(player: sender,
     name: game.config.players[sender].displayName(int(sender)), text: text)
+
+proc publicChat(chat: ReplayChat, players: int): bool =
+  ## Keeps direct messages and invalid display text out of the public feed.
+  chat.target == -2 and chat.playerId >= 0 and
+    int(chat.playerId) < players and chat.text.len > 0 and
+    validateUtf8(chat.text) == -1
+
+proc syncChatFeed(
+    state: var HumanCommunication,
+    game: Game,
+    chats: openArray[ReplayChat]
+) =
+  ## Restores visible history on rewind, otherwise appends newly due messages.
+  let
+    tick = uint32(max(0'i32, game.world.tick))
+    players = game.config.players.len
+    rebuild = state.chatGame != game or tick < state.chatTick or
+      state.chatIndex > chats.len
+    clearFeed = state.chatGame != nil or game.replayMode or game.historyPlayback
+  state.chatGame = game
+  state.chatTick = tick
+  if rebuild:
+    if clearFeed:
+      state.feed.setLen(0)
+    var
+      first = 0
+      last = chats.len
+    while first < last:
+      let middle = first + (last - first) div 2
+      if chats[middle].tick <= tick:
+        first = middle + 1
+      else:
+        last = middle
+    state.chatIndex = first
+    var remaining = MaxHumanChatLines
+    while state.chatIndex > 0 and remaining > 0:
+      dec state.chatIndex
+      if chats[state.chatIndex].publicChat(players):
+        dec remaining
+  while state.chatIndex < chats.len and
+    chats[state.chatIndex].tick <= tick:
+      let chat = chats[state.chatIndex]
+      inc state.chatIndex
+      if chat.publicChat(players):
+        state.addLine(game, chat.playerId, chat.text)
+
+proc syncChatFeed*(state: var HumanCommunication, game: Game) =
+  ## Reads recorded chat at the displayed tick without consuming bot mailboxes.
+  if game == nil or game.world == nil:
+    return
+  if game.recorder != nil:
+    state.syncChatFeed(game, game.recorder.data.chats)
+  else:
+    state.syncChatFeed(game, game.replayData.chats)
 
 proc observeServerNotices*(state: var HumanCommunication, session: NetworkMatch) =
   ## Only RoomClient relay notices, never player-authored chat or replay tapes.
@@ -54,8 +110,9 @@ proc chatRune*(state: var HumanCommunication, rune: Rune): bool =
     state.draft.add encoded
 
 proc chatEnter*(state: var HumanCommunication, game: Game, player: int32): bool =
-  if game == nil or game.replayMode or player notin 0'i32 ..< int32(game.inboxes.len):
-    return false
+  if game == nil or game.replayMode or game.historyPlayback or
+    player notin 0'i32 ..< int32(game.inboxes.len):
+      return false
   state.blockedFrame = true
   if not state.typing:
     state.typing = true
@@ -68,7 +125,11 @@ proc chatEnter*(state: var HumanCommunication, game: Game, player: int32): bool 
     state.draft = ""
     return true
   if game.sendChat(int(player), -2, state.draft) > 0:
-    if not game.networked: state.addLine(game, player, state.draft)
+    if not game.networked:
+      if game.recorder != nil:
+        state.syncChatFeed(game)
+      else:
+        state.addLine(game, player, state.draft)
     state.typing = false
     state.draft = ""
     state.status = ""
@@ -115,22 +176,9 @@ proc submitHumanDiplomacy*(game: Game, player, other: int32,
 
 proc observeHumanPacket*(state: var HumanCommunication, session: NetworkMatch,
     packet: RoomMessage) =
-  ## Call AFTER successful applyPacket, once for each applied tick. Use the
-  ## authoritative command seat for attribution: broadcast mailbox IDs are -2
-  ## and cannot identify a sender. Reading/popping bot inboxes is incorrect.
-  if session == nil or packet.kind != TickPacket or
-      packet.match != session.client.match or
-      packet.tick != uint32(session.game.world.tick) or
-      packet.tick <= state.observedTick: return
-  state.observedTick = packet.tick
-  for command in packet.commands:
-    if command.seat >= uint32(session.client.snapshot.seats.len) or
-        session.client.snapshot.seats[command.seat].name != "Human": continue
-    var reader = PacketReader(data: command.payload)
-    if reader.get32() != 0: continue
-    let sender = cast[int32](reader.get32())
-    let target = cast[int32](reader.get32())
-    let text = reader.getString(MaxChatBytes)
-    if sender == int32(command.seat) and target == -2 and text.len > 0 and
-        validateUtf8(text) == -1:
-      state.addLine(session.game, sender, text)
+  ## Observes the authoritative transcript after successful packet application.
+  if session == nil or session.client == nil or session.game == nil or
+    packet.kind != TickPacket or packet.match != session.client.match or
+    packet.tick != uint32(session.game.world.tick):
+      return
+  state.syncChatFeed(session.game)

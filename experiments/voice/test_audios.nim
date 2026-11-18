@@ -1,11 +1,45 @@
 import
-  std/os,
+  std/[importutils, monotimes, os, times],
   openal, slappy,
   audios
 
+privateAccess(VoiceAudio)
+
 when defined(macosx):
+  proc voiceAudioCreate(voiceProcessing: bool,
+    inputDevice, outputDevice: cstring): pointer {.importc.}
+    ## Allocates a dormant capture queue for meter regression checks.
   echo "Testing embedded microphone metadata for direct Nim launches"
   doAssert microphonePermission() in ["pending", "denied", "allowed"]
+  echo "Testing dormant duplex audio never starts the microphone for output"
+  let duplex = newVoiceAudio(duplex = true)
+  doAssert not duplex.capturing()
+  doAssert not duplex.outputActive()
+  doAssert duplex.readCapture() == ""
+  echo "Testing meter levels survive empty UI polls and clear on Stop"
+  duplex.nativeDuplex = voiceAudioCreate(true, "", "")
+  doAssert duplex.nativeDuplex != nil
+  duplex.level = 0.05'f
+  duplex.levelUpdated = getMonoTime() - initDuration(milliseconds = 10)
+  discard duplex.readCapture()
+  doAssert duplex.inputLevel() > 0.01'f
+  duplex.levelUpdated = getMonoTime() - initDuration(seconds = 1)
+  discard duplex.readCapture()
+  doAssert duplex.inputLevel() < 0.001'f
+  duplex.stopCapture()
+  doAssert duplex.inputLevel() == 0
+  var refused = false
+  try:
+    duplex.queuePcm("\0\0")
+  except VoiceAudioError:
+    refused = true
+  doAssert refused
+  doAssert not duplex.capturing()
+  duplex.close()
+  duplex.close()
+  when defined(voiceAudioTesting):
+    echo "Testing native duplex queues, cancellation and PCM resampling"
+    doAssert testDuplexAudio()
 
 echo "Testing PCM16 amplitude and sample validation"
 doAssert pcmLevel("") == 0

@@ -244,6 +244,140 @@ for i in 0 ..< 10:
   reordered.commitAudio()
 doAssert "not been acknowledged" in reordered.failure
 
+echo "Testing semantic turns preserve recording identities across mode changes"
+block:
+  let handsFree = newVoiceClient(testMode = true)
+  handsFree.state = Connected
+  handsFree.autoRespond = false
+  handsFree.semanticVad = true
+  handsFree.setHandsFree(true)
+  let turn = handsFree.sessionEvent(){
+    "session", "audio", "input", "turn_detection"}
+  doAssert turn{"type"}.getStr() == "semantic_vad"
+  doAssert turn{"eagerness"}.getStr() == "auto"
+  doAssert not turn{"create_response"}.getBool()
+  doAssert turn{"interrupt_response"}.getBool()
+  doAssert not turn.hasKey("silence_duration_ms")
+  var
+    starts, stops, commits: int
+    commands: seq[string]
+  handsFree.onSpeechStart = proc() =
+    ## Counts each current utterance once before local playback interruption.
+    inc starts
+  handsFree.onSpeechStop = proc() =
+    ## Counts completed utterances without reacting to discarded speech.
+    inc stops
+  handsFree.onInputCommit = proc() =
+    ## Counts finalized recordings before their transcript is delivered.
+    inc commits
+  handsFree.onTranscript = proc(text: string) =
+    ## Records only commands from the current hands-free conversation.
+    doAssert commits > commands.len
+    commands.add(text)
+  handsFree.event(%*{"type": "input_audio_buffer.speech_started",
+    "item_id": "abandoned"})
+  handsFree.discardTranscripts()
+  handsFree.event(%*{"type": "input_audio_buffer.speech_started",
+    "item_id": "current"})
+  handsFree.event(%*{"type": "input_audio_buffer.speech_started",
+    "item_id": "current"})
+  doAssert starts == 2
+  handsFree.event(%*{"type": "input_audio_buffer.speech_stopped",
+    "item_id": "abandoned"})
+  handsFree.event(%*{"type": "conversation.item.input_audio_transcription.completed",
+    "item_id": "abandoned", "transcript": "Do not execute this old order."})
+  handsFree.event(%*{"type": "input_audio_buffer.committed",
+    "item_id": "abandoned"})
+  doAssert stops == 0 and commits == 0 and commands.len == 0
+  handsFree.event(%*{"type": "conversation.item.input_audio_transcription.completed",
+    "item_id": "current", "transcript": "Bring food to Willow."})
+  doAssert commands.len == 0
+  handsFree.event(%*{"type": "input_audio_buffer.speech_stopped",
+    "item_id": "current"})
+  handsFree.event(%*{"type": "input_audio_buffer.speech_stopped",
+    "item_id": "current"})
+  handsFree.event(%*{"type": "input_audio_buffer.committed",
+    "item_id": "current"})
+  handsFree.event(%*{"type": "input_audio_buffer.committed",
+    "item_id": "current"})
+  handsFree.event(%*{"type": "conversation.item.input_audio_transcription.completed",
+    "item_id": "current", "transcript": "Bring food to Willow."})
+  doAssert stops == 1 and commits == 1
+  doAssert commands == @["Bring food to Willow."]
+  handsFree.setHandsFree(false)
+  doAssert handsFree.sessionEvent(){
+    "session", "audio", "input", "turn_detection"}.kind == JNull
+
+echo "Testing continuous transcripts retain turn order and drain failures"
+block:
+  let ordered = newVoiceClient(testMode = true)
+  ordered.state = Connected
+  ordered.handsFree = true
+  ordered.autoRespond = false
+  var
+    pending = 0
+    results: seq[string]
+  ordered.onInputCommit = proc() =
+    ## Counts committed recordings awaiting a success or failure callback.
+    inc pending
+  ordered.onTranscript = proc(text: string) =
+    ## Records successful turns in their spoken order.
+    dec pending
+    results.add(text)
+  ordered.onTranscriptError = proc(message: string) =
+    ## Releases a failed recording without turning its error into a command.
+    dec pending
+    results.add("Error: " & message)
+
+  proc commit(id: string) =
+    ## Models one automatically detected and committed utterance.
+    ordered.event(%*{"type": "input_audio_buffer.speech_started",
+      "item_id": id})
+    ordered.event(%*{"type": "input_audio_buffer.committed", "item_id": id})
+
+  proc finish(id, text: string) =
+    ## Delivers one final transcript independently of other inference jobs.
+    ordered.event(%*{
+      "type": "conversation.item.input_audio_transcription.completed",
+      "item_id": id, "transcript": text
+    })
+
+  commit("first")
+  commit("second")
+  finish("second", "Then bring it home.")
+  doAssert pending == 2 and results.len == 0
+  finish("first", "Gather wild berries.")
+  doAssert pending == 0
+  doAssert results == @["Gather wild berries.", "Then bring it home."]
+
+  commit("failed-first")
+  commit("good-second")
+  finish("good-second", "Try the forest.")
+  doAssert pending == 2
+  ordered.event(%*{"type": "conversation.item.input_audio_transcription.failed",
+    "item_id": "failed-first", "error": {"message": "Audio was unclear."}})
+  doAssert pending == 0
+  doAssert "Audio was unclear" in results[^2]
+  doAssert results[^1] == "Try the forest."
+  doAssert "Audio was unclear" in ordered.failure
+
+  commit("abandoned-wait")
+  ordered.discardTranscripts()
+  pending = 0
+  commit("fresh")
+  finish("fresh", "A new conversation.")
+  doAssert pending == 0
+  doAssert results[^1] == "A new conversation."
+  let count = results.len
+  ordered.event(%*{"type": "conversation.item.input_audio_transcription.failed",
+    "item_id": "abandoned-wait", "error": {"message": "Old failure."}})
+  doAssert results.len == count and pending == 0
+
+  for i in 0 ..< 9:
+    commit("blocked-" & $i)
+  doAssert ordered.state == Failed
+  doAssert "cannot keep up" in ordered.failure
+
 echo "Testing isolated speech repeats the approved reply"
 transcriber.testEvents.setLen(0)
 let reply = "I could not find a way across the Willow Stream."
@@ -283,5 +417,36 @@ transcriber.connect("bad\ncredential")
 doAssert transcriber.state == Failed
 doAssert "newline" in transcriber.failure
 doAssert "credential" notin transcriber.failure
+
+echo "Testing successive interruptions suppress every older audio response"
+block:
+  let interrupted = newVoiceClient(testMode = true)
+  interrupted.state = Connected
+  var heard: string
+  interrupted.onAudio = proc(data: string) =
+    ## Collects only audio belonging to the current unsuppressed reply.
+    heard.add(data)
+  for id in ["first", "second"]:
+    doAssert interrupted.speakText("A short reply.")
+    interrupted.event(%*{"type": "response.created", "response": {"id": id}})
+    interrupted.event(%*{
+      "type": "response.output_audio.delta", "item_id": id & "-item",
+      "response_id": id, "delta": base64.encode(pcm)
+    })
+    interrupted.interrupt(0)
+  doAssert heard.len == pcm.len * 2
+  for id in ["first", "second"]:
+    interrupted.event(%*{
+      "type": "response.output_audio.delta", "item_id": id & "-item",
+      "response_id": id, "delta": base64.encode(pcm)
+    })
+    interrupted.event(%*{
+      "type": "response.output_audio_transcript.done",
+      "item_id": id & "-item", "response_id": id,
+      "transcript": "Stale words that must remain suppressed."
+    })
+  doAssert heard.len == pcm.len * 2,
+    "A later interruption must not let an earlier canceled reply speak again."
+  doAssert interrupted.transcripts.len == 0
 
 echo "Realtime protocol tests passed"

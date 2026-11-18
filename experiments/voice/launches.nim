@@ -62,7 +62,8 @@ proc launchApplication*(
         for filename in ["IBMPlexSans-Regular.ttf", "OFL-IBMPlexSans.txt"]:
           copyFile(ExperimentDir / "assets" / filename, assets / filename)
       let signing = execCmdEx(
-        "/usr/bin/codesign --force --sign - " & quoteShell(appDir))
+        "/bin/sh " & quoteShell(ExperimentDir / "sign.sh") &
+        " " & quoteShell(appDir))
       if signing.exitCode != 0:
         raise newException(IOError,
           "Could not sign " & name & ": " & signing.output)

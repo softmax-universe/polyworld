@@ -29,16 +29,17 @@ type
   InputTranscript = object
     itemId, text, failure: string
     generation: int
-    committed, final, delivered: bool
+    bound, started, stopped, committed, final, delivered: bool
   VoiceClient* = ref object
     state*: VoiceState
     status*, model*, voice*, instructions*, failure*: string
     credential: string
     transcripts*: seq[Transcript]
-    responseActive*, handsFree*, autoRespond*: bool
+    responseActive*, handsFree*, autoRespond*, semanticVad*: bool
     onAudio*: proc(pcm: string)
     onTranscript*: proc(text: string)
-    onAudioStart*, onSpeechStart*: proc()
+    onTranscriptError*: proc(message: string)
+    onAudioStart*, onSpeechStart*, onSpeechStop*, onInputCommit*: proc()
     socket: WebSocket
     http: AsyncHttpClient
     outgoing: Deque[string]
@@ -46,6 +47,7 @@ type
     writing: bool
     pendingResponses: Deque[PendingResponse]
     pendingTranscripts: Deque[int]
+    committedTranscripts: Deque[string]
     inputTranscripts: seq[InputTranscript]
     inputGeneration: int
     isolatedResponse: bool
@@ -111,7 +113,10 @@ proc newVoiceClient*(testMode = false): VoiceClient =
 proc sessionEvent*(client: VoiceClient): JsonNode =
   ## Builds the current GA Realtime session configuration.
   let turn =
-    if client.handsFree:
+    if client.handsFree and client.semanticVad:
+      %*{"type": "semantic_vad", "eagerness": "auto",
+        "create_response": client.autoRespond, "interrupt_response": true}
+    elif client.handsFree:
       %*{"type": "server_vad", "threshold": 0.55,
         "prefix_padding_ms": 300, "silence_duration_ms": 450,
         "create_response": client.autoRespond, "interrupt_response": true}
@@ -252,23 +257,39 @@ proc inputTranscript(client: VoiceClient, id: string): int =
   result = client.inputTranscripts.len
   client.inputTranscripts.add(InputTranscript(itemId: id))
 
-proc deliverTranscript(client: VoiceClient, index: int) =
-  ## Delivers only finalized input belonging to the current recording epoch.
-  let transcript = client.inputTranscripts[index]
-  if not transcript.committed or not transcript.final or transcript.delivered:
-    return
-  client.inputTranscripts[index].delivered = true
-  if transcript.generation != client.inputGeneration:
-    return
-  if transcript.failure.len > 0:
-    client.failure = transcript.failure
-    client.status = client.failure
-  elif client.onTranscript != nil:
-    client.onTranscript(transcript.text)
+proc deliverTranscripts(client: VoiceClient) =
+  ## Delivers complete current recordings in server commitment order.
+  while client.committedTranscripts.len > 0:
+    let id = client.committedTranscripts.peekFirst()
+    var index = -1
+    for i, transcript in client.inputTranscripts:
+      if transcript.itemId == id:
+        index = i
+        break
+    if index < 0:
+      discard client.committedTranscripts.popFirst()
+      continue
+    let transcript = client.inputTranscripts[index]
+    if transcript.generation != client.inputGeneration or transcript.delivered:
+      discard client.committedTranscripts.popFirst()
+      client.inputTranscripts[index].delivered = true
+      continue
+    if not transcript.final:
+      return
+    discard client.committedTranscripts.popFirst()
+    client.inputTranscripts[index].delivered = true
+    if transcript.failure.len > 0:
+      client.failure = transcript.failure
+      client.status = client.failure
+      if client.onTranscriptError != nil:
+        client.onTranscriptError(transcript.failure)
+    elif client.onTranscript != nil:
+      client.onTranscript(transcript.text)
 
 proc discardTranscripts*(client: VoiceClient) =
   ## Invalidates older recordings while retaining their acknowledgment order.
   inc client.inputGeneration
+  client.deliverTranscripts()
 
 proc receiveEvent*(client: VoiceClient, message: string) =
   ## Applies a server event and emits audio callbacks on the UI thread.
@@ -277,8 +298,11 @@ proc receiveEvent*(client: VoiceClient, message: string) =
     kind = event{"type"}.getStr()
     itemId = event{"item_id"}.getStr()
     responseId = event{"response_id"}.getStr()
-  if responseId.len > 0 and responseId == client.suppressedResponse:
-    return
+  if responseId.len > 0:
+    if responseId == client.suppressedResponse or
+      (kind.startsWith("response.output_") and
+        responseId != client.responseId):
+          return
   case kind
   of "session.created":
     client.emit(client.sessionEvent())
@@ -291,20 +315,51 @@ proc receiveEvent*(client: VoiceClient, message: string) =
       let index = client.inputTranscript(itemId)
       if not client.inputTranscripts[index].committed:
         client.inputTranscripts[index].committed = true
-        client.inputTranscripts[index].generation =
-          if client.pendingTranscripts.len > 0:
-            client.pendingTranscripts.popFirst()
-          else:
-            client.inputGeneration
-        client.deliverTranscript(index)
+        if not client.inputTranscripts[index].bound:
+          client.inputTranscripts[index].bound = true
+          client.inputTranscripts[index].generation =
+            if client.pendingTranscripts.len > 0:
+              client.pendingTranscripts.popFirst()
+            else:
+              client.inputGeneration
+        if client.inputTranscripts[index].generation == client.inputGeneration:
+          if client.committedTranscripts.len >= MaxPendingTranscripts:
+            client.fail("Voice transcription cannot keep up. Reconnect to continue.")
+            return
+          client.committedTranscripts.addLast(itemId)
+          if client.onInputCommit != nil:
+            client.onInputCommit()
+          client.deliverTranscripts()
+        else:
+          client.inputTranscripts[index].delivered = true
     if client.handsFree:
       client.inputBytes = 0
   of "input_audio_buffer.speech_started":
+    if itemId.len > 0:
+      let index = client.inputTranscript(itemId)
+      if client.inputTranscripts[index].started:
+        return
+      client.inputTranscripts[index].started = true
+      if not client.inputTranscripts[index].bound:
+        client.inputTranscripts[index].bound = true
+        client.inputTranscripts[index].generation = client.inputGeneration
+      if client.inputTranscripts[index].generation != client.inputGeneration:
+        return
     client.status = "Listening..."
     if client.onSpeechStart != nil:
       client.onSpeechStart()
   of "input_audio_buffer.speech_stopped":
+    if itemId.len > 0:
+      let index = client.inputTranscript(itemId)
+      if client.inputTranscripts[index].stopped:
+        return
+      client.inputTranscripts[index].stopped = true
+      if client.inputTranscripts[index].bound and
+        client.inputTranscripts[index].generation != client.inputGeneration:
+          return
     client.status = "Thinking..."
+    if client.onSpeechStop != nil:
+      client.onSpeechStop()
   of "conversation.item.input_audio_transcription.delta":
     client.putText(itemId, User, event{"delta"}.getStr())
   of "conversation.item.input_audio_transcription.completed":
@@ -318,7 +373,7 @@ proc receiveEvent*(client: VoiceClient, message: string) =
     let input = client.inputTranscript(itemId)
     client.inputTranscripts[input].text = text
     client.inputTranscripts[input].final = true
-    client.deliverTranscript(input)
+    client.deliverTranscripts()
   of "conversation.item.input_audio_transcription.failed":
     if itemId.len == 0:
       return
@@ -327,7 +382,7 @@ proc receiveEvent*(client: VoiceClient, message: string) =
     client.inputTranscripts[input].final = true
     client.inputTranscripts[input].failure = client.apiError(event{"error"},
       "Could not understand that recording. Please try again")
-    client.deliverTranscript(input)
+    client.deliverTranscripts()
   of "response.created":
     client.responseId = event{"response", "id"}.getStr()
     client.isolatedResponse = false
@@ -397,6 +452,7 @@ proc disconnect*(client: VoiceClient) =
   client.failure = ""
   client.isolatedResponse = false
   client.pendingTranscripts.clear()
+  client.committedTranscripts.clear()
   client.inputTranscripts.setLen(0)
   inc client.inputGeneration
   client.outgoing.clear()

@@ -17,8 +17,9 @@ const
 type
   UiAction* = enum
     ConnectAction, DisconnectAction, BeginTalkAction, EndTalkAction,
-    HandsFreeAction, RepliesAction, SubmitAction, InterruptAction,
-    ClearAction, CopyAction
+    ConversationAction, RepliesAction, SubmitAction, InterruptAction,
+    ClearAction, CopyAction, InputDeviceAction, OutputDeviceAction,
+    RefreshDevicesAction
   TranscriptLine* = object
     user*: bool
     text*: string
@@ -32,8 +33,11 @@ type
     model*, status*, error*, draft*: string
     connected*, connecting*, listening*, speaking*, responding*: bool
     handsFree*, speakReplies*, demo*: bool
+    conversationRequested*, permissionPending*: bool
     level*: float32
     latencyMs*: int
+    inputDevices*, outputDevices*: seq[string]
+    inputDevice*, outputDevice*: int
     lines*: seq[TranscriptLine]
     layouts: seq[TextLayout]
     errorLayout: TextLayout
@@ -41,6 +45,8 @@ type
     scroll: float32
     follow: bool = true
     holding, mouseHolding, keyHolding: bool
+    deviceMenu, deviceScroll: int
+    pickerConsumesInput: bool
 
 proc label(sk: Silky, text: string, x, y: float32,
     color = Ink, font = "Default") =
@@ -60,7 +66,8 @@ proc button(view: VoiceView, title: string, area: Rect,
   ## Draws a button and reports one enabled pointer press.
   let
     sk = view.sk
-    hover = sk.mousePos.overlaps(area) and enabled
+    hover = sk.mousePos.overlaps(area) and enabled and
+      not view.pickerConsumesInput
     color =
       if active and enabled: Accent
       elif hover: Border
@@ -113,8 +120,12 @@ proc drawOrb(view: VoiceView, area: Rect) =
   let
     sk = view.sk
     center = vec2(area.x + area.w / 2, area.y + 94)
-    active = view.listening or view.speaking or view.responding
+    active = view.listening or view.speaking or view.responding or
+      view.conversationRequested
     pulse = (sin(epochTime() * 2.5) * 0.5 + 0.5).float32
+    inputSignal = clamp(
+      (20 * log10(max(view.level, 0.000001'f)) + 60) / 50, 0.0'f, 1.0'f
+    )
     tint = (if view.listening: Warm else: Accent)
   sk.disc(center, 78, Background)
   sk.disc(center, 69 + (if active: pulse * 3 else: 0), Border)
@@ -124,7 +135,9 @@ proc drawOrb(view: VoiceView, area: Rect) =
       distance = abs(i.float32 - 12) / 12
       envelope = 1 - distance * distance
       signal =
-        if view.listening: clamp(view.level * 5, 0.0'f, 1.0'f)
+        if view.listening and view.speaking:
+          max(inputSignal, 0.3'f + pulse * 0.35'f)
+        elif view.listening: inputSignal
         elif view.speaking: 0.3'f + pulse * 0.35'f
         elif view.responding: 0.15'f + pulse * 0.15'f
         else: 0.05'f
@@ -137,18 +150,25 @@ proc drawOrb(view: VoiceView, area: Rect) =
     )
   let
     title =
-      if view.listening: "Listening"
+      if view.permissionPending: "Microphone permission"
+      elif view.listening and view.speaking: "Speaking and listening"
+      elif view.listening: "Listening"
       elif view.speaking: "Speaking"
       elif view.responding: "Thinking"
       elif view.connecting: "Connecting"
       elif view.connected: "Ready when you are"
       else: "Let's talk"
     subtitle =
-      if view.listening: "Your microphone is on"
+      if view.permissionPending: "Allow access in the system prompt"
+      elif view.conversationRequested and view.listening:
+        if view.speaking: "Speak any time to interrupt"
+        else: "Microphone on. Just talk naturally."
+      elif view.conversationRequested: "Starting your conversation"
+      elif view.listening: "Your microphone is on"
       elif view.speaking: "Press Stop to interrupt"
       elif view.responding: "Waiting for a reply"
-      elif view.connected: "A little voice, a little curiosity"
-      else: "Connect to start a conversation"
+      elif view.connected: "Start a conversation, or hold to talk"
+      else: "Press Start conversation to begin"
   discard sk.drawText(
     "Heading", title, vec2(area.x, area.y + 190), Ink,
     area.w, 38, hAlign = CenterAlign
@@ -172,7 +192,8 @@ proc drawToggle(view: VoiceView, title, hint: string,
     pos + vec2((if enabled: 26 else: 10), 10), 7,
     (if enabled: Background else: Muted)
   )
-  sk.mousePos.overlaps(area) and sk.buttonPressed[MouseLeft]
+  sk.mousePos.overlaps(area) and sk.buttonPressed[MouseLeft] and
+    not view.pickerConsumesInput
 
 proc drawTranscript(view: VoiceView, area: Rect) =
   ## Lays out conversation cards with user-controlled scrolling.
@@ -210,7 +231,8 @@ proc drawTranscript(view: VoiceView, area: Rect) =
       layout.height = max(24.0'f, layout.state.innerHeight)
     total += layout.height + 64
   let maxScroll = max(0.0'f, total - area.h)
-  if sk.mousePos.overlaps(area) and view.window.scrollDelta.y != 0:
+  if sk.mousePos.overlaps(area) and view.window.scrollDelta.y != 0 and
+    not view.pickerConsumesInput:
     view.scroll -= view.window.scrollDelta.y * 12
     view.scroll = clamp(view.scroll, 0.0'f, maxScroll)
     view.follow = view.scroll >= maxScroll - 8
@@ -244,6 +266,128 @@ proc drawTranscript(view: VoiceView, area: Rect) =
       Muted, 1.5
     )
 
+proc devicesEnabled(view: VoiceView): bool =
+  ## Allows route changes only while no audio or connection is active.
+  not (view.listening or view.conversationRequested or view.connecting or
+    view.speaking or view.responding)
+
+proc deviceArea(area: Rect, output: bool): Rect =
+  ## Places two equally sized device selectors beside the refresh button.
+  let width = (area.w - 108) / 2
+  rect(area.x + (if output: width + 12 else: 0), area.y + 24, width, 36)
+
+proc devicePopup(view: VoiceView, area: Rect): Rect =
+  ## Keeps a bounded device menu inside the conversation panel width.
+  let
+    output = view.deviceMenu == 2
+    control = deviceArea(area, output)
+    count = if output: view.outputDevices.len else: view.inputDevices.len
+    width = min(area.w, max(control.w, 310.0'f))
+  rect(min(control.x, area.x + area.w - width), control.y + control.h + 4,
+    width, min(7, count).float32 * 34 + 8)
+
+proc updateDevices(view: VoiceView, area: Rect): seq[UiAction] =
+  ## Consumes menu input before any underlying conversation controls see it.
+  let sk = view.sk
+  view.pickerConsumesInput = view.deviceMenu != 0
+  if not view.devicesEnabled() or not view.window.focused:
+    view.deviceMenu = 0
+    return
+  if view.deviceMenu != 0:
+    let
+      popup = view.devicePopup(area)
+      count =
+        if view.deviceMenu == 2: view.outputDevices.len
+        else: view.inputDevices.len
+    if view.window.buttonPressed[KeyEscape]:
+      view.deviceMenu = 0
+      return
+    if sk.mousePos.overlaps(popup) and view.window.scrollDelta.y != 0:
+      view.deviceScroll = clamp(
+        view.deviceScroll - int(view.window.scrollDelta.y),
+        0, max(0, count - 7)
+      )
+    if sk.buttonPressed[MouseLeft] and sk.mousePos.overlaps(popup):
+      let row = int((sk.mousePos.y - popup.y - 4) / 34)
+      let selected = row + view.deviceScroll
+      if sk.mousePos.y >= popup.y + 4 and row >= 0 and row < 7 and
+        selected >= 0 and selected < count:
+          if view.deviceMenu == 1:
+            view.inputDevice = selected
+            result.add(InputDeviceAction)
+          else:
+            view.outputDevice = selected
+            result.add(OutputDeviceAction)
+      view.deviceMenu = 0
+      return
+  if sk.buttonPressed[MouseLeft]:
+    for output in [false, true]:
+      let count = if output: view.outputDevices.len else: view.inputDevices.len
+      if sk.mousePos.overlaps(deviceArea(area, output)) and count > 0:
+        let menu = if output: 2 else: 1
+        view.deviceMenu = if view.deviceMenu == menu: 0 else: menu
+        view.deviceScroll = 0
+        view.pickerConsumesInput = true
+        return
+    if view.deviceMenu != 0:
+      view.deviceMenu = 0
+
+proc drawDevices(view: VoiceView, area: Rect): bool =
+  ## Draws the currently selected microphone and speaker even while disabled.
+  let
+    sk = view.sk
+    enabled = view.devicesEnabled()
+  for output in [false, true]:
+    let
+      control = deviceArea(area, output)
+      names = if output: view.outputDevices else: view.inputDevices
+      selected = if output: view.outputDevice else: view.inputDevice
+      name =
+        if selected >= 0 and selected < names.len: names[selected]
+        else: "System default"
+    sk.label((if output: "SOUND OUT" else: "SOUND IN"),
+      control.x, area.y + 2, Accent, "Small")
+    sk.panel(control, (if enabled: Card else: Panel), 8)
+    sk.pushClipRect(rect(control.x + 10, control.y, control.w - 36, control.h))
+    discard sk.drawText("Small", name, vec2(control.x + 10, control.y),
+      (if enabled: Ink else: Muted), control.w - 36, control.h,
+      vAlign = MiddleAlign)
+    sk.popClipRect()
+    sk.label("v", control.x + control.w - 22, control.y + 9, Muted)
+  result = view.button("Refresh",
+    rect(area.x + area.w - 84, area.y + 24, 84, 36), enabled = enabled)
+  sk.label(
+    (if enabled: "Choose the microphone and speaker for this conversation."
+      else: "Stop conversation or playback to change devices."),
+    area.x, area.y + 68, Muted, "Small"
+  )
+
+proc drawDevicePopup(view: VoiceView, area: Rect) =
+  ## Draws the device menu after other controls so rows stay visible.
+  if view.deviceMenu == 0:
+    return
+  let
+    sk = view.sk
+    popup = view.devicePopup(area)
+    names =
+      if view.deviceMenu == 2: view.outputDevices else: view.inputDevices
+    selected =
+      if view.deviceMenu == 2: view.outputDevice else: view.inputDevice
+  sk.panel(rect(popup.x - 1, popup.y - 1, popup.w + 2, popup.h + 2), Border, 9)
+  sk.panel(popup, Card, 8)
+  for row in 0 ..< min(7, names.len - view.deviceScroll):
+    let
+      index = view.deviceScroll + row
+      entry = rect(popup.x + 4, popup.y + 4 + row.float32 * 34,
+        popup.w - 8, 34)
+    if index == selected or sk.mousePos.overlaps(entry):
+      sk.panel(entry, Border, 5)
+    sk.pushClipRect(rect(entry.x + 10, entry.y, entry.w - 20, entry.h))
+    discard sk.drawText("Small", names[index], vec2(entry.x + 10, entry.y),
+      (if index == selected: Accent else: Ink), entry.w - 20, entry.h,
+      vAlign = MiddleAlign)
+    sk.popClipRect()
+
 proc draw*(view: VoiceView): seq[UiAction] =
   ## Draws one frame and emits explicit actions for the app loop.
   let
@@ -253,7 +397,10 @@ proc draw*(view: VoiceView): seq[UiAction] =
     side = rect(24, 98, 288, height - 154)
     mainX = 336.0'f
     mainWidth = width - mainX - 24
-    talkArea = rect(side.x + 20, side.y + 278, side.w - 40, 48)
+    devicesArea = rect(mainX, 146, mainWidth, 88)
+    conversationArea = rect(side.x + 20, side.y + 278, side.w - 40, 48)
+    talkArea = rect(side.x + 20, side.y + 373, side.w - 40, 48)
+  result.add(view.updateDevices(devicesArea))
   if view.lines.len == 0 and view.lastLineCount > 0:
     view.follow = true
     view.scroll = 0
@@ -282,25 +429,34 @@ proc draw*(view: VoiceView): seq[UiAction] =
     side.x + side.w - 78, side.y + 17, Muted, "Small"
   )
   view.drawOrb(rect(side.x, side.y + 17, side.w, 260))
-  let talkTitle =
-    if view.handsFree:
-      if view.listening: "Pause microphone"
-      else: "Start microphone"
-    elif view.listening: "Release to send"
-    else: "Hold to talk"
-  let talkPressed = view.button(
-    talkTitle, talkArea, view.listening, view.connected
+  let conversationPressed = view.button(
+    (if view.conversationRequested: "Stop conversation"
+      else: "Start conversation"),
+    conversationArea, active = true
   )
-  if view.handsFree:
+  if conversationPressed:
+    result.add(ConversationAction)
+  discard sk.drawText(
+    "Small", "Just talk. Interrupt whenever you like.",
+    vec2(side.x, side.y + 336), Muted, side.w, 22, hAlign = CenterAlign
+  )
+  let
+    manualEnabled = view.connected and not view.conversationRequested and
+      not conversationPressed and not view.pickerConsumesInput
+    talkTitle =
+      if view.listening and not view.conversationRequested: "Release to send"
+      else: "Hold to talk"
+  let talkPressed = view.button(
+    talkTitle, talkArea, view.listening and manualEnabled, manualEnabled
+  )
+  if view.conversationRequested or conversationPressed:
     view.holding = false
     view.mouseHolding = false
     view.keyHolding = false
-    if talkPressed:
-      result.add(if view.listening: EndTalkAction else: BeginTalkAction)
   else:
     if talkPressed:
       view.mouseHolding = true
-    if view.connected and view.window.focused and
+    if manualEnabled and view.window.focused and
       not view.textFocused() and sk.buttonPressed[KeySpace]:
         view.keyHolding = true
     if not sk.buttonDown[MouseLeft] or not view.window.focused:
@@ -308,7 +464,7 @@ proc draw*(view: VoiceView): seq[UiAction] =
     if not sk.buttonDown[KeySpace] or not view.window.focused or
       view.textFocused():
         view.keyHolding = false
-    let held = view.connected and view.window.focused and
+    let held = manualEnabled and view.window.focused and
       (view.mouseHolding or view.keyHolding)
     if held and not view.holding:
       result.add(BeginTalkAction)
@@ -316,16 +472,9 @@ proc draw*(view: VoiceView): seq[UiAction] =
       result.add(EndTalkAction)
     view.holding = held
   discard sk.drawText(
-    "Small",
-    (if view.handsFree: "Headphones recommended for hands-free"
-      else: "Or hold SPACE outside the text field"),
-    vec2(side.x, side.y + 336), Muted, side.w, 22, hAlign = CenterAlign
+    "Small", "Or hold SPACE outside the text field",
+    vec2(side.x, side.y + 423), Muted, side.w, 18, hAlign = CenterAlign
   )
-  if view.drawToggle(
-    "Hands-free", "Automatic end-of-turn detection",
-    rect(side.x + 8, side.y + 373, side.w - 16, 64), view.handsFree
-  ):
-    result.add(HandsFreeAction)
   if view.drawToggle(
     "Spoken replies", "Text always stays visible",
     rect(side.x + 8, side.y + 441, side.w - 16, 64), view.speakReplies
@@ -347,6 +496,8 @@ proc draw*(view: VoiceView): seq[UiAction] =
     view.follow = true
     view.scroll = 0
     result.add(ClearAction)
+  if view.drawDevices(devicesArea):
+    result.add(RefreshDevicesAction)
   var errorHeight = 0.0'f
   if view.error.len > 0:
     if view.errorLayout.state == nil:
@@ -372,25 +523,34 @@ proc draw*(view: VoiceView): seq[UiAction] =
       mainWidth - 32, wordWrap = true
     )
     errorHeight += 12
-  view.drawTranscript(rect(mainX, 146, mainWidth, height - 295 - errorHeight))
+  view.drawTranscript(rect(mainX, 248, mainWidth, height - 397 - errorHeight))
   let composeY = height - 133
-  sk.pushLayout(vec2(mainX, composeY), vec2(mainWidth - 92, 48))
-  sk.textBox(
-    view.window, DraftId, view.draft, mainWidth - 92, 48,
-    wrapWords = false, singleLine = true, submitOnEnter = true
-  )
-  sk.popLayout()
+  if view.pickerConsumesInput:
+    sk.panel(rect(mainX, composeY, mainWidth - 92, 48), Card, 8)
+    sk.pushClipRect(rect(mainX + 10, composeY, mainWidth - 112, 48))
+    sk.label(view.draft, mainX + 10, composeY + 12)
+    sk.popClipRect()
+  else:
+    sk.pushLayout(vec2(mainX, composeY), vec2(mainWidth - 92, 48))
+    sk.textBox(
+      view.window, DraftId, view.draft, mainWidth - 92, 48,
+      wrapWords = false, singleLine = true, submitOnEnter = true
+    )
+    sk.popLayout()
   if view.draft.len == 0 and not view.textFocused():
     sk.label("Type a message...", mainX + 10, composeY + 12, Muted)
   let submitted = DraftId in textBoxStates and
     textBoxStates[DraftId].submitted
+  let canSubmit = view.connected and view.draft.strip.len > 0 and
+    (not view.conversationRequested or view.listening) and
+    not view.pickerConsumesInput
   if view.button(
     "Send", rect(width - 104, composeY, 80, 48), active = true,
-    enabled = view.connected and view.draft.strip.len > 0
-  ) or (submitted and view.connected and view.draft.strip.len > 0):
+    enabled = canSubmit
+  ) or (submitted and canSubmit):
     result.add(SubmitAction)
   sk.label("ENTER to send  /  ESC to stop", mainX, height - 75, Muted, "Small")
-  if sk.buttonPressed[KeyEscape]:
+  if sk.buttonPressed[KeyEscape] and not view.pickerConsumesInput:
     result.add(InterruptAction)
   sk.drawRect(vec2(24, height - 44), vec2(width - 48, 1), Border)
   let status =
@@ -405,3 +565,4 @@ proc draw*(view: VoiceView): seq[UiAction] =
     "Small", view.model & suffix, vec2(width - 350, height - 30),
     Muted, 326, 24, hAlign = RightAlign
   )
+  view.drawDevicePopup(devicesArea)

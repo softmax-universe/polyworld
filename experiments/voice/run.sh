@@ -46,7 +46,7 @@ trap 'rm -f "$temporaryExecutable"' EXIT HUP INT TERM
 mv -f "$temporaryExecutable" "$executable"
 
 if [ "$(uname -s)" = Darwin ]; then
-  /usr/bin/codesign --force --sign - "$appDir"
+  /bin/sh "$experimentDir/sign.sh" "$appDir"
 fi
 
 if [ "$buildOnly" = true ]; then

@@ -15,21 +15,68 @@ type
     speaker: StreamingSource
     captureStarted, initialized, closed, closeDevice: bool
     level: float32
+    levelUpdated: MonoTime
     chunkBytes: seq[int]
     queuedBytes, completedBytes: int
     playbackAnchor: MonoTime
     anchorBytes: int
     wasPlaying: bool
+    duplex: bool
+    nativeDuplex: pointer
+    inputDevice, outputDevice: string
 
 when defined(macosx):
+  import devices
+
   {.compile: currentSourcePath().parentDir / "permissions.m".}
-  {.passL: "-framework AVFoundation -framework Foundation".}
+  {.compile: currentSourcePath().parentDir / "duplex.m".}
+  {.passL: "-framework AVFoundation -framework AVFAudio -framework Foundation".}
   {.passL: "-Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist " &
     "-Xlinker " & quoteShell(currentSourcePath().parentDir / "macos.plist").}
   proc voiceMicrophonePermission(): cint {.importc.}
     ## Returns the operating system microphone authorization state.
   proc voiceRequestMicrophonePermission() {.importc.}
     ## Asks macOS for microphone permission without blocking the UI.
+  proc voiceAudioCreate(voiceProcessing: bool,
+    inputDevice, outputDevice: cstring): pointer {.importc.}
+    ## Copies mode and routes without opening any hardware or requesting access.
+  proc voiceDuplexStart(handle: pointer): bool {.importc.}
+    ## Starts microphone and playback with native echo cancellation.
+  proc voiceDuplexStop(handle: pointer) {.importc.}
+    ## Stops the native audio hardware after conversation mode ends.
+  proc voiceDuplexPoll(handle: pointer): bool {.importc.}
+    ## Recovers a device configuration transition only while capture is active.
+  proc voiceDuplexError(handle: pointer): cstring {.importc.}
+    ## Retrieves a bounded error from setup or an audio callback.
+  proc voiceDuplexAvailable(handle: pointer): cint {.importc.}
+    ## Returns the available processed microphone frames.
+  proc voiceDuplexRead(handle, samples: pointer, capacity: cint): cint {.importc.}
+    ## Drains processed PCM16 samples into caller-owned memory.
+  proc voiceDuplexQueue(handle, samples: pointer, count: cint): bool {.importc.}
+    ## Appends speech to the same echo-cancelled audio graph.
+  proc voiceDuplexFlush(handle: pointer) {.importc.}
+    ## Discards queued speech while microphone capture continues.
+  proc voiceDuplexQueued(handle: pointer): cint {.importc.}
+    ## Reports remaining speech frames without pumping the device.
+  proc voiceDuplexMilliseconds(handle: pointer): cint {.importc.}
+    ## Returns the current utterance's rendered duration.
+  proc voiceDuplexClose(handle: pointer) {.importc.}
+    ## Releases native graph callbacks and audio queues.
+  proc voiceAudioCaptureDiagnostics(handle: pointer): cstring {.importc.}
+    ## Reports frame counts and peaks without retaining microphone recordings.
+  when defined(voiceAudioTesting):
+    proc voiceDuplexTest(): bool {.importc.}
+      ## Exercises native queues and conversion without hardware.
+    proc testDuplexAudio*(): bool =
+      ## Runs deterministic native audio checks without microphone access.
+      voiceDuplexTest()
+
+  proc checkDuplex(audio: VoiceAudio) =
+    ## Maps native callback failures into the shared voice audio exception.
+    discard voiceDuplexPoll(audio.nativeDuplex)
+    let message = $voiceDuplexError(audio.nativeDuplex)
+    if message.len > 0:
+      raise newException(VoiceAudioError, message)
 
 proc microphonePermission*(): string =
   ## Returns microphone authorization or missing metadata without recording.
@@ -46,9 +93,28 @@ proc microphonePermission*(): string =
   else:
     "allowed"
 
-proc newVoiceAudio*(closeDevice = true): VoiceAudio =
+proc newVoiceAudio*(closeDevice = true, duplex = false,
+  inputDevice = "", outputDevice = ""): VoiceAudio =
   ## Creates dormant audio state without opening or recording a microphone.
-  VoiceAudio(closeDevice: closeDevice)
+  VoiceAudio(closeDevice: closeDevice, duplex: duplex,
+    inputDevice: inputDevice, outputDevice: outputDevice)
+
+when defined(macosx):
+  proc prepareNative(audio: VoiceAudio) =
+    ## Lazily creates the native queues with immutable per-app route choices.
+    if audio.nativeDuplex == nil:
+      audio.nativeDuplex = voiceAudioCreate(audio.duplex,
+        audio.inputDevice.cstring, audio.outputDevice.cstring)
+      if audio.nativeDuplex == nil:
+        raise newException(VoiceAudioError,
+          "Could not allocate audio buffers.")
+
+proc captureDiagnostics*(audio: VoiceAudio): string =
+  ## Reports local capture counters and peaks without saving or sending audio.
+  when defined(macosx):
+    if audio.nativeDuplex != nil:
+      return $voiceAudioCaptureDiagnostics(audio.nativeDuplex)
+  "Microphone has not started."
 
 proc pcmLevel*(pcm: string): float32 =
   ## Measures RMS amplitude in signed little-endian PCM16 mono samples.
@@ -66,15 +132,24 @@ proc pcmLevel*(pcm: string): float32 =
   sqrt(energy / (pcm.len div 2).float64).float32
 
 proc inputLevel*(audio: VoiceAudio): float32 =
-  ## Returns the normalized RMS amplitude of the latest microphone chunk.
+  ## Returns a meter envelope that remains visible between microphone chunks.
   audio.level
+
+proc updateInputLevel(audio: VoiceAudio, pcm: string) =
+  ## Releases the meter gradually between batched hardware capture callbacks.
+  let
+    now = getMonoTime()
+    elapsed = (now - audio.levelUpdated).inMilliseconds.float64 / 1000
+    previous = audio.level * exp(-elapsed / 0.18).float32
+  audio.level = max(previous, pcmLevel(pcm))
+  audio.levelUpdated = now
 
 proc capturing*(audio: VoiceAudio): bool =
   ## Reports whether microphone samples are currently being recorded.
   audio.captureStarted
 
 proc startCapture*(audio: VoiceAudio) =
-  ## Opens and starts Slappy capture only after the user requests listening.
+  ## Opens microphone capture only after the user requests listening.
   if audio.closed:
     raise newException(VoiceAudioError, "Audio has been closed.")
   if audio.captureStarted:
@@ -88,30 +163,41 @@ proc startCapture*(audio: VoiceAudio) =
     of "pending":
       voiceRequestMicrophonePermission()
       raise newException(VoiceAudioError,
-        "Allow microphone access in the macOS prompt, then use Talk again.")
+        "Allow microphone access in the macOS prompt, then enable it again.")
     of "denied":
       raise newException(VoiceAudioError,
         "Enable this app or your terminal in System Settings > " &
         "Privacy & Security > Microphone.")
     else:
       discard
-  try:
-    if audio.microphone == nil:
-      audio.microphone = newMicrophone(
-        frequency = VoiceSampleRate,
-        channels = 1,
-        bits = 16,
-        bufferSize = VoiceSampleRate * 2
-      )
-    discard audio.microphone.readAll()
-    audio.microphone.start()
+    audio.prepareNative()
+    if not voiceDuplexStart(audio.nativeDuplex):
+      audio.checkDuplex()
+      raise newException(VoiceAudioError, "Could not start microphone audio.")
     audio.captureStarted = true
-  except SlappyError as error:
-    raise newException(VoiceAudioError,
-      "Could not open the microphone: " & error.msg)
+    return
+  else:
+    try:
+      if audio.microphone == nil:
+        audio.microphone = newMicrophone(
+          frequency = VoiceSampleRate,
+          channels = 1,
+          bits = 16,
+          bufferSize = VoiceSampleRate * 2
+        )
+      discard audio.microphone.readAll()
+      audio.microphone.start()
+      audio.captureStarted = true
+    except SlappyError as error:
+      raise newException(VoiceAudioError,
+        "Could not open the microphone: " & error.msg)
 
 proc stopCapture*(audio: VoiceAudio) =
   ## Stops microphone recording and clears its displayed level.
+  when defined(macosx):
+    if audio.nativeDuplex != nil:
+      voiceDuplexStop(audio.nativeDuplex)
+      voiceDuplexFlush(audio.nativeDuplex)
   if audio.microphone != nil and audio.captureStarted:
     audio.microphone.stop()
   audio.captureStarted = false
@@ -119,13 +205,25 @@ proc stopCapture*(audio: VoiceAudio) =
 
 proc readCapture*(audio: VoiceAudio): string =
   ## Drains available microphone samples as PCM16 mono at 24 kHz.
+  when defined(macosx):
+    if audio.nativeDuplex != nil:
+      audio.checkDuplex()
+      let count = voiceDuplexAvailable(audio.nativeDuplex)
+      if count > 0:
+        result = newString(count.int * 2)
+        let read = voiceDuplexRead(
+          audio.nativeDuplex, addr result[0], count
+        )
+        result.setLen(read.int * 2)
+      audio.updateInputLevel(result)
+      return
   if audio.microphone == nil:
     return
   let bytes = audio.microphone.readAll()
   if bytes.len > 0:
     result = newString(bytes.len)
     copyMem(addr result[0], unsafeAddr bytes[0], bytes.len)
-  audio.level = pcmLevel(result)
+  audio.updateInputLevel(result)
 
 proc checkPlayback(message: string) =
   ## Converts OpenAL failures at the experiment boundary into audio errors.
@@ -134,6 +232,10 @@ proc checkPlayback(message: string) =
 
 proc pollPlayback*(audio: VoiceAudio) =
   ## Reclaims completed streaming buffers and advances bounded bookkeeping.
+  when defined(macosx):
+    if audio.nativeDuplex != nil:
+      audio.checkDuplex()
+      return
   if audio.speaker == nil:
     return
   discard alGetError()
@@ -154,6 +256,9 @@ proc pollPlayback*(audio: VoiceAudio) =
 proc playbackMilliseconds*(audio: VoiceAudio): int =
   ## Estimates played audio from completed chunks and the active play clock.
   audio.pollPlayback()
+  when defined(macosx):
+    if audio.nativeDuplex != nil:
+      return voiceDuplexMilliseconds(audio.nativeDuplex).int
   var consumed = audio.completedBytes
   if audio.wasPlaying:
     let elapsed = (getMonoTime() - audio.playbackAnchor).inMilliseconds
@@ -165,6 +270,9 @@ proc playbackMilliseconds*(audio: VoiceAudio): int =
 proc outputActive*(audio: VoiceAudio): bool =
   ## Reports whether any streamed speech remains queued for playback.
   audio.pollPlayback()
+  when defined(macosx):
+    if audio.nativeDuplex != nil:
+      return voiceDuplexQueued(audio.nativeDuplex) > 0
   audio.queuedBytes > 0
 
 proc queuePcm*(audio: VoiceAudio, pcm: string) =
@@ -175,40 +283,55 @@ proc queuePcm*(audio: VoiceAudio, pcm: string) =
     return
   if pcm.len mod 2 != 0:
     raise newException(VoiceAudioError, "PCM16 audio has an incomplete sample.")
-  try:
-    if not audio.initialized:
-      slappyInit()
-      audio.initialized = true
-    if audio.speaker == nil:
-      discard alGetError()
-      audio.speaker = newStreamingSource(
-        frequency = VoiceSampleRate,
-        channels = 1,
-        bits = 16
-      )
-      checkPlayback("Could not create the speech output stream.")
-  except SlappyError as error:
-    raise newException(VoiceAudioError,
-      "Could not open speech output: " & error.msg)
-  audio.pollPlayback()
-  if pcm.len > MaxPlaybackBytes - audio.queuedBytes or
-    audio.chunkBytes.len >= MaxPlaybackChunks:
+  when defined(macosx):
+    if audio.duplex and not audio.captureStarted:
       raise newException(VoiceAudioError,
-        "Speech playback queue is full. Stop the reply and try again.")
-  var bytes = newSeq[uint8](pcm.len)
-  copyMem(addr bytes[0], unsafeAddr pcm[0], pcm.len)
-  discard alGetError()
-  audio.speaker.queueData(bytes)
-  checkPlayback("Could not queue streamed speech audio.")
-  audio.chunkBytes.add(pcm.len)
-  audio.queuedBytes += pcm.len
-  if not audio.wasPlaying:
-    audio.playbackAnchor = getMonoTime()
-    audio.anchorBytes = audio.completedBytes
-    audio.wasPlaying = true
+        "Start Conversation before playing its voice.")
+    audio.prepareNative()
+    audio.checkDuplex()
+    if not voiceDuplexQueue(
+      audio.nativeDuplex, unsafeAddr pcm[0], (pcm.len div 2).cint
+    ):
+      audio.checkDuplex()
+    return
+  else:
+    try:
+      if not audio.initialized:
+        slappyInit()
+        audio.initialized = true
+      if audio.speaker == nil:
+        discard alGetError()
+        audio.speaker = newStreamingSource(
+          frequency = VoiceSampleRate,
+          channels = 1,
+          bits = 16
+        )
+        checkPlayback("Could not create the speech output stream.")
+    except SlappyError as error:
+      raise newException(VoiceAudioError,
+        "Could not open speech output: " & error.msg)
+    audio.pollPlayback()
+    if pcm.len > MaxPlaybackBytes - audio.queuedBytes or
+      audio.chunkBytes.len >= MaxPlaybackChunks:
+        raise newException(VoiceAudioError,
+          "Speech playback queue is full. Stop the reply and try again.")
+    var bytes = newSeq[uint8](pcm.len)
+    copyMem(addr bytes[0], unsafeAddr pcm[0], pcm.len)
+    discard alGetError()
+    audio.speaker.queueData(bytes)
+    checkPlayback("Could not queue streamed speech audio.")
+    audio.chunkBytes.add(pcm.len)
+    audio.queuedBytes += pcm.len
+    if not audio.wasPlaying:
+      audio.playbackAnchor = getMonoTime()
+      audio.anchorBytes = audio.completedBytes
+      audio.wasPlaying = true
 
 proc stopPlayback*(audio: VoiceAudio) =
   ## Interrupts speech, discards pending buffers, and resets the turn clock.
+  when defined(macosx):
+    if audio.nativeDuplex != nil:
+      voiceDuplexFlush(audio.nativeDuplex)
   if audio.speaker != nil:
     audio.speaker.flush()
   audio.chunkBytes.setLen(0)
@@ -222,6 +345,10 @@ proc close*(audio: VoiceAudio) =
   if audio.closed:
     return
   audio.stopCapture()
+  when defined(macosx):
+    if audio.nativeDuplex != nil:
+      voiceDuplexClose(audio.nativeDuplex)
+      audio.nativeDuplex = nil
   var message: string
   if audio.microphone != nil:
     try:

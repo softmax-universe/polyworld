@@ -152,8 +152,91 @@ proc main() =
       check action.first == FarmBuilding.ord.int32
       check action.second == origin[0]
       check action.third == origin[1]
+      check not action.append
       check pendingBuild == -1
       check run.stateHash() == before # Submission must not mutate simulation.
+
+    test "Shift placements append on the same peon and retain the blueprint":
+      fixture()
+      run.world.players[0].gold = 0
+      run.world.players[0].wood = 0
+      let other = run.world.spawnUnit(0, PeonUnit,
+        tile2(run.world.map.side div 2 + 8, run.world.map.side div 2))
+      selectedIds.add other
+      let firstOrigin = origin
+      window.state.buttonDown.incl KeyLeftShift
+      inputFrame({MouseLeft})
+      inputFrame(released = {MouseLeft})
+      run.flushPlayerCommands()
+      require run.submissions.len == 1
+      check run.submissions[0].kind == ActionBuild
+      check run.submissions[0].entityId == worker
+      check run.submissions[0].append
+      check pendingBuild == FarmBuilding.ord.int32
+      check selectedIds == @[worker, other]
+      require run.world.applyBuild(0, worker, FarmBuilding.ord.int32,
+        firstOrigin[0], firstOrigin[1], append = true)
+      let half = run.world.map.side div 2
+      var found = false
+      for y in half - 8 .. half + 8:
+        for x in half - 8 .. half + 8:
+          if not run.world.canQueueBuild(0, worker, FarmBuilding.ord.int32,
+              x, y):
+            continue
+          let size = BuildingTable[FarmBuilding].footprint
+          pointAt(screenPosition(clickTilePoint(x + size.width div 2,
+            y + size.depth div 2), viewProjection))
+          if mouseOverUi(window, sk.mousePos) or
+              buildGhostOrigin(viewProjection) != (x, y):
+            continue
+          origin = (x, y)
+          found = true
+          break
+        if found: break
+      require found
+      let before = run.stateHash()
+      inputFrame({MouseLeft})
+      inputFrame(released = {MouseLeft})
+      run.flushPlayerCommands()
+      require run.submissions.len == 2
+      let action = run.submissions[1]
+      check action.kind == ActionBuild
+      check action.entityId == worker
+      check action.first == FarmBuilding.ord.int32
+      check action.second == origin[0]
+      check action.third == origin[1]
+      check action.append
+      check pendingBuild == FarmBuilding.ord.int32
+      check selectedIds == @[worker, other]
+      check not selectionStarted
+      check run.stateHash() == before
+      inputFrame(released = {KeyLeftShift})
+      inputFrame({MouseLeft})
+      inputFrame(released = {MouseLeft})
+      run.flushPlayerCommands()
+      require run.submissions.len == 3
+      check not run.submissions[2].append
+      check run.submissions[2].entityId == worker
+      check pendingBuild == -1
+
+    test "Shift right click appends work at an existing unfinished building":
+      for append in [false, true]:
+        fixture()
+        run.world.players[0].gold = 5000
+        run.world.players[0].wood = 5000
+        require run.world.applyBuild(0, worker, FarmBuilding.ord.int32,
+          origin[0], origin[1])
+        pendingBuild = -1
+        if append: window.state.buttonDown.incl KeyLeftShift
+        let before = run.stateHash()
+        inputFrame({MouseRight})
+        inputFrame(released = {MouseRight})
+        run.flushPlayerCommands()
+        require run.submissions.len == 1
+        check run.submissions[0].kind == ActionBuild
+        check run.submissions[0].entityId == worker
+        check run.submissions[0].append == append
+        check run.stateHash() == before
 
     test "worker entering a mine cancels blueprint before the next input pass":
       fixture()

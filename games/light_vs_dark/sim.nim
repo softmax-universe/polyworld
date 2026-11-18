@@ -34,7 +34,7 @@ const
 type
   UnitOrder* = object
     kind*: uint8
-    first*, second*: int32
+    first*, second*, third*: int32
     offset*: FixedVec2
 
   UnitState* = enum
@@ -2591,6 +2591,48 @@ proc ownedBuilding(w: World, player, buildingId: int32): int32 =
     return -1
   index
 
+proc canQueueBuild*(w: World, player, peonId, kindValue, x, y: int32): bool =
+  ## Validates an unpaid building plan without reserving terrain or resources.
+  if w == nil or player < 0 or player >= w.players.len:
+    return false
+  let index = w.ownedUnit(player, peonId)
+  if index < 0 or w.units[index].kind != PeonUnit or w.units[index].hp <= 0 or
+      w.units[index].orderQueue.len >= MaxUnitOrders or
+      kindValue < 0 or kindValue > BuildableHigh.ord.int32:
+    return false
+  let
+    kind = BuildingKind(kindValue)
+    size = BuildingTable[kind].footprint
+    builder = if w.units[index].state == UnitInMine: NoEntity else: peonId
+  if not w.map.inGrid(x, y) or
+      not w.map.inGrid(x + size.width - 1, y + size.depth - 1) or
+      not w.techMet(player, BuildingTable[kind].requires):
+    return false
+  var resumesSite = false
+  for structure in w.buildings:
+    if structure.owner == player and structure.kind == kind and
+        structure.origin == tile2(x, y) and
+        structure.state == BuildingUnderConstruction and
+        (w.activeBuilderFor(structure) < 0 or structure.builderId == peonId):
+      resumesSite = true
+      break
+  if not resumesSite and not w.canPlace(player, kind, x, y, builder):
+    return false
+  for unit in w.units:
+    if unit.kind != PeonUnit or unit.hp <= 0 or unit.state == UnitDying or
+        (unit.owner != player and not w.diplomacy.sharesVision(player, unit.owner)):
+      continue
+    for order in unit.orderQueue:
+      if order.kind != ActionBuild or order.first < 0 or
+          order.first > BuildableHigh.ord.int32 or
+          not w.map.inGrid(order.second, order.third):
+        continue
+      let planned = BuildingTable[BuildingKind(order.first)].footprint
+      if x < order.second + planned.width and order.second < x + size.width and
+          y < order.third + planned.depth and order.third < y + size.depth:
+        return false
+  true
+
 proc applyMove*(w: World, player, unitId, x, y: int32,
     offset = FixedVec2Zero, append = false): bool =
   ## Walks a unit to a tile.
@@ -2749,11 +2791,43 @@ proc applyDeposit*(w: World, player, unitId, depotId: int32,
   w.beginDropOff(index, wantWood, depotId)
   true
 
+proc applyBuild*(w: World, player, peonId, kindValue, x, y: int32,
+    append = false): bool
+
+proc queuedBuildWaits(w: World, unit: Unit, order: UnitOrder): bool =
+  ## Retains a valid front plan while resources or another unit delay its start.
+  if unit.kind != PeonUnit or unit.hp <= 0 or order.first < 0 or
+      order.first > BuildableHigh.ord.int32:
+    return false
+  let
+    kind = BuildingKind(order.first)
+    stats = BuildingTable[kind]
+    x = order.second
+    y = order.third
+  if not w.map.inGrid(x, y) or
+      not w.map.inGrid(x + stats.footprint.width - 1,
+        y + stats.footprint.depth - 1) or not w.techMet(unit.owner, stats.requires):
+    return false
+  for structure in w.buildings:
+    if structure.owner == unit.owner and structure.kind == kind and
+        structure.origin == tile2(x, y) and
+        structure.state == BuildingUnderConstruction and
+        (w.activeBuilderFor(structure) < 0 or structure.builderId == unit.id):
+      return false
+  for row in y ..< y + stats.footprint.depth:
+    for column in x ..< x + stats.footprint.width:
+      if not w.tileOpen(column, row): return false
+  not w.canPlace(unit.owner, kind, x, y, unit.id) or
+    w.players[unit.owner].gold < stats.gold or
+    w.players[unit.owner].wood < stats.wood
+
 proc startNextOrder(w: World, index: int32) =
-  ## Revalidate on activation; rejected stale orders cannot stall the FIFO.
+  ## Revalidates orders, waiting for build resources and skipping stale plans.
   let unit = w.units[index]
   while unit.state == UnitIdle and unit.orderQueue.len > 0:
     let order = unit.orderQueue[0]
+    if order.kind == ActionBuild and w.queuedBuildWaits(unit, order):
+      return
     var remaining = unit.orderQueue
     remaining.delete(0)
     unit.orderQueue = @[]
@@ -2772,11 +2846,20 @@ proc startNextOrder(w: World, index: int32) =
       discard w.applyHarvest(unit.owner, unit.id, order.first, order.second)
     of ActionDeposit:
       discard w.applyDeposit(unit.owner, unit.id, order.first)
+    of ActionBuild:
+      discard w.applyBuild(unit.owner, unit.id, order.first,
+        order.second, order.third)
     else: discard
     unit.orderQueue = remaining
 
-proc applyBuild*(w: World, player, peonId, kindValue, x, y: int32): bool =
-  ## Places a construction site and sends a peon to raise it.
+proc applyBuild*(w: World, player, peonId, kindValue, x, y: int32,
+    append: bool): bool =
+  ## Appends an unpaid plan or places a site and sends a peon to raise it.
+  if append:
+    if not w.canQueueBuild(player, peonId, kindValue, x, y): return false
+    w.units[w.unitIndex(peonId)].orderQueue.add UnitOrder(kind: ActionBuild,
+      first: kindValue, second: x, third: y)
+    return true
   let index = w.ownedUnit(player, peonId)
   if index < 0 or w.units[index].kind != PeonUnit or w.units[index].hp <= 0 or
       w.units[index].state == UnitInMine:
@@ -2984,7 +3067,7 @@ proc applyReplayAction*(w: World, action: ReplayAction): bool {.discardable.} =
     w.applyDeposit(player, action.entityId, action.first, action.append)
   of ActionBuild:
     w.applyBuild(player, action.entityId, action.first,
-      action.second, action.third)
+      action.second, action.third, action.append)
   of ActionTrain:
     w.applyTrain(player, action.entityId, action.first)
   of ActionSetRally:
@@ -3103,15 +3186,16 @@ proc applyDeposit*(
     game.record(ActionDeposit, player, unitId, depotId, append = append)
 
 proc applyBuild*(
-    game: Game, player, peonId, kindValue, x, y: int32
+    game: Game, player, peonId, kindValue, x, y: int32, append = false
 ): bool =
   ## Starts a building and records the command when accepted.
   if game.networked:
-    return game.queueNetworkAction(ActionBuild, player, peonId, kindValue, x, y)
-  result = game.world.applyBuild(player, peonId, kindValue, x, y)
+    return game.queueNetworkAction(ActionBuild, player, peonId, kindValue, x, y,
+      append = append)
+  result = game.world.applyBuild(player, peonId, kindValue, x, y, append)
   if result:
     game.metrics.command(int(player), game.world.tick)
-    game.record(ActionBuild, player, peonId, kindValue, x, y)
+    game.record(ActionBuild, player, peonId, kindValue, x, y, append = append)
 
 proc applyTrain*(
     game: Game, player, buildingId, kindValue: int32
@@ -3275,6 +3359,7 @@ proc hashWorld(w: World): uint64 =
       hash.addHashy(order.kind)
       hash.addHashy(order.first)
       hash.addHashy(order.second)
+      hash.addHashy(order.third)
       hash.addHashy(int32(order.offset.x))
       hash.addHashy(int32(order.offset.y))
     hash.addHashy(unit.path.len)

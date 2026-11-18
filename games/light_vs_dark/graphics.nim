@@ -1286,12 +1286,12 @@ proc runGraphics*(network: NetworkMatch = nil,
       tile = groundTile(ground, mapHalf(), run.world.map.side)
     (tile[0] - size.width div 2, tile[1] - size.depth div 2)
 
-  proc queuePendingBuild(x, y: int32) =
+  proc queuePendingBuild(x, y: int32, append = false) =
     ## Sends the first selected peon to raise the pending structure.
     let id = selectedBuildWorker()
     if id != NoEntity:
-      queueBuild(options.playerSlot - 1, id, pendingBuild, x, y)
-      pendingBuild = -1
+      queueBuild(options.playerSlot - 1, id, pendingBuild, x, y, append)
+      if not append: pendingBuild = -1
     else:
       discard refreshPendingBuild()
 
@@ -1438,10 +1438,18 @@ proc runGraphics*(network: NetworkMatch = nil,
       selectionStarted = false
       minimapPanning = false
       if not inside or overUi or onMinimap: return
-      let origin = buildGhostOrigin(viewProjection)
-      if run.world.canPlace(player, BuildingKind(pendingBuild), origin[0], origin[1],
-          selectedBuildWorker()):
-        queuePendingBuild(origin[0], origin[1])
+      let
+        origin = buildGhostOrigin(viewProjection)
+        append = window.actionDown(ShiftInput)
+        valid =
+          if append:
+            run.world.canQueueBuild(player, selectedBuildWorker(), pendingBuild,
+              origin[0], origin[1])
+          else:
+            run.world.canPlace(player, BuildingKind(pendingBuild), origin[0],
+              origin[1], selectedBuildWorker())
+      if valid:
+        queuePendingBuild(origin[0], origin[1], append)
         clickMarks.emitClickMark(clickTilePoint(origin[0], origin[1]))
       else:
         playSound(ErrorSound)
@@ -1515,7 +1523,8 @@ proc runGraphics*(network: NetworkMatch = nil,
             let unit = run.world.units[run.world.unitIndex(id)]
             if unit.kind == PeonUnit:
               queueBuild(player, id, structure.kind.ord.int32,
-                structure.origin.x.int32, structure.origin.y.int32)
+                structure.origin.x.int32, structure.origin.y.int32,
+                append = window.actionDown(ShiftInput))
               playSound(MoveOrderSound)
               clickMarks.emitClickMark(buildingCentre(structure))
               return
@@ -1678,6 +1687,27 @@ proc runGraphics*(network: NetworkMatch = nil,
       finishCharacters(scene)
     selectionOutline.drawOutline(targetFlash.targetFlashColor())
 
+  proc drawBuildingGhost(kind: BuildingKind, owner: int32, origin: Tile2,
+      viewProjection: Mat4, tint: Vec4) =
+    ## Shares the complete translucent model between placement and queued plans.
+    let
+      size = BuildingTable[kind].footprint
+      x = origin.x.float32 + size.width.float32 * 0.5'f - mapHalf()
+      z = origin.y.float32 + size.depth.float32 * 0.5'f - mapHalf()
+      centre = vec3(x, surfaceHeight(x, z), z)
+    buildingArt.buildingPack(owner).drawProp(
+      BuildingProps[kind], centre, 0.0'f, BuildingScale, viewProjection, tint)
+
+  proc drawQueuedBuildGhosts(viewProjection: Mat4) =
+    ## Shows only the selected peons' planned buildings, never real blockers.
+    let owner =
+      if playerMode(): options.playerSlot - 1
+      elif viewMode > 0: viewMode - 1
+      else: -1'i32
+    for marker in run.world.selectedBuildMarkers(selectedIds, owner):
+      drawBuildingGhost(marker.kind, marker.owner, marker.origin, viewProjection,
+        vec4(0.55, 0.95, 0.65, 0.42))
+
   proc drawBuildGhost(viewProjection: Mat4) =
     ## Follows the pointer with a transparent building while placing.
     if refreshPendingBuild(): return
@@ -1685,28 +1715,22 @@ proc runGraphics*(network: NetworkMatch = nil,
       return
     let
       kind = BuildingKind(pendingBuild)
-      size = BuildingTable[kind].footprint
       origin = buildGhostOrigin(viewProjection)
     let
-      valid = run.world.canPlace(options.playerSlot - 1, kind, origin[0], origin[1],
-        selectedBuildWorker())
-      x = float32(origin[0]) + float32(size.width) * 0.5'f32 - mapHalf()
-      z = float32(origin[1]) + float32(size.depth) * 0.5'f32 - mapHalf()
-      centre = vec3(x, surfaceHeight(x, z), z)
-      name = BuildingProps[kind]
+      valid =
+        if window.actionDown(ShiftInput):
+          run.world.canQueueBuild(options.playerSlot - 1, selectedBuildWorker(),
+            pendingBuild, origin[0], origin[1])
+        else:
+          run.world.canPlace(options.playerSlot - 1, kind, origin[0], origin[1],
+            selectedBuildWorker())
       tint =
         if valid:
           vec4(0.55, 0.95, 0.65, 0.42)
         else:
           vec4(0.95, 0.28, 0.22, 0.42)
-    buildingArt.buildingPack(options.playerSlot - 1).drawProp(
-      name,
-      centre,
-      0.0'f32,
-      BuildingScale,
-      viewProjection,
-      tint
-    )
+    drawBuildingGhost(kind, options.playerSlot - 1, tile2(origin[0], origin[1]),
+      viewProjection, tint)
 
   proc updateTerrainVision() {.measure.} =
     ## Uploads the selected team's softened visible and explored terrain.
@@ -2237,6 +2261,7 @@ proc runGraphics*(network: NetworkMatch = nil,
         finishCharacters(scene)
         drawSelectedOutline(view, projection, viewProjection)
         drawTargetOutline(view, projection, viewProjection)
+        drawQueuedBuildGhosts(viewProjection)
         drawBuildGhost(viewProjection)
         drawWater(
           viewProjection,

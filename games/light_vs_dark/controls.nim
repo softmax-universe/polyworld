@@ -94,7 +94,7 @@ proc queueHarvest*(player, unitId, target, isTree: int32, append = false) =
     second: isTree
   )
 
-proc queueBuild*(player, peonId, kindValue, x, y: int32) =
+proc queueBuild*(player, peonId, kindValue, x, y: int32, append = false) =
   ## Queues a building placement.
   pending.add PlayerCommand(
     kind: CommandBuild,
@@ -102,7 +102,8 @@ proc queueBuild*(player, peonId, kindValue, x, y: int32) =
     entityId: peonId,
     first: kindValue,
     second: x,
-    third: y
+    third: y,
+    append: append
   )
 
 proc queueDeposit*(player, peonId, depotId: int32, append = false) =
@@ -138,6 +139,7 @@ proc selectedProducer*(world: World, player: int32, selected: openArray[int32],
       reservedWood += stats.wood
       reservedFood += stats.food
     of CommandBuild:
+      if command.append: continue
       let stats = BuildingTable[BuildingKind(command.first)]
       reservedGold += stats.gold
       reservedWood += stats.wood
@@ -253,7 +255,8 @@ proc applyCommand(game: Game, command: PlayerCommand): bool =
       command.entityId,
       command.first,
       command.second,
-      command.third
+      command.third,
+      append = command.append
     )
   of CommandTrain:
     game.applyTrain(command.player, command.entityId, command.first)
@@ -274,7 +277,8 @@ proc flushPlayerCommands*(game: Game) =
   pending.setLen(0)
   for command in commands:
     if game.applyCommand(command) and game.networked and
-        command.kind in {CommandTrain, CommandBuild, CommandResearch}:
+        command.kind in {CommandTrain, CommandBuild, CommandResearch} and
+        not (command.kind == CommandBuild and command.append):
       inFlight.add ProductionReservation(world: game.world, command: command)
 
 proc retireProductionReservation*(world: World, action: ReplayAction) =
@@ -290,6 +294,6 @@ proc retireProductionReservation*(world: World, action: ReplayAction) =
     if reservation.world == world and command.kind == kind and
         command.player == action.playerId and command.entityId == action.entityId and
         command.first == action.first and command.second == action.second and
-        command.third == action.third:
+        command.third == action.third and command.append == action.append:
       inFlight.delete(i)
       return

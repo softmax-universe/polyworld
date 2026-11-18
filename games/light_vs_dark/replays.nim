@@ -16,7 +16,7 @@ const
   ReplayFormatVersion* = 7'u16
   ## This client supports only this gameplay version. Bump it when rules change.
   ## Older replays use their archived client; never add compatibility branches.
-  ReplayGameVersion* = 43'u16
+  ReplayGameVersion* = 44'u16
 
   ActionMove* = 1'u8
   ActionAttack* = 2'u8
@@ -113,7 +113,8 @@ proc record*(recorder: ReplayRecorder, action: ReplayAction) =
   if recorder == nil:
     return
   if action.append and action.kind notin
-      {ActionMove, ActionAttackMove, ActionAttack, ActionHarvest, ActionDeposit}:
+      {ActionMove, ActionAttackMove, ActionAttack, ActionHarvest, ActionDeposit,
+        ActionBuild}:
     fail("replay action kind cannot append unit orders")
   if not action.offset.validTileOffset:
     fail("replay point offset is outside its tile")
@@ -191,7 +192,8 @@ proc validateSetup(setup: Setup) =
 proc validateAction*(action: ReplayAction, setup: Setup) =
   ## Validates one command's kind, ownership range, and payload bounds.
   if action.append and action.kind notin
-      {ActionMove, ActionAttackMove, ActionAttack, ActionHarvest, ActionDeposit}:
+      {ActionMove, ActionAttackMove, ActionAttack, ActionHarvest, ActionDeposit,
+        ActionBuild}:
     fail("replay action kind cannot append unit orders")
   if not action.offset.validTileOffset:
     fail("replay point offset is outside its tile")
@@ -255,6 +257,8 @@ proc validateAction*(action: ReplayAction, setup: Setup) =
       fail("replay build does not name a peon")
     if action.first < 0 or action.first > int32(BuildableHigh.ord):
       fail("replay build names an unbuildable structure")
+    if action.offset != FixedVec2Zero:
+      fail("replay build has an unused tile offset")
     requireTile(action.second, action.third)
   of ActionTrain:
     if not action.entityId.isPlayerBuildingId:

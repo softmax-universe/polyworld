@@ -123,6 +123,7 @@ import
   test_sparse_rooms,
   test_room_resize,
   test_galcon_relay_support,
+  test_pudge_relay_support,
   test_client_loading_gap,
   test_roomclients,
   test_networks,

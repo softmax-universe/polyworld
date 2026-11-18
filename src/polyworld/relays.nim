@@ -14,6 +14,8 @@ const
   CatchupBatch* = 16
 
 type
+  StartPolicy = enum
+    ManualReady, HostHash, QueuedPreparation, PersistentPreparation
   Delivery = object
     id, stamp: uint64
     bytes: int
@@ -48,8 +50,7 @@ type
     identity*: GameIdentity
     owner*: uint32
     public*, paused*: bool
-    galconStartPending: bool
-    lvdStartPending: bool
+    startPending: bool
     phase*: RoomPhase
     revision*, match*, tickRate*, tick*: uint32
     payload*: string
@@ -131,6 +132,22 @@ proc controls(room: RelayRoom, id: uint32): bool =
   for seat in room.seats:
     if seat.owner == id:
       return true
+
+proc pudgeWars(identity: GameIdentity): bool =
+  ## Identifies the Pudge Wars adapter with two contiguous seat banks.
+  identity.game == "pudge_wars" and identity.protocol == 1
+
+proc startPolicy(room: RelayRoom): StartPolicy =
+  ## Selects the start handshake for the room's immutable game identity.
+  case room.identity.game
+  of "gods_of_the_arena":
+    HostHash
+  of "galcon":
+    if room.identity.protocol >= 2: QueuedPreparation else: ManualReady
+  of "light_vs_dark":
+    if room.identity.protocol >= 3: PersistentPreparation else: ManualReady
+  else:
+    if room.identity.pudgeWars: PersistentPreparation else: ManualReady
 
 proc logEvent*(
     relay: Relay, event: string, connection = 0,
@@ -223,7 +240,7 @@ proc stop(relay: Relay, room: RelayRoom, detail: string) =
   if room.phase == Desynced:
     return
   room.phase = Desynced
-  room.lvdStartPending = false
+  room.startPending = false
   room.detail = detail
   relay.logEvent("match.stopped", room = room, detail = detail)
   relay.status(room)
@@ -236,7 +253,8 @@ proc retainedBytes(relay: Relay): int =
 
 proc durationNotices(room: RelayRoom): bool =
   ## Adapter opt-in; preserve legacy preparation semantics.
-  room.identity.game == "light_vs_dark" and room.identity.protocol >= 4
+  room.identity.pudgeWars or
+    (room.identity.game == "light_vs_dark" and room.identity.protocol >= 4)
 
 proc changed(relay: Relay, room: RelayRoom, rosterOnly = false) =
   ## Keeps roster readiness intent, but requires hashes for the new revision.
@@ -245,15 +263,14 @@ proc changed(relay: Relay, room: RelayRoom, rosterOnly = false) =
   room.retainedNotice = RoomMessage()
   for id in room.participants:
     relay.guest(id).readyDuration = 0
-  room.galconStartPending = false
-  if not rosterOnly:
-    room.lvdStartPending = false
-  elif room.lvdStartPending:
+  if not rosterOnly or room.startPolicy != PersistentPreparation:
+    room.startPending = false
+  elif room.startPending:
     var occupied = false
     for seat in room.seats:
       occupied = occupied or seat.owner != 0
     if not occupied:
-      room.lvdStartPending = false
+      room.startPending = false
   for id in room.participants:
     if not rosterOnly or not room.controls(id):
       relay.guest(id).ready = false
@@ -284,8 +301,7 @@ proc closeIfUnwatched(relay: Relay, room: RelayRoom): bool =
   for guest in relay.guests:
     if guest.room == room.id:
       guest.clearMembership()
-  room.galconStartPending = false
-  room.lvdStartPending = false
+  room.startPending = false
   room.paused = false
   room.deadline = 0
   room.owner = 0
@@ -319,9 +335,8 @@ proc disconnectConnection(relay: Relay, connection: int, preserveRoom = false) =
     return
   if room.phase == Lobby:
     guest.ready = false
-    room.galconStartPending = false
-    if guest.id == room.owner:
-      room.lvdStartPending = false
+    if room.startPolicy != PersistentPreparation or guest.id == room.owner:
+      room.startPending = false
   relay.publish(room)
 
 proc disconnect*(relay: Relay, connection: int) =
@@ -443,8 +458,7 @@ proc removeGuest(relay: Relay, room: RelayRoom, guest: Guest) =
   if room.owner == guest.id:
     if room.participants.len > 0:
       room.owner = room.participants[0]
-    room.galconStartPending = false
-    room.lvdStartPending = false
+    room.startPending = false
   relay.send(guest, RoomMessage(kind: RoomState))
   if relay.closeIfUnwatched(room):
     return
@@ -519,13 +533,84 @@ proc unchangedRosterTeams(before, after: JsonNode,
       payload["diplomacySettings"].delete("teams")
   true
 
+proc rosterResizePayload(room: RelayRoom, message: RoomMessage): bool =
+  ## Checks whether a generic resize changed only adapter roster fields.
+  if message.payload == room.payload:
+    return true
+  if room.identity.game notin ["galcon", "light_vs_dark"]:
+    return false
+  try:
+    let
+      before = parseJson(room.payload)
+      after = parseJson(message.payload)
+    if before.kind != JObject or after.kind != JObject:
+      return false
+    if room.identity.game == "galcon":
+      if not after.hasKey("players") or after["players"].kind != JInt or
+          after["players"].getInt != message.number.int:
+        return false
+      before.delete("players")
+      after.delete("players")
+      return before == after
+    if not before.hasKey("players") or before["players"].kind != JArray or
+        not after.hasKey("players") or after["players"].kind != JArray or
+        after["players"].len != message.number.int or
+        not after.hasKey("playerCount") or after["playerCount"].kind != JInt or
+        after["playerCount"].getInt != message.number.int:
+      return false
+    # Resizing may truncate or append empty records, never alter survivors.
+    for index in 0 ..< min(before["players"].len, after["players"].len):
+      if before["players"][index] != after["players"][index]:
+        return false
+    for index in before["players"].len ..< after["players"].len:
+      if after["players"][index] != %*{"name": ""}:
+        return false
+    if not unchangedRosterTeams(before, after,
+        before["players"].len, after["players"].len):
+      return false
+    before.delete("players")
+    after.delete("players")
+    before.delete("playerCount")
+    after.delete("playerCount")
+    return before == after
+  except JsonParsingError:
+    return false
+
+proc pudgeRoster(payload: string, count: int): JsonNode =
+  ## Validates the seat bank width against Pudge Wars' setup.
+  try:
+    result = parseJson(payload)
+  except JsonParsingError:
+    reject("Invalid Pudge Wars room setup JSON")
+  if count notin 2 .. 10 or count mod 2 != 0 or result.kind != JObject or
+      not result.hasKey("teamSize") or result["teamSize"].kind != JInt or
+      result["teamSize"].getBiggestInt != count div 2:
+    reject("Pudge Wars requires two banks of one to five seats")
+
+proc resizePudgeRoster(seats: openArray[Seat], count: int,
+    owner: uint32): seq[Seat] =
+  ## Retains each bank's surviving seats and validates the dropped slots.
+  let
+    oldSize = seats.len div 2
+    newSize = count div 2
+    retained = min(oldSize, newSize)
+  result = newSeq[Seat](count)
+  for bank in 0 .. 1:
+    for slot in 0 ..< retained:
+      result[bank * newSize + slot] = seats[bank * oldSize + slot]
+    for slot in retained ..< oldSize:
+      let dropped = seats[bank * oldSize + slot].owner
+      if dropped != 0 and dropped != owner:
+        reject("Cannot remove a seat owned by another participant")
+
 proc receive*(
     relay: Relay, connection: int, message: RoomMessage, now: float64
 )
 
-proc tryLvdStart(relay: Relay, room: RelayRoom, now: float64) =
+proc tryPersistentStart(relay: Relay, room: RelayRoom, now: float64) =
   ## Retain host intent across roster revisions, never stale preparation.
-  if room == nil or room.phase != Lobby or not room.lvdStartPending:
+  if room == nil or room.phase != Lobby or not room.startPending or
+      room.startPolicy != PersistentPreparation:
     return
   let owner = relay.guest(room.owner)
   if owner == nil or owner.connection == 0:
@@ -547,7 +632,8 @@ proc receive*(
     reject("Clients cannot assign delivery identifiers")
   if message.kind == Hello:
     relay.hello(connection, message, now)
-    relay.tryLvdStart(relay.room(relay.connectionGuest(connection).room), now)
+    relay.tryPersistentStart(
+      relay.room(relay.connectionGuest(connection).room), now)
     return
   let guest = relay.connectionGuest(connection)
   if guest == nil:
@@ -607,6 +693,8 @@ proc receive*(
     if message.number notin 1'u32 .. uint32(MaxSeats) or
       message.tickRate notin 1'u32 .. 120'u32 or not message.name.validName:
         reject("Invalid room settings")
+    if guest.identity.pudgeWars:
+      discard pudgeRoster(message.payload, int(message.number))
     let room = RelayRoom(
       id: relay.newRoomId(), name: message.name, identity: guest.identity,
       owner: guest.id, public: message.flag, phase: Lobby, revision: 1,
@@ -615,7 +703,7 @@ proc receive*(
     )
     guest.room = room.id
     relay.rooms.add room
-    if room.identity.game == "light_vs_dark" and room.identity.protocol >= 3:
+    if room.startPolicy == PersistentPreparation:
       guest.readyRevision = 0
     relay.logEvent("room.created", connection, room,
       "seats=" & $message.number & " tickRate=" & $message.tickRate &
@@ -636,7 +724,7 @@ proc receive*(
       reject("Room participant limit reached")
     guest.room = room.id
     guest.ready = false
-    if room.identity.game == "light_vs_dark" and room.identity.protocol >= 3:
+    if room.startPolicy == PersistentPreparation:
       guest.readyRevision = 0
     room.participants.add guest.id
     relay.logEvent("room.joined", connection, room)
@@ -674,48 +762,23 @@ proc receive*(
         reject("Invalid room settings")
     var rosterOnly = message.kind == ResizeRoom and
       message.tickRate == room.tickRate
-    if rosterOnly and message.payload != room.payload:
-      rosterOnly = false
-      if room.identity.game in ["galcon", "light_vs_dark"]:
-        try:
-          let before = parseJson(room.payload)
-          let after = parseJson(message.payload)
-          if before.kind == JObject and after.kind == JObject:
-            if room.identity.game == "galcon" and
-                after.hasKey("players") and after["players"].kind == JInt and
-                after["players"].getInt == message.number.int:
-              before.delete("players")
-              after.delete("players")
-              rosterOnly = before == after
-            elif room.identity.game == "light_vs_dark" and
-                before.hasKey("players") and before["players"].kind == JArray and
-                after.hasKey("players") and after["players"].kind == JArray and
-                after["players"].len == message.number.int and
-                after.hasKey("playerCount") and after["playerCount"].kind == JInt and
-                after["playerCount"].getInt == message.number.int:
-              # Resizing may truncate or append empty records, never alter survivors.
-              var namesUnchanged = true
-              for index in 0 ..< min(before["players"].len, after["players"].len):
-                if before["players"][index] != after["players"][index]:
-                  namesUnchanged = false
-              for index in before["players"].len ..< after["players"].len:
-                if after["players"][index] != %*{"name": ""}:
-                  namesUnchanged = false
-              let teamsUnchanged = unchangedRosterTeams(before, after,
-                before["players"].len, after["players"].len)
-              before.delete("players")
-              after.delete("players")
-              before.delete("playerCount")
-              after.delete("playerCount")
-              rosterOnly = namesUnchanged and teamsUnchanged and before == after
-        except JsonParsingError:
-          discard
-    # Validate the entire removed tail before changing settings or assignments.
-    for index in int(message.number) ..< room.seats.len:
-      let owner = room.seats[index].owner
-      if owner != 0 and owner != guest.id:
-        reject("Cannot remove a seat owned by another participant")
-    room.seats.setLen(int(message.number))
+    if room.identity.pudgeWars:
+      let after = pudgeRoster(message.payload, int(message.number))
+      if rosterOnly and message.payload != room.payload:
+        let before = pudgeRoster(room.payload, room.seats.len)
+        before.delete("teamSize")
+        after.delete("teamSize")
+        rosterOnly = before == after
+      if int(message.number) != room.seats.len:
+        room.seats = resizePudgeRoster(room.seats, int(message.number), guest.id)
+    else:
+      rosterOnly = rosterOnly and room.rosterResizePayload(message)
+      # Validate the entire removed tail before changing settings or assignments.
+      for index in int(message.number) ..< room.seats.len:
+        let owner = room.seats[index].owner
+        if owner != 0 and owner != guest.id:
+          reject("Cannot remove a seat owned by another participant")
+      room.seats.setLen(int(message.number))
     room.name = message.name
     room.payload = message.payload
     room.public = message.flag
@@ -727,7 +790,8 @@ proc receive*(
       reject("Seats can only change in the lobby")
     let owner = room.seats[message.seat].owner
     let hostBotRemoval = message.kind == ReleaseSeat and
-      room.identity.game in ["galcon", "gods_of_the_arena", "light_vs_dark"] and
+      (room.identity.pudgeWars or
+      room.identity.game in ["galcon", "gods_of_the_arena", "light_vs_dark"]) and
       guest.id == room.owner and room.seats[message.seat].name != "Human"
     if owner != 0 and owner != guest.id and not hostBotRemoval:
       reject("Seat belongs to another participant")
@@ -759,20 +823,18 @@ proc receive*(
     guest.readyRevision = room.revision
     guest.readyDuration = if message.kind == PreparedDuration: message.durationTicks else: 0
     relay.publish(room)
-    if room.identity.game == "galcon" and room.identity.protocol >= 2 and
-      room.galconStartPending:
+    if room.startPolicy == QueuedPreparation and room.startPending:
       relay.receive(relay.guest(room.owner).connection,
         RoomMessage(kind: StartMatch), now)
     else:
-      relay.tryLvdStart(room, now)
+      relay.tryPersistentStart(room, now)
   of StartMatch:
     if room.phase != Lobby or room.owner != guest.id:
       reject("Only the owner can start a lobby")
-    let hostPrepared = room.identity.game == "gods_of_the_arena"
-    let lvdAutomatic = room.identity.game == "light_vs_dark" and
-      room.identity.protocol >= 3
-    let automaticPreparation = lvdAutomatic or
-      (room.identity.game == "galcon" and room.identity.protocol >= 2)
+    let
+      policy = room.startPolicy
+      hostPrepared = policy == HostHash
+      automaticPreparation = policy in {QueuedPreparation, PersistentPreparation}
     if automaticPreparation:
       var occupied, pending: bool
       for seat in room.seats:
@@ -784,10 +846,7 @@ proc receive*(
         pending = pending or controller.readyRevision != room.revision
       if not occupied: reject("At least one controlling client is required")
       if pending:
-        if lvdAutomatic:
-          room.lvdStartPending = true
-        else:
-          room.galconStartPending = true
+        room.startPending = true
         return
     if hostPrepared and message.revision != room.revision:
       reject("Start refers to outdated room settings")
@@ -798,7 +857,7 @@ proc receive*(
     for seat in room.seats:
       if seat.owner == 0:
         # Legacy LvD versions predate the packed-seat adapter.
-        if room.identity.game == "light_vs_dark" and not lvdAutomatic:
+        if room.identity.game == "light_vs_dark" and policy == ManualReady:
           reject("Every game seat must have an owner")
         continue
       let controller = relay.guest(seat.owner)
@@ -831,8 +890,7 @@ proc receive*(
     let gotaNotice = initRelayNotice(room.identity, room.payload,
       room.tickRate, room.seats)
     room.gotaNotice = gotaNotice
-    room.galconStartPending = false
-    room.lvdStartPending = false
+    room.startPending = false
     room.initialHash = initialHash
     room.durationTicks = if room.durationNotices: durationTicks else: 0
     room.retainedNotice = RoomMessage()

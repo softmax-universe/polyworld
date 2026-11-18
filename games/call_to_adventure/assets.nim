@@ -2,7 +2,7 @@ import
   std/os,
   jsony,
   polyworld/[assets, chargen, common, terrainsurfaces],
-  content
+  content, gear
 
 const
   LogoPath* = DataRoot & "/themes/cta/cta_logo.png"
@@ -17,7 +17,7 @@ const
   ]
   CtaTerrainTiles* = [
     "crypt-rock-1", "crypt-rock-2", "crypt-stone-1", "crypt-flagstone-1",
-    "crypt-lava-1", "crypt-lava-2", "cobble-tan-1"
+    "crypt-lava-1", "crypt-lava-2", "cobble-tan-1", "crypt-stone-2", "brick-white-1"
   ]
   CryptRockSurface* = SurfaceNames.len.float32
   CryptRubbleSurface* = CryptRockSurface + 1
@@ -26,6 +26,11 @@ const
   CryptLavaSurface* = CryptRockSurface + 4
   CryptCrustSurface* = CryptRockSurface + 5
   VaultSurface* = CryptRockSurface + 6
+  DungeonSurface* = CryptRockSurface + 7
+  TempleWallSurface* = CryptRockSurface + 8
+  ArmorySurface* = CryptRockSurface + 9
+  LibrarySurface* = CryptRockSurface + 10
+  TempleSurface* = CryptRockSurface + 11
   CtaTerrainAssets* = TerrainAssets(size: 256)
   HeroPortraitRoot = DataRoot & "/characters/chargen/portraits/"
   HeroPortraitPaths*: array[HeroClass, string] = [
@@ -155,9 +160,14 @@ proc browserAssets*(): seq[Asset] =
   result.add terrainAssets(
     NoTrees, GeneratedTerrain, NoRocks, CtaTerrainAssets, CtaTerrainTiles
   )
+  for path in TreegenTextures:
+    result.add imageAsset(path, GeneratorTextureSize)
+  result.add imageAsset(RockgenTexture, GeneratorTextureSize)
   result.add generatedCharacterAssets()
   for path in HeroPortraitPaths:
     result.add fileAsset(path)
   for name in AbilityIconFiles:
     if name.len > 0:
       result.add fileAsset("abilities/" & name & ".png")
+  for name in gearIcons():
+    result.add fileAsset(GearIconDir & name & ".png")

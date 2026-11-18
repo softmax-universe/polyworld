@@ -29,3 +29,16 @@ proc lacksMana*(actor: Actor, ability: Ability): bool =
   ## Returns whether the hero cannot pay for a skill. Using an item neither
   ## checks nor charges mana, so this only applies to the hero's own skills.
   actor.mana < Abilities[ability].manaCost
+
+proc cooldownSeconds*(
+    actor: Actor,
+    ability: Ability,
+    renderAlpha: float32
+): float32 =
+  ## Returns the seconds a skill's wait has still to run, the whole wait
+  ## while it is being cast, on the same clock as `cooldownLeft`.
+  if actor.action == ability:
+    return Abilities[ability].cooldownTicks.float32 / TickRate.float32
+  let ticks = actor.cooldowns[int(ability)]
+  if ticks > 0:
+    return max(ticks.float32 - renderAlpha, 0) / TickRate.float32

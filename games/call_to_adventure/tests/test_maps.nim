@@ -24,6 +24,72 @@ block:
     "a different seed must produce a different dungeon"
   doAssert other.ramps.len > 0
 
+echo "Testing Old Halls themes and Surface scenery"
+block:
+  for seed in 2026'i32 .. 2031'i32:
+    let
+      dungeon = generateMap(seed)
+      repeat = generateMap(seed)
+    doAssert dungeon.decor == repeat.decor
+    var surface: set[DecorKind]
+    var arches = 0
+    for prop in dungeon.decor:
+      if prop.kind == ArchDecor:
+        inc arches
+        doAssert prop.span > 0
+        doAssert isWalkable(int(prop.tile.level), int(prop.tile.x), int(prop.tile.z))
+    doAssert arches >= dungeon.rooms[OldHallsLevel].len
+    for prop in dungeon.decor:
+      if prop.tile.level == SurfaceLevel:
+        surface.incl prop.kind
+    doAssert surface == {TreeDecor, RockDecor, BushDecor}
+
+    var
+      seen: set[RoomTheme]
+      previous = NoRoomTheme
+    for room in dungeon.rooms[OldHallsLevel]:
+      doAssert room.theme != NoRoomTheme and room.theme != previous
+      seen.incl room.theme
+      previous = room.theme
+      var count = 0
+      for z in room.z ..< room.z + room.depth:
+        for x in room.x ..< room.x + room.width:
+          let tile = layers[OldHallsLevel].tiles[z * GridTiles + x]
+          if tile.kind == room.theme.roomFloor:
+            inc count
+      doAssert count > 0
+      var
+        placed: set[DecorKind]
+        statues: set[range[0..1]]
+        altarCount = 0
+      for prop in dungeon.decor:
+        if int(prop.tile.level) == OldHallsLevel and
+            room.contains(int32(prop.tile.x), int32(prop.tile.z)):
+          placed.incl prop.kind
+          case prop.kind
+          of StatueDecor:
+            doAssert prop.span in 0..1
+            statues.incl range[0..1](prop.span)
+          of AltarDecor:
+            doAssert prop.span in [1'i32, 3]
+            inc altarCount
+          else:
+            discard
+      if room.theme == TempleTheme:
+        doAssert statues == {range[0..1](0), range[0..1](1)}
+        doAssert altarCount == 1
+      let expected =
+        case room.theme
+        of ArmoryTheme: {HeraldryDecor, WeaponsDecor, ArmorDecor, TargetDecor}
+        of LibraryTheme: {ShelvesDecor, BooksDecor, CircleDecor}
+        of DungeonTheme: {BonesDecor, ShacklesDecor, PrisonRackDecor}
+        of TempleTheme:
+          {AltarDecor, StatueDecor, GemsDecor, RugDecor, ColumnDecor, GobletNicheDecor}
+        of NoRoomTheme: {}
+      doAssert expected <= placed, $room.theme & ": " & $placed
+      doAssert TorchDecor in placed and WallTrimDecor in placed, $room.theme
+    doAssert seen == {ArmoryTheme, LibraryTheme, DungeonTheme, TempleTheme}
+
 echo "Testing every level is populated and connected"
 block:
   let dungeon = generateMap(2026)

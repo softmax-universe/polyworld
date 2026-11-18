@@ -22,7 +22,7 @@ import
   replays,
   ui,
   controls, homes, lobbies, multiplayer, attackorders, layouts, linemoves,
-  networkpresentation, shortcutsettings, unitselection, orderfeedback,
+  networkpresentation, shortcutsettings, unitselection, orderfeedback, ordermarkers,
   constructionpresentation, targetfeedback, rendervisibility,
   harvestpresentation, woodcuttingpresentation, battlesounds
 
@@ -1300,6 +1300,23 @@ proc runGraphics*(network: NetworkMatch = nil,
     let xz = tileCentreXZ(tile2(x, y))
     vec3(xz.x, surfaceHeight(xz.x, xz.y), xz.y)
 
+  proc drawSelectedOrderMarkers(viewProjection: Mat4) =
+    ## Rebuilds looping destinations from the selected units' current orders.
+    let owner =
+      if playerMode(): options.playerSlot - 1
+      elif viewMode > 0: viewMode - 1
+      else: -1'i32
+    var moves, attacks: seq[Vec3]
+    for marker in run.world.selectedOrderMarkers(selectedIds, owner):
+      let
+        x = toFloat32(marker.position.x) - mapHalf()
+        z = toFloat32(marker.position.y) - mapHalf()
+        point = vec3(x, surfaceHeight(x, z), z)
+      if marker.attack: attacks.add point
+      else: moves.add point
+    clickMarks.drawLoopingClickMarks(viewProjection, moves)
+    attackClickMarks.drawLoopingClickMarks(viewProjection, attacks)
+
   proc issueSelectedMove(player, x, y: int32, append = false): bool =
     ## Moves every selected owned unit, or rallies a selected building.
     if not run.world.map.inGrid(x, y) or not run.world.terrainOpen(x, y):
@@ -2241,6 +2258,7 @@ proc runGraphics*(network: NetworkMatch = nil,
         harvestBars.draw(viewProjection, barCameraRight, barCameraUp)
         clickMarks.drawClickMarks(viewProjection)
         attackClickMarks.drawClickMarks(viewProjection)
+        drawSelectedOrderMarkers(viewProjection)
         if lineGesture.active and lineGesture.dragging:
           worldShapes.clear()
           let color = orderFeedbackColor(lineGesture.attackMove)

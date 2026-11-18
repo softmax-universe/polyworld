@@ -6,12 +6,17 @@ client.snapshot = RoomMessage(
   kind: RoomState, room: "room", phase: Playing,
   seats: @[Seat(owner: 7, name: "Human")]
 )
+doAssert not client.hasPendingCommand(0)
 doAssert client.submit(0, "opaque game command")
+doAssert client.hasPendingCommand(0)
+doAssert not client.hasPendingCommand(1)
 client.send(RoomMessage(kind: ReportHash, match: 2, tick: 24, hash: 123))
 client.send(RoomMessage(kind: FinishMatch, match: 2, tick: 25, hash: 456))
 client.lost()
+doAssert client.hasPendingCommand(0)
 client.opened()
 client.accept(RoomMessage(kind: Welcome, participant: 7, token: "secret").encode)
+doAssert client.hasPendingCommand(0)
 var commands, checkpoints, finals: int
 for bytes in client.outgoing:
   let message = decode(bytes)
@@ -30,6 +35,7 @@ for bytes in client.outgoing:
 doAssert commands == 1 and checkpoints == 1 and finals == 1
 # Acknowledged commands are not retransmitted; hash confirmations still are.
 client.accept(RoomMessage(kind: CommandAck, match: 2, sequence: 1).encode)
+doAssert not client.hasPendingCommand(0)
 client.lost()
 client.opened()
 client.accept(RoomMessage(kind: Welcome, participant: 7, token: "secret").encode)
@@ -50,6 +56,33 @@ doAssert client.takeTick(packet) and packet.tick == 1
 client.appliedTick(1)
 doAssert not client.takeTick(packet)
 echo "Reconnect receipts, mandatory hashes and immutable ticks passed"
+
+echo "Testing pending commands acknowledged before their tick"
+doAssert client.submit(0, "reserved game command")
+client.lost()
+client.opened()
+client.accept(RoomMessage(kind: Welcome, participant: 7, token: "secret").encode)
+client.accept(RoomMessage(kind: CommandAck, match: 2, sequence: 2, tick: 2).encode)
+doAssert client.hasPendingCommand(0)
+client.outgoing.setLen(0)
+client.flushCommands()
+doAssert client.outgoing.len == 0
+client.lost()
+client.opened()
+client.accept(RoomMessage(kind: Welcome, participant: 7, token: "secret").encode)
+commands = 0
+for bytes in client.outgoing:
+  let message = decode(bytes)
+  if message.kind == SubmitCommand:
+    inc commands
+    doAssert message.sequence == 2 and message.payload == "reserved game command"
+doAssert commands == 1
+client.accept(RoomMessage(kind: TickPacket, match: 2, tick: 2,
+  commands: @[Command(participant: 7, seat: 0, sequence: 2,
+    payload: "reserved game command")]).encode)
+doAssert not client.hasPendingCommand(0)
+doAssert client.takeTick(packet) and packet.tick == 2
+client.appliedTick(2)
 
 client.accept(RoomMessage(
   kind: MatchStatus, match: client.match, phase: Waiting,

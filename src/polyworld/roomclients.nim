@@ -81,6 +81,12 @@ proc flushCommands*(client: RoomClient) =
       client.send(pending.message)
       pending.sent = true
 
+proc hasPendingCommand*(client: RoomClient, seat: uint32): bool =
+  ## Reports a seat's submissions still waiting in the reconnect queue.
+  for pending in client.pending:
+    if pending.message.seat == seat:
+      return true
+
 proc submit*(client: RoomClient, seat: uint32, payload: string): bool =
   ## Reports queue acceptance only, never gameplay success.
   if not client.began or payload.len > MaxCommandBytes or
@@ -183,7 +189,12 @@ proc accept*(client: RoomClient, bytes: string) =
       reject("Unknown command acknowledgement")
     for i in 0 ..< client.pending.len:
       if client.pending[i].message.sequence == message.sequence:
-        client.pending.delete(i)
+        if message.tick <= client.applied:
+          client.pending.delete(i)
+        else:
+          # The relay reserved a tick but may still be collecting commands.
+          # Keep this seat pending until the authoritative echo arrives.
+          client.pending[i].sent = true
         break
   of CaughtUp:
     if message.match != client.match:

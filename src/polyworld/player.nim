@@ -7,7 +7,7 @@
 import
   std/times,
   chroma, pixie, silky, vmath, windy,
-  actioncam, chrome, gameuis, inputs, stackpanels
+  actioncam, chrome, displays, gameuis, inputs, stackpanels
 
 const
   TransportHeight* = 80.0'f32
@@ -25,7 +25,8 @@ const
   TransportControlsWidth =
     12 + (IconSize + IconGap) * 10 + (GroupGap - IconGap) * 3
   TransportMinWidth* =
-    TransportControlsWidth + 80 + GroupGap + IconSize + 16 + TickLabelW
+    TransportControlsWidth + 80 + GroupGap + IconSize * 2 + IconGap +
+      16 + TickLabelW
   SpeedIcons = ["speed_1x", "speed_2x", "speed_4x", "speed_16x"]
   GlyphColor = rgbx(226, 230, 239, 255)
   GlyphActive = rgbx(235, 216, 154, 255)
@@ -36,16 +37,18 @@ type
     controls*: array[5, GameUiPanel]
     loop*: GameUiPanel
     speeds*: array[4, GameUiPanel]
-    scrub*, recorded*, scrubHit*, camera*, stats*, tick*: GameUiPanel
+    scrub*, recorded*, scrubHit*, camera*, fullscreen*, stats*, tick*: GameUiPanel
 
   Player* = object
     playing*: bool
     repeating*: bool
     speedIndex*: int
     live*: bool
+    streamed*: bool
+      ## Received ticks bound playback/seeks; an empty live buffer waits.
     tick*: int32
     recordedTicks*: int32
-      ## How far the in-memory tape has been simulated.
+      ## Simulated tape extent, or contiguous received extent for streams.
     durationTicks*: int32
       ## Configured match length. Live scrubber uses this until the game ends.
     over*: bool
@@ -85,15 +88,13 @@ proc initPlayer*(
     durationTicks: int32,
     playing = true,
     speed = 1'i32,
-    repeating = false
+    repeating = not live
 ): Player =
-  ## Creates a transport that starts in play unless asked to pause.
+  ## Starts in play; recorded transports loop unless asked otherwise.
   result.live = live
   result.durationTicks = max(durationTicks, 0)
   result.playing = playing
   result.repeating = repeating
-  when defined(replayViewer):
-    result.repeating = repeating or not live
   result.speedIndex = speedIndexOf(speed)
   result.restoreTick = -1
   result.targetTick = -1
@@ -120,7 +121,8 @@ proc seekTo*(player: var Player, tick: int32, play = true,
   ## then resimulate up to it.
   inc player.seekSerial
   player.automaticSeek = automatic
-  let wanted = clamp(tick, 0'i32, player.timelineEnd)
+  let wanted = clamp(tick, 0'i32,
+    if player.streamed: player.recordedTicks else: player.timelineEnd)
   if wanted < player.tick:
     player.restoreTick = wanted
   player.targetTick = wanted
@@ -133,7 +135,7 @@ proc skipToStart*(player: var Player) =
 
 proc skipToEnd*(player: var Player) =
   ## Jumps to the last timeline tick.
-  player.seekTo(player.timelineEnd)
+  player.seekTo(if player.streamed: player.recordedTicks else: player.timelineEnd)
 
 proc stepBack*(player: var Player) =
   ## Pauses and moves exactly one tick backward.
@@ -155,7 +157,7 @@ proc pause*(player: var Player) =
 
 proc play*(player: var Player) =
   ## Starts playback, rewinding first when already at the end.
-  if player.tick >= player.timelineEnd and player.timelineEnd > 0:
+  if not player.streamed and player.tick >= player.timelineEnd and player.timelineEnd > 0:
     player.seekTo(0)
   else:
     player.playing = true
@@ -202,8 +204,14 @@ proc shouldTick*(
 ): bool =
   ## Returns whether one more simulation tick belongs in this frame.
   ## Paused seeks run until they land so single-tick steps stay exact.
+  if player.streamed and player.tick >= player.recordedTicks:
+    player.accumulator = 0
+    if player.targetTick <= player.tick:
+      player.targetTick = -1
+    if not player.over:
+      return false
   if player.reachedEnd:
-    if player.repeating:
+    if player.repeating and player.timelineEnd > 0:
       player.seekTo(0, automatic = true)
       return false
     player.playing = false
@@ -222,10 +230,12 @@ proc shouldTick*(
     return true
   false
 
-proc transportPanels*(panel: GameUiPanel, showStats = false): TransportPanels =
+proc transportPanels*(panel: GameUiPanel, showStats = false,
+    tickLabelW = TickLabelW): TransportPanels =
   ## Reserves fixed controls at both ends, then fills the timeline between.
   var trailing = panel.stack(RightToLeft, vec2(0, IconY))
-  let tick = trailing.takeColumn(TickLabelW, 16)
+  let tick = trailing.takeColumn(tickLabelW, 16)
+  result.fullscreen = trailing.take(vec2(IconSize), IconGap)
   result.camera = trailing.take(vec2(IconSize), GroupGap)
   if showStats:
     result.stats = trailing.take(vec2(IconSize), IconGap)
@@ -250,7 +260,7 @@ proc transportPanels*(panel: GameUiPanel, showStats = false): TransportPanels =
   )
   var label = tick.stack(TopToBottom)
   label.gap((IconSize - clusterH) * 0.5'f)
-  result.tick = label.take(vec2(TickLabelW - 12, clusterH))
+  result.tick = label.take(vec2(tickLabelW - 12, clusterH))
 
 proc drawGlyph(
     sk: Silky,
@@ -299,6 +309,33 @@ proc clicked(
     else: window.buttonPressed[MouseLeft]
   pressed and panel.contains(sk.mousePos)
 
+proc drawFullscreen(sk: Silky, panel: GameUiPanel, active: bool) =
+  ## Draws expanding or contracting corners without an extra atlas asset.
+  let
+    color = if active: GlyphActive else: GlyphColor
+    inset = 14.0'f
+    length = 14.0'f
+    thickness = 4.0'f
+  for y in 0 .. 1:
+    for x in 0 .. 1:
+      let
+        corner = panel.origin + vec2(
+          if x == 0: inset else: panel.size.x - inset - length,
+          if y == 0: inset else: panel.size.y - inset - length
+        )
+        right = (x == 1) xor active
+        bottom = (y == 1) xor active
+      sk.drawRect(
+        corner + vec2(0, if bottom: length - thickness else: 0),
+        vec2(length, thickness),
+        color
+      )
+      sk.drawRect(
+        corner + vec2(if right: length - thickness else: 0, 0),
+        vec2(thickness, length),
+        color
+      )
+
 proc drawTransport*(
     player: var Player,
     sk: Silky,
@@ -312,8 +349,16 @@ proc drawTransport*(
   ## Draws the shared play/replay bar and applies clicks.
   sk.drawRibbon(panel)
   let playing = player.playing or player.targetTick >= 0
+  # Size the tick label for the widest one this timeline can show, so a
+  # large Hud font widens its column instead of clipping it.
+  hudScratch.setLen(0)
+  hudScratch.add "Tick "
+  hudScratch.addHudInt(player.timelineEnd.int)
+  hudScratch.add " / "
+  hudScratch.addHudInt(player.timelineEnd.int)
+  let tickLabelW = max(TickLabelW, sk.getTextSize("Hud", hudScratch).x + 16)
   let
-    slots = panel.transportPanels(statsToggle != nil)
+    slots = panel.transportPanels(statsToggle != nil, tickLabelW)
     skipStart = slots.controls[0]
     stepBackBtn = slots.controls[1]
     playBtn = slots.controls[2]
@@ -386,6 +431,13 @@ proc drawTransport*(
   sk.drawIcon(actionBtn, "action_cam", actionCam.enabled)
   if window.clicked(sk, actionBtn, keyboardAliases):
     actionCam.toggle(followSelection)
+  let fullscreen = window.isFullscreen
+  sk.drawFullscreen(slots.fullscreen, fullscreen)
+  if window.clicked(sk, slots.fullscreen, keyboardAliases):
+    window.setFullscreen(not fullscreen)
+  if slots.fullscreen.contains(sk.mousePos):
+    sk.tooltipAnchor = rect(slots.fullscreen.origin, slots.fullscreen.size)
+    tooltip (if fullscreen: "Exit fullscreen" else: "Enter fullscreen")
   hudScratch.setLen(0)
   hudScratch.add "Tick "
   hudScratch.addHudInt(player.tick.int)

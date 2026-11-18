@@ -2,7 +2,7 @@ import
   std/[json, monotimes, net, os, strutils, tempfiles, times],
   bassy, fixxy,
   polyworld/[cli, llms, mailboxes, oracles, timings],
-  ../examples/gods_of_the_arena/[bots, maps, replays, sim]
+  ../games/gods_of_the_arena/[bots, maps, replays, sim]
 
 const
   JevRequest = staticRead("fixtures/jev_request.bas")
@@ -138,6 +138,7 @@ block:
   doAssert llmConfig().baseUrl == "https://openrouter.ai/api"
   for endpoint in [
     "https://openrouter.ai/api", "https://OPENROUTER.AI:443/api/",
+    "https://api.openai.com", "https://API.OPENAI.COM:443/",
     "http://localhost:9100", "https://localhost:9100/api",
     "http://127.0.0.1:12345", "http://[::1]:9100"
   ]:
@@ -154,6 +155,8 @@ block:
   delEnv("COWORLD_LLM_MODEL")
   for endpoint in [
     "https://example.com/api", "https://openrouter.ai.evil.test/api",
+    "https://api.openai.com.evil.test", "http://api.openai.com",
+    "https://api.openai.com:8443", "https://api.openai.com/v1",
     "https://evilopenrouter.ai/api", "https://localhost.evil.test",
     "http://openrouter.ai/api", "https://openrouter.ai:8443/api",
     "https://openrouter.ai/other", "https://user@openrouter.ai/api",
@@ -235,7 +238,7 @@ block:
   var chatHost = initHost()
   chatClient.addFunctions(chatHost)
   let chatSource = readFile(
-    currentSourcePath().parentDir / "../examples/inference/chat.bas"
+    currentSourcePath().parentDir / "../games/inference/chat.bas"
   )
   var chatRuntime = initRuntime(compile(chatSource, chatHost), chatHost)
   chatClient.bindRuntime(chatRuntime)
@@ -255,7 +258,7 @@ block:
       directory = createTempDir("polyworld-mailbox-llm-", "")
       idle = directory / "idle.bas"
       responder = currentSourcePath().parentDir /
-        "../examples/inference/mailbox_llm.bas"
+        "../games/inference/mailbox_llm.bas"
       settings = [
         ("COWORLD_LLM_ENDPOINT", config.baseUrl),
         ("COGAME_LLM", "on"),
@@ -487,7 +490,7 @@ end if
         else:
           delEnv(name)
     let
-      root = currentSourcePath().parentDir / "../examples/gods_of_the_arena"
+      root = currentSourcePath().parentDir / "../games/gods_of_the_arena"
       game = newGame(generateMap(54), 240, 10, false, ReplayData(),
         drafting = false)
     game.recorder = initReplayRecorder(game.currentSetup(16000), game.map.preset)
@@ -553,6 +556,8 @@ end if
   let
     first = newLlmClient(0, config)
     second = newLlmClient(1, config)
+  # Distinct origins keep PIPEWAIT connection reuse out of the barrier test.
+  second.config.baseUrl = "http://localhost:" & $port
   first.beginTick(10)
   second.beginTick(10)
   let
@@ -635,7 +640,7 @@ block:
   scriptClient.addFunctions(host)
   for name in ["chat", "jev", "request"]:
     let source = readFile(currentSourcePath().parentDir /
-      "../examples/inference" / (name & ".bas"))
+      "../games/inference" / (name & ".bas"))
     discard compile(source, host)
 
 echo "Testing wall-clock pacing and unlimited speed"

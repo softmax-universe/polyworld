@@ -1,0 +1,336 @@
+import
+  std/[options, sequtils, strutils],
+  ../src/core/[bots, match, replays, sim]
+
+const
+  ArcherBot = staticRead("../players/archer.bas")
+  WarriorBot = staticRead("../players/warrior.bas")
+  MageBot = staticRead("../players/mage.bas")
+  ArcherWarriorBot = staticRead("../players/archer_warrior.bas")
+  ReferenceBots = [ArcherBot, WarriorBot, MageBot, ArcherWarriorBot]
+
+proc fixture(seed: int64): BotMatch =
+  ## Gives the reference script a deterministic four-seat test match.
+  result = initBotMatch(@[Mage, Mage, Mage, Mage], seed,
+    loadBots(newSeqWith(4, ArcherBot)), 28_800)
+  result.game.currentPlayer = 0
+  result.game.players[0].hand.setLen(0)
+  result.game.players[0].energy = 9
+  result.game.players[0].totalEnergy = 9
+
+proc ready(owner, id: int, name: string): MinionState =
+  ## Creates a ready permanent with its printed stats.
+  let card = baseCardNamed(name)
+  MinionState(owner: owner, id: id, card: card,
+    currentToughness: (if card.kind == Minion: card.toughness else: 0),
+    canAttack: true)
+
+echo "The reference players list legal decks: the precons and a multiclass one"
+block:
+  let seats = loadBots(ReferenceBots).setupBotSeats()
+  doAssert seats[0] == precon(Archer)
+  doAssert seats[1] == precon(Warrior)
+  doAssert seats[2] == precon(Mage)
+  doAssert seats[3].heroClass == Archer
+  for seat in seats:
+    doAssert seat.deck.deckProblems.len == 0
+  let splash = seats[3].deck.buildDeck()
+  doAssert splash.anyIt(it.class == some(Warrior))
+  doAssert splash.anyIt(it.levelUpClass == some(Warrior))
+
+echo "The reference players play alike and differ only in their setup"
+block:
+  proc play(source: string): string =
+    ## The script without its title and its setup.
+    let
+      start = source.find("IF selectingClass THEN")
+      finish = source.find("END IF\n", start) + "END IF\n".len
+    source[source.find("'\n") ..< start] & source[finish .. ^1]
+  for bot in ReferenceBots:
+    doAssert bot.play == ArcherBot.play
+
+echo "The reference script takes the swing worth the most"
+block:
+  # A Ranged 3/1 takes no damage back from a Bear, so it kills one, and
+  # takes it from the next living player.
+  for seed in 0 ..< 16:
+    var played = fixture(seed)
+    played.game.players[0].board = @[ready(0, 1, "Sharpshooter")]
+    for player in 1 .. 3:
+      played.game.players[player].board = @[ready(player, player + 1, "Bear")]
+    played.game.nextMinionId = 5
+    doAssert played.step()
+    let action = played.bots[0].action
+    doAssert action.kind == ActionAttack
+    let target = action.choices[0].toChoice
+    doAssert target.kind == CreatureChoice
+    doAssert target.owner == 1
+block:
+  # A 10/10 is worth more aimed at a hero than spent on a 1/2.
+  var played = fixture(7)
+  played.game.players[0].board = @[ready(0, 1, "Primordial")]
+  played.game.players[1].board = @[ready(1, 2, "Footsoldier")]
+  played.game.nextMinionId = 3
+  doAssert played.step()
+  let target = played.bots[0].action.choices[0].toChoice
+  doAssert target.kind == HeroChoice
+  doAssert target.owner == 1
+
+echo "The reference script reaches every opponent's minions and heroes"
+block:
+  # With the next player's board empty, the others are still attacked, and
+  # equal targets are picked at random.
+  var owners: set[range[1 .. 3]]
+  for seed in 0 ..< 16:
+    var played = fixture(seed)
+    played.game.players[0].board = @[ready(0, 1, "Sharpshooter")]
+    for player in 2 .. 3:
+      played.game.players[player].board = @[ready(player, player + 1, "Bear")]
+    played.game.nextMinionId = 5
+    doAssert played.step()
+    let target = played.bots[0].action.choices[0].toChoice
+    doAssert target.kind == CreatureChoice
+    owners.incl target.owner
+  doAssert owners == {2, 3}
+block:
+  # Nothing to kill: it swings at the next living player's hero.
+  var played = fixture(5)
+  played.game.players[0].board = @[ready(0, 1, "Primordial")]
+  played.game.nextMinionId = 2
+  doAssert played.step()
+  let target = played.bots[0].action.choices[0].toChoice
+  doAssert target.kind == HeroChoice
+  doAssert target.owner == 1
+
+echo "The reference script plays cards, chooses targets, and ends explicitly"
+block:
+  var played = fixture(1)
+  played.game.players[0].hand = @[baseCardNamed("Ooze")]
+  doAssert played.step()
+  doAssert played.bots[0].action.kind == ActionPlayCard
+  doAssert played.step()
+  doAssert played.bots[0].action.kind == ActionEndTurn
+block:
+  # Alone, a Bouncer enters play and declines to bounce itself.
+  for seed in 0 ..< 16:
+    var played = fixture(seed)
+    played.game.players[0].hand = @[baseCardNamed("Bouncer")]
+    doAssert played.step()
+    doAssert played.bots[0].action.kind == ActionPlayCard
+    doAssert played.game.players[0].board.len == 1
+block:
+  var played = fixture(3)
+  played.game.players[0].hand = @[baseCardNamed("Duel")]
+  played.game.players[0].board = @[ready(0, 1, "Bear")]
+  played.game.players[0].board[0].canAttack = false
+  played.game.players[2].board = @[ready(2, 2, "Bear")]
+  played.game.nextMinionId = 3
+  doAssert played.step()
+  doAssert played.bots[0].action.kind == ActionPlayCard
+  doAssert played.bots[0].action.choices.len == 2
+
+echo "The reference script never turns a card on its own side for nothing"
+block:
+  # With no enemy minion, removal, damage and weakening stay in hand or
+  # enter play doing nothing, whatever the seed.
+  for seed in 0 ..< 16:
+    for name in ["Oozification", "Overcharge", "Assassin", "Tactician"]:
+      var played = fixture(seed)
+      played.game.players[0].hand = @[baseCardNamed(name)]
+      played.game.players[0].board = @[ready(0, 1, "Bear")]
+      played.game.players[0].board[0].canAttack = false
+      played.game.nextMinionId = 2
+      while played.game.currentPlayer == 0 and played.step():
+        discard
+      let board = played.game.players[0].board
+      doAssert board.len >= 1 and board[0].id == 1, name
+      doAssert board[0].currentToughness == board[0].card.toughness, name
+      doAssert board[0].bonusPower == 0, name
+block:
+  # Duel never makes your own minions fight each other.
+  for seed in 0 ..< 16:
+    var played = fixture(seed)
+    played.game.players[0].hand = @[baseCardNamed("Duel")]
+    played.game.players[0].board = @[ready(0, 1, "Bear"),
+      ready(0, 2, "Footsoldier")]
+    for minion in played.game.players[0].board.mitems:
+      minion.canAttack = false
+    played.game.nextMinionId = 3
+    doAssert played.step()
+    doAssert played.bots[0].action.kind == ActionEndTurn
+block:
+  # Explode's friendly minion is its cost: with no enemy minion it still
+  # destroys one of yours to hit a hero.
+  var played = fixture(7)
+  played.game.players[0].hand = @[baseCardNamed("Explode")]
+  played.game.players[0].board = @[ready(0, 1, "Bear")]
+  played.game.players[0].board[0].canAttack = false
+  played.game.nextMinionId = 2
+  doAssert played.step()
+  let action = played.bots[0].action
+  doAssert action.kind == ActionPlayCard
+  doAssert action.choices[0].toChoice == creatureChoice(0, 1)
+  doAssert action.choices[1].toChoice.kind == HeroChoice
+  doAssert action.choices[1].toChoice.owner != 0
+
+echo "The reference script aims at what each card does"
+block:
+  # One damage kills the Sniper, so it goes there and not at the Bear.
+  var played = fixture(11)
+  played.game.players[0].hand = @[baseCardNamed("Sharpshooter")]
+  played.game.players[1].board = @[ready(1, 1, "Bear"), ready(1, 2, "Sniper")]
+  played.game.nextMinionId = 3
+  doAssert played.step()
+  let action = played.bots[0].action
+  doAssert action.kind == ActionPlayCard
+  doAssert action.choices[0].toChoice == creatureChoice(1, 2)
+block:
+  # Duel buffs your biggest body and strips Ranged from a minion that has it.
+  var played = fixture(12)
+  played.game.players[0].hand = @[baseCardNamed("Duel")]
+  played.game.players[0].board = @[ready(0, 1, "Footsoldier"), ready(0, 2, "Bear")]
+  played.game.players[1].board = @[ready(1, 3, "Bear"), ready(1, 4, "Sniper")]
+  played.game.nextMinionId = 5
+  doAssert played.step()
+  let action = played.bots[0].action
+  doAssert action.kind == ActionPlayCard
+  doAssert action.choices.len == 2
+  doAssert action.choices[0].toChoice == creatureChoice(0, 2)
+  doAssert action.choices[1].toChoice == creatureChoice(1, 4)
+block:
+  # A bounce takes their biggest threat, not the smallest.
+  var played = fixture(13)
+  played.game.players[0].hand = @[baseCardNamed("Bouncer")]
+  played.game.players[1].board = @[ready(1, 1, "Footsoldier"), ready(1, 2, "Bear")]
+  played.game.nextMinionId = 3
+  doAssert played.step()
+  let action = played.bots[0].action
+  doAssert action.kind == ActionPlayCard
+  doAssert action.choices[0].toChoice == creatureChoice(1, 2)
+
+echo "The reference script answers a trigger that offers a choice"
+block:
+  # The branch worth more comes first, then that branch's own target: with
+  # a stale count the script would answer the option alone.
+  let fickle = Card(name: "Fickle", energyCost: 0, kind: Trinket,
+    class: some(Mage), rules: rules(on(eachTurn(You),
+      choose(rules(draw(1)), rules(damage(3, target({kind: {Minion}})))))))
+  var played = fixture(31)
+  played.game.players[2].board = @[MinionState(id: 1, owner: 2, card: fickle)]
+  # The first candidate is a cheap body; the Bear further down is the one
+  # worth burning, so an answer taken from an unwritten slot shows up.
+  played.game.players[0].board = @[ready(0, 2, "Footsoldier")]
+  played.game.players[3].board = @[ready(3, 3, "Bear")]
+  played.game.pendingTriggers = @[
+    PendingTrigger(owner: 2, sourceId: 1, trigger: 0)]
+  played.game.nextMinionId = 4
+  doAssert played.step()
+  let action = played.bots[2].action
+  doAssert action.kind == ActionResolveTrigger
+  doAssert action.choices.len == 2
+  doAssert action.choices[0].toChoice == optionChoice(1)
+  doAssert action.choices[1].toChoice == creatureChoice(3, 3)
+  doAssert not played.game.waitingTrigger
+
+echo "The reference script picks the option it is better off with"
+block:
+  # 6 damage for 3 of its own is worse than 2 for nothing.
+  var played = fixture(21)
+  played.game.players[0].hand = @[baseCardNamed("Overcharge")]
+  played.game.players[1].board = @[ready(1, 1, "Bear")]
+  played.game.nextMinionId = 2
+  doAssert played.step()
+  let action = played.bots[0].action
+  doAssert action.kind == ActionPlayCard
+  doAssert action.choices.len == 2
+  doAssert action.choices[0].toChoice == optionChoice(0)
+  doAssert action.choices[1].toChoice == creatureChoice(1, 1)
+block:
+  # With a branch that costs nothing, it takes the bigger one.
+  var played = fixture(22)
+  played.game.players[0].hand = @[Card(name: "Pick", energyCost: 0,
+    kind: Spell, class: some(Mage), rules: rules(choose(
+      rules(damage(1, target({kind: {Minion}}))),
+      rules(damage(4, target({kind: {Minion}}))))))]
+  played.game.players[1].board = @[ready(1, 1, "Bear")]
+  played.game.nextMinionId = 2
+  doAssert played.step()
+  let action = played.bots[0].action
+  doAssert action.kind == ActionPlayCard
+  doAssert action.choices[0].toChoice == optionChoice(1)
+
+echo "The reference script takes control of the biggest threat"
+block:
+  var played = fixture(16)
+  played.game.players[0].hand = @[baseCardNamed("Control")]
+  played.game.players[1].board = @[ready(1, 1, "Footsoldier"), ready(1, 2, "Bear")]
+  played.game.nextMinionId = 3
+  doAssert played.step()
+  let action = played.bots[0].action
+  doAssert action.kind == ActionPlayCard
+  doAssert action.choices[0].toChoice == creatureChoice(1, 2)
+  doAssert played.game.players[0].board[^1].id == 2
+
+echo "The reference script discards what it can use least"
+block:
+  # Eight energy away, Summon Primordial is dead weight and goes first.
+  var played = fixture(14)
+  played.game.players[0].energy = 2
+  played.game.players[0].totalEnergy = 2
+  played.game.players[0].hand = @[baseCardNamed("Bouncer"),
+    baseCardNamed("Summon Primordial"), baseCardNamed("Bear")]
+  played.game.pendingToss = PendingToss(player: 0, count: 1)
+  doAssert played.step()
+  doAssert played.bots[0].action.kind == ActionToss
+  doAssert played.bots[0].action.indices == @[1'i32]
+block:
+  # With the energy to cast everything, the weakest body goes instead.
+  var played = fixture(15)
+  played.game.players[0].energy = 10
+  played.game.players[0].totalEnergy = 10
+  played.game.players[0].hand = @[baseCardNamed("Bouncer"),
+    baseCardNamed("Summon Primordial"), baseCardNamed("Bear")]
+  played.game.pendingToss = PendingToss(player: 0, count: 1)
+  doAssert played.step()
+  doAssert played.bots[0].action.kind == ActionToss
+  doAssert played.bots[0].action.indices == @[0'i32]
+
+echo "The reference script chooses discards and off-turn trigger targets"
+block:
+  var played = fixture(6)
+  played.game.players[2].hand = @[
+    baseCardNamed("Bouncer"), baseCardNamed("Ooze"), baseCardNamed("Primordial")]
+  played.game.pendingToss = PendingToss(player: 2, count: 2)
+  doAssert played.step()
+  doAssert played.bots[2].action.kind == ActionToss
+  doAssert played.bots[2].action.indices.len == 2
+  doAssert played.bots[2].action.indices[0] != played.bots[2].action.indices[1]
+block:
+  var played = fixture(9)
+  let snare = Card(name: "Snare", kind: Trinket, class: some(Mage),
+    rules: rules(on(nextTurn(You), damage(1, target({kind: {Minion}})))))
+  played.game.players[2].board = @[
+    MinionState(id: 1, owner: 2, card: snare)]
+  played.game.players[0].board = @[ready(0, 2, "Bear")]
+  played.game.pendingTriggers = @[
+    PendingTrigger(owner: 2, sourceId: 1, trigger: 0)]
+  played.game.nextMinionId = 3
+  doAssert played.step()
+  doAssert played.bots[2].action.kind == ActionResolveTrigger
+  doAssert not played.game.waitingTrigger
+block:
+  # A trigger aims like a card: its one damage goes where it kills.
+  var played = fixture(10)
+  let snare = Card(name: "Snare", kind: Trinket, class: some(Mage),
+    rules: rules(on(nextTurn(You), damage(1, target({kind: {Minion}})))))
+  played.game.players[2].board = @[MinionState(id: 1, owner: 2, card: snare)]
+  played.game.players[0].board = @[ready(0, 2, "Bear"), ready(0, 3, "Sniper")]
+  played.game.pendingTriggers = @[
+    PendingTrigger(owner: 2, sourceId: 1, trigger: 0)]
+  played.game.nextMinionId = 4
+  doAssert played.step()
+  let action = played.bots[2].action
+  doAssert action.kind == ActionResolveTrigger
+  doAssert action.choices[0].toChoice == creatureChoice(0, 3)
+
+echo "Reference policy action coverage passed"

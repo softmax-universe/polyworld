@@ -1,0 +1,15 @@
+Hint: used config file '/Users/me/.nimby/nim/config/nim.cfg' [Conf]
+Hint: used config file '/Users/me/.nimby/nim/config/config.nims' [Conf]
+Hint: used config file '/Users/me/p/nim.cfg' [Conf]
+Hint: used config file '/Users/me/p/polyworld/config.nims' [Conf]
+Hint: used config file '/Users/me/p/polyworld/games/gods_of_the_arena/config.nims' [Conf]
+...................................................................................................................................................................................................................................
+/Users/me/p/windy/src/windy/platforms/macos/platform.nim(14, 9) Hint: Using OpenGL backend [User]
+..............................................................................
+/Users/me/p/polyworld/games/gods_of_the_arena/sim.nim(1911, 6) Hint: 'currentWaypointLayer' is declared but not used [XDeclaredButNotUsed]
+/Users/me/p/polyworld/games/gods_of_the_arena/sim.nim(5977, 6) Hint: 'settleSurface' is declared but not used [XDeclaredButNotUsed]
+.
+/Users/me/p/polyworld/games/gods_of_the_arena/pointers.nim(3, 24) Hint: duplicate import of 'rtscameras'; previous import here: /Users/me/p/polyworld/games/gods_of_the_arena/tests/test_pointers.nim(5, 13) [DuplicateModuleImport]
+/Users/me/p/windy/src/windy/platforms/macos/objc.nim(159, 14) Hint: 'addProtocol' is declared but not used [XDeclaredButNotUsed]
+Hint: 
+220563 lines; 2.392s; 657.621MiB peakmem; proj: /Users/me/p/polyworld/games/gods_of_the_arena/tests/test_pointers.nim; out: unknownOutput [SuccessX]

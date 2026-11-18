@@ -136,6 +136,35 @@ block:
   doAssert ribbon.stats.origin.x + 64 <= ribbon.camera.origin.x
   doAssert ribbon.scrub.size.x > 0
 
+echo "Testing scoreboard headline, kills and column headings use separate rows"
+block:
+  var table = StatsTable(kind: GotaStats)
+  for slot in 0 ..< 10:
+    table.rows.add StatsRow(slot: slot, team: slot div 5)
+  for size in [vec2(800, 600), vec2(1280, 720), vec2(1920, 1080)]:
+    let layout = initGameUiLayout(size, TransportHeight)
+    for kind in StatsKind:
+      table.kind = kind
+      for options in [StatsOptions(),
+        StatsOptions(headline: "TIME REMAINING", headlineSuffix: "  12:34"),
+        StatsOptions(statusText: "Match finished"),
+        StatsOptions(headline: "Results", statusText: "Match finished")]:
+          let
+            slots = statsLayout(layout, table, options)
+            rows = [slots.headline, slots.kills, slots.status,
+              slots.header, slots.body]
+          for index in 1 ..< rows.len:
+            doAssert rows[index - 1].origin.y + rows[index - 1].size.y <=
+              rows[index].origin.y,
+              "Scoreboard header content must not share vertical space"
+          doAssert slots.kills.size.y ==
+            (if kind == GotaStats: StatsKillsHeight else: 0.0'f)
+          doAssert slots.body.origin.y + slots.body.size.y <=
+            slots.panel.origin.y + slots.panel.size.y - StatsPadding
+          doAssert slots.panel.origin.y >= 0
+          if options.headline.len == 0:
+            doAssert slots.kills.origin.y == slots.panel.origin.y + StatsPadding
+
 echo "Testing bounded sparklines preserve spikes and flat values"
 block:
   let panel = GameUiPanel(origin: vec2(10, 20), size: vec2(20, 40))

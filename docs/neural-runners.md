@@ -73,21 +73,25 @@ No common neural manifest is required. Architectures define their own binary
 formats, and unused auxiliary files remain read-only resources.
 
 Zippy reads the archive and returns the BASIC entry and binary resources as
-strings. Uploads are limited to 16 MiB and packages to 256 files. The loader
+strings. Uploads are limited to 16 MiB and packages to 256 files. Decoded
+source, resource contents, resource names and accounting overhead share a
+64 MiB package budget. Each extraction receives the remaining budget and
+rejects excess output during decompression, even with false ZIP size fields.
+This bounds retained package data, not total process memory. The loader
 requires one BASIC file and canonical resource paths. ZIP decoding, compression
 support and checksum checks belong to Zippy, including stored, deflated and
 ZIP64 archives. Polyworld does not implement ZIP parsing or decompression.
 
 After unpacking, the VM compiler applies its existing BASIC source limit.
-Native model and buffer limits apply when the neural runner is used. There is
-no separate expanded-size limit in the ZIP decoder. The current Zippy reader
+Native model and buffer limits apply when the neural runner is used.
+The current Zippy reader
 requires a filename, so byte uploads temporarily stage the compressed archive;
 entry contents stay in memory, and the temporary ZIP is removed after reading.
 Errors use `PolicyError`, `BasicError` or `NeuralError` and reach the existing
 per-player failure reporting.
 
 Runnable synthetic ZIPs are included under
-`examples/gods_of_the_arena/neural/examples/` as `synthetic-richard.zip`,
+`games/gods_of_the_arena/neural/examples/` as `synthetic-richard.zip`,
 `synthetic-david.zip`, `synthetic-andre.zip` and `synthetic-fly.zip`. Their names identify the runner
 being tested. Their weights are deterministic test matrices, mostly zeros with
 a few hand-set coefficients. They contain no trained weights or submitted
@@ -95,13 +99,13 @@ player policies. Regenerate copies locally:
 
 ```sh
 nim r tools/gen_neural_examples.nim
-nim c -d:headless -o:tmp/gota examples/gods_of_the_arena/gota.nim
+nim c -d:headless -o:tmp/gota games/gods_of_the_arena/gota.nim
 tmp/gota --bot tmp/neural-examples/synthetic-richard.zip:5 \
   --bot tmp/neural-examples/synthetic-david.zip:5 --ticks 240
 ```
 
 The readable BASIC examples are under
-`examples/gods_of_the_arena/neural/policies/`. These are reusable BASIC glue
+`games/gods_of_the_arena/neural/policies/`. These are reusable BASIC glue
 and examples written for this API. Downloaded and converted player policies
 and trained weights stay in ignored `tmp/` for local validation.
 
@@ -130,7 +134,7 @@ The converter recognizes the reviewed integer and residual inference blocks,
 exports only their coefficients and replaces those blocks with host calls:
 
 ```sh
-python3 examples/gods_of_the_arena/tools/convert_richard.py \
+python3 games/gods_of_the_arena/tools/convert_richard.py \
   private-policy.bas private-policy.zip
 ```
 
@@ -190,7 +194,7 @@ Convert the legacy package by translating its cadence, goal and decoder settings
 into BASIC, preserving the original BASIC draft/shop logic and unchanged model:
 
 ```sh
-python3 examples/gods_of_the_arena/tools/convert_david.py \
+python3 games/gods_of_the_arena/tools/convert_david.py \
   private-legacy.zip private-policy.zip
 ```
 
@@ -249,7 +253,7 @@ uses the same unscaled Q16.16 conversion as the logits.
 Convert a private hero policy and checkpoint with:
 
 ```sh
-python3 examples/gods_of_the_arena/tools/convert_andre.py \
+python3 games/gods_of_the_arena/tools/convert_andre.py \
   private-hero.bas private-weights.bin tmp/andre.zip
 ```
 
@@ -336,7 +340,7 @@ accept Q16.16 values or integers within that range and each cost one work unit.
 
 ## Adding an architecture
 
-1. Submit an approved Nim patch under `examples/gods_of_the_arena/neural/`.
+1. Submit an approved Nim patch under `games/gods_of_the_arena/neural/`.
    Use a flat model object, an explicit byte parser and free inference procedures.
 2. Keep package loading in `src/polyworld/policies.nim`. Resolve resources through
    `NeuralContext.modelBytes`; never open arbitrary paths inside a runner.
@@ -351,8 +355,8 @@ accept Q16.16 values or integers within that range and each cost one work unit.
 ## Validation
 
 Run `nim check tests/tests.nim`, `nim r tests/tests.nim`, and
-`nim r tests/bench_gota_neural.nim`. Converter fixtures run with
-`python tests/test_neural_converters.py`. Coworld integration tests are in
+`nim r games/gods_of_the_arena/tests/bench_neural.nim`. Converter fixtures run with
+`python games/gods_of_the_arena/tests/test_neural_converters.py`. Coworld integration tests are in
 `coworld/tools/test_runtime.nim` and require the native game binaries in
 `tmp/coworld/`. For local development with an uninstalled companion Bassy checkout,
 set `BASSY_PATH=/absolute/path/to/bassy/src`.

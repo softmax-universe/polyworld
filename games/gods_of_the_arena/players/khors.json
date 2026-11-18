@@ -1,0 +1,11 @@
+{
+  "name": "Khors",
+  "author": "Andre von Auto",
+  "policy": "khors:v290",
+  "source": "https://github.com/treeform/andre_von_auto/blob/7d32d2a06749f95cabd2bbe33c3b7cad869a402a/games/gods-of-the-arena/khors/agents/a4/a4_forward.bas",
+  "submittedFile": "a4_forward.bas",
+  "sitePolicyId": 78,
+  "leagueId": "league_3c60897b-25cf-4b37-9d1a-8554c1198f28",
+  "verifiedChampionOn": "2026-11-13",
+  "sha256": "67d1c2436e363f308cb111e8ea5f2d3181ee7047d9a2d664fcaae1f45cea02bd"
+}

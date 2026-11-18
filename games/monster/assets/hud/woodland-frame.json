@@ -1,0 +1,147 @@
+{
+  "version": 1,
+  "image": "woodland-frame.png",
+  "imageSize": [
+    2098,
+    749
+  ],
+  "format": "RGBA PNG",
+  "coordinateOrigin": "top-left",
+  "regionUnits": "source pixels",
+  "scaleMode": "uniform",
+  "anchor": "bottom-center",
+  "regions": {
+    "minimap": [
+      128,
+      248,
+      300,
+      300
+    ],
+    "chatHistory": [
+      500,
+      156,
+      1010,
+      402
+    ],
+    "scrollbar": [
+      1520,
+      170,
+      24,
+      390
+    ],
+    "input": [
+      520,
+      592,
+      870,
+      24
+    ],
+    "send": [
+      1450,
+      594,
+      76,
+      24
+    ],
+    "nameAndEnergyLabel": [
+      1775,
+      207,
+      140,
+      37
+    ],
+    "energyFill": [
+      1775,
+      273,
+      190,
+      12
+    ],
+    "carrying": [
+      1775,
+      304,
+      190,
+      14
+    ],
+    "portrait": {
+      "center": [
+        1667,
+        239
+      ],
+      "radius": 54
+    },
+    "inventory": [
+      {
+        "resource": "berries",
+        "rect": [
+          1627,
+          352,
+          84,
+          86
+        ]
+      },
+      {
+        "resource": "grain",
+        "rect": [
+          1758,
+          352,
+          80,
+          86
+        ]
+      },
+      {
+        "resource": "fish",
+        "rect": [
+          1885,
+          352,
+          82,
+          86
+        ]
+      },
+      {
+        "resource": "pine",
+        "rect": [
+          1627,
+          494,
+          84,
+          92
+        ]
+      },
+      {
+        "resource": "oak",
+        "rect": [
+          1758,
+          494,
+          82,
+          92
+        ]
+      },
+      {
+        "resource": "stone",
+        "rect": [
+          1885,
+          494,
+          82,
+          92
+        ]
+      }
+    ]
+  },
+  "rendering": [
+    "Draw live minimap, portrait, panel backgrounds, and inventory contents beneath this overlay.",
+    "Draw live text and Silky scrollbar using the regions; the PNG contains no text or scrollbar.",
+    "Apply the same uniform scale and screen offset to the image and all regions.",
+    "Regions are conservative content insets, not the outer widget hit areas.",
+    "The joined asymmetric frame is not a single nine-patch.",
+    "Use a separate texture or a sufficiently large atlas: the source image is 2098 pixels wide."
+  ],
+  "companionAssets": {
+    "portrait": "moss-portrait.png",
+    "resources": "resource-icons.png",
+    "resourceGrid": [3, 2],
+    "resourceOrder": ["berries", "grain", "fish", "pine", "oak", "stone"]
+  },
+  "generator": "built-in imagegen",
+  "prompts": [
+    "woodland-frame.prompt.txt",
+    "woodland-frame-cleanup.prompt.txt",
+    "portrait.prompt.txt",
+    "resources.prompt.txt"
+  ]
+}

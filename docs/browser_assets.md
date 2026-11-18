@@ -7,7 +7,7 @@ Native games read the cleared original assets from `../polyworld_art` at their
 original quality. Browser builds use that directory by default, or the directory
 selected by `POLYWORLD_ART`, and mount the result at `/polyworld_art`.
 Clone `Metta-AI/polyworld_art` with Git LFS first. It remains private until the
-owner approves publication. Heartleaf and AWM assets are excluded.
+owner approves publication. Heartleaf and Cards and Casters assets are excluded.
 
 ## GotA asset licenses
 
@@ -109,9 +109,9 @@ Run from the repository root:
 ```sh
 nim check tests/tests.nim
 nim r tests/tests.nim
-nim c -d:emscripten examples/gods_of_the_arena/gota.nim
-nim c -d:emscripten examples/light_vs_dark/lvd.nim
-nim c -d:emscripten examples/call_to_adventure/cta.nim
+nim c -d:emscripten games/gods_of_the_arena/gota.nim
+nim c -d:emscripten games/light_vs_dark/lvd.nim
+nim c -d:emscripten games/call_to_adventure/cta.nim
 nim r tests/manual_assetpacks.nim
 ```
 
@@ -126,6 +126,21 @@ against the original models, including all declared construction and rubble prop
 Add `-d:replayViewer` to each WASM command to build its replay viewer. Replay
 fixtures must match the current game versions. Check full replay playback,
 controls, resizing, and visible errors in the browser.
+
+## Replay downloads
+
+Pages using `src/polyworld/webinputs.js` can set `Module.polyworldMaxReplayBytes`
+before loading the compiled game script. Supply a positive safe integer in bytes
+in the game-owned Emscripten shell or in an earlier pre-JS file. The default is
+64 MiB. The same byte limit applies to the downloaded response body and to a
+gzip replay after decompression. URL parameters cannot change the limit.
+
+For example, add `polyworldMaxReplayBytes: 128 * 1024 * 1024` to the game's
+`Module` object to allow 128 MiB replays.
+
+This limit bounds replay input bytes. It does not impose a server match-duration
+cap. Total browser memory, download time, and the game's replay parser limits
+are separate.
 
 ## PNG comparison
 

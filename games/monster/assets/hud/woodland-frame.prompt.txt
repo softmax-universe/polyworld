@@ -1,0 +1,18 @@
+Use case: background-extraction and precise-object-edit.
+Asset type: production-ready transparent PNG game HUD overlay, not a screenshot or mockup.
+
+The input image is the exact approved woodland HUD to extract. Retain its existing narrow, hand-painted stone, willow-root, aged-brass, leaf, and blue-crystal decoration and its raised central chat silhouette. Keep the same relative proportions and positions of all three sections. This is removal and extraction, not redesign.
+
+Output ONLY the complete decorative HUD frame, tightly framed on a genuinely transparent RGBA background, with roughly 20 pixels of transparent padding around its entire silhouette. Wide horizontal asset, approximately 3.3:1 width to height. All outer frame edges, bottom corners, root tips, and leaves must be visible. Remove the entire landscape above and around the HUD, including every tree, building, person, overhead label, ground texture, and shadow cast onto the game world.
+
+Create real transparent cutout holes, with alpha zero, in ALL areas where the game will draw live content:
+1. LEFT minimap: delete the complete map image, green terrain, river, town labels, blue location marker, and camera rectangle. Preserve only its decorative outer frame. The full inner square must be a clear transparent hole.
+2. CENTRAL conversation: delete ALL dialogue, names, punctuation, and the entire dark grey/black panel backing, producing a large fully transparent conversation opening. DELETE the whole scroll bar, including its thumb, gold track, caps, and any shadow. Do not replace it with a new scrollbar; Silky will render it.
+3. INPUT: delete every placeholder such as "Talk to Moss..." or "Who is there?" and remove the input's interior backing. Preserve its thin brass outline as an empty transparent text-entry frame.
+4. SEND BUTTON: remove the word "Send" and preserve the decorative button border. Make its interior transparent too.
+5. RIGHT creature stats: remove the blue Moss portrait but keep the oval brass portrait rim with a transparent center. Remove "Moss", "Energy 93%", "Carrying 6/6", and any other letters or numbers. Remove the green energy fill and dark bar background; keep only its thin empty decorative border. Remove all grey/black stat-area backing so it becomes transparent.
+6. INVENTORY: preserve all six separate brass square slot frames in the existing 3-column, 2-row layout. Delete ALL berries, grain, fish, logs, stone, captions, quantities, and black backgrounds from their interiors. Every slot center must be truly transparent.
+
+Keep only the decorative border and divider pixels, including the slender lower rim and the small blue crystals. Preserve their crisp illustrated shading, but no broad panel backgrounds, no opaque empty rectangles, no leftover content fragments, no text anywhere. Do not add labels to identify the holes. Do not add extra ornament. Avoid white or black matte fringes: edges should have clean antialiased alpha.
+
+CRITICAL: all outside space AND all listed openings must use genuine PNG transparency, NOT an opaque black/white/grey background and NOT a painted checkerboard. This will be composited over a live game; it must function as a clean frame overlay. Output a single complete overlay asset.

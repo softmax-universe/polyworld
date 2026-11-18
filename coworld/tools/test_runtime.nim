@@ -12,7 +12,7 @@ const
   LogLimit = 10 * 1024 * 1024
   SocketTimeout = 5000
   Games = [("gota", 10), ("lvd", 6), ("cta", 4),
-    ("awm", 2), ("awm", 7)]
+    ("cac", 2), ("cac", 7)]
 
 proc fileUri(path: string): string =
   ## Encodes one absolute path for the runner's local file handoff.
@@ -109,20 +109,29 @@ proc episode(
     expectedOutput = "",
     expectedRuntimeError = "",
     annotations = true,
-    selectClass = true
-) =
+    selectClass = true,
+    seed = 2026,
+    classes: seq[string] = @[]
+): JsonNode {.discardable.} =
   ## Runs one local roster and inspects outputs at the completion marker.
+  ## Returns the results, or the failure marker.
   doAssert scripts.len == count
-  let directory = createTempDir("coworld-" & game & "-", "")
+  let
+    evidenceRoot = getEnv("COWORLD_TEST_ARTIFACTS")
+    directory = createTempDir("coworld-" & game & "-", "",
+      if evidenceRoot.len > 0: evidenceRoot else: getTempDir())
   defer:
-    removeDir(directory)
+    if evidenceRoot.len == 0:
+      removeDir(directory)
+    else:
+      echo "Runtime evidence: ", directory
   let listener = newSocket()
   listener.bindAddr(Port(0), "127.0.0.1")
   let port = listener.getLocalAddr()[1]
   listener.close()
   let
     config = %*{
-      "tokens": [], "players": [], "seed": 2026, "max_ticks": ticks,
+      "tokens": [], "players": [], "seed": seed, "max_ticks": ticks,
       "wait_for_llm": waitForLlm
     }
     seats = newJArray()
@@ -135,14 +144,21 @@ proc episode(
     env[key] = value
   env["COGAME_HOST"] = "127.0.0.1"
   env["COGAME_PORT"] = $port
+  if classes.len > 0:
+    config["classes"] = %classes
   for slot, fixture in scripts:
     let source =
-      if game == "awm" and selectClass:
-        "IF selectingClass THEN\npickClass(selfPlayer MOD 3)\nEND\n" &
-          "END IF\n" &
+      if game == "cac" and selectClass:
+        # A reference player's setup picks the class and deck, then the
+        # fixture, then the reference player's play.
+        let
+          reference = readFile(Root / "games/cac/players" /
+            (if slot mod 2 == 0: "archer.bas" else: "warrior.bas"))
+          setupStart = reference.find("IF selectingClass THEN")
+          setupEnd = reference.find("END IF\n", setupStart) + "END IF\n".len
+        reference[setupStart ..< setupEnd] &
           fixture.splitLines().filterIt(it.strip() != "END").join("\n") &
-          "\n" &
-          readFile(Root / "examples/awm/players/base.bas")
+          "\n" & reference
       else:
         fixture
     let path = directory / ("player-" & $slot)
@@ -204,6 +220,7 @@ proc episode(
       "episode timed out: " & readFile(logPath)
     sleep(20)
   let output = readFile(marker).fromJson(JsonNode)
+  result = output
   doAssert fileExists(directory / "status.json"), "completion preceded status"
   var logs: seq[string]
   for slot in 0 ..< count:
@@ -247,6 +264,9 @@ proc episode(
     doAssert logs[0].contains("BASIC error:")
   else:
     doAssert output["scores"].len == count
+    if game == "cac":
+      doAssert output["seed"].getInt() == seed
+      doAssert output["ticks"].getInt() in 0 .. ticks
     if game == "gota":
       doAssert output["total_xp"].len == count
       for xp in output["total_xp"]:
@@ -256,12 +276,7 @@ proc episode(
           outcome = output["outcome"].getStr
           won = (outcome == "RedTeam" and slot < 5) or
             (outcome == "BlueTeam" and slot >= 5)
-          ticks = output["ticks"].getInt
-          expected =
-            if won and ticks > 0:
-              int(output["total_xp"][slot].getBiggestInt * 1440 div ticks)
-            else:
-              0
+          expected = int(won)
         doAssert score.kind == JInt
         doAssert score.getInt() == expected
     else:
@@ -332,11 +347,26 @@ for (game, count) in Games:
   episode(game, count, scripts, failure = true)
   scripts[0] = "WHILE 1\nWEND\n"
   episode(game, count, scripts)
-  if game == "awm":
+  if game == "cac":
     episode(game, count, scripts.mapIt("END\n"), failure = true,
       selectClass = false,
       expectedRuntimeError = "BASIC setup selected no class")
-    echo "AWM missing class reports policy failure with healthy endpoints"
+    echo "CaC missing class reports policy failure with healthy endpoints"
+    # The classes override skips every script's setup: these scripts pick
+    # no class, yet each seat plays the class its slot names. Every seat
+    # only ends its turn, so max_ticks ends the match.
+    let classNames = ["archer", "warrior", "mage"]
+    var classes: seq[string]
+    for slot in 0 ..< count:
+      classes.add classNames[slot mod classNames.len]
+    let overridden = episode(game, count, newSeq[string](count).mapIt(
+      "IF selfClass = selfPlayer MOD 3 THEN PRINT \"CLASS-OVERRIDDEN\"\n" &
+      "endTurn()\nEND\n"), selectClass = false, ticks = 7,
+      seed = -2147483648, classes = classes,
+      expectedOutput = "CLASS-OVERRIDDEN")
+    doAssert overridden["outcome"].getStr() == "timeout"
+    doAssert overridden["ticks"].getInt() == 7
+    echo "CaC classes, seed and max_ticks reach the match"
   echo game, ": runtime contracts passed"
 
   for slot in 0 ..< scripts.len:
@@ -344,8 +374,8 @@ for (game, count) in Games:
 sendChat(-2, "CHAT")
 print pullMailbox$(), mailboxId()
 """
-  # AWM actions share a turn, so allow the baseline to reach every seat.
-  episode(game, count, scripts, ticks = (if game == "awm": 240 else: 3),
+  # CaC actions share a turn, so allow the baseline to reach every seat.
+  episode(game, count, scripts, ticks = (if game == "cac": 240 else: 3),
     waitForLlm = true, expectedOutput = "CHAT")
   echo game, ": hosted mailbox integration passed"
 
@@ -383,6 +413,28 @@ print "PACKAGE-PASSED"
   episode("gota", 10, scripts, failure = true)
   echo "GOTA extensionless ZIP, mixed roster and package failures passed"
 
+  # A small upload must not bypass the aggregate decoded-package budget.
+  scripts[0] = zipFixture([("policy.bas", "end"),
+    ("first.bin", repeat('x', MaxUnpackedBytes div 2)),
+    ("second.bin", repeat('y', MaxUnpackedBytes div 2))], true)
+  episode("gota", 10, scripts, failure = true,
+    expectedRuntimeError = "Uncompressed data exceeds output limit")
+
+  # Both directory and local sizes lie; enforcement must count actual output.
+  scripts[0] = zipFixture([("policy.bas", "end"),
+    ("oversized.bin", repeat('x', MaxUnpackedBytes + 1))], true)
+  let
+    local = scripts[0].find("PK\x03\x04", 4)
+    central = scripts[0].find("PK\x01\x02")
+    resourceCentral = scripts[0].find("PK\x01\x02", central + 4)
+  doAssert local >= 0 and central >= 0 and resourceCentral >= 0
+  for offset in [local + 22, resourceCentral + 24]:
+    for byte in 0 ..< 4:
+      scripts[0][offset + byte] = '\0'
+  episode("gota", 10, scripts, failure = true,
+    expectedRuntimeError = "Uncompressed data exceeds output limit")
+  echo "GOTA aggregate and false-size ZIP limits report player failure"
+
   scripts[0] = zipFixture([("policy.bas",
     repeat("' Oversized source for VM compilation.\n", 2000))], true)
   episode("gota", 10, scripts, failure = true,
@@ -392,7 +444,7 @@ print "PACKAGE-PASSED"
 if "gota".selected:
   let
     library = readFile(Root /
-      "examples/gods_of_the_arena/neural/policies/david.bas").split(
+      "games/gods_of_the_arena/neural/policies/david.bas").split(
         "' Example policy.")[0]
     source = library & "nnStep()\nprint \"DAVID-PASSED\"\n"
     packed = zipFixture([("policy.bas", source),
@@ -415,7 +467,7 @@ res = nn_david("model.bin", state, data)
 if "gota".selected:
   let
     library = readFile(Root /
-      "examples/gods_of_the_arena/neural/policies/andre.bas").split(
+      "games/gods_of_the_arena/neural/policies/andre.bas").split(
         "' Example policy.")[0]
     source = library & """
 dim f(40)

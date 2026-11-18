@@ -36,6 +36,7 @@ var
   toonView: Uniform[Mat4]
   toonProj: Uniform[Mat4]
   toonUseSkinning: Uniform[bool]
+  toonPackedParts: Uniform[bool]
   toonJointMatrices: Uniform[array[128, Mat4]]
   toonLightDirection: Uniform[Vec3]   # direction the light travels
   toonCameraPosition: Uniform[Vec3]
@@ -50,6 +51,7 @@ var
   toonRimColor: Uniform[Vec4]
   toonUnlit: Uniform[bool]           # always in the highlight band
   toonTint: Uniform[Vec4]
+  toonGlaze: Uniform[Vec4]           # laid over the colour by its alpha
   toonLightingMode: Uniform[int32]
   toonPerPixelLighting: Uniform[bool]
   toonNeutralMaterial: Uniform[bool]
@@ -139,7 +141,9 @@ proc toonVert(
   color: var Vec4,
   normal: var Vec3,
   uv: var Vec2,
-  lightIntensity: var float32
+  lightIntensity: var float32,
+  parts: var Vec2,
+  emission: var Vec4
 ) =
   var skin = mat4(1.0'f)
   if toonUseSkinning:
@@ -154,6 +158,8 @@ proc toonVert(
   worldPos = (toonModel * skinnedPosition).xyz
   color = vertexColor
   uv = vertexUV
+  parts = vertexUV1
+  emission = vertexTangent
   normal = normalize(toonNormalMatrix * skinnedNormal)
   # Step 1: Lambert from the one light, computed per vertex like the
   # GameCube did and interpolated across the triangle.
@@ -161,16 +167,28 @@ proc toonVert(
   lightIntensity = max(dot(normal, toLight), 0.0'f)
   gl_Position = toonProj * toonView * vec4(worldPos, 1.0'f)
 
+proc glazed(color: Vec4): Vec4 =
+  ## Lays `toonGlaze` over a finished colour by its alpha, keeping the
+  ## colour's light and dark, so a body can read as made of something else.
+  let shade = dot(color.rgb, vec3(0.3'f, 0.59'f, 0.11'f))
+  result = vec4(mix(color.rgb, toonGlaze.rgb * (0.45'f + 0.9'f * shade),
+    toonGlaze.a), color.a)
+
 proc toonFrag(
   worldPos: Vec3,
   color: Vec4,
   normal: Vec3,
   uv: Vec2,
   lightIntensity: float32,
+  parts: Vec2,
+  emission: Vec4,
   fragColor: var Vec4
 ) =
   var albedo: Vec4 = texture(toonBaseColorTexture, uv) * toonBaseColorFactor * color
-  if albedo.a < toonAlphaCutoff:
+  let cutoff = if toonPackedParts: parts.y else: toonAlphaCutoff
+  if albedo.a < cutoff:
+    discardFragment()
+  if toonPackedParts and emission.w < 0.5'f and not gl_FrontFacing:
     discardFragment()
   var n: Vec3 = normalize(normal)
   if not gl_FrontFacing:
@@ -180,8 +198,9 @@ proc toonFrag(
     return
   if toonNeutralMaterial:
     albedo = vec4(0.8'f, 0.8'f, 0.8'f, albedo.a)
-  if toonUnlit or toonLightingMode == 2:
-    fragColor = albedo * toonTint
+  if toonUnlit or (toonPackedParts and parts.x > 0.5'f) or
+    toonLightingMode == 2:
+    fragColor = glazed(albedo * toonTint)
     return
   var lambert = lightIntensity
   if toonPerPixelLighting or toonLightingMode == 1:
@@ -205,9 +224,11 @@ proc toonFrag(
     rim = facing * facing * facing * facing
   lit = mix(lit, toonRimColor.rgb, rim * toonRimColor.a)
   var emissive: Vec3 = texture(toonEmissiveTexture, uv).rgb * toonEmissiveFactor
+  if toonPackedParts:
+    emissive = emission.xyz
   if toonNeutralMaterial:
     emissive = vec3(0.0'f)
-  fragColor = vec4(lit * albedo.rgb + emissive, albedo.a) * toonTint
+  fragColor = glazed(vec4(lit * albedo.rgb + emissive, albedo.a) * toonTint)
 
 ## Sun depth pass: the same skinned vertex path projected by the sun's
 ## light matrix instead of the camera, with the base color's alpha cutout
@@ -219,11 +240,15 @@ var toonDepthLightMvp: Uniform[Mat4]
 
 proc toonDepthVert(
   vertexPosition: Vec3,
+  vertexColor: Vec4,
   vertexUV: Vec2,
+  vertexUV1: Vec2,
   vertexJoints: UVec4,
   vertexWeights: Vec4,
   gl_Position: var Vec4,
-  uv: var Vec2
+  uv: var Vec2,
+  parts: var Vec2,
+  opacity: var float32
 ) =
   var skin = mat4(1.0'f)
   if toonUseSkinning:
@@ -235,10 +260,17 @@ proc toonDepthVert(
   gl_Position =
     toonDepthLightMvp * toonModel * (skin * vec4(vertexPosition, 1.0'f))
   uv = vertexUV
+  parts = vertexUV1
+  opacity = vertexColor.a
 
-proc toonDepthFrag(uv: Vec2, fragColor: var Vec4) =
+proc toonDepthFrag(
+  uv: Vec2, parts: Vec2, opacity: float32, fragColor: var Vec4
+) =
   let albedo: Vec4 = texture(toonBaseColorTexture, uv) * toonBaseColorFactor
-  if albedo.a < toonAlphaCutoff:
+  let
+    cutoff = if toonPackedParts: parts.y else: toonAlphaCutoff
+    alpha = if toonPackedParts: albedo.a * opacity else: albedo.a
+  if alpha < cutoff:
     discardFragment()
   fragColor = vec4(1.0'f, 1.0'f, 1.0'f, 1.0'f)
 
@@ -372,19 +404,19 @@ type
 
   ToonUniforms = object
     model, normalMatrix, view, proj: GLint
-    useSkinning, jointMatrices: GLint
+    useSkinning, jointMatrices, packedParts: GLint
     lightDirection, cameraPosition: GLint
     baseColorTexture, baseColorFactor: GLint
     emissiveTexture, emissiveFactor: GLint
     alphaCutoff, ramp: GLint
-    highlightColor, shadowColor, rimColor, unlit, tint: GLint
+    highlightColor, shadowColor, rimColor, unlit, tint, glaze: GLint
     lightingMode, perPixelLighting, neutralMaterial: GLint
     shadowMvp0, shadowMvp1, shadowMap0, shadowMap1, shadowStep: GLint
     shadowsOn, shadowStrength: GLint
     shadowBias, shadowTexel, shadowSoftness, shadingStrength, lightLevel: GLint
 
   ToonDepthUniforms = object
-    model, lightMvp, useSkinning, jointMatrices: GLint
+    model, lightMvp, useSkinning, jointMatrices, packedParts: GLint
     baseColorTexture, baseColorFactor, alphaCutoff: GLint
 
   BackgroundUniforms = object
@@ -393,6 +425,7 @@ type
   ToonMeshPose* = object
     node*: Node
     unlit*: bool
+    packedParts*: bool
     transform*: Mat4
     normal*: Mat3
     joints*: seq[Mat4]
@@ -442,6 +475,7 @@ type
     view*, proj*: Mat4
     cameraPosition*: Vec3
     tint*: Color                 ## multiplies the final colour
+    glaze*: Color                ## laid over the final colour by its alpha
     lightDirection*: Vec3        ## direction the light travels
     highlightColor*: Color
     shadowColor*: Color
@@ -515,6 +549,7 @@ proc newToonContext*(): ToonContext =
   loc(view, "toonView")
   loc(proj, "toonProj")
   loc(useSkinning, "toonUseSkinning")
+  loc(packedParts, "toonPackedParts")
   loc(jointMatrices, "toonJointMatrices")
   loc(lightDirection, "toonLightDirection")
   loc(cameraPosition, "toonCameraPosition")
@@ -529,6 +564,7 @@ proc newToonContext*(): ToonContext =
   loc(rimColor, "toonRimColor")
   loc(unlit, "toonUnlit")
   loc(tint, "toonTint")
+  loc(glaze, "toonGlaze")
   loc(lightingMode, "toonLightingMode")
   loc(perPixelLighting, "toonPerPixelLighting")
   loc(neutralMaterial, "toonNeutralMaterial")
@@ -553,6 +589,7 @@ proc newToonContext*(): ToonContext =
   dloc(model, "toonModel")
   dloc(lightMvp, "toonDepthLightMvp")
   dloc(useSkinning, "toonUseSkinning")
+  dloc(packedParts, "toonPackedParts")
   dloc(jointMatrices, "toonJointMatrices")
   dloc(baseColorTexture, "toonBaseColorTexture")
   dloc(baseColorFactor, "toonBaseColorFactor")
@@ -708,6 +745,7 @@ proc prepareMeshPoses(
     let mesh = addr pose.meshes[index]
     mesh.node = node
     mesh.unlit = node.name in unlitParts
+    mesh.packedParts = false
     mesh.transform = node.mat
     mesh.normal = node.mat.normalMatrix
     root.skinMatricesInto(node, mesh.joints)
@@ -720,14 +758,20 @@ proc prepareToonPose*(
   pose: var ToonPose,
   root: Node,
   transform: Mat4,
-  unlitParts: openArray[string] = []
+  unlitParts: openArray[string] = [],
+  merged: Node = nil
 ) =
   ## Captures active meshes in retained storage for all drawing passes.
   root.updateTransforms(transform)
   pose.bounds = emptyBounds()
   pose.boundsValid = true
   pose.meshCount = 0
-  prepareMeshPoses(root, root, pose, unlitParts)
+  if merged == nil:
+    prepareMeshPoses(root, root, pose, unlitParts)
+  else:
+    merged.mat = root.mat
+    prepareMeshPoses(merged, root, pose, [])
+    pose.meshes[0].packedParts = true
 
 proc uploadPose(
   useSkinning, jointMatrices: GLint,
@@ -746,6 +790,7 @@ proc drawPrimitive(
   pose: ptr ToonMeshPose = nil
 ) =
   let u = ctx.uniforms
+  glUniform1i(u.packedParts, (pose != nil and pose.packedParts).ord.GLint)
   var
     modelMat = if pose == nil: owner.mat else: pose.transform
     normalMat = if pose == nil: owner.mat.normalMatrix else: pose.normal
@@ -874,6 +919,7 @@ proc draw*(
     u.rimColor, ctx.rimColor.r, ctx.rimColor.g, ctx.rimColor.b,
     ctx.rimColor.a)
   glUniform4f(u.tint, ctx.tint.r, ctx.tint.g, ctx.tint.b, ctx.tint.a)
+  glUniform4f(u.glaze, ctx.glaze.r, ctx.glaze.g, ctx.glaze.b, ctx.glaze.a)
   glUniform1i(u.lightingMode, ctx.lighting.ord.GLint)
   glUniform1i(u.perPixelLighting, ctx.perPixelLighting.ord.GLint)
   glUniform1i(u.neutralMaterial, ctx.neutralMaterial.ord.GLint)
@@ -929,6 +975,7 @@ proc drawSunDepthPrimitive(
   pose: ptr ToonMeshPose = nil
 ) =
   let u = ctx.depthUniforms
+  glUniform1i(u.packedParts, (pose != nil and pose.packedParts).ord.GLint)
   var modelMat = if pose == nil: owner.mat else: pose.transform
   glUniformMatrix4fv(u.model, 1, GL_FALSE, cast[ptr float32](modelMat.addr))
   if pose == nil:

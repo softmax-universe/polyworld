@@ -843,6 +843,7 @@ proc compileProgram(vertexSource, fragmentSource: string): GLuint =
 
 var
   ambientTexture: GLuint
+  ambientFallbackTexture: GLuint
   ambientOrigin: Vec2
   ambientSpan = vec2(1)
   environmentHighlight = ToonPalettes[0].highlight
@@ -876,7 +877,21 @@ proc setEnvUniforms(loc: EnvLocations) =
   glUniform4f(loc.bounds, ambientOrigin.x, ambientOrigin.y,
     ambientSpan.x, ambientSpan.y)
   glActiveTexture(GL_TEXTURE9)
-  glBindTexture(GL_TEXTURE_2D, ambientTexture)
+  if ambientTexture == 0:
+    # Disabled samplers still require a complete texture on macOS OpenGL.
+    if ambientFallbackTexture == 0:
+      glGenTextures(1, ambientFallbackTexture.addr)
+      glBindTexture(GL_TEXTURE_2D, ambientFallbackTexture)
+      var pixel = [255'u8, 255, 255, 255]
+      glTexImage2D(
+        GL_TEXTURE_2D, 0, GL_RGBA8.GLint, 1, 1, 0,
+        GL_RGBA, GL_UNSIGNED_BYTE, pixel[0].addr
+      )
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST.GLint)
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST.GLint)
+    glBindTexture(GL_TEXTURE_2D, ambientFallbackTexture)
+  else:
+    glBindTexture(GL_TEXTURE_2D, ambientTexture)
   glUniform1i(loc.ambient, 9)
   glActiveTexture(GL_TEXTURE0)
 
@@ -2145,12 +2160,25 @@ proc generatedMaterial(directory, name: string): tuple[color, height: Image] =
       let gray = ((value.r.int * alpha.int + 127) div 255).uint8
       result.height.data[i] = rgbx(gray, gray, gray, alpha)
 
-proc loadGeneratedTiles(extraTiles: openArray[string]): seq[seq[Image]] =
+type GeneratedTileImages* = tuple[color, height: Image]
+
+proc loadGeneratedTiles(
+    extraTiles: openArray[string],
+    extraImages: openArray[GeneratedTileImages]
+): seq[seq[Image]] =
   ## Packs independently filtered color and height into the terrain array.
   terrainAverageColors.setLen(0)
+  var pairs: seq[GeneratedTileImages]
   for name in @SurfaceNames & @extraTiles:
+    pairs.add generatedMaterial("tiles", name)
+  pairs.add extraImages
+  for pair in pairs:
+    if pair.color.width != GeneratedTextureSize or
+        pair.color.height != GeneratedTextureSize or
+        pair.height.width != GeneratedTextureSize or
+        pair.height.height != GeneratedTextureSize:
+      raise newException(QuadTerrainError, "Expected 256x256 terrain images")
     let
-      pair = generatedMaterial("tiles", name)
       colors = mipChain(pair.color)
       heights = mipChain(pair.height)
     terrainAverageColors.add averageColor(colors[0])
@@ -2194,7 +2222,7 @@ proc uploadTerrainData(texture: var GLuint, values: seq[float32]): Vec2 =
   glBindTexture(GL_TEXTURE_2D, 0)
   vec2(width.float32, height.float32)
 
-proc rebuildTerrainData() {.measure.} =
+proc rebuildTerrainData(hardMaterials: openArray[int]) {.measure.} =
   ## Refreshes visual sidecars without altering terrain or simulation flags.
   if not generatedTerrain:
     return
@@ -2212,7 +2240,8 @@ proc rebuildTerrainData() {.measure.} =
       terrainSplatCount,
       terrainSplatChance,
       terrainAverageColors.len,
-      groundMaterialOverrides
+      groundMaterialOverrides,
+      hardMaterials
     )
   except TerrainMapError:
     raise newException(QuadTerrainError, getCurrentExceptionMsg())
@@ -2323,6 +2352,11 @@ proc uploadTerrainVisibility*(
       nil
     )
     visibilitySize = size
+  # Fog has one byte per tile; map widths need not be multiples of four.
+  # Preserve the caller's pixel-store state for subsequent image uploads.
+  var unpackAlignment: GLint
+  glGetIntegerv(GL_UNPACK_ALIGNMENT, unpackAlignment.addr)
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
   glTexSubImage2D(
     GL_TEXTURE_2D,
     0,
@@ -2334,6 +2368,7 @@ proc uploadTerrainVisibility*(
     GL_UNSIGNED_BYTE,
     unsafeAddr values[0]
   )
+  glPixelStorei(GL_UNPACK_ALIGNMENT, unpackAlignment)
   glBindTexture(GL_TEXTURE_2D, 0)
 
 proc uploadAmbientOcclusion*(
@@ -2361,6 +2396,9 @@ proc clearAmbientOcclusion*() =
   if ambientTexture != 0:
     glDeleteTextures(1, ambientTexture.addr)
     ambientTexture = 0
+  if ambientFallbackTexture != 0:
+    glDeleteTextures(1, ambientFallbackTexture.addr)
+    ambientFallbackTexture = 0
 
 proc uploadGroundMask*(values: openArray[uint8], size: int) =
   ## Uploads a square two-channel coverage mask (stone, dirt) the terrain
@@ -2622,7 +2660,7 @@ proc scatterRocks*(count, randomSeed: int, scale = 1.0'f) =
 var
   vertexArray, vertexBuffer: GLuint
   mesh: seq[float32]
-  tileTopOffsets: seq[seq[int]]
+  tileTopOffsets: seq[seq[Slice[int]]]
   meshVertexCount = 0
   propVertexArray, propVertexBuffer: GLuint
   propMesh: seq[float32]   # x y z r g b nx ny nz; grass, boulders, props
@@ -2988,6 +3026,35 @@ proc releaseTexturedBatch(batch: var TexturedBatch) =
     glDeleteVertexArrays(1, batch.depthVertexArray.addr)
   batch = TexturedBatch()
 
+proc clearSceneProps*() =
+  ## Releases match placements and their batches while keeping shared assets.
+  propPlacements.setLen(0)
+  for batch in texturedBatches.mitems:
+    releaseTexturedBatch(batch)
+  texturedBatches.setLen(0)
+
+proc closePropPack*(pack: PropPack) =
+  ## Releases a generated pack after removing its placements from the scene.
+  if pack == nil:
+    return
+  for model in pack.models:
+    glDeleteBuffers(1, model.vertexBuffer.addr)
+    glDeleteBuffers(1, model.texturedVertexBuffer.addr)
+    glDeleteVertexArrays(1, model.vertexArray.addr)
+    glDeleteVertexArrays(1, model.depthVertexArray.addr)
+    glDeleteVertexArrays(1, model.texturedVertexArray.addr)
+    glDeleteVertexArrays(1, model.texturedDepthVertexArray.addr)
+    model.vertexBuffer = 0
+    model.texturedVertexBuffer = 0
+    model.vertexArray = 0
+    model.depthVertexArray = 0
+    model.texturedVertexArray = 0
+    model.texturedDepthVertexArray = 0
+  glDeleteTextures(1, pack.textureArray.addr)
+  pack.textureArray = 0
+  pack.models.setLen(0)
+  pack.names.clear()
+
 proc rebuildTexturedBatches() {.measure.} =
   ## Preserves clean buffers and uploads only changed textured groups.
   prepareTexturedBatches()
@@ -3258,14 +3325,160 @@ proc cornerMaterial(
       best = kind
   tileMaterial(best).topMaterial
 
+proc emitStairTreads(
+    northWest, northEast, southWest, southEast: Vec3,
+    style: TileMaterial, materials: Vec4,
+    edgeMask: float32, splatRange: Vec3, treads: int,
+    westSide, eastSide: bool
+): int =
+  ## A tile's navigation surface spans the full rise. Draw level stone
+  ## treads above it, with a riser at each lip and closed outer cheeks.
+  let
+    up = vec3(0, 1, 0)
+    rise = (northWest.y - southWest.y) / treads.float32
+  for step in 0 ..< treads:
+    let
+      front = step.float32 / treads.float32
+      back = (step + 1).float32 / treads.float32
+      a = mix(northWest, southWest, front)
+      b = mix(northEast, southEast, front)
+      c = mix(northWest, southWest, back) + up * rise
+      d = mix(northEast, southEast, back) + up * rise
+    let
+      nw = mix(CornerWeights[0], CornerWeights[2], front)
+      ne = mix(CornerWeights[1], CornerWeights[3], front)
+      sw = mix(CornerWeights[0], CornerWeights[2], back)
+      se = mix(CornerWeights[1], CornerWeights[3], back)
+    addTriangle(a, b, c, up, up, up, style.top, materials,
+      nw, ne, sw, edgeMask, splatRange)
+    addTriangle(b, d, c, up, up, up, style.top, materials,
+      ne, se, sw, edgeMask, splatRange)
+  let topEnd = mesh.len
+  for step in 0 ..< treads:
+    let
+      front = step.float32 / treads.float32
+      back = (step + 1).float32 / treads.float32
+      a = mix(northWest, southWest, front)
+      b = mix(northEast, southEast, front)
+      c = mix(northWest, southWest, back) + up * rise
+      d = mix(northEast, southEast, back) + up * rise
+    addWall(c, d, c - up * rise, d - up * rise,
+      vec3(0, 0, 1), style.skirt, style.skirtMaterial)
+    if westSide:
+      addWall(a, c, a, c - up * rise, vec3(-1, 0, 0),
+        style.skirt, style.skirtMaterial)
+    if eastSide:
+      addWall(b, d, b, d - up * rise, vec3(1, 0, 0),
+        style.skirt, style.skirtMaterial)
+  topEnd
+
+type WallRecess* = object
+  ## An opening in the rendered face of a wall tile. Facing uses edgeLink's
+  ## east, south, west, north order, pointing out of the wall.
+  layer*, x*, z*, facing*: int
+  base*, bottom*, spring*, rise*, halfWidth*, depth*: float32
+
+proc recessWidth*(recess: WallRecess, progress: float32): float32 =
+  recess.halfWidth * (1 - progress * progress)
+
+proc addRecessedWall(top0, top1, bottom0, bottom1, normal, tint: Vec3,
+    material: float32, recess: WallRecess) =
+  ## Leave the face intact around the opening and line the pocket with stone.
+  let
+    center = (top0 + top1) * 0.5
+    along = normalize(top1 - top0)
+    up = vec3(0, 1, 0)
+    level = center - up * (center.y - recess.base)
+    sill = recess.bottom
+    spring = recess.spring
+    radius = recess.halfWidth
+    inward = -normal * recess.depth
+  proc point(x, y: float32): Vec3 =
+    level + along * x + up * y
+  proc band(y0, y1, r0, r1: float32) =
+    addWall(point(-0.5, y1), point(-r1, y1),
+      point(-0.5, y0), point(-r0, y0), normal, tint, material)
+    addWall(point(r1, y1), point(0.5, y1),
+      point(r0, y0), point(0.5, y0), normal, tint, material)
+  addWall(point(-0.5, sill), point(0.5, sill), bottom0, bottom1,
+    normal, tint, material)
+  band(sill, spring, radius, radius)
+  addWall(point(radius, spring), point(radius, spring) + inward,
+    point(radius, sill), point(radius, sill) + inward,
+    -along, tint * 0.80, material)
+  addWall(point(-radius, spring) + inward, point(-radius, spring),
+    point(-radius, sill) + inward, point(-radius, sill),
+    along, tint * 0.80, material)
+  let
+    shelfLeft = point(-radius, sill)
+    shelfRight = point(radius, sill)
+  addWall(shelfLeft, shelfRight, shelfLeft + inward, shelfRight + inward,
+    up, tint, material)
+  const Segments = 12
+  for i in 0 ..< Segments:
+    let
+      t0 = i.float32 / Segments.float32
+      t1 = (i + 1).float32 / Segments.float32
+      y0 = spring + recess.rise * t0
+      y1 = spring + recess.rise * t1
+      r0 = recess.recessWidth(t0)
+      r1 = recess.recessWidth(t1)
+    band(y0, y1, r0, r1)
+    for sign in [-1'f32, 1]:
+      let
+        a = point(sign * r1, y1)
+        b = point(sign * r0, y0)
+        lipNormal = normalize(along * (-sign * (y1 - y0)) -
+          up * (r0 - r1))
+      addWall(a, a + inward, b, b + inward,
+        lipNormal, tint * 0.75, material)
+  let peak = spring + recess.rise
+  addWall(top0, top1, point(-0.5, peak), point(0.5, peak),
+    normal, tint, material)
+  let backTint = tint * 0.43
+  addWall(point(-radius, spring) + inward, point(radius, spring) + inward,
+    shelfLeft + inward, shelfRight + inward, normal, backTint, material)
+  for i in 0 ..< Segments:
+    let
+      t0 = i.float32 / Segments.float32
+      t1 = (i + 1).float32 / Segments.float32
+      y0 = spring + recess.rise * t0
+      y1 = spring + recess.rise * t1
+      r0 = recess.recessWidth(t0)
+      r1 = recess.recessWidth(t1)
+    addWall(point(-r1, y1) + inward, point(r1, y1) + inward,
+      point(-r0, y0) + inward, point(r0, y0) + inward,
+      normal, backTint, material)
+
 proc emitLayer(
     layerIndex: int,
     layer: QuadLayer,
     floorY: float32,
-    blockers: openArray[seq[int32]]
+    blockers: openArray[seq[int32]],
+    stairKind: uint32,
+    stairTreads: int,
+    wallRecesses: Table[(int, int, int), WallRecess]
 ) =
   ## Emits one solid tile layer with tops, skirts, cliffs, and edge masks.
   let w = layer.width
+  template wallFace(
+      top0, top1, bottom0, bottom1, normal, tint, material: untyped,
+      wallX, wallZ, facing: int
+  ) =
+    let key = (wallX, wallZ, facing)
+    if key in wallRecesses:
+      let
+        recess = wallRecesses[key]
+        outward = case facing
+          of 0: vec3(1, 0, 0)
+          of 1: vec3(0, 0, 1)
+          of 2: vec3(-1, 0, 0)
+          else: vec3(0, 0, -1)
+      addRecessedWall(top0, top1, bottom0, bottom1, outward, tint, material,
+        recess)
+    else:
+      addWall(top0, top1, bottom0, bottom1, normal, tint, material)
+
   var faceNormals = newSeq[Vec3](layer.tiles.len)
   for i, t in layer.tiles:
     if t.exists:
@@ -3311,37 +3524,50 @@ proc emitLayer(
         n1 = cornerNormal(layer, faceNormals, x, z, 1)
         n2 = cornerNormal(layer, faceNormals, x, z, 2)
         n3 = cornerNormal(layer, faceNormals, x, z, 3)
-      tileTopOffsets[layerIndex][i] = mesh.len
-      addTriangle(
-        v00,
-        v10,
-        v01,
-        n0,
-        n1,
-        n2,
-        style.top,
-        materials,
-        CornerWeights[0],
-        CornerWeights[1],
-        CornerWeights[2],
-        edgeMask,
-        splatRange
-      )
-      addTriangle(
-        v10,
-        v11,
-        v01,
-        n1,
-        n3,
-        n2,
-        style.top,
-        materials,
-        CornerWeights[1],
-        CornerWeights[3],
-        CornerWeights[2],
-        edgeMask,
-        splatRange
-      )
+      let firstTop = mesh.len
+      let lastTop =
+        if stairTreads > 0 and t.kind == stairKind and h[0] > h[2] and
+            h[0] == h[1] and h[2] == h[3]:
+          let
+            westSide = x == 0 or layer.tiles[i - 1].kind != stairKind or
+              layer.tiles[i - 1].tops != t.tops
+            eastSide = x == w - 1 or layer.tiles[i + 1].kind != stairKind or
+              layer.tiles[i + 1].tops != t.tops
+          emitStairTreads(v00, v10, v01, v11, style, materials, edgeMask,
+            splatRange, stairTreads, westSide, eastSide)
+        else:
+          addTriangle(
+            v00,
+            v10,
+            v01,
+            n0,
+            n1,
+            n2,
+            style.top,
+            materials,
+            CornerWeights[0],
+            CornerWeights[1],
+            CornerWeights[2],
+            edgeMask,
+            splatRange
+          )
+          addTriangle(
+            v10,
+            v11,
+            v01,
+            n1,
+            n3,
+            n2,
+            style.top,
+            materials,
+            CornerWeights[1],
+            CornerWeights[3],
+            CornerWeights[2],
+            edgeMask,
+            splatRange
+          )
+          mesh.len
+      tileTopOffsets[layerIndex][i] = firstTop ..< lastTop
 
       if layer.slab:
         # Underside of the slab; never walkable.
@@ -3367,14 +3593,15 @@ proc emitLayer(
         let
           y0 = if layer.slab: b[1] else: floorY
           y1 = if layer.slab: b[3] else: floorY
-        addWall(
+        wallFace(
           v10,
           v11,
           vec3(x1, y0, z0),
           vec3(x1, y1, z1),
           vec3(1, 0, 0),
           style.skirt,
-          style.skirtMaterial
+          style.skirtMaterial,
+          x, z, 0
         )
       else:
         let n = layer.tiles[z * w + x + 1]
@@ -3386,15 +3613,20 @@ proc emitLayer(
               style
             else:
               tileMaterial(n.kind)
-          addWall(
-            v10,
-            v11,
-            vec3(x1, nh[0], z0),
-            vec3(x1, nh[2], z1),
-            vec3(1, 0, 0),
-            cliffStyle.skirt,
-            cliffStyle.skirtMaterial
-          )
+          if (x + 1, z, 2) in wallRecesses:
+            wallFace(vec3(x1, nh[0], z0), vec3(x1, nh[2], z1), v10, v11,
+              vec3(-1, 0, 0), cliffStyle.skirt, cliffStyle.skirtMaterial,
+              x + 1, z, 2)
+          else:
+            addWall(
+              v10,
+              v11,
+              vec3(x1, nh[0], z0),
+              vec3(x1, nh[2], z1),
+              vec3(1, 0, 0),
+              cliffStyle.skirt,
+              cliffStyle.skirtMaterial
+            )
         if layer.slab:
           let nb = n.bottoms.unpack
           if b[1] != nb[0] or b[3] != nb[2]:
@@ -3410,14 +3642,15 @@ proc emitLayer(
         let
           y0 = if layer.slab: b[2] else: floorY
           y1 = if layer.slab: b[3] else: floorY
-        addWall(
+        wallFace(
           v01,
           v11,
           vec3(x0, y0, z1),
           vec3(x1, y1, z1),
           vec3(0, 0, 1),
           style.skirt,
-          style.skirtMaterial
+          style.skirtMaterial,
+          x, z, 1
         )
       else:
         let n = layer.tiles[(z + 1) * w + x]
@@ -3428,15 +3661,20 @@ proc emitLayer(
               style
             else:
               tileMaterial(n.kind)
-          addWall(
-            v01,
-            v11,
-            vec3(x0, nh[0], z1),
-            vec3(x1, nh[1], z1),
-            vec3(0, 0, 1),
-            cliffStyle.skirt,
-            cliffStyle.skirtMaterial
-          )
+          if (x, z + 1, 3) in wallRecesses:
+            wallFace(vec3(x0, nh[0], z1), vec3(x1, nh[1], z1), v01, v11,
+              vec3(0, 0, -1), cliffStyle.skirt, cliffStyle.skirtMaterial,
+              x, z + 1, 3)
+          else:
+            addWall(
+              v01,
+              v11,
+              vec3(x0, nh[0], z1),
+              vec3(x1, nh[1], z1),
+              vec3(0, 0, 1),
+              cliffStyle.skirt,
+              cliffStyle.skirtMaterial
+            )
         if layer.slab:
           let nb = n.bottoms.unpack
           if b[2] != nb[0] or b[3] != nb[1]:
@@ -3452,28 +3690,30 @@ proc emitLayer(
         let
           y0 = if layer.slab: b[0] else: floorY
           y1 = if layer.slab: b[2] else: floorY
-        addWall(
+        wallFace(
           v00,
           v01,
           vec3(x0, y0, z0),
           vec3(x0, y1, z1),
           vec3(-1, 0, 0),
           style.skirt,
-          style.skirtMaterial
+          style.skirtMaterial,
+          x, z, 2
         )
       if z == 0 or not layer.tiles[(z - 1) * w + x].exists or
           not layer.tiles[(z - 1) * w + x].connectedSouth:
         let
           y0 = if layer.slab: b[0] else: floorY
           y1 = if layer.slab: b[1] else: floorY
-        addWall(
+        wallFace(
           v00,
           v10,
           vec3(x0, y0, z0),
           vec3(x1, y1, z0),
           vec3(0, 0, -1),
           style.skirt,
-          style.skirtMaterial
+          style.skirtMaterial,
+          x, z, 3
         )
 
 proc emitWaterLayer(layer: QuadLayer) =
@@ -3578,12 +3818,14 @@ proc initTerrain*(
   terrainStyle: TerrainStyle = CartoonTerrain,
   rockStyle: RockStyle = LowPolyRocks,
   extraTiles: openArray[string] = [],
-  settings = DefaultTerrainAssets
+  settings = DefaultTerrainAssets,
+  extraImages: openArray[GeneratedTileImages] = []
 ) =
   ## Initializes rendering with a current GL context, once before bakeTerrain.
   ## Extra generated tile names append after SurfaceNames without splat stamps.
   ## Assets load from ../polyworld_data/terrain/ relative to the repo root.
-  if terrainStyle != GeneratedTerrain and extraTiles.len > 0:
+  if terrainStyle != GeneratedTerrain and
+      (extraTiles.len > 0 or extraImages.len > 0):
     raise newException(QuadTerrainError, "Extra tiles need generated terrain.")
   terrainMaterialSize = settings.size
   terrainUnboostedMaterial = -1.0'f
@@ -3675,7 +3917,7 @@ proc initTerrain*(
   )
   if generatedTerrain:
     terrainTextureArray = buildTextureArray(
-      loadGeneratedTiles(extraTiles), GL_REPEAT.GLint
+      loadGeneratedTiles(extraTiles, extraImages), GL_REPEAT.GLint
     )
     let stamps = loadGeneratedStamps()
     splatColorArray = buildTextureArray(stamps.colors, GL_CLAMP_TO_EDGE.GLint)
@@ -4128,7 +4370,11 @@ proc initTerrain*(
 
 proc bakeTerrain*(
     rebuildWalkability = true,
-    blockers: openArray[seq[int32]] = []
+    blockers: openArray[seq[int32]] = [],
+    stairKind = uint32.high,
+    stairTreads = 0,
+    hardMaterials: openArray[int] = [],
+    wallRecesses: openArray[WallRecess] = []
 ) {.measure.} =
   ## Rebuilds and uploads terrain and props, with optional tile edge blockers.
   ## Nonzero per-layer blockers affect the overlay only. Omitted grids are open.
@@ -4136,9 +4382,9 @@ proc bakeTerrain*(
   mesh.setLen(0)
   tileTopOffsets.setLen(layers.len)
   for i, layer in layers:
-    tileTopOffsets[i] = newSeq[int](layer.tiles.len)
-    for offset in tileTopOffsets[i].mitems:
-      offset = -1
+    tileTopOffsets[i] = newSeq[Slice[int]](layer.tiles.len)
+    for span in tileTopOffsets[i].mitems:
+      span = 0 ..< 0
   waterMesh.setLen(0)
   layerVertexRanges.setLen(0)
   waterLayerRanges.setLen(0)
@@ -4148,7 +4394,10 @@ proc bakeTerrain*(
   let floorY = -amplitude - 6
   if rebuildWalkability:
     computeWalkable()
-  rebuildTerrainData()
+  rebuildTerrainData(hardMaterials)
+  var recesses = newSeq[Table[(int, int, int), WallRecess]](layers.len)
+  for recess in wallRecesses:
+    recesses[recess.layer][(recess.x, recess.z, recess.facing)] = recess
   profileBlock "terrain geometry":
     for i in 0 ..< layers.len:
       let
@@ -4158,7 +4407,7 @@ proc bakeTerrain*(
       if layers[i].water:
         emitWaterLayer(layers[i])
       else:
-        emitLayer(i, layers[i], floorY, blockers)
+        emitLayer(i, layers[i], floorY, blockers, stairKind, stairTreads, recesses[i])
       layerVertexRanges.add first ..< (mesh.len div TerrainVertexSize)
       waterLayerRanges.add firstWater ..< (waterMesh.len div 6)
   rebuildTreeMesh()
@@ -4185,19 +4434,20 @@ proc updateTerrainEdges*(walkable: PathWalkable) =
   glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer)
   for layerIndex, offsets in tileTopOffsets:
     let width = layers[layerIndex].width
-    for i, offset in offsets:
-      if offset < 0:
+    for i, span in offsets:
+      if span.a > span.b:
         continue
+      let offset = span.a
       let mask = float32(pathing.edgeMask(
         layerIndex, i mod width, i div width, walkable = walkable))
       if mesh[offset + 3] == mask:
         continue
-      for vertex in 0 ..< 6:
-        mesh[offset + vertex * TerrainVertexSize + 3] = mask
+      for vertex in countup(span.a, span.b, TerrainVertexSize):
+        mesh[vertex + 3] = mask
       glBufferSubData(
         GL_ARRAY_BUFFER,
         offset * sizeof(float32),
-        6 * TerrainVertexSize * sizeof(float32),
+        span.len * sizeof(float32),
         mesh[offset].addr
       )
 
@@ -4304,7 +4554,7 @@ proc drawTexturedBatch(batch: TexturedBatch, mvp: Mat4) =
   glBindVertexArray(0)
 
 proc drawTerrain*(viewProjection: Mat4, showEdges = false,
-    drawGround = true) {.measure.} =
+    drawGround = true, drawProps = true) {.measure.} =
   ## Opaque terrain and prop passes. Disables back-face culling itself (the
   ## gltf PBR renderer's beginFrame leaves culling on and the terrain mesh
   ## is not consistently wound) and enables the depth test.
@@ -4335,6 +4585,10 @@ proc drawTerrain*(viewProjection: Mat4, showEdges = false,
   if drawGround:
     glDrawArrays(GL_TRIANGLES, 0, meshVertexCount.GLsizei)
   glBindVertexArray(0)
+
+  if not drawProps:
+    glUseProgram(0)
+    return
 
   if propMesh.len > 0:
     var model3d = mat4()

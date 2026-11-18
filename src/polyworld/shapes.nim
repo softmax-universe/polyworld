@@ -181,23 +181,29 @@ proc tint(color: ColorRGBX): ColorRGBX =
   else:
     color
 
-proc addVertex(
-    renderer: var ShapeRenderer,
+proc writeVertex(
+    vertices: var seq[float32],
+    offset: int,
     position: Vec3,
     uv: Vec2,
-    color: ColorRGBX
-) =
-  ## Adds one interleaved vertex to the dynamic mesh.
+    color: tuple[r, g, b, a: float32]
+) {.inline.} =
+  ## Writes into storage reserved once for the complete primitive.
+  vertices[offset] = position.x
+  vertices[offset + 1] = position.y
+  vertices[offset + 2] = position.z
+  vertices[offset + 3] = uv.x
+  vertices[offset + 4] = uv.y
+  vertices[offset + 5] = color.r
+  vertices[offset + 6] = color.g
+  vertices[offset + 7] = color.b
+  vertices[offset + 8] = color.a
+
+proc vertexColor(color: ColorRGBX): tuple[r, g, b, a: float32] {.inline.} =
   const ByteScale = 1.0'f32 / 255.0'f32
-  renderer.vertices.add position.x
-  renderer.vertices.add position.y
-  renderer.vertices.add position.z
-  renderer.vertices.add uv.x
-  renderer.vertices.add uv.y
-  renderer.vertices.add color.r.float32 * ByteScale
-  renderer.vertices.add color.g.float32 * ByteScale
-  renderer.vertices.add color.b.float32 * ByteScale
-  renderer.vertices.add color.a.float32 * ByteScale
+  let painted = tint(color)
+  (painted.r.float32 * ByteScale, painted.g.float32 * ByteScale,
+    painted.b.float32 * ByteScale, painted.a.float32 * ByteScale)
 
 proc addTriangle*(
     renderer: var ShapeRenderer,
@@ -210,10 +216,29 @@ proc addTriangle*(
     uvC = vec2(0.5, 1)
 ) =
   ## Adds one world-space triangle.
-  let painted = tint(color)
-  renderer.addVertex(a, uvA, painted)
-  renderer.addVertex(b, uvB, painted)
-  renderer.addVertex(c, uvC, painted)
+  let
+    painted = vertexColor(color)
+    first = renderer.vertices.len
+  renderer.vertices.setLen(first + 3 * VertexFloats)
+  renderer.vertices.writeVertex(first, a, uvA, painted)
+  renderer.vertices.writeVertex(first + VertexFloats, b, uvB, painted)
+  renderer.vertices.writeVertex(first + 2 * VertexFloats, c, uvC, painted)
+
+proc addTriangle*(
+    renderer: var ShapeRenderer,
+    points: array[3, Vec3],
+    colors: array[3, ColorRGBX]
+) =
+  ## Adds a triangle with independent vertex colors for soft fades.
+  let first = renderer.vertices.len
+  renderer.vertices.setLen(first + 3 * VertexFloats)
+  for i in 0 ..< 3:
+    renderer.vertices.writeVertex(
+      first + i * VertexFloats,
+      points[i],
+      vec2(0.5),
+      vertexColor(colors[i])
+    )
 
 proc addQuad*(
     renderer: var ShapeRenderer,
@@ -228,8 +253,16 @@ proc addQuad*(
     uvD = vec2(0, 1)
 ) =
   ## Adds one quad as two triangles. `a-b-c-d` is the corner winding.
-  renderer.addTriangle(a, b, c, color, uvA, uvB, uvC)
-  renderer.addTriangle(a, c, d, color, uvA, uvC, uvD)
+  let
+    painted = vertexColor(color)
+    first = renderer.vertices.len
+  renderer.vertices.setLen(first + 6 * VertexFloats)
+  renderer.vertices.writeVertex(first, a, uvA, painted)
+  renderer.vertices.writeVertex(first + VertexFloats, b, uvB, painted)
+  renderer.vertices.writeVertex(first + 2 * VertexFloats, c, uvC, painted)
+  renderer.vertices.writeVertex(first + 3 * VertexFloats, a, uvA, painted)
+  renderer.vertices.writeVertex(first + 4 * VertexFloats, c, uvC, painted)
+  renderer.vertices.writeVertex(first + 5 * VertexFloats, d, uvD, painted)
 
 proc rotateY(offset: Vec3, angle: float32): Vec3 =
   ## Rotates an XZ offset around Y.
@@ -431,9 +464,10 @@ proc addLine*(
 
 proc draw*(
     renderer: var ShapeRenderer,
-    viewProjection: Mat4
+    viewProjection: Mat4,
+    opaque = false
 ) =
-  ## Uploads and draws the shape batch with scene depth.
+  ## Draws the shape batch, writing depth for opaque surfaces.
   if renderer.vertices.len == 0:
     return
   glBindBuffer(GL_ARRAY_BUFFER, renderer.vertexBuffer)
@@ -444,10 +478,13 @@ proc draw*(
     GL_DYNAMIC_DRAW
   )
   glEnable(GL_DEPTH_TEST)
-  glDepthMask(GL_FALSE)
+  glDepthMask(if opaque: GL_TRUE else: GL_FALSE)
   glDisable(GL_CULL_FACE)
-  glEnable(GL_BLEND)
-  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+  if opaque:
+    glDisable(GL_BLEND)
+  else:
+    glEnable(GL_BLEND)
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
   glUseProgram(renderer.program)
   shapeViewProjection = viewProjection
   glUniformMatrix4fv(

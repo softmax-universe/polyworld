@@ -1,9 +1,12 @@
 ## Shared Silky HUD chrome for Polyworld games.
 
 import
-  std/[math, strutils, times, unicode],
-  chroma, pixie, silky, vmath, windy,
-  gameuis, inputs, profiles, quadterrain, rtscameras
+  std/[math, strutils, tables, times, unicode],
+  bumpy, chroma, pixie, silky, vmath, windy,
+  daycycles, gameuis, hovers, inputs, profiles, quadterrain, rtscameras,
+  networks, sounds
+
+export daycycles
 
 const
   PanelAccent* = rgbx(83, 91, 108, 255)
@@ -29,8 +32,6 @@ const
   UiCrispSteps* = [0.25'f32, 0.5'f32, 1.0'f32, 2.0'f32, 4.0'f32]
   HudReferenceSize* = vec2(1920, 1080)
   HudDoubleScaleSize = HudReferenceSize * 2.0'f * 0.8'f
-  HudDaySeconds* = 300'i32
-    ## Wall-clock seconds in one in-game day. A 20 minute match is four days.
   DebugWindowTitle* = "Debug"
   DebugWindowOrigin* = vec2(360, 32)
   DebugWindowSize* = vec2(460, 380)
@@ -38,33 +39,49 @@ const
   FpsLimitMax* = 240
   FpsAvgTau = 1.0'f32
   FpsAvgPeriod = 0.5
+  FpsSamples = 60
   FpsLabelSize = vec2(40, 22)
   FpsNowSize = vec2(70, 22)
   FpsAvgSize = vec2(168, 22)
   FpsStdSize = vec2(148, 22)
 
 type
+  UiScaleMode* = enum
+    AutoUiScale = "Auto"
+    CustomUiScale = "Custom"
   SparkStyle* = enum
     Linear, Stepped
+  DebugTab* = object
+    ## Game-owned tuning controls drawn inside the shared debug window.
+    label*: string
+    draw*: proc(sk: Silky, window: Window)
   SparkSample* = object
     tick*: int32
     value*: int64
 
 var
+  uiScaleMode*: UiScaleMode
+  uiScalePercent* = 100
+  uiScaleReference* = 1.0'f
   hudScratch*: string
   debugMenuOpen* = false
+  debugTab* = 0
   interpolateVisuals* = true
   showPaths* = false
   showTiles* = false
   framePaceHz* = 60
   fpsLastTime = 0.0
   fpsLabelTime = 0.0
+  fpsHistory: array[FpsSamples, float32]
+  fpsCursor, fpsCount, fpsFrames: int
+  fpsSampleTime = 0.0
   fpsHasAvg = false
   fpsAvgValue = 0.0'f32
   fpsVarValue = 0.0'f32
   fpsNowText = "  0.00"
   fpsAvgText = "frame   0.00 ms"
   fpsStdText = "  0.00 ms std"
+  hoverStates: Table[pointer, HoverState]
 
 proc sparkPoints*(
     panel: GameUiPanel,
@@ -265,39 +282,6 @@ proc writeClock*(s: var string, hour, minute: int) =
   s.add ':'
   s.addPad2(minute)
 
-proc hudDayTicks*(tickRate: int32): int32 =
-  ## Ticks in one in-game day at this simulation rate.
-  tickRate * HudDaySeconds
-
-proc clockMinutes(tick, tickRate: int32): int =
-  ## Absolute spectator minutes since 8:00 on day 1.
-  8 * 60 + int(tick) * 24 * 60 div int(hudDayTicks(tickRate))
-
-proc clockHour*(tick, tickRate: int32): float32 =
-  ## The accelerated spectator clock in hours, 0 ..< 24 with a fraction.
-  float32(clockMinutes(tick, tickRate) mod (24 * 60)) / 60
-
-proc clockHour*(tick: float32, tickRate: int32): float32 =
-  ## The same accelerated clock from a fractional tick (whole ticks plus
-  ## the frame's sub-tick blend), continuous instead of stepping once per
-  ## whole game minute — the sun and its shadows glide with it.
-  var minutes =
-    8.0'f32 * 60.0'f32 +
-    tick * 24.0'f32 * 60.0'f32 / float32(hudDayTicks(tickRate))
-  minutes = minutes - float32(24 * 60) * floor(minutes / float32(24 * 60))
-  minutes / 60.0'f32
-
-proc hudClock*(
-    tick, tickRate: int32
-): tuple[day, hour, minute: int] =
-  ## Converts simulation ticks into day, hour, and minute.
-  let
-    totalMinutes = clockMinutes(tick, tickRate)
-    minuteOfDay = totalMinutes mod (24 * 60)
-  result.day = totalMinutes div (24 * 60) + 1
-  result.hour = minuteOfDay div 60
-  result.minute = minuteOfDay mod 60
-
 proc formatAmount*(value: int): string =
   ## Writes a thousands-separated count into the shared HUD scratch.
   writeAmount(hudScratch, value)
@@ -331,6 +315,24 @@ proc fitUiScale*(windowSize, contentSize: Vec2): float32 =
       need.x <= layoutSize.x and need.y <= layoutSize.y
   )
 
+proc snapUiScalePercent*(percent: int): int =
+  ## Snaps to tenths plus quarter and three-quarter scale stops.
+  let value = clamp(percent, 25, 400)
+  result = clamp(((value + 5) div 10) * 10, 25, 400)
+  for fraction in [25, 75]:
+    let candidate = (value div 100) * 100 + fraction
+    if candidate <= 400 and abs(candidate - value) < abs(result - value):
+      result = candidate
+
+proc selectedUiScale*(automatic: float32, reference = 1.0'f): float32 =
+  ## Keeps custom scaling fixed when the window or fullscreen mode changes.
+  uiScaleReference = reference
+  case uiScaleMode
+  of AutoUiScale:
+    automatic
+  of CustomUiScale:
+    reference * clamp(uiScalePercent, 25, 400).float32 / 100
+
 proc gameUiScale*(windowSize: Vec2): float32 =
   ## Uses the same crisp HUD breakpoints for every game window.
   result = fitUiScale(
@@ -344,6 +346,7 @@ proc gameUiScale*(windowSize: Vec2): float32 =
   if windowSize.x >= HudDoubleScaleSize.x and
     windowSize.y >= HudDoubleScaleSize.y:
       result = max(result, 2.0'f)
+  result = selectedUiScale(result)
 
 proc gameUiScale*(window: Window): float32 =
   ## Uses the shared HUD breakpoints for the current drawable size.
@@ -432,6 +435,18 @@ proc drawSlot*(
       "slot.9patch"
   sk.draw9Patch(name, SlotPatch, panel.origin, panel.size)
 
+proc hoverSound*(sk: Silky, panel: GameUiPanel, enabled = true) =
+  ## Plays a quiet cue on pointer entry, without repeating during hover or drag.
+  if hoverStates.mgetOrPut(cast[pointer](sk), HoverState()).hoverEntered(
+    sk.frameStartTime,
+    sk.mousePos,
+    rect(panel.origin, panel.size),
+    sk.clipRect,
+    enabled,
+    sk.mouseConsumed or sk.buttonDown[MouseLeft]
+  ):
+    playSound(HoverSound)
+
 proc drawTab*(
     sk: Silky,
     panel: GameUiPanel,
@@ -439,6 +454,7 @@ proc drawTab*(
     hovered = false
 ) =
   ## Draws one theme tab 9-patch.
+  sk.hoverSound(panel, hovered)
   let name =
     if selected:
       "panel.tab.selected.9patch"
@@ -591,6 +607,42 @@ proc drawWellImage*(
     return
   let inner = well.inset(min(pad, min(well.size.x, well.size.y) * 0.08'f32))
   sk.drawSprite(name, inner.origin, inner.size, color)
+
+proc squareEdge(center: Vec2, halfSize, turn: float32): Vec2 =
+  ## Returns where a clock hand, this share of a turn past 12 o'clock, meets
+  ## the edge of a square.
+  let
+    angle = turn * float32(TAU)
+    hand = vec2(sin(angle), -cos(angle))
+  center + hand * (halfSize / max(abs(hand.x), abs(hand.y)))
+
+proc drawClockShade*(
+    sk: Silky,
+    pos: Vec2,
+    size: float32,
+    turn: float32,
+    color: ColorRGBX
+) =
+  ## Shades the part of a square a clock hand has yet to sweep, clockwise
+  ## from 12 o'clock: all of it at turn 0 and none of it at turn 1. The fan
+  ## only needs the hand and the corners ahead of it to fill exactly that.
+  const Stops = [0.125'f32, 0.375, 0.625, 0.875, 1]
+  if turn >= 1:
+    return
+  let
+    white = sk.atlas.entries[WhiteTileKey]
+    uv = vec2(white.x.float32 + white.width.float32 / 2,
+      white.y.float32 + white.height.float32 / 2)
+    halfSize = size / 2
+    center = pos + vec2(halfSize)
+    hand = max(turn, 0)
+  var edge = squareEdge(center, halfSize, hand)
+  for stop in Stops:
+    if stop > hand:
+      let next = squareEdge(center, halfSize, stop)
+      sk.drawTriangle(
+        [center, edge, next], [uv, uv, uv], [color, color, color])
+      edge = next
 
 proc beginFrame*(
     sk: Silky,
@@ -810,10 +862,43 @@ proc noteFps() =
       if fpsLabelTime == 0.0 or now - fpsLabelTime >= FpsAvgPeriod:
         writeFpsStats()
         fpsLabelTime = now
+  if fpsLastTime > 0:
+    inc fpsFrames
+  if fpsSampleTime == 0:
+    fpsSampleTime = now
+  let elapsed = now - fpsSampleTime
+  if elapsed >= 1:
+    fpsHistory[fpsCursor] = fpsFrames.float32 / elapsed.float32
+    fpsCursor = (fpsCursor + 1) mod FpsSamples
+    fpsCount = min(fpsCount + 1, FpsSamples)
+    fpsFrames = 0
+    fpsSampleTime = now
   fpsLastTime = now
 
+proc fpsChart(sk: Silky, window: Window) =
+  ## Draws actual frames per second with the current FPS limit as a guide.
+  var maximum = max(1, framePaceHz).float32
+  for value in fpsHistory:
+    maximum = max(maximum, value)
+  group "fpsChart":
+    box 420, 42
+    rectangle "chartBackground":
+      box 0, 0, 420, 42
+      tint sk.theme.menuPopupHoverColor
+    for i in 0 ..< fpsCount:
+      let
+        index = (fpsCursor - fpsCount + i + FpsSamples) mod FpsSamples
+        x = float32(FpsSamples - fpsCount + i) * 7
+        height = 40 * fpsHistory[index] / maximum
+      rectangle "fpsBar" & $i:
+        box x, 42 - height, 6, height
+        tint rgbx(96, 184, 244, 255)
+    rectangle "fpsLimitLine":
+      box 0, 42 - 40 * framePaceHz.float32 / maximum, 420, 1
+      tint rgbx(190, 190, 190, 180)
+
 proc mouseOverDebugMenu*(mouse: Vec2): bool =
-  ## Returns whether the pointer is over the F1 debug window.
+  ## Returns whether the pointer is over the shared debug window.
   if not debugMenuOpen or DebugWindowTitle notin subWindowStates:
     return false
   let state = subWindowStates[DebugWindowTitle]
@@ -824,89 +909,217 @@ proc mouseOverDebugMenu*(mouse: Vec2): bool =
     mouse.y >= state.pos.y and
     mouse.y <= state.pos.y + state.size.y
 
+proc networkChart(sk: Silky, window: Window, stats: NetworkStats, chart: int) =
+  ## Draws a bounded 60-second history using Silky layout and rectangles.
+  var maximum = max(1.0'f, if chart == 4: stats.tickRate.float32 else: 0)
+  for sample in stats.samples:
+    let value = case chart
+      of 0: max(sample.sentKb, sample.receivedKb)
+      of 1: max(sample.sentPackets, sample.receivedPackets)
+      of 2: sample.rttMs
+      of 3: sample.jitterMs
+      else: sample.ticksPerSecond
+    maximum = max(maximum, value)
+  group "networkChart" & $chart:
+    box 420, 42
+    rectangle "chartBackground":
+      box 0, 0, 420, 42
+      tint sk.theme.menuPopupHoverColor
+    for i in 0 ..< stats.count:
+      let
+        index = (stats.cursor - stats.count + i + NetworkSamples) mod NetworkSamples
+        sample = stats.samples[index]
+        first = case chart
+          of 0: sample.receivedKb
+          of 1: sample.receivedPackets
+          of 2: sample.rttMs
+          of 3: sample.jitterMs
+          else: sample.ticksPerSecond
+        second = if chart == 0: sample.sentKb else: sample.sentPackets
+        x = float32(NetworkSamples - stats.count + i) * 7
+        height = 40 * first / maximum
+      rectangle "received" & $i:
+        box x, 42 - height, (if chart < 2: 3 else: 6), height
+        tint rgbx(96, 184, 244, 255)
+      if chart < 2:
+        let height = 40 * second / maximum
+        rectangle "sent" & $i:
+          box x + 3, 42 - height, 3, height
+          tint rgbx(138, 208, 104, 255)
+    if chart == 4 and stats.tickRate > 0:
+      rectangle "normalTickRate":
+        box 0, 42 - 40 * stats.tickRate.float32 / maximum, 420, 1
+        tint rgbx(190, 190, 190, 180)
+
+proc networkPanel(sk: Silky, window: Window, stats: NetworkStats) =
+  ## Exposes transport rates and delay controls through standard Silky widgets.
+  if stats == nil:
+    text "offlineNetwork":
+      characters "No multiplayer connection in this match."
+    return
+  text "networkState":
+    characters (if stats.active: "Connected" else: "Disconnected") &
+      " | Last 60 seconds"
+  text "networkLegend":
+    characters "Blue: received | Green: sent"
+  let sample = stats.current
+  for chart, caption in [
+    "Traffic: " & sample.receivedKb.formatFloat(ffDecimal, 1) &
+      " KB/s in / " & sample.sentKb.formatFloat(ffDecimal, 1) & " KB/s out",
+    "Packets/s: " & sample.receivedPackets.formatFloat(ffDecimal, 1) &
+      " in / " & sample.sentPackets.formatFloat(ffDecimal, 1) & " out",
+    "RTT (1s avg): " & sample.rttMs.formatFloat(ffDecimal, 1) & " ms",
+    "Jitter (1s avg): " & sample.jitterMs.formatFloat(ffDecimal, 1) & " ms",
+    "Ticks/s: " & sample.ticksPerSecond.formatFloat(ffDecimal, 1) &
+      " played / " & $stats.tickRate & " normal (gray)"
+  ]:
+    text "networkCaption" & $chart:
+      characters caption
+    sk.networkChart(window, stats, chart)
+  text "networkMeasurement":
+    characters (if stats.measuredAt == 0: "Waiting for a server RTT sample."
+      elif stats.age > 5: "RTT stale: no recent echoed packet."
+      else: "Server-clock RTT, including client turnaround.")
+  checkBox "Smooth network playback", stats.smoothPlayback
+  text "networkSmoothing":
+    characters "Spaces bursts out; speeds up to catch up."
+  text "networkLag":
+    characters "Simulated lag per direction (ms)"
+  scrubber "networkLagMs", stats.lagMs, 0, 2000, $stats.lagMs
+  text "networkJitter":
+    characters "Extra random delay per direction (0 to N ms)"
+  scrubber "networkJitterMs", stats.jitterMs, 0, 1000, $stats.jitterMs
+  text "networkOrdering":
+    characters "Ordered delivery. No packets dropped or reordered."
+  button "Reset simulated delay":
+    stats.lagMs = 0
+    stats.jitterMs = 0
+
 proc drawDebugMenu*(
     sk: Silky, window: Window,
-    creepWaypoints: ptr bool = nil, waypointStatus = ""
+    creepWaypoints: ptr bool = nil, waypointStatus = "",
+    network: NetworkStats = nil,
+    extraTabs: openArray[DebugTab] = [],
+    graphicsExtension: proc(sk: Silky, window: Window) = nil
 ) =
-  ## Draws the shared F1 debug window when it is open.
+  ## Draws graphics, network and optional game-owned debugging controls.
   noteFps()
   if not debugMenuOpen:
     return
+  when defined(gotaDebugInputProbe):
+    if sk.buttonPressed[MouseLeft] or sk.buttonReleased[MouseLeft]:
+      echo "DEBUG_INPUT mouse=", sk.mousePos, " pressed=",
+        sk.buttonPressed[MouseLeft], " released=", sk.buttonReleased[MouseLeft],
+        " down=", sk.buttonDown[MouseLeft], " tab=", debugTab
+  debugTab = clamp(debugTab, 0, extraTabs.len + 1)
   sk.beginDsl()
   try:
     subWindow(
       DebugWindowTitle,
       debugMenuOpen,
       DebugWindowOrigin,
-      DebugWindowSize + vec2(0, if creepWaypoints == nil: 0 else: 62)
+      vec2(500, min(860.0'f, window.size.y.float32 / sk.uiScale - 64))
     ):
-      group "fpsRow":
-        box(
-          FpsLabelSize.x + FpsNowSize.x + FpsAvgSize.x + FpsStdSize.x,
-          FpsLabelSize.y
+      for row in 0 ..< (extraTabs.len + 3) div 2:
+        group "debugTabs" & $row:
+          box 440, 32
+          layout LeftToRight
+          itemSpacing 20
+          for index in row * 2 .. min(row * 2 + 1, extraTabs.len + 1):
+            let label =
+              if index == 0: "Graphics"
+              elif index == 1: "Networking"
+              else: extraTabs[index - 2].label
+            radioButton label, debugTab, index
+            when defined(gotaDebugInputProbe):
+              if sk.buttonReleased[MouseLeft]:
+                echo "DEBUG_TAB index=", index, " selected=", debugTab
+      if debugTab == 1:
+        sk.networkPanel(window, network)
+      elif debugTab >= 2:
+        if extraTabs[debugTab - 2].draw != nil:
+          extraTabs[debugTab - 2].draw(sk, window)
+      else:
+        group "fpsRow":
+          box(
+            FpsLabelSize.x + FpsNowSize.x + FpsAvgSize.x + FpsStdSize.x,
+            FpsLabelSize.y
+          )
+          text "fpsCaption":
+            box 0, 0, FpsLabelSize.x, FpsLabelSize.y
+            characters "FPS:"
+            textAlign LeftAlign, MiddleAlign
+          text "fpsNow":
+            box FpsLabelSize.x, 0, FpsNowSize.x, FpsNowSize.y
+            font "Mono"
+            characters fpsNowText
+            textAlign RightAlign, MiddleAlign
+          text "fpsAvg":
+            box(
+              FpsLabelSize.x + FpsNowSize.x,
+              0,
+              FpsAvgSize.x,
+              FpsAvgSize.y
+            )
+            font "Mono"
+            characters fpsAvgText
+            textAlign RightAlign, MiddleAlign
+          text "fpsStd":
+            box(
+              FpsLabelSize.x + FpsNowSize.x + FpsAvgSize.x,
+              0,
+              FpsStdSize.x,
+              FpsStdSize.y
+            )
+            font "Mono"
+            characters fpsStdText
+            textAlign RightAlign, MiddleAlign
+        text "fpsHistoryCaption":
+          characters "FPS history (1s averages) | Gray: FPS limit"
+        sk.fpsChart(window)
+        text "fpsLimitCaption":
+          characters "FPS limit"
+        scrubber(
+          "fpsLimit",
+          framePaceHz,
+          FpsLimitMin,
+          FpsLimitMax,
+          $framePaceHz
         )
-        text "fpsCaption":
-          box 0, 0, FpsLabelSize.x, FpsLabelSize.y
-          characters "FPS:"
-          textAlign LeftAlign, MiddleAlign
-        text "fpsNow":
-          box FpsLabelSize.x, 0, FpsNowSize.x, FpsNowSize.y
-          font "Mono"
-          characters fpsNowText
-          textAlign RightAlign, MiddleAlign
-        text "fpsAvg":
-          box(
-            FpsLabelSize.x + FpsNowSize.x,
-            0,
-            FpsAvgSize.x,
-            FpsAvgSize.y
-          )
-          font "Mono"
-          characters fpsAvgText
-          textAlign RightAlign, MiddleAlign
-        text "fpsStd":
-          box(
-            FpsLabelSize.x + FpsNowSize.x + FpsAvgSize.x,
-            0,
-            FpsStdSize.x,
-            FpsStdSize.y
-          )
-          font "Mono"
-          characters fpsStdText
-          textAlign RightAlign, MiddleAlign
-      text "fpsLimitCaption":
-        characters "FPS limit"
-      scrubber(
-        "fpsLimit",
-        framePaceHz,
-        FpsLimitMin,
-        FpsLimitMax,
-        $framePaceHz
-      )
-      text "terrainScaleCaption":
-        characters "Terrain texture scale"
-      scrubber(
-        "terrainTextureScale",
-        terrainTextureScale,
-        0.01'f,
-        1.0'f,
-        terrainTextureScale.formatFloat(ffDecimal, 3)
-      )
-      text "terrainScaleHint":
-        characters "Lower values make larger texture patterns."
-      checkBox "Interpolation", interpolateVisuals
-      checkBox "Show paths", showPaths
-      checkBox "Show tiles", showTiles
-      if creepWaypoints != nil:
-        checkBox "Creep waypoints", creepWaypoints[]
-        text "creepWaypointStatus":
-          characters waypointStatus
+        text "terrainScaleCaption":
+          characters "Terrain texture scale"
+        scrubber(
+          "terrainTextureScale",
+          terrainTextureScale,
+          0.01'f,
+          1.0'f,
+          terrainTextureScale.formatFloat(ffDecimal, 3)
+        )
+        text "terrainScaleHint":
+          characters "Lower values make larger texture patterns."
+        checkBox "Interpolation", interpolateVisuals
+        checkBox "Show paths", showPaths
+        checkBox "Show tiles", showTiles
+        if creepWaypoints != nil:
+          checkBox "Creep waypoints", creepWaypoints[]
+          text "creepWaypointStatus":
+            characters waypointStatus
+        if graphicsExtension != nil:
+          graphicsExtension(sk, window)
   finally:
     sk.endDsl()
 
 proc handleChromeKey*(button: Button): bool =
   ## Handles shared debug keys. F1 toggles this menu, F2 starts or writes
   ## a Fluffy trace.
+  if customBindingsEnabled:
+    if DebugInput.matches(button):
+      debugMenuOpen = not debugMenuOpen
+      return true
+    if TraceInput.matches(button):
+      toggleRuntimeTrace()
+      return true
+    return false
   case button
   of KeyF1:
     debugMenuOpen = not debugMenuOpen

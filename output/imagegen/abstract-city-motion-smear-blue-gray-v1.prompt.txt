@@ -1,0 +1,9 @@
+Generated using the built-in image_gen tool.
+
+Use case: stylized-concept
+Asset type: abstract cinematic image, wide landscape composition
+Primary request: an abstract impression of moving extremely fast through a city at night, with a huge optical zoom smear.
+Scene/backdrop: near-black and charcoal darkness, city architecture barely suggested as blue and slate-gray masses.
+Style/medium: experimental long-exposure photography, strong radial zoom blur, painterly optical smearing. Thick soft blue-gray shapes drag into long layered streaks, with sparse icy-blue and silver-white city lights smeared into luminous trails. A powerful sense of forward acceleration, converging into a dim distant vanishing point and sweeping outward toward the edges. Rich darkness between the streaks, atmospheric softness, subtle grain, dramatic depth. More abstract than recognizable, no sharp buildings.
+Color palette: black, deep midnight blue, steel blue, slate gray, restrained cold white highlights.
+Constraints: full-bleed landscape image, no text, no logos, no watermark, no people, no crisp city details; emphasize broad smeared shapes and light streaks, avoid a neat symmetrical sci-fi tunnel.

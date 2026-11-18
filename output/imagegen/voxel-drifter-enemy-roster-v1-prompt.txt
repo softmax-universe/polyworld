@@ -1,0 +1,54 @@
+Generated with the built-in image_gen tool.
+
+Use case: stylized-concept
+Asset type: one square, high-resolution 3 by 3 enemy concept selection sheet containing EXACTLY NINE different full-body robotic monsters.
+
+Primary request: Give the user nine strong, varied enemy design ideas for our established original voxel action-adventure game so they can choose favorites by number. These should look like enemies that could actually appear in the referenced game, not unrelated science-fiction illustrations. Distinct silhouettes and readable forms matter more than intricate surface noise.
+
+Input images: Both images are visual style and world-continuity references. Use the first image's hostile robots as the shared design family and the second image's voxel construction, ancient machine shapes, palette and rendering quality. Do not recreate their combat scenes or environments. No protagonist on the sheet.
+
+Grid and presentation: A precise 3-column by 3-row layout, exactly nine equal panels, reading left to right then top to bottom. One monster centered in each panel, entire body and every weapon/appendage visible, no cropping and no overlap between cells. Use consistent three-quarter viewing angles and lighting. Background in all cells is a subdued matte deep teal/indigo studio-like gradient with a small simple slate stone ground patch and soft contact shadow; floating enemies cast a shadow beneath them. Thin subtle separators and comfortable margins. No elaborate dioramas, scenery, UI cards or decorative borders. Scale each monster to fill its own panel while leaving space for the label. Each occupies roughly 70 percent of its cell. Showcase clear model geometry, not huge effects.
+
+Art style: Crisp genuinely three-dimensional small-cuboid voxel geometry in the style of Cube World, with Hyper Light Drifter's eerie ancient robotic aesthetic. Visible square faces, stepped silhouettes, flat shaded simple solid-color materials, strong form readability, restrained ambient occlusion. Bodies, jaws, armor, legs, shields, weapons, rings and cables are made of small cuboids, not smooth rounded meshes. Mature, impersonal, dangerous machines; no cute faces, giant baby eyes or smiling monsters. Shared pale mint/ivory weathered slab armor, dark indigo mechanical joints and inner structures, recessed cyan square cores and narrow turquoise eye slits, occasional restrained hot magenta accents. Carved square-spiral motifs and segmented technology unite the family. Vary armor distribution and proportions; do not make nine reskins of the same humanoid. Localized glow on power cores and blade edges, with crisp unlit surfaces elsewhere. Three-dimensional game asset renders, not flat pixel-art sprites or painted concept art.
+
+Designs and exact labels, in this fixed order:
+
+TOP LEFT / 01: BLADE WARDEN
+A tall lean bipedal predator with asymmetrical stepped shoulder armor, a narrow severe head recessed into a high collar, long articulated legs, and two elongated cyan-edged forearm blades. Aggressive forward-leaning ready stance, blades separated so both are readable. Main role: fast melee hunter.
+Label exactly: "01  BLADE WARDEN"
+
+TOP CENTER / 02: BASTION
+A squat, extremely broad heavily armored defensive brute with short thick legs, a small deeply recessed sensor slit, and one towering rectangular slab shield projecting in front of an arm. Opposite arm is a compact heavy impact fist. Indigo shoulder mass, ivory shield plates with cyan inset glyph, very stable grounded silhouette. Main role: shielded defender.
+Label exactly: "02  BASTION"
+
+TOP RIGHT / 03: RIFT HOUND
+A low lean four-legged robotic hunting beast, long angular muzzle and split mechanical jaw, swept-back segmented spinal fins with restrained magenta charging lights, springlike block-built rear limbs and long claws. Alert crouching pounce stance. No organic fur, no cartoon puppy expression. Main role: flanking charger.
+Label exactly: "03  RIFT HOUND"
+
+MIDDLE LEFT / 04: SAW CRAB
+A wide flat six-legged mechanical scavenger with a compact armored shell, two enormous asymmetrical serrated pincers held apart, and a visible cyan square core set into the central carapace. Legs spread laterally, all geometric hard segments, recognizable crab-like silhouette. Main role: low sweeping area attacker.
+Label exactly: "04  SAW CRAB"
+
+MIDDLE CENTER / 05: PRISM DRONE
+A hovering angular diamond-shaped cyan energy core surrounded by four detached pale stone/ceramic armor plates, arranged in an asymmetric segmented frame with small magenta targeting lights. The detached plates hover clearly apart, separated by modest gaps and fine energy filaments. Compact aerial enemy with no humanoid limbs. Main role: ranged flying shooter.
+Label exactly: "05  PRISM DRONE"
+
+MIDDLE RIGHT / 06: SIEGE STRIDER
+A tall tripod artillery machine with three long splayed angular stilt legs supporting an elongated rectangular energy cannon, narrow shielded cockpit/core, and backward counterweight. The cannon has a bright recessed square muzzle. Dramatic top-heavy silhouette, plenty of negative space under its body, visibly different from a biped or crab. Main role: long-range artillery.
+Label exactly: "06  SIEGE STRIDER"
+
+BOTTOM LEFT / 07: COIL WYRM
+A segmented mechanical serpent with block-built armored vertebrae, cyan-lit gaps between segments, a heavy angular drill-shaped head with a narrow sensor slit, and a tapering geometric tail. Its body forms a dynamic low S-shaped coil, head lifted enough to show the threatening face. All curves constructed through stepped cuboid segments, not smooth pipes. Main role: burrowing ambusher.
+Label exactly: "07  COIL WYRM"
+
+BOTTOM CENTER / 08: HOLLOW ORACLE
+A levitating ancient machine shaped like a hollow stepped bell or hanging shrine, with a long severe faceless ivory mask suspended within an open indigo frame, a cyan core in the hollow chest, small magenta hovering glyph fragments, and several short hanging segmented cable tendrils. Eerie sacred machine rather than a robed human wizard. Distinct tall suspended silhouette and readable empty center. Main role: support or summoner.
+Label exactly: "08  HOLLOW ORACLE"
+
+BOTTOM RIGHT / 09: CROWN REAPER
+An imposing four-armed sentinel, narrow waist and long armored legs, tall split crown-like head and broken segmented cyan energy halo. Two upper arms hold long geometric polearms diagonally outward, while the lower pair carries short block blades close to the body. Keep each of the four arms anatomically clear and separate, no tangled weapons. Pale ivory and indigo armor with limited magenta markings. Main role: elite melee enemy.
+Label exactly: "09  CROWN REAPER"
+
+Typography: Below each creature, one clean compact label in sharp readable pale mint uppercase monospaced lettering, using EXACTLY the number and name specified above. Keep labels aligned consistently at the bottom of each panel, with breathing room. These nine labels are the ONLY text in the image. No overall title, descriptive paragraphs, role captions, watermark or logos.
+
+Quality constraints: Exactly nine unique designs, exactly one per cell, no duplicated cells or missing monsters. Show all creatures sharply and at comparable presentation quality. No extra miniature variants, no human scale figures, no attack trails obscuring anatomy, no extreme bloom, no photorealistic metal, no smooth toy plastic, no painterly strokes, no 2D sprite filter. The sheet should make the nine different combat silhouettes and shared voxel robot design language immediately obvious.

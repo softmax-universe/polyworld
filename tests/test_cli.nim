@@ -195,6 +195,36 @@ block:
   let split = parseCommon(@["--vsync", "off", "--bot:one.bas"])
   doAssert not split.vsync
 
+echo "Testing launch audio uses saved settings unless explicitly overridden"
+block:
+  let defaults = parseCommon(@[])
+  doAssert not defaults.soundMuted
+  doAssert not defaults.soundOverride
+  for argument in ["--mute", "--mute=true", "--mute=1", "--mute=yes",
+      "--mute=on", "--mute:true"]:
+    let options = parseCommon(@["--unmute", argument])
+    doAssert options.soundMuted and options.soundOverride
+  for argument in ["--unmute", "--mute=false", "--mute=0", "--mute=no",
+      "--mute=off", "--mute:false"]:
+    let options = parseCommon(@["--mute", argument])
+    doAssert not options.soundMuted and options.soundOverride
+  doAssert parseCommon(@["--unmute", "--mute"]).soundMuted
+  doAssert not parseCommon(@["--mute", "--unmute"]).soundMuted
+  let options = parseCommon(@["--seed", "7", "--unmute", "--ticks", "24"])
+  doAssert options.seed == 7 and options.maximumTicks == 24
+  doAssert not options.soundMuted and options.soundOverride
+  var soundMuted = true
+  doAssert not soundMuted.takeSoundFlag("--music")
+  doAssert soundMuted
+  for invalid in ["--mute=", "--mute=loud", "--mute:maybe"]:
+    var rejected = false
+    try:
+      discard soundMuted.takeSoundFlag(invalid)
+    except ValueError:
+      rejected = true
+    doAssert rejected, "Invalid mute values must fail without enabling sound"
+    doAssert soundMuted
+
 echo "Testing --windowSize is a shared flag"
 block:
   let options = parseCommon(@["--windowSize:800x400", "--bot:one.bas"])

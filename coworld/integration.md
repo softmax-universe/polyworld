@@ -5,7 +5,7 @@ Coworld builds. Desktop, ordinary headless, and WASM builds do not import Mummy.
 `-d:emscripten -d:replayViewer` selects the static replay bootstrap and enables
 looping. Each game retains its simulation, BASIC resource limits and early endings.
 
-The packages are `coworld/gota`, `coworld/lvd`, `coworld/cta`, and `coworld/awm`.
+The packages are `coworld/gota`, `coworld/lvd`, `coworld/cta`, and `coworld/cac`.
 Each contains a manifest template, Compose definition, unchanged BASIC baseline,
 game guide and executable viewer build hook. Generated packages and test outputs are ignored.
 
@@ -18,17 +18,20 @@ separate Metta checkout so an existing development checkout stays intact.
 
 ```sh
 nim r coworld/tools/sync_dependencies.nim
-export POLYWORLD_DEPS="$PWD/tmp/coworld/deps"
 coworld build --project coworld/gota --version 2026.9.9.3
 coworld build --project coworld/lvd --version 2026.9.9.3
 coworld build --project coworld/cta --version 2026.9.9.3
-coworld build --project coworld/awm --version VERSION
+coworld build --project coworld/cac --version VERSION
 ```
 
-`nimby.lock` pins ordinary dependencies. `coworld/dependencies.lock` pins the same
-revisions plus optional Mummy. Run
+Local builds use sibling dependency checkouts, such as `/Users/me/p/zippy`.
+`nimby.lock` is the single dependency lock for development, CI, and Coworld.
+The sync tool reuses checkouts at those revisions and preserves local branches
+and edits. Updates require clean checkouts and fast-forward merges. Set
+`POLYWORLD_DEPS` explicitly to use a separate cache of detached pinned checkouts,
+as the container build does. Run
 `nim r coworld/tools/sync_dependencies.nim --latest` to resolve upstream HEADs and
-update both locks. Ordinary builds never update revisions implicitly.
+update the lock. Ordinary builds never update revisions implicitly.
 The build hook validates the asset commit in `coworld/assets.json`. `POLYWORLD_ART`
 can point at a checkout of that revision. Each game's `assets.nim` declarations
 select its browser models, textures, and UI files. Emscripten builds automatically
@@ -42,7 +45,7 @@ The runner supplies local `file://` URIs through `COGAME_CONFIG_URI`,
 `COGAME_PLAYER_SEATS_URI`, `COGAME_RESULTS_URI`, `COGAME_SAVE_REPLAY_URI`, and
 `COGAME_PLAYER_FAILURE_URI`. Configurations require matching tokens and players
 arrays. GotA has ten seats, CTA has four, and LvD supports variable rosters with
-six-player FFA in Competition. AWM takes two to seven seats: two play a duel,
+six-player FFA in Competition. Cards and Casters takes two to seven seats: two play a duel,
 more a free-for-all; its turn-based tick is one game action. Staged policy filenames may have no extension.
 Raw BASIC source is read with bounded reads and compiled with the game limits.
 
@@ -75,7 +78,7 @@ purpose, `function` names the operation, and `args` must encode a JSON object.
 The policy cannot select a seat or filesystem path. Coworld binds its optional
 `annotations_uri` to each seat. Desktop and WASM hosts expose the same functions
 and return disabled when there is no destination; they do not save files yet.
-This includes GoTA, Light vs Dark, Call to Adventure, AWM and Heartleaf hosts.
+This includes GoTA, Light vs Dark, Call to Adventure, Cards and Casters and Heartleaf hosts.
 Heartleaf does not yet have a Coworld output integration.
 
 `ANNOTATE` returns a status instead of raising a BASIC error.
@@ -126,11 +129,14 @@ under Emscripten without threads. It is included in the normal CI suite.
 entrypoints, recording regression tests, and full replay verification. First record
 full matches into `tmp/coworld/{gota,lvd,cta}.replay` with the headless binaries and
 `--record PATH`. Run `nim r coworld/tools/test_runtime.nim` from the repository root.
-Pass a game name, such as `awm`, to check only that game.
+Pass a game name, such as `cac`, to check only that game.
 It uses the binaries in `tmp/coworld` to check
 extensionless and empty sources, slot-specific print and annotation output, optional
 annotation destinations, compilation failure,
 disabled VMs, health/Ping/Pong, completion ordering and the 10 MiB log bound.
+GotA also checks aggregate decoded-package limits and forged ZIP size metadata.
+Set `COWORLD_TEST_ARTIFACTS` to an existing directory to retain each episode's
+inputs, logs, status, results and replay for independent inspection.
 
 `nim r coworld/tools/test_tools.nim` checks concurrent build subprocesses,
 working-directory restoration, and failure logs.
@@ -144,19 +150,23 @@ ARM and x86 coverage. `tools/replay_probe.html` captures the Softmax iframe prot
 CTA stores authoritative per-hero banked gold and return flags.
 They are cloned, restored and hashed with the world. Surviving returned heroes tied
 for the most banked gold receive 1; every other hero receives 0. Light vs Dark
-also emits binary scores. GotA emits Emmett's Glory: lifetime XP per elapsed
-minute for the winning team, rounded down to integers, and zero for losses,
-draws, or timeouts, in zero-based platform slot order.
-GotA standings use team win/loss Elo MMR, starting at 1,500 with K=32 and
-no score-margin scaling. Emmett's Glory remains in game results for analysis.
+also emits binary scores. GotA emits binary results in zero-based platform slot order: 1 for each
+winning hero and 0 for losses, draws, or timeouts. Lifetime XP remains a
+separate analysis field. GotA standings use OpenSkill Plackett-Luce with
+initial `mu: 25` and `sigma: 25/3`. MMR uses team wins, losses, and draws
+only. Keep `margin_scale: null` so score margins cannot weight rating
+changes. XP, Glory, and match duration have no effect on ladder ratings.
 Its league scheduler must preserve `strategy: "team_n"`, `team_count: 2`,
 `team_layout: "blocks"`, `matchmaking: "elo_softmax"`,
 `matchmaking_temperature: 100`, and
 `distinct_teammates: true`. With ten eligible policies, each controls one hero
 in a mixed five-versus-five match. Omitting `distinct_teammates` instead clones
 one policy across each team's five seats. Keep this league setting intact
-when publishing releases or changing scoring. The Competition variant uses
-`draft_mode: "open"`, allowing any hero to be picked multiple times.
+when publishing releases or changing scoring. The main league selects the
+`team-draft` variant with `draft_mode: "team"`: one of each hero per team, with
+the same hero allowed on opposing teams. Preserve the existing `competition`
+variant with `draft_mode: "open"` for NeuralHub at Diablo Valley College.
+Do not change the student league's settings or default variant.
 
 ## Release acceptance
 

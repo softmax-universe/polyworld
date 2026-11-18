@@ -1,0 +1,1843 @@
+## Gods of the Arena Silky HUD.
+
+import
+  std/[strformat, strutils, times, monotimes],
+  chroma, pixie, silky, vmath, windy,
+  polyworld/[stats, metrics, actioncam, chrome, configs, gameuis, inputs, pathing, player, rtscameras,
+    sounds, stackpanels, profiles, networks],
+  assets, content, sim, game, controls, layouts, shops, maps, events, drafts, cameras, tooltips,
+  deathhud, matchtiming
+
+const
+  ## Icons draw at power-of-two sizes so the 128 and 256 px source art
+  ## lands on exact mip levels and stays crisp.
+  IconTiny = 16.0'f32
+  IconSmall = 64.0'f32
+  IconLarge = 128.0'f32
+  BadgeSmall = 16.0'f
+  BadgeLarge = 64.0'f32
+  AbilityInputs = [AbilityOneInput, AbilityTwoInput, AbilityThreeInput,
+    AbilityFourInput, ItemOneInput, ItemTwoInput]
+  ScoreIcons = ["tower", "kills", "deaths"]
+  CooldownFill = rgbx(8, 10, 16, 180)
+  IconTint = rgbx(245, 230, 190, 255)
+  ManaColor* = rgbx(238, 202, 65, 255)
+
+type
+  HudChrome = object
+    layout: GameUiLayout
+    score: GameUiPanel
+    heroes: GameUiPanel
+    clock: GameUiPanel
+    minimap: GameUiPanel
+    details: GameUiPanel
+    inventory: GameUiPanel
+  SelectedKind = enum
+    SelectedHero,
+    SelectedTower,
+    SelectedBarracks,
+    SelectedMob,
+    SelectedGod
+
+  SelectedUnit = object
+    id: int32
+    kind: SelectedKind
+    team: Team
+    neutral: bool
+    portraitKey: string
+    callsign: string
+    classLabel: string
+    status: string
+    hp: float32
+    maxHp: float32
+    mana: float32
+    maxMana: float32
+    xp: int
+    nextXp: int
+    gold: int
+    level: int
+    damage: int32
+    attackCasting: CastKind
+    moveSpeed: float32
+    attackSpeed: float32
+    attackRange: float32
+    inventory: array[InventorySlots, Item]
+    itemCounts: array[InventorySlots, int32]
+    portalCooldown, channelTicks: int32
+    itemCooldowns: array[InventorySlots, int32]
+    abilities: array[HeroAbilitySlot, Ability]
+    abilityLevels: array[HeroAbilitySlot, int32]
+    abilityPoints: int32
+    cooldowns: array[HeroAbilitySlot, int32]
+    charges: array[HeroAbilitySlot, int32]
+    recharges: array[HeroAbilitySlot, int32]
+
+proc ribbonCounts(): array[Team, int] =
+  ## Occupancy is independent of stable lobby slots and packed hero indices.
+  for hero in run.world.heroes:
+    inc result[hero.team]
+
+proc placeChrome(layout: GameUiLayout): HudChrome =
+  ## Places every textured HUD panel in one layout space.
+  let counts = ribbonCounts()
+  result.layout = layout
+  result.heroes = layout.panel(GameUiRegion.TopCenter,
+    heroRibbonSize(counts[RedTeam], counts[BlueTeam]))
+  result.score = layout.scorePanel(result.heroes.size)
+  result.clock = layout.panel(GameUiRegion.TopRight, PanelClock)
+  result.minimap = layout.panel(GameUiRegion.BottomLeft, PanelMinimap)
+  result.details = layout.panel(GameUiRegion.BottomCenter, PanelDetails)
+  result.inventory = layout.panel(
+    GameUiRegion.BottomRight,
+    PanelInventory
+  )
+
+var networkSpectator* = false
+
+proc deathHudPanel(chrome: HudChrome): GameUiPanel =
+  ## A passive compact plate below the ribbon, never a battlefield overlay.
+  result.size = vec2(260, 60)
+  result.origin = vec2(floor((chrome.layout.size.x - result.size.x) / 2),
+    chrome.heroes.origin.y + chrome.heroes.size.y + 10)
+  if run.world.preparationTicksLeft() > 0:
+    result.origin.y += 54
+
+proc preparationHudText*(world: World): string =
+  ## Round up applied simulation ticks, never wall time or render interpolation.
+  let ticks = world.preparationTicksLeft()
+  if ticks > 0:
+    let seconds = (ticks + TickRate - 1) div TickRate
+    result = "PREPARATION " & $(seconds div 60) & ":" &
+      align($(seconds mod 60), 2, '0')
+
+proc preparationHudPanel(chrome: HudChrome): GameUiPanel =
+  result.size = vec2(300, 44)
+  result.origin = vec2(floor((chrome.layout.size.x - result.size.x) / 2),
+    chrome.heroes.origin.y + chrome.heroes.size.y + 10)
+
+proc drawPreparationHud(sk: Silky, chrome: HudChrome) =
+  let text = preparationHudText(run.world)
+  if text.len == 0:
+    return
+  let panel = preparationHudPanel(chrome)
+  sk.draw9Patch("window.9patch", sk.theme.windowPatch, panel.origin, panel.size)
+  sk.drawLabel(text, panel.origin + vec2(12, 4), panel.size - vec2(24, 8),
+    sk.theme.defaultTextColor, "Bold", CenterAlign)
+
+proc drawDeathHud(sk: Silky, chrome: HudChrome) =
+  ## Ownership is independent of selection/camera; ticks remain authoritative.
+  let text = deathHudText(run.world, options.playerSlot, run.replayMode,
+    spectator = networkSpectator)
+  if text.len == 0:
+    return
+  let panel = deathHudPanel(chrome)
+  sk.draw9Patch("window.9patch", sk.theme.windowPatch, panel.origin, panel.size)
+  sk.drawLabel(text, panel.origin + vec2(12, 4), panel.size - vec2(24, 8),
+    sk.theme.defaultTextColor, "H1", CenterAlign)
+
+proc localHudHeroId*(): int32 =
+  ## playerSlot is one-based packed order, never a stable lobby seat.
+  if run != nil and run.world != nil and not run.replayMode and
+      not networkSpectator and options.playerSlot > 0 and
+      options.playerSlot <= run.world.heroes.len:
+    let hero = run.world.heroes[options.playerSlot - 1]
+    if hero != nil:
+      return hero.id
+
+proc hudDetailId(primaryId: int32, actionCam: ActionCam): int32 =
+  ## Inspection and the spectator director never replace a human's own HUD.
+  let own = localHudHeroId()
+  if own != 0: own
+  elif actionCam.enabled and actionCam.locked: actionCam.lockId
+  else: primaryId
+
+proc transportAvailable*(): bool =
+  not defined(gotaTestRoom) and run != nil and run.world != nil and
+    run.world.phase != Drafting and localHudHeroId() == 0 and
+    (not run.networked or networkSpectator)
+
+proc keepDraftPlaying*(world: World, transport: var Player) =
+  ## Draft deadlines always advance, including paused startup and rewind.
+  if world.phase == Drafting:
+    transport.playing = true
+
+proc currentLayout*(window: Window): GameUiLayout =
+  ## Reserves timeline space only when the transport controls are visible.
+  initGameUiLayout(
+    vec2(window.size.x.float32, window.size.y.float32) /
+      gameUiScale(window),
+    if transportAvailable(): TransportHeight else: 0.0'f
+  )
+
+var
+  statsState: StatsState
+  statsGame: Game
+  statsTable: StatsTable
+  playerNames: seq[string]
+  fittedNames: seq[string]
+  fittedNameWidth = -1.0'f
+  showCreepWaypoints* = false
+  hudTooltip: TooltipSession
+  tooltipGame: Game
+  tooltipSelection: int32
+  tooltipSize: Vec2
+
+proc clearHudTooltip*() =
+  ## Menus and match lifecycle owners call this when the HUD is suspended.
+  hudTooltip.clearTooltip()
+
+proc currentMetrics(slot: int, complete: bool): MetricRow =
+  ## Combines authoritative totals with live or original replay telemetry.
+  result = run.metrics.read(slot, run.world.tick, complete)
+  if run.historyPlayback:
+    result = result.withTelemetry(
+      run.history, slot, run.world.tick, complete
+    )
+  if run.replayMode:
+    result = result.withTelemetry(
+      run.replayData.metrics, slot, run.world.tick, complete
+    )
+
+proc currentStats(): lent StatsTable =
+  ## Updates retained rows while keeping roster names across frames and seeks.
+  run.sampleMetrics()
+  let fresh = statsGame != run or statsTable.rows.len != run.world.heroes.len
+  if fresh:
+    statsGame = run
+    playerNames.setLen(run.world.heroes.len)
+    fittedNames.setLen(run.world.heroes.len)
+    fittedNameWidth = -1
+    statsTable.rows.setLen(run.world.heroes.len)
+    for slot in 0 ..< playerNames.len:
+      playerNames[slot] = run.config.players[slot].displayName(slot)
+  statsTable.kind = GotaStats
+  statsTable.tick = run.world.tick
+  statsTable.complete = run.finished()
+  statsTable.winner =
+    if run.world.gameOver and not run.world.draw: run.world.winner.ord
+    else: -1
+  statsTable.kills = run.world.teamHeroKills
+  var index = 0
+  for team in [BlueTeam, RedTeam]:
+    for slot, hero in run.world.heroes:
+      if hero.team != team:
+        continue
+      let row = addr statsTable.rows[index]
+      if fresh:
+        row.name = playerNames[slot]
+      row.slot = slot
+      row.subtitle = HeroSpecs[hero.class].name
+      row.portrait = HeroPortraitKeys[hero.class]
+      row.team = team.ord
+      row.fallen = hero.state == Dying
+      row.selected = not run.replayMode and options.playerSlot == slot + 1
+      row.metrics = currentMetrics(slot, statsTable.complete)
+      inc index
+  statsTable
+
+proc matchStatsOptions(): StatsOptions =
+  StatsOptions(headline: "TIME REMAINING", headlineSuffix: "  " & run.remainingMatchText())
+
+proc statsContains(window: Window, mouse: Vec2): bool =
+  ## Tests the overlay before allowing input through to the existing HUD.
+  if not statsState.visible(window.tabHeld):
+    return false
+  statsState.mouseOverStats(window, currentLayout(window),
+    currentStats(), mouse, matchStatsOptions())
+
+proc hudClicked(window: Window, sk: Silky, panel: GameUiPanel): bool =
+  ## Keeps covered HUD controls from receiving an overlay click.
+  not window.statsContains(sk.mousePos) and
+    not mouseOverDebugMenu(sk.mousePos) and
+    not hudTooltip.tooltipContains(sk.mousePos) and
+    (localHudHeroId() == 0 or window.buttonPressed[MouseLeft]) and
+    chrome.clicked(window, sk, panel)
+
+proc drawBuyback(
+    sk: Silky,
+    window: Window,
+    panel: GameUiPanel,
+    hero: Hero,
+    controlled, playing: bool
+) =
+  ## Shows the death countdown and a priced buyback in the inventory area.
+  let
+    price = run.world.buybackPrice(hero.id)
+    reason = run.world.buybackReason(hero.id)
+    enabled = controlled and reason.len == 0 and not run.historyPlayback
+    seconds = (hero.respawnTicks() + TickRate - 1) div TickRate
+    gold = rgbx(247, 221, 143, 255)
+    muted = rgbx(163, 175, 192, 255)
+  sk.drawRect(panel.origin, panel.size, rgbx(8, 12, 20, 255))
+  var rows = panel.stack(TopToBottom, vec2(4))
+  let
+    countdown = rows.takeRow(28, 8)
+    button = rows.takeRow(44, 8)
+    status = rows.takeRest()
+  hudScratch.setLen(0)
+  hudScratch.add "Respawn in "
+  hudScratch.addHudInt(seconds.int)
+  hudScratch.add 's'
+  sk.drawLabel(
+    hudScratch,
+    countdown.origin,
+    countdown.size,
+    gold,
+    "Bold",
+    CenterAlign
+  )
+  sk.drawTab(button, hovered = enabled and sk.hovered(button))
+  hudScratch.setLen(0)
+  hudScratch.add "BUYBACK  "
+  hudScratch.addHudInt(price.int)
+  hudScratch.add " gold"
+  sk.drawLabel(
+    hudScratch,
+    button.origin,
+    button.size,
+    if enabled: gold else: muted,
+    "Small",
+    CenterAlign
+  )
+  sk.drawLabel(
+    if reason.len > 0: reason
+    elif not controlled or run.historyPlayback: "Awaiting respawn"
+    elif not playing: "Resume to complete buyback"
+    else: "Return to your spawn now",
+    status.origin,
+    status.size,
+    muted,
+    "Small",
+    CenterAlign
+  )
+  if enabled and window.hudClicked(sk, button):
+    playSound(ClickSound)
+    queueBuyback(hero.id)
+    armedAbility = -1
+    armedItem = -1
+
+proc currentChrome(window: Window): HudChrome =
+  ## Places every textured HUD panel for the current window.
+  placeChrome(currentLayout(window))
+
+proc inspectionPanel*(window: Window): GameUiPanel =
+  ## One shared passive inspection rectangle, clear of ribbon and death plate.
+  let chrome = currentChrome(window)
+  result = chrome.layout.inspectionPanel(chrome.score, chrome.heroes)
+  if run.world.preparationTicksLeft() > 0 and
+      result.overlaps(preparationHudPanel(chrome)):
+    let preparation = preparationHudPanel(chrome)
+    result.origin.y = preparation.origin.y + preparation.size.y + 10
+
+proc mouseOverInspection*(window: Window, mouse: Vec2,
+    primaryId: int32, viewMode = 0'i32): bool
+
+proc mouseOverUi*(
+    window: Window,
+    mouse: Vec2,
+    primaryId = 0'i32
+): bool =
+  ## Returns whether the pointer is over a visible game UI panel.
+  when defined(gotaTestRoom):
+    if mouse.x >= 12 and mouse.x < 392 and
+      mouse.y >= 94 and mouse.y < 398:
+        return true
+  if run.world.phase == Drafting or shopOpen or
+    window.statsContains(mouse) or mouseOverDebugMenu(mouse) or
+    hudTooltip.tooltipContains(mouse):
+      return true
+  let chrome = currentChrome(window)
+  if mouseOverInspection(window, mouse, primaryId):
+    return true
+  if primaryId == 0 and localHudHeroId() == 0:
+    result = mouseOverPanels(
+      mouse,
+      chrome.layout,
+      [
+        chrome.score,
+        chrome.heroes,
+        chrome.clock,
+        chrome.minimap,
+        chrome.inventory
+      ]
+    )
+  else:
+    result = mouseOverPanels(
+      mouse,
+      chrome.layout,
+      [
+        chrome.score,
+        chrome.heroes,
+        chrome.clock,
+        chrome.minimap,
+        chrome.details,
+        chrome.inventory
+      ]
+    )
+
+proc renderPoint(position: WorldPoint): Vec3 =
+  ## Converts authoritative integer coordinates at the HUD boundary.
+  vec3(
+    position.x.float32 / WorldScale.float32,
+    position.y.float32 / WorldScale.float32,
+    position.z.float32 / WorldScale.float32
+  )
+
+proc teamHudColor*(team: Team): ColorRGBX =
+  ## Returns the team's color for HUD markers and health bars.
+  if team == RedTeam:
+    rgbx(224, 80, 83, 255)
+  else:
+    rgbx(76, 128, 232, 255)
+
+proc classLabel(style: HeroAttackStyle): string =
+  ## Returns the compact class word shown under a hero name.
+  case style
+  of MeleeAttack:
+    "MELEE"
+  of RangedAttack:
+    "RANGER"
+  of MagicAttack:
+    "MAGE"
+
+proc callsign(name: string): string =
+  ## Returns the first name word in HUD capitals.
+  var word = name
+  let space = name.find(' ')
+  if space >= 0:
+    word = name[0 ..< space]
+  toUpperAscii(word)
+
+const HeroCallsigns = block:
+  var names: array[HeroClass, string]
+  for class in HeroClass:
+    names[class] = callsign(HeroSpecs[class].name)
+  names
+
+proc remainingTowers(team: Team): int =
+  ## Counts the towers still standing for one team.
+  for tower in run.world.buildings:
+    if tower.kind == TowerBuilding and tower.team == team and tower.hp > 0:
+      inc result
+
+proc clockHour*(): float32 =
+  ## The accelerated spectator clock in hours, 0 ..< 24 with a fraction:
+  ## the match starts at 8:00 and a day is five minutes long.
+  clockHour(run.world.battleTick(), TickRate)
+
+proc currentHudTime(): tuple[day, hour, minute: int] =
+  ## Converts simulation ticks into the accelerated spectator clock.
+  hudClock(run.world.battleTick(), TickRate)
+
+proc visibleInView(
+    viewMode: int32,
+    team: Team,
+    position: WorldPoint
+): bool =
+  ## Applies the current omniscient or team visibility spectator mode.
+  if viewMode == 0:
+    return true
+  let viewingTeam = Team(viewMode - 1)
+  team == viewingTeam or visible(run.world, viewingTeam, position)
+
+proc visibleInView(viewMode: int32, unit: Footman): bool =
+  ## Neutral mobs never inherit allied visibility from navigation orientation.
+  if unit.camp == 0:
+    return visibleInView(viewMode, unit.team, unit.position)
+  viewMode == 0 or visible(run.world, Team(viewMode - 1), unit.position)
+
+proc unitHudColor(unit: Footman): ColorRGBX =
+  ## Distinguishes neutral mobs from the two playable factions.
+  if unit.camp > 0: rgbx(242, 184, 61, 255)
+  else: teamHudColor(unit.team)
+
+proc isPicked(id: int32, selectedIds: openArray[int32]): bool =
+  ## Returns whether an object belongs to the current selection set.
+  for selectedId in selectedIds:
+    if selectedId == id:
+      return true
+
+proc selectedUnit(id: int32, viewMode: int32): SelectedUnit {.measure.} =
+  ## Builds the current flat view of one selectable world object.
+  if run == nil or run.world == nil or id == 0:
+    return
+  for hero in run.world.heroes:
+    if hero != nil and hero.id == id:
+      if not visibleInView(viewMode, hero.team, hero.position):
+        return SelectedUnit()
+      let
+        spec = hero.class.heroSpec
+        moveSpeed = hero.heroMoveSpeed.float32 *
+          TickRate.float32 / WorldScale.float32
+        attackRange = heroAttackRange(hero.class).float32 /
+          WorldScale.float32
+        attackTicks = run.world.heroAttackTicks(hero).float32
+      return SelectedUnit(
+        id: hero.id,
+        kind: SelectedHero,
+        team: hero.team,
+        portraitKey: HeroPortraitKeys[hero.class],
+        callsign: HeroCallsigns[hero.class],
+        classLabel: classLabel(spec.attackStyle),
+        status:
+          if hero.state == Dying: "Respawning"
+          elif hero.portalEnds > run.world.tick: "Teleporting"
+          elif hero.controls[StunControl].ends > run.world.tick: "Stunned"
+          elif hero.controls[RootControl].ends > run.world.tick: "Rooted"
+          elif hero.controls[SilenceControl].ends > run.world.tick: "Silenced"
+          elif hero.inOwnSpawn: "Spawn recovery"
+          elif hero.recoveryItems != default(typeof(hero.recoveryItems)):
+            "Regenerating"
+          else: "Ready",
+        hp: max(hero.hp, 0'i32).float32,
+        maxHp: hero.maxHp.float32,
+        mana: hero.mana.float32,
+        maxMana: hero.maxMana.float32,
+        xp: hero.xp,
+        nextXp:
+          if hero.level < HeroMaxLevel:
+            xpForNextLevel(hero.level)
+          else:
+            hero.xp,
+        gold: hero.gold,
+        level: hero.level,
+        damage: hero.heroAttackDamage,
+        attackCasting: hero.class.heroAttackCasting,
+        moveSpeed: moveSpeed,
+        attackSpeed: TickRate.float32 / max(attackTicks, 1),
+        attackRange: attackRange,
+        inventory: hero.inventory,
+        itemCounts: hero.itemCounts,
+        itemCooldowns: hero.itemCooldowns(run.world.tick),
+        portalCooldown: max(0'i32, hero.portalCooldownEnds - run.world.tick),
+        channelTicks: max(0'i32, hero.portalEnds - run.world.tick),
+        abilities: spec.abilities,
+        abilityLevels: hero.abilityLevels,
+        abilityPoints: hero.abilityPoints,
+        charges: hero.charges,
+        recharges: hero.recharges,
+        cooldowns: hero.cooldowns
+      )
+  for footman in run.world.footmen:
+    if footman.id == id:
+      if not visibleInView(viewMode, footman):
+        return SelectedUnit()
+      let
+        moveSpeed = FootmanMovePerTick.float32 *
+          TickRate.float32 / WorldScale.float32
+        attackRange = footman.kind.footmanAttackRange.float32 /
+          WorldScale.float32
+      return SelectedUnit(
+        id: footman.id,
+        kind: SelectedMob,
+        team: footman.team, neutral: footman.camp > 0,
+        callsign: if footman.camp > 0: NeutralNames[footman.appearance]
+          elif footman.kind == RangedCreep: "CASTER" else: "FOOTMAN",
+        classLabel: if footman.camp > 0:
+          (if footman.leader: ["LOW LEADER", "MEDIUM LEADER", "HIGH LEADER"]
+            else: ["LOW CAMP", "MEDIUM CAMP", "HIGH CAMP"])[footman.campTier - 1]
+          elif footman.kind == RangedCreep: "RANGED" else: "MELEE",
+        status:
+          if footman.state == Dying: "Dying"
+          elif footman.camp > 0:
+            case run.world.camps[footman.camp - 1].state
+            of RestingCamp: "Resting"
+            of FightingCamp: "Defending camp"
+            of ReturningCamp: "Returning home"
+            of EmptyCamp: "Cleared"
+          elif footman.state == Fighting: "Fighting"
+          else: "Marching",
+        hp: max(footman.hp, 0'i32).float32,
+        maxHp: footman.unitMaxHp.float32,
+        level: 1,
+        damage: footman.unitDamage,
+        moveSpeed: moveSpeed,
+        attackSpeed: TickRate.float32 / footmanAttackTicks(attackClips[0]).float32,
+        attackRange: attackRange
+      )
+  for tower in run.world.buildings:
+    if tower.id == id:
+      if tower.hp <= 0:
+        return SelectedUnit()
+      if not visibleInView(viewMode, tower.team, tower.position):
+        return SelectedUnit()
+      let
+        role =
+          case tower.tier
+          of OuterTower:
+            "OUTER"
+          of InnerTower:
+            "INNER"
+          of GateTower:
+            "GATE"
+        attackRange = TowerAttackRanges[tower.tier].float32 /
+          WorldScale.float32
+      return SelectedUnit(
+        id: tower.id,
+        kind: (if tower.kind == BarracksBuilding: SelectedBarracks
+          else: SelectedTower),
+        team: tower.team,
+        callsign: (if tower.kind == BarracksBuilding: "BARRACKS"
+          elif tower.guardsGod: "GOD GUARD" else: role),
+        classLabel: (if tower.kind == BarracksBuilding: "BARRACKS" else: "TOWER"),
+        status:
+          if tower.hp <= 0:
+            "Destroyed"
+          elif buildingExposed(run.world, tower):
+            "Exposed"
+          else:
+            "Protected",
+        hp: max(tower.hp, 0'i32).float32,
+        maxHp: tower.maxHp.float32,
+        level: tower.tier.ord + 1,
+        damage: (if tower.kind == TowerBuilding: TowerDamages[tower.tier] else: 0),
+        attackRange: (if tower.kind == TowerBuilding: attackRange else: 0)
+      )
+  for fort in run.world.forts:
+    if fort.id == id:
+      if not visibleInView(viewMode, fort.team, fort.center):
+        return SelectedUnit()
+      return SelectedUnit(
+        id: fort.id,
+        kind: SelectedGod,
+        team: fort.team,
+        callsign: "GOD",
+        classLabel: (if fort.team == RedTeam: "WARLOCK" else: "DRUID"),
+        status:
+          if fort.hp <= 0: "Fallen"
+          elif fortExposed(run.world, fort.team): "Exposed"
+          else: "Protected by god guards",
+        hp: max(fort.hp, 0'i32).float32,
+        maxHp: FortHp.float32,
+        level: 1
+      )
+
+proc hudSelection(primaryId: int32, actionCam: ActionCam,
+    viewMode: int32): SelectedUnit =
+  ## Own hero is always available; external spectator filters apply only to watches.
+  selectedUnit(hudDetailId(primaryId, actionCam),
+    if localHudHeroId() != 0: 0'i32 else: viewMode)
+
+type InspectionInfo = object
+  id: int32
+  name, title, hp, mana: string
+
+proc inspectionInfo(primaryId, viewMode: int32): InspectionInfo =
+  ## Passive inspection is human-only and never overrides current human sight.
+  let own = localHudHeroId()
+  if own == 0 or primaryId == 0 or primaryId == own:
+    return
+  let mode = run.world.heroes[options.playerSlot - 1].team.ord.int32 + 1
+  let unit = selectedUnit(primaryId, mode)
+  if unit.id == 0 or unit.hp <= 0 or unit.status in ["Respawning", "Dying", "Fallen"]:
+    return
+  result.id = unit.id
+  result.name = unit.classLabel
+  result.title = unit.callsign
+  if unit.kind == SelectedHero:
+    let slot = run.world.heroIndex(unit.id)
+    if slot in 0 ..< run.config.players.len:
+      result.name = run.config.players[slot].displayName(slot)
+    result.title.add "  Lv " & $unit.level
+  result.hp = &"HP {int(unit.hp)} / {int(unit.maxHp)}"
+  if unit.maxMana > 0:
+    result.mana = &"Mana {int(unit.mana)} / {int(unit.maxMana)}"
+
+proc mouseOverInspection*(window: Window, mouse: Vec2,
+    primaryId: int32, viewMode = 0'i32): bool =
+  inspectionInfo(primaryId, viewMode).id != 0 and
+    window.inspectionPanel().contains(mouse)
+
+proc drawInspection(sk: Silky, window: Window, primaryId, viewMode: int32) =
+  let info = inspectionInfo(primaryId, viewMode)
+  if info.id == 0:
+    return
+  let panel = window.inspectionPanel()
+  sk.draw9Patch("window.9patch", sk.theme.windowPatch, panel.origin, panel.size)
+  for i, text in [info.name, info.title, info.hp, info.mana]:
+    if text.len > 0:
+      sk.drawLabel(sk.fittedLabel(text, panel.size.x - 24, "Small"),
+        panel.origin + vec2(12, 8 + i.float32 * 25),
+        vec2(panel.size.x - 24, 24), sk.theme.defaultTextColor, "Small")
+
+proc selectHeroCard(
+    primaryId: var int32,
+    selectedIds: var seq[int32],
+    followSelection: var bool,
+    id: int32,
+    additive: bool
+) =
+  ## Selects or toggles one hero from a HUD portrait click.
+  var found = false
+  for hero in run.world.heroes:
+    if hero.id == id:
+      found = true
+      break
+  if not found:
+    return
+  playSound(SelectSound)
+  if localHudHeroId() != 0:
+    primaryId = id
+    selectedIds = @[id]
+    followSelection = false
+    return
+  if not additive:
+    selectedIds.setLen(0)
+  elif isPicked(id, selectedIds) and selectedIds.len > 1:
+    for i in 0 ..< selectedIds.len:
+      if selectedIds[i] == id:
+        selectedIds.delete(i)
+        break
+    if primaryId == id:
+      primaryId = selectedIds[0]
+    followSelection = selectedIds.len > 0
+    return
+  if not isPicked(id, selectedIds):
+    selectedIds.add id
+  primaryId = id
+  followSelection = true
+
+proc minimapMap(panel: GameUiPanel): GameUiPanel =
+  ## Returns the map rectangle inside the minimap plate's frame.
+  panel.inset(8)
+
+proc minimapAim*(window: Window, mouse: Vec2, point: var Vec2): bool =
+  ## Resolves a map destination when the pointer is inside the minimap.
+  let area = currentChrome(window).minimap.minimapMap()
+  if window.statsContains(mouse) or hudTooltip.tooltipContains(mouse) or
+      not area.contains(mouse):
+    return false
+  point = minimapWorldPoint(mouse, area.origin, area.size, mapHalfSize())
+  true
+
+proc updateMinimapCamera*(
+    window: Window,
+    mouse: Vec2,
+    cameraTarget: var Vec3,
+    minimapPanning: var bool,
+    followSelection: var bool
+) =
+  ## Moves the free camera while the primary button drags on the minimap.
+  if window.statsContains(mouse) or hudTooltip.tooltipContains(mouse):
+    minimapPanning = false
+    return
+  let
+    chrome = currentChrome(window)
+    area = chrome.minimap.minimapMap()
+  if window.mousePressed(MouseLeft) and area.contains(mouse):
+    minimapPanning = true
+    followSelection = false
+  if not window.mouseDown(MouseLeft):
+    minimapPanning = false
+  if minimapPanning:
+    let point = minimapWorldPoint(
+      mouse,
+      area.origin,
+      area.size,
+      mapHalfSize()
+    )
+    cameraTarget.x = point.x
+    cameraTarget.z = point.y
+    cameraTarget.y = surfaceHeight(point.x, point.y)
+
+proc minimapPosition(position: Vec3, panel: GameUiPanel): Vec2 =
+  ## Projects a world position into the minimap's inner rectangle.
+  let area = panel.minimapMap()
+  let
+    x = clamp(
+      (position.x + mapHalfSize()) / (mapHalfSize() * 2),
+      0.0'f32,
+      1.0'f32
+    )
+    y = clamp(
+      (position.z + mapHalfSize()) / (mapHalfSize() * 2),
+      0.0'f32,
+      1.0'f32
+    )
+  area.origin + vec2(x * area.size.x, y * area.size.y)
+
+proc minimapFogAlpha(team, index: int): uint8 =
+  ## Dims hidden terrain while keeping the map readable beneath the fog.
+  if run.world.teamVisible[team][index] != 0:
+    0
+  elif run.world.teamExplored[team][index] != 0:
+    145
+  else:
+    179
+
+proc drawMinimapFog(sk: Silky, area: GameUiPanel, viewMode: int32) =
+  ## Covers hidden terrain with merged row spans using the team's LOS mask.
+  if viewMode == 0:
+    return
+  let
+    team = int(viewMode - 1)
+    tiles = mapTiles()
+    tileSize = area.size / tiles.float32
+  for y in 0 ..< tiles:
+    var x = 0
+    while x < tiles:
+      let alpha = minimapFogAlpha(team, y * tiles + x)
+      var finish = x + 1
+      while finish < tiles and
+        minimapFogAlpha(team, y * tiles + finish) == alpha:
+          inc finish
+      if alpha > 0:
+        sk.drawRect(
+          area.origin + vec2(x.float32, y.float32) * tileSize,
+          vec2((finish - x).float32, 1) * tileSize,
+          rgbx(0, 0, 0, alpha)
+        )
+      x = finish
+
+proc drawMinimapIcon(
+    sk: Silky,
+    name: string,
+    point: Vec2,
+    size: float32,
+    color: ColorRGBX,
+    selected = false
+) =
+  ## Draws a team glyph with a dark outline or a selection highlight.
+  let
+    outline = if selected: rgbx(255, 242, 187, 255)
+      else: rgbx(16, 19, 24, 255)
+    outlineSize = size + (if selected: 4.0'f else: 2.0'f)
+  sk.drawSprite(
+    name,
+    point - vec2(outlineSize / 2),
+    vec2(outlineSize),
+    outline
+  )
+  sk.drawSprite(name, point - vec2(size / 2), vec2(size), color)
+
+proc drawMinimapHero(
+    sk: Silky,
+    hero: Hero,
+    point: Vec2,
+    selected: bool
+) =
+  ## Points a map marker along the heading beneath an upright hero portrait.
+  const
+    MarkerSize = 48.0'f
+    MarkerCenter = vec2(0.5'f, 50.0'f / 128.0'f)
+    Corners = [vec2(0, 0), vec2(1, 0), vec2(1, 1), vec2(0, 1)]
+  let
+    entry = sk.atlas.entries["map_marker"]
+    uvOrigin = vec2(entry.x.float32, entry.y.float32)
+    uvSize = vec2(entry.width.float32, entry.height.float32)
+    markerColor = if selected: rgbx(255, 242, 187, 255) else: IconTint
+  var forward = vec2(hero.facing.x.float32, hero.facing.z.float32)
+  if lengthSq(forward) > 0:
+    forward = normalize(forward)
+  else:
+    forward = vec2(0, 1)
+  let right = vec2(forward.y, -forward.x)
+  var positions, uvs: array[4, Vec2]
+  for i, corner in Corners:
+    # The source marker points down, with its circular head above center.
+    let offset = (corner - MarkerCenter) * MarkerSize
+    positions[i] = point + right * offset.x + forward * offset.y
+    uvs[i] = uvOrigin + corner * uvSize
+  for indices in [[0, 1, 2], [0, 2, 3]]:
+    sk.drawTriangle(
+      [positions[indices[0]], positions[indices[1]], positions[indices[2]]],
+      [uvs[indices[0]], uvs[indices[1]], uvs[indices[2]]],
+      [markerColor, markerColor, markerColor]
+    )
+  sk.drawSprite(
+    WhiteTileKey,
+    point - vec2(10),
+    vec2(20),
+    teamHudColor(hero.team),
+    radius = 10
+  )
+  sk.drawSprite(
+    HeroPortraitKeys[hero.class],
+    point - vec2(8),
+    vec2(16),
+    radius = 8
+  )
+
+proc drawMinimapCamera(
+    sk: Silky,
+    window: Window,
+    panel: GameUiPanel,
+    cameraTarget: Vec3,
+    cameraDistance: float32
+) =
+  ## Draws the fixed RTS camera's visible ground footprint.
+  let
+    area = panel.minimapMap()
+    aspect = window.size.x.float32 / max(window.size.y.float32, 1)
+  sk.drawCameraFrame(
+    minimapViewport(
+      cameraTarget,
+      cameraDistance,
+      aspect,
+      area.origin,
+      area.size,
+      mapHalfSize(),
+      zoomPitch(cameraDistance)
+    ),
+    rgbx(255, 242, 187, 255)
+  )
+
+proc drawScoreRow(
+    sk: Silky,
+    panels: ScorePanels,
+    team: Team,
+    row: int
+) =
+  ## Draws one team's towers, kills, and deaths on a single row.
+  let
+    color = teamHudColor(team)
+    values = [
+      remainingTowers(team),
+      run.world.teamHeroKills[team.ord],
+      run.world.teamHeroDeaths[team.ord]
+    ]
+  sk.drawSprite(
+    if team == RedTeam: "hostile" else: "alliance",
+    panels.sides[row].origin,
+    vec2(IconTiny),
+    color
+  )
+  for i, cell in panels.values[row]:
+    writeInt(hudScratch, values[i])
+    sk.drawLabel(
+      hudScratch,
+      cell.origin,
+      cell.size,
+      color,
+      "Default",
+      CenterAlign
+    )
+
+proc heroCardIndex(hero: Hero): int =
+  ## Rank occupied stable seats within each team, never reserve missing seats.
+  result = if hero.team == RedTeam: 0 else: 5
+  for other in run.world.heroes:
+    if other.team == hero.team and other.slot < hero.slot:
+      inc result
+
+proc drawHeroPortrait(
+    sk: Silky,
+    window: Window,
+    panel: HeroPanels,
+    hero: Hero,
+    primaryId: var int32,
+    selectedIds: var seq[int32],
+    followSelection: var bool,
+    actionCam: var ActionCam,
+    focusPlayerHero: var bool,
+    networkStats: NetworkStats = nil
+) =
+  ## Draws one top-bar portrait on the hero plate.
+  let
+    portrait = panel.portrait
+    picked = isPicked(hero.id, selectedIds)
+  sk.drawWellImage(
+    portrait,
+    HeroPortraitKeys[hero.class],
+    if hero.state == Dying or hero.hp <= 0:
+      rgbx(140, 140, 148, 255)
+    else:
+      rgbx(255, 255, 255, 255),
+    selected = picked,
+    iconSize = IconSmall
+  )
+  sk.hoverSound(portrait, not statsState.visible(window.tabHeld) and
+    not hudTooltip.tooltipContains(sk.mousePos))
+  if window.hudClicked(sk, portrait):
+    actionCam.takeManual()
+    selectHeroCard(
+      primaryId,
+      selectedIds,
+      followSelection,
+      hero.id,
+      window.actionDown(ShiftInput)
+    )
+    if localHudHeroId() != 0 and hero.id == localHudHeroId():
+      focusPlayerHero = true
+
+proc drawHeroMeters(
+    sk: Silky,
+    panel: HeroPanels,
+    hero: Hero
+) =
+  ## Draws one hero's bars and level on the hero plate.
+  let
+    portrait = panel.portrait
+    hpBar = panel.hp
+    manaBar = panel.mana
+  sk.drawBar(
+    hpBar.origin,
+    hpBar.size,
+    hero.hp.float32,
+    hero.maxHp.float32,
+    teamHudColor(hero.team)
+  )
+  sk.drawBar(
+    manaBar.origin,
+    manaBar.size,
+    hero.mana.float32,
+    hero.maxMana.float32,
+    ManaColor
+  )
+  writeInt(hudScratch, hero.level)
+  sk.drawBadge(
+    portrait.origin + vec2(-4, portrait.size.y - BadgeSmall + 3),
+    vec2(BadgeSmall),
+    hudScratch
+  )
+
+proc drawStat(
+    sk: Silky,
+    panel: GameUiPanel,
+    icon: string,
+    value: string
+) =
+  ## Draws one compact stat icon and its numeric value.
+  sk.drawSprite(
+    icon,
+    panel.origin + vec2(0, 1),
+    vec2(16),
+    IconTint
+  )
+  sk.drawLabel(
+    value,
+    panel.origin + vec2(20, 0),
+    vec2(56, 18),
+    rgbx(236, 238, 244, 255),
+    "Small"
+  )
+
+proc drawAbilityIcon(
+    sk: Silky,
+    slot: GameUiPanel,
+    icon: string,
+    tint = rgbx(255, 255, 255, 255)
+) =
+  ## Draws one ability glyph inside a framed art slot.
+  sk.drawWellImage(slot, icon, tint, iconSize = IconSmall)
+
+proc drawCooldownSweep(
+    sk: Silky,
+    slot: GameUiPanel,
+    remaining, duration: int32
+) =
+  ## Covers the unreadied portion of one ability well from the top.
+  if remaining <= 0 or duration <= 0:
+    return
+  let height = slot.size.y * remaining.float32 / duration.float32
+  sk.drawRect(slot.origin, vec2(slot.size.x, height), CooldownFill)
+
+proc cooldownSeconds(remaining: int32): int32 =
+  ## Rounds remaining ticks up to whole seconds for the HUD.
+  (remaining + TickRate - 1) div TickRate
+
+proc drawAbilityKey(
+    sk: Silky,
+    slot: GameUiPanel,
+    key: string
+) =
+  ## Draws one hotkey pip in the corner of a framed art slot.
+  sk.drawKeyPip(slot, key)
+
+proc drawUi*(
+    sk: Silky,
+    window: Window,
+    transport: var Player,
+    cameraTarget: Vec3,
+    cameraDistance: float32,
+    viewMode: int32,
+    primaryId: var int32,
+    selectedIds: var seq[int32],
+    followSelection: var bool,
+    actionCam: var ActionCam,
+    focusPlayerHero: var bool,
+    attackMoveArmed: var bool,
+    attackMoveHeld: bool,
+    networkStats: NetworkStats = nil,
+    extraTabs: openArray[DebugTab] = [],
+    graphicsExtension: proc(sk: Silky, window: Window) = nil
+) {.measure.} =
+  ## Draws every Silky HUD panel for the current frame.
+  let creep = footmanById(run.world, primaryId)
+  hudScratch.setLen(0)
+  if creep.id == 0:
+    hudScratch.add "Select a pikeman to inspect its waypoints."
+  else:
+    hudScratch.addHudInt(creep.waypointIndex)
+    hudScratch.add '/'
+    hudScratch.addHudInt(creep.creepWaypointCount())
+    hudScratch.add " cleared - "
+    case creep.state
+    of Fighting:
+      hudScratch.add "Chasing / fighting"
+    of Dying:
+      hudScratch.add "Dying"
+    else:
+      hudScratch.add "Marching"
+  # Register debugging first so changing HUD contents cannot shift its hit IDs.
+  # The popup layer keeps these controls above the later world HUD draws.
+  sk.pushLayer(PopupsLayer)
+  try:
+    sk.drawDebugMenu(window, addr showCreepWaypoints, hudScratch,
+      networkStats, extraTabs, graphicsExtension)
+  finally:
+    sk.popLayer()
+  if run.world.phase == Drafting:
+    hudTooltip.clearTooltip()
+    sk.drawDraft(window, currentLayout(window).size, transport.playing)
+    if transportAvailable():
+      transport.drawTransport(
+        sk, window, currentLayout(window).transportPanel, actionCam,
+        followSelection, addr statsState.toggled
+      )
+    return
+  if shopOpen and localHudHeroId() != 0:
+    # Shop cards already show their full descriptions inline; no hover route.
+    hudTooltip.clearTooltip()
+    sk.drawShop(window, run.world, run.world.heroes[options.playerSlot - 1],
+      currentLayout(window).size, transport.playing)
+    return
+  profileBlock "HUD metrics":
+    statsState.syncDirector(actionCam, currentStats(), window.tabHeld)
+  let
+    chrome = currentChrome(window)
+    scorePanel = sk.beginFrame(chrome.score)
+    scoreSlots = scorePanel.scorePanels()
+    heroesPanel = sk.beginFrame(chrome.heroes)
+    counts = ribbonCounts()
+    heroes = heroesPanel.heroPanels(counts[RedTeam], counts[BlueTeam])
+    clockPanel = sk.beginFrame(chrome.clock)
+    clock = clockPanel.clockPanels()
+    minimapPanel = sk.beginFrame(chrome.minimap)
+    inventoryPanel = sk.beginFrame(chrome.inventory)
+    inventory = inventoryPanel.inventoryPanels()
+    details = chrome.details.detailsPanels()
+    hudTime = currentHudTime()
+  sk.drawPreparationHud(chrome)
+  sk.drawDeathHud(chrome)
+  sk.drawInspection(window, primaryId, viewMode)
+  let detailId = hudDetailId(primaryId, actionCam)
+  var selection = hudSelection(primaryId, actionCam, viewMode)
+  if tooltipGame != run or tooltipSelection != detailId or
+      tooltipSize != chrome.layout.size:
+    hudTooltip.clearTooltip()
+    tooltipGame = run
+    tooltipSelection = detailId
+    tooltipSize = chrome.layout.size
+  if hudTooltip.tooltipContains(sk.mousePos):
+    sk.mouseConsumed = true
+  let
+    basic = GameUiPanel(
+      origin: details.portrait.origin + vec2(0, 158), size: vec2(40)
+    )
+    controlsHero = localHudHeroId() != 0 and
+      selection.kind == SelectedHero and selection.id == localHudHeroId()
+    hoverEnabled = not statsState.visible(window.tabHeld) and
+      not hudTooltip.tooltipContains(sk.mousePos) and
+      not mouseOverDebugMenu(sk.mousePos) and not run.historyPlayback
+    attackClicked = controlsHero and selection.hp > 0 and
+      window.hudClicked(sk, basic)
+  sk.hoverSound(basic, hoverEnabled and controlsHero and selection.hp > 0)
+  if (window.mousePressed(MouseLeft) or window.mousePressed(MouseRight)) and
+    mouseOverUi(window, sk.mousePos, primaryId) and not attackClicked:
+      attackMoveArmed = attackMoveHeld
+  if attackClicked:
+    attackMoveArmed = attackMoveHeld or not attackMoveArmed
+    playSound(if attackMoveArmed: SelectSound else: CancelSound)
+    armedAbility = -1
+    armedItem = -1
+  if selection.id != 0:
+    discard sk.beginFrame(chrome.details)
+
+  for i, label in ["TOWERS", "KILLS", "DEATHS"]:
+    let pos = scoreSlots.headers[i].origin
+    sk.drawSprite(
+      ScoreIcons[i], pos + vec2(0, 1), vec2(IconTiny), IconTint
+    )
+    sk.drawLabel(
+      label,
+      pos + vec2(IconTiny + 4, 0),
+      vec2(68, 20),
+      rgbx(166, 174, 190, 255),
+      "Hud"
+    )
+  sk.drawScoreRow(scoreSlots, RedTeam, 0)
+  sk.drawScoreRow(scoreSlots, BlueTeam, 1)
+
+  for hero in run.world.heroes:
+    sk.drawHeroPortrait(
+      window,
+      heroes[hero.heroCardIndex],
+      hero,
+      primaryId,
+      selectedIds,
+      followSelection,
+      actionCam,
+      focusPlayerHero
+    )
+  let nameWidth =
+    if run.world.heroes.len > 0:
+      heroes[run.world.heroes[0].heroCardIndex].name.size.x
+    else: 0.0'f
+  if fittedNameWidth != nameWidth:
+    fittedNameWidth = nameWidth
+    for slot in 0 ..< playerNames.len:
+      fittedNames[slot] = sk.fittedLabel(playerNames[slot], nameWidth, "Small")
+  for slot, hero in run.world.heroes:
+    let panel = heroes[hero.heroCardIndex]
+    sk.drawLabel(
+      fittedNames[slot],
+      panel.name.origin,
+      panel.name.size,
+      rgbx(166, 174, 190, 255),
+      "Small",
+      CenterAlign
+    )
+    sk.drawHeroMeters(panel, hero)
+  let versus = heroesPanel.heroVersusPanel(counts[RedTeam])
+  sk.drawLabel(
+    "vs",
+    versus.origin,
+    versus.size,
+    rgbx(166, 174, 190, 255),
+    "HeroVersus"
+  )
+
+  sk.drawSprite(
+    if hudTime.hour < 6 or hudTime.hour >= 18: "night" else: "day",
+    clock.icon.origin + vec2(0, 2),
+    vec2(22)
+  )
+  sk.drawLabel(
+    "TIME OF DAY",
+    clock.caption.origin,
+    clock.caption.size,
+    rgbx(193, 198, 210, 255),
+    "Small"
+  )
+  writeClock(hudScratch, hudTime.hour, hudTime.minute)
+  sk.drawLabel(
+    hudScratch,
+    clock.time.origin,
+    clock.time.size,
+    rgbx(247, 221, 143, 255),
+    "H1",
+    CenterAlign
+  )
+
+  let mapArea = minimapPanel.minimapMap()
+  sk.drawFrame(
+    GameUiPanel(origin: mapArea.origin, size: mapArea.size)
+  )
+  if run.map.minimap.len == mapTiles() * mapTiles():
+    let tileSize = mapArea.size / mapTiles().float32
+    for y in 0 ..< mapTiles():
+      var x = 0
+      while x < mapTiles():
+        let color = run.map.minimap[y * mapTiles() + x]
+        var finish = x + 1
+        while finish < mapTiles() and
+          run.map.minimap[y * mapTiles() + finish] == color:
+            finish.inc
+        sk.drawRect(
+          mapArea.origin + vec2(x.float32, y.float32) * tileSize,
+          vec2((finish - x).float32, 1) * tileSize,
+          rgbx(
+            uint8((color shr 16) and 255),
+            uint8((color shr 8) and 255),
+            uint8(color and 255),
+            255
+          )
+        )
+        x = finish
+  sk.drawRect(
+    mapArea.origin + mapArea.size * 0.5'f32 - vec2(2),
+    vec2(4),
+    rgbx(91, 119, 128, 255)
+  )
+  sk.pushClipRect(rect(mapArea.origin, mapArea.size))
+  sk.drawMinimapFog(mapArea, viewMode)
+  for tower in run.world.buildings:
+    if tower.hp > 0 and
+        visibleInView(viewMode, tower.team, tower.position):
+      sk.drawMinimapIcon(
+        (if tower.kind == BarracksBuilding: "barracks" else: "tower"),
+        minimapPosition(renderPoint(tower.position), minimapPanel),
+        16.0'f,
+        teamHudColor(tower.team),
+        isPicked(tower.id, selectedIds)
+      )
+  for fort in run.world.forts:
+    if not defined(gotaTestRoom) and
+      visibleInView(viewMode, fort.team, fort.center):
+      sk.drawMinimapIcon(
+        WhiteTileKey,
+        minimapPosition(renderPoint(fort.center), minimapPanel),
+        10.0'f,
+        teamHudColor(fort.team),
+        isPicked(fort.id, selectedIds)
+      )
+  for footman in run.world.footmen:
+    if footman.state != Dying and footman.hp > 0 and
+        visibleInView(viewMode, footman):
+      sk.drawMinimapIcon(
+        "contact",
+        minimapPosition(renderPoint(footman.position), minimapPanel),
+        8.0'f,
+        unitHudColor(footman),
+        isPicked(footman.id, selectedIds)
+      )
+  for hero in run.world.heroes:
+    if hero.state != Dying and hero.hp > 0 and
+      visibleInView(viewMode, hero.team, hero.position):
+        sk.drawMinimapHero(
+          hero,
+          minimapPosition(renderPoint(hero.position), minimapPanel),
+          isPicked(hero.id, selectedIds)
+        )
+  sk.popClipRect()
+  sk.drawMinimapCamera(
+    window,
+    minimapPanel,
+    cameraTarget,
+    cameraDistance
+  )
+
+  if selection.id != 0:
+    let
+      teamColor = if selection.neutral: rgbx(242, 184, 61, 255)
+        else: teamHudColor(selection.team)
+      portrait = details.portrait
+    if selection.kind == SelectedHero:
+      sk.drawWellImage(
+        portrait, selection.portraitKey, iconSize = IconLarge
+      )
+    else:
+      let glyph =
+        case selection.kind
+        of SelectedTower:
+          "tower"
+        of SelectedBarracks:
+          "barracks"
+        of SelectedMob:
+          "minion"
+        of SelectedGod:
+          "fort"
+        of SelectedHero:
+          "champion"
+      sk.drawWellImage(portrait, glyph, teamColor, iconSize = IconLarge)
+    sk.hoverSound(portrait, hoverEnabled and controlsHero)
+    if window.hudClicked(sk, portrait) and
+        selection.kind == SelectedHero and
+        localHudHeroId() != 0 and selection.id == localHudHeroId():
+      actionCam.takeManual()
+      focusPlayerHero = true
+      playSound(SelectSound)
+    if selection.kind == SelectedHero:
+      let
+        melee = selection.attackCasting == MeleeCast
+        attacking = controlsHero and attackMoveArmed
+      sk.drawSprite(
+        if melee: "attack" else: "bow",
+        basic.origin + vec2(4),
+        vec2(32),
+        if attacking: rgbx(255, 55, 45, 255) else: rgbx(255, 255, 255, 255)
+      )
+      sk.drawLabel(
+        "BASIC ATTACK",
+        basic.origin + vec2(46, 2),
+        vec2(108, 18),
+        rgbx(247, 221, 143, 255),
+        "Small"
+      )
+      hudScratch.setLen(0)
+      hudScratch.add(if melee: "Melee: " else: "Ranged: ")
+      hudScratch.addHudInt(selection.damage.int)
+      sk.drawLabel(
+        hudScratch,
+        basic.origin + vec2(46, 20),
+        vec2(108, 18),
+        rgbx(236, 238, 244, 255),
+        "Small"
+      )
+      for slot in HeroAbilitySlot:
+        let
+          i = slot.ord
+          well = details.abilities[i]
+          spec = selection.abilities[slot].abilitySpec(
+            selection.abilityLevels[slot]
+          )
+          empty = selection.charges[slot] == 0
+          remaining =
+            if empty: max(selection.cooldowns[slot], selection.recharges[slot])
+            else: selection.cooldowns[slot]
+        sk.drawAbilityIcon(
+          well,
+          abilityIconKey(selection.abilities[slot]),
+          if remaining > 0 or selection.abilityLevels[slot] == 0:
+            rgbx(150, 150, 158, 255)
+          else:
+            rgbx(255, 255, 255, 255)
+        )
+        sk.drawCooldownSweep(
+          well, remaining, if empty: spec.rechargeTicks else: spec.cooldownTicks
+        )
+        if localHudHeroId() != 0 and selection.id == localHudHeroId():
+            let
+              hero = run.world.heroes[options.playerSlot - 1]
+              upgrade = GameUiPanel(
+                origin: well.origin + vec2(well.size.x - 23, 2),
+                size: vec2(21, 20)
+              )
+              clickedUpgrade = hero.abilityLevelError(slot) == NoActionError and
+                window.hudClicked(sk, upgrade)
+            sk.hoverSound(well, hoverEnabled and selection.hp > 0 and
+              (hero.abilityLevelError(slot) == NoActionError or
+                (selection.abilityLevels[slot] > 0 and remaining <= 0 and
+                  selection.mana >= spec.manaCost.float32)))
+            if window.hudClicked(sk, well):
+              armedItem = -1
+              armedAbility = -1
+              if clickedUpgrade or window.actionDown(ShiftInput):
+                  queueLevelAbility(selection.id, slot.ord.int32)
+                  playSound(if hero.abilityLevelError(slot) == NoActionError:
+                    ClickSound else: ErrorSound)
+                  armedAbility = -1
+              else:
+                let accepted = activatePlayerAbility(
+                  run.world, selection.id, slot.ord.int32
+                )
+                playSound(if accepted: SelectSound else: ErrorSound)
+            if armedAbility == slot.ord.int32:
+              let color = rgbx(255, 223, 133, 255)
+              sk.drawRect(well.origin, vec2(well.size.x, 3), color)
+              sk.drawRect(well.origin, vec2(3, well.size.y), color)
+              sk.drawRect(well.origin + vec2(well.size.x - 3, 0),
+                vec2(3, well.size.y), color)
+              sk.drawRect(well.origin + vec2(0, well.size.y - 3),
+                vec2(well.size.x, 3), color)
+      for i in 0 .. 1:
+        let
+          well = details.abilities[4 + i]
+          item = selection.inventory[i]
+        if item != NoItem:
+          sk.drawAbilityIcon(well, itemIconKey(item))
+          sk.drawCooldownSweep(well, selection.itemCooldowns[i],
+            item.itemSpec.cooldownTicks)
+        else:
+          sk.drawWellImage(well, "")
+        sk.hoverSound(well, hoverEnabled and controlsHero and
+          selection.hp > 0 and item != NoItem and
+          (item == PortalScroll or item.itemSpec.kind == Consumable) and
+          selection.itemCooldowns[i] <= 0)
+        if controlsHero and selection.hp > 0 and
+          window.hudClicked(sk, well):
+            playSound(if item == NoItem: ErrorSound else: SelectSound)
+            activatePlayerItem(
+              run.world,
+              selection.id,
+              int32(i),
+              epochTime(),
+              window.buttonPressed[DoubleClick]
+            )
+  let playerHeroId = localHudHeroId()
+  let playerHero = playerHeroId != 0
+  if playerHero:
+    sk.drawTab(inventory.shop, hovered = sk.hovered(inventory.shop))
+    sk.drawSprite("shop", inventory.shop.origin + vec2(6, 6), vec2(16))
+    sk.drawLabel("SHOP  " & ShopInput.actionLabel, inventory.shop.origin + vec2(28, 0),
+      inventory.shop.size - vec2(28, 0), rgbx(247, 221, 143, 255), "Small")
+    if window.hudClicked(sk, inventory.shop):
+      playSound(ClickSound)
+      shopOpen = true
+      armedAbility = -1
+      armedItem = -1
+  let inventoryHero = selection
+  for slot in 0 ..< InventorySlots:
+    let
+      slotPanel = inventory.slots[slot]
+      item =
+        if inventoryHero.id == 0: NoItem else: inventoryHero.inventory[slot]
+    if item != NoItem:
+      sk.drawWellImage(slotPanel, itemIconKey(item), iconSize = IconSmall)
+      sk.drawCooldownSweep(slotPanel, inventoryHero.itemCooldowns[slot],
+        item.itemSpec.cooldownTicks)
+    else:
+      sk.drawSlot(slotPanel)
+    sk.hoverSound(slotPanel, hoverEnabled and playerHero and
+      inventoryHero.id == playerHeroId and inventoryHero.hp > 0 and
+      item != NoItem and
+      (item == PortalScroll or item.itemSpec.kind == Consumable) and
+      inventoryHero.itemCooldowns[slot] <= 0)
+    if playerHero and inventoryHero.id != 0 and inventoryHero.hp > 0 and
+      window.hudClicked(sk, slotPanel):
+        playSound(if item == NoItem: ErrorSound else: SelectSound)
+        activatePlayerItem(
+          run.world,
+          playerHeroId,
+          int32(slot),
+          epochTime(),
+          window.buttonPressed[DoubleClick]
+        )
+
+  if selection.id != 0:
+    let
+      teamColor = if selection.neutral: rgbx(242, 184, 61, 255)
+        else: teamHudColor(selection.team)
+      badge = GameUiPanel(
+        origin: details.portrait.origin + vec2(-18, 91),
+        size: vec2(BadgeLarge)
+      )
+      namePos = details.name.origin
+      classPos = details.class.origin
+      hpBar = details.hp
+      healthColor = if selection.neutral: rgbx(180, 180, 180, 255)
+        else: teamColor
+      manaBar = details.mana
+      xpBar = details.xp
+    if selection.kind == SelectedHero and selection.abilityPoints > 0:
+      let count = selection.abilityPoints
+      writeInt(hudScratch, count)
+      hudScratch.add(if count == 1: " ability point" else: " ability points")
+      hudScratch.add " | " & ShiftInput.actionLabel & " + ability to learn"
+      sk.drawLabel(
+        hudScratch,
+        hpBar.origin - vec2(0, 26),
+        vec2(hpBar.size.x, 20),
+        rgbx(247, 221, 143, 255),
+        "Small"
+      )
+    writeInt(hudScratch, selection.level)
+    sk.drawBadge(badge.origin, badge.size, hudScratch, font = "Bold")
+    sk.drawLabel(
+      selection.callsign,
+      namePos,
+      details.name.size,
+      rgbx(255, 255, 255, 255),
+      "Default"
+    )
+    sk.drawLabel(
+      selection.classLabel,
+      classPos,
+      details.class.size,
+      teamColor,
+      "Small"
+    )
+    var stats = details.stats.stack(TopToBottom)
+    writeInt(hudScratch, selection.damage.int)
+    sk.drawStat(stats.takeRow(18), "damage", hudScratch)
+    writeInt(hudScratch, selection.maxHp.int)
+    sk.drawStat(stats.takeRow(18), "health", hudScratch)
+    writeInt(hudScratch, (selection.moveSpeed * 100).int)
+    sk.drawStat(
+      stats.takeRow(18),
+      "movement",
+      hudScratch
+    )
+    writeRatio(hudScratch, selection.hp.int, selection.maxHp.int)
+    sk.drawValueBar(
+      hpBar.origin,
+      hpBar.size,
+      selection.hp,
+      selection.maxHp,
+      healthColor,
+      hudScratch
+    )
+    sk.drawSprite(
+      "health",
+      hpBar.origin + vec2(4, 4),
+      vec2(20),
+      healthColor
+    )
+    if selection.maxMana > 0:
+      sk.drawValueBar(
+        manaBar.origin,
+        manaBar.size,
+        selection.mana,
+        selection.maxMana,
+        ManaColor,
+        (writeRatio(hudScratch, selection.mana.int, selection.maxMana.int); hudScratch)
+      )
+      sk.drawSprite(
+        "mana",
+        manaBar.origin + vec2(4, 4),
+        vec2(20),
+        ManaColor
+      )
+    if selection.nextXp > 0:
+      sk.drawValueBar(
+        xpBar.origin,
+        xpBar.size,
+        selection.xp.float32,
+        selection.nextXp.float32,
+        rgbx(152, 86, 196, 255),
+        (writeRatio(hudScratch, selection.xp, selection.nextXp); hudScratch)
+      )
+      sk.drawSprite(
+        "experience",
+        xpBar.origin + vec2(4, 4),
+        vec2(20)
+      )
+    for i in 0 .. 5:
+      let well = details.abilities[i]
+      if i < 4 and selection.kind == SelectedHero:
+        let
+          slot = HeroAbilitySlot(i)
+          remaining =
+            if selection.charges[slot] == 0:
+              max(selection.cooldowns[slot], selection.recharges[slot])
+            else:
+              selection.cooldowns[slot]
+        if remaining > 0:
+          writeInt(hudScratch, cooldownSeconds(remaining).int)
+          sk.drawLabel(
+            hudScratch,
+            well.origin,
+            well.size,
+            rgbx(247, 221, 143, 255),
+            "Hud",
+            CenterAlign
+          )
+        let
+          rank = selection.abilityLevels[slot]
+          spec = selection.abilities[slot].abilitySpec(rank)
+          badge = well.origin + vec2(3, 2)
+        sk.drawRect(badge, vec2(42, 20), rgbx(0, 0, 0, 190))
+        hudScratch.setLen(0)
+        hudScratch.add 'L'
+        hudScratch.addHudInt(rank.int)
+        hudScratch.add '/'
+        hudScratch.addHudInt(slot.abilityMaxLevel.int)
+        sk.drawLabel(
+          hudScratch,
+          badge,
+          vec2(42, 20),
+          rgbx(247, 221, 143, 255),
+          "Small",
+          CenterAlign
+        )
+        if rank == 0:
+          let required = slot.abilityRequiredLevel(1)
+          hudScratch.setLen(0)
+          if selection.level < required:
+            hudScratch.add "Needs L"
+            hudScratch.addHudInt(required.int)
+          else:
+            hudScratch.add "Locked"
+          sk.drawLabel(
+            hudScratch,
+            well.origin + vec2(0, 23),
+            vec2(well.size.x, 20),
+            rgbx(247, 221, 143, 255),
+            "Small",
+            CenterAlign
+          )
+        else:
+          sk.drawRect(badge + vec2(0, 22), vec2(28, 20), rgbx(0, 0, 0, 190))
+          writeInt(hudScratch, selection.charges[slot].int)
+          hudScratch.add '/'
+          hudScratch.addHudInt(spec.charges.int)
+          sk.drawLabel(
+            hudScratch,
+            badge + vec2(0, 22),
+            vec2(28, 20),
+            rgbx(255, 255, 255, 255),
+            "Small",
+            CenterAlign
+          )
+        if localHudHeroId() != 0 and selection.id == localHudHeroId():
+            let hero = run.world.heroes[options.playerSlot - 1]
+            if hero.abilityLevelError(slot) == NoActionError:
+              let upgrade = GameUiPanel(
+                origin: well.origin + vec2(well.size.x - 23, 2),
+                size: vec2(21, 20)
+              )
+              sk.drawRect(upgrade.origin, upgrade.size, rgbx(80, 62, 20, 255))
+              sk.drawLabel(
+                "+", upgrade.origin, upgrade.size,
+                rgbx(255, 223, 133, 255), "Small", CenterAlign
+              )
+        if selection.recharges[slot] > 0:
+          let progress = 1 - selection.recharges[slot].float32 /
+            max(1, spec.rechargeTicks).float32
+          sk.drawRect(
+            well.origin + vec2(3, well.size.y - 5),
+            vec2((well.size.x - 6) * progress, 3),
+            rgbx(110, 190, 245, 255)
+          )
+      if i >= 4 and selection.kind == SelectedHero:
+        let slot = i - 4
+        if selection.itemCooldowns[slot] > 0:
+          writeInt(hudScratch,
+            cooldownSeconds(selection.itemCooldowns[slot]).int)
+          hudScratch.add 's'
+          sk.drawLabel(hudScratch,
+            well.origin, well.size, rgbx(255, 255, 255, 255),
+            "Small", CenterAlign)
+        if selection.inventory[slot] != NoItem and
+          selection.inventory[slot].itemSpec.kind == Consumable:
+            sk.drawItemCount(well, selection.itemCounts[slot])
+      sk.drawAbilityKey(well, AbilityInputs[i].actionLabel)
+
+  if inventoryHero.id != 0:
+    for slot in 0 ..< InventorySlots:
+      let
+        item = inventoryHero.inventory[slot]
+        well = inventory.slots[slot]
+        cooldown = inventoryHero.itemCooldowns[slot]
+      if cooldown > 0:
+        writeInt(hudScratch, cooldownSeconds(cooldown).int)
+        hudScratch.add 's'
+        sk.drawLabel(hudScratch,
+          well.origin, well.size, rgbx(255, 255, 255, 255),
+          "Small", CenterAlign)
+      if item != NoItem and item.itemSpec.kind == Consumable:
+        sk.drawItemCount(well, inventoryHero.itemCounts[slot])
+  if inventoryHero.id != 0 and inventoryHero.kind == SelectedHero:
+    let hero = run.world.heroById(inventoryHero.id)
+    if hero.state == Dying:
+      sk.drawBuyback(
+        window, inventory.contents, hero, playerHero, transport.playing
+      )
+  hudScratch.setLen(0)
+  if playerHero and armedItem >= 0:
+    if run.world.heroById(playerHeroId).inventory[armedItem] == PortalScroll:
+      hudScratch.add "CLICK MAP"
+    else:
+      hudScratch.add "CLICK SELF OR ALLY"
+  elif inventoryHero.id != 0 and inventoryHero.channelTicks > 0:
+    hudScratch.add "TELEPORTING "
+    hudScratch.addHudInt(cooldownSeconds(inventoryHero.channelTicks).int)
+    hudScratch.add 's'
+  elif inventoryHero.id != 0 and inventoryHero.portalCooldown > 0:
+    hudScratch.add "PORTAL "
+    hudScratch.addHudInt(cooldownSeconds(inventoryHero.portalCooldown).int)
+    hudScratch.add 's'
+  elif playerHero and
+    run.world.heroById(playerHeroId).lastActionError != NoActionError:
+      hudScratch.add(
+        run.world.heroById(playerHeroId).lastActionError.actionErrorMessage)
+  else:
+    hudScratch.add "INVENTORY"
+  sk.drawLabel(
+    hudScratch,
+    inventory.title.origin,
+    inventory.title.size,
+    rgbx(200, 205, 216, 255),
+    "Small"
+  )
+  let gold = inventory.gold
+  sk.drawSprite(
+    "gold",
+    gold.origin + vec2(0, 6),
+    vec2(20)
+  )
+  writeAmount(hudScratch, if inventoryHero.id == 0: 0 else: inventoryHero.gold)
+  sk.drawLabel(
+    hudScratch,
+    gold.origin + vec2(31, 0),
+    vec2(gold.size.x - 31, gold.size.y),
+    rgbx(232, 196, 86, 255)
+  )
+
+  if run.replayMode and run.hashCheck.error.len > 0:
+    sk.drawError(
+      chrome.layout.size,
+      &"REPLAY DIVERGED - continuing simulation " &
+        &"({run.hashCheck.mismatches} mismatches)",
+      run.hashCheck.error
+    )
+
+  if transportAvailable():
+    transport.drawTransport(
+      sk,
+      window,
+      chrome.layout.transportPanel,
+      actionCam,
+      followSelection,
+      addr statsState.toggled
+    )
+  statsState.syncDirector(actionCam, statsTable, window.tabHeld)
+  if shopOpen or window.statsContains(sk.mousePos) or
+      mouseOverDebugMenu(sk.mousePos):
+    hudTooltip.clearTooltip()
+  else:
+    var targets: seq[TooltipTarget]
+    if controlsHero:
+      targets.add TooltipTarget(id: "attack:" & $selection.id,
+        card: DetailTooltip(title: "Attack move", icon: "attack",
+          description: "Attack move (" & AttackMoveInput.actionLabel & ")"),
+        anchor: basic, key: AttackMoveInput.actionLabel)
+    if selection.kind == SelectedHero and selection.id != 0:
+      for slot in HeroAbilitySlot:
+        let ability = selection.abilities[slot]
+        targets.add TooltipTarget(
+          id: "ability:" & $selection.id & ":" & $slot.ord & ":" & $ability.ord,
+          card: abilityDetails(ability, selection.abilityLevels[slot]),
+          anchor: details.abilities[slot.ord],
+          key: AbilityInputs[slot.ord].actionLabel)
+      for slot in 0 .. 1:
+        let item = selection.inventory[slot]
+        if item != NoItem:
+          targets.add TooltipTarget(
+            id: "detail-item:" & $selection.id & ":" & $slot & ":" & $item.ord,
+            card: itemDetails(item), anchor: details.abilities[slot + 4],
+            key: AbilityInputs[slot + 4].actionLabel)
+    if inventoryHero.id != 0:
+      for slot in 0 ..< InventorySlots:
+        let item = inventoryHero.inventory[slot]
+        if item != NoItem:
+          targets.add TooltipTarget(
+            id: "inventory:" & $inventoryHero.id & ":" & $slot & ":" & $item.ord,
+            card: itemDetails(item), anchor: inventory.slots[slot],
+            key: if slot < 2: AbilityInputs[slot + 4].actionLabel else: "")
+    hudTooltip.updateTooltip(targets, sk.mousePos, chrome.layout.size,
+      getMonoTime().ticks.float64 / 1_000_000_000.0)
+    sk.drawTooltip(hudTooltip, chrome.layout.size)
+
+proc drawStatsOverlay*(sk: Silky, window: Window) {.measure.} =
+  ## Presents readable statistics above the HUD at every window width.
+  if shopOpen or run.world.phase == Drafting:
+    return
+  if not statsState.visible(window.tabHeld):
+    return
+  sk.drawStatsOverlay(
+    window, currentLayout(window), statsState, currentStats(), run.history,
+    matchStatsOptions()
+  )
+
+when defined(gotaTestRoom):
+  import lobbies
+
+  proc drawTestRoom*(sk: Silky): int =
+    ## Offers immediate hero changes using the existing Silky theme.
+    result = -1
+    let hero = run.world.heroes[0]
+    sk.lobbyPanel(vec2(12, 94), vec2(380, 304))
+    sk.drawLabel(
+      "HERO TEST ROOM", vec2(24, 104), vec2(356, 28),
+      sk.theme.defaultTextColor, "H1", CenterAlign
+    )
+    for class in HeroClass:
+      let at = vec2(
+        (24 + (class.ord mod 2) * 182).float32,
+        (140 + (class.ord div 2) * 36).float32
+      )
+      if sk.lobbyButton(
+        class.heroSpec.name, at, 174,
+        selected = class == hero.class, height = 32
+      ):
+        result = class.ord
+    if sk.lobbyButton("Reset hero", vec2(24, 326), 174, height = 32):
+      result = hero.class.ord
+    if sk.lobbyButton("Wound hero", vec2(206, 326), 174, height = 32):
+      result = -2
+    sk.drawLabel(
+      "Level 20 / unlimited casts / 1s cooldowns", vec2(24, 366), vec2(356, 24),
+      sk.theme.defaultTextColor, "Default", CenterAlign
+    )

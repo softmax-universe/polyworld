@@ -2,7 +2,8 @@
 ##
 ## Every game understands `--bot`, `--player`, `--replay`, `--record`,
 ## `--seed`, `--play`, `--speed`, `--windowSize`, `--vsync`, `--seconds`,
-## `--minutes`, and `--ticks`. Duration flags all write `maximumTicks`.
+## `--minutes`, `--ticks`, `--mute`, and `--unmute`. Duration flags all write
+## `maximumTicks`; audio uses saved levels unless explicitly overridden.
 ## Each game runs its own argument loop, farms those flags through
 ## `takeCommonFlag`, and handles the rest itself.
 
@@ -41,6 +42,10 @@ type
       ## Graphical window height. Zero keeps the shared default.
     vsync*: bool = true
       ## Graphical window waits for the display when true.
+    soundMuted*: bool
+      ## Explicit launch mute choice, applied only when soundOverride is set.
+    soundOverride*: bool
+      ## False restores saved audio levels without imposing a launch choice.
     playerSlot*: int32
       ## One-based human controller slot. Zero means bots fill every slot.
     headlessTickRate*: int32
@@ -225,6 +230,26 @@ proc parseVsyncFlag(text: string): bool =
   else:
     fail("--vsync must be on or off")
 
+proc takeSoundFlag*(soundMuted: var bool, argument: string): bool =
+  ## Reads one launch-only mute flag without consuming unrelated arguments.
+  case argument
+  of "--mute":
+    soundMuted = true
+  of "--unmute":
+    soundMuted = false
+  else:
+    if not argument.startsWith("--mute=") and
+      not argument.startsWith("--mute:"):
+        return false
+    case argument[7 .. ^1].strip().toLowerAscii()
+    of "true", "1", "yes", "on":
+      soundMuted = true
+    of "false", "0", "no", "off":
+      soundMuted = false
+    else:
+      raise newException(ValueError, "--mute must be true or false")
+  true
+
 proc takeCommonFlag*(
     options: var GameOptions,
     arguments: seq[string],
@@ -232,6 +257,12 @@ proc takeCommonFlag*(
     argument: string
 ): bool =
   ## Handles one shared flag. Returns false when the game should try it.
+  try:
+    if options.soundMuted.takeSoundFlag(argument):
+      options.soundOverride = true
+      return true
+  except ValueError as error:
+    fail(error.msg)
   if argument.startsWith("--headless-tick-rate:") or
     argument.startsWith("--headless-tick-rate=") or
     argument == "--headless-tick-rate":

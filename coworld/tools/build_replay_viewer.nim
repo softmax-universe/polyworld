@@ -30,8 +30,6 @@ proc main() =
     root = expandFilename(Root)
   require(resolved != root and not root.isRelativeTo(resolved),
     "Replay bundle output must not contain the repository: " & output)
-  putEnv("POLYWORLD_DEPS",
-    absolutePath(getEnv("POLYWORLD_DEPS", Root / "tmp/coworld/deps")))
   putEnv("POLYWORLD_ART",
     absolutePath(getEnv("POLYWORLD_ART", Root.parentDir / "polyworld_art")))
   syncDependencies()
@@ -47,9 +45,9 @@ proc main() =
   createDir(output)
   run([
     "nim", "c", "-d:emscripten", "-d:replayViewer",
-    "examples" / directory / (game & ".nim")
+    "games" / directory / (game & ".nim")
   ])
-  let source = Root / "examples" / directory / "emscripten"
+  let source = Root / "games" / directory / "emscripten"
   for suffix in ["js", "wasm", "data"]:
     copyFile(source / (game & "." & suffix), output / (game & "." & suffix))
   copyFile(source / (game & ".html"), output / "index.html")

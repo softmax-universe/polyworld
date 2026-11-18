@@ -133,6 +133,7 @@ import
 # reconnect recovery, and warnings derived only from the local simulation.
 import
   ../games/gods_of_the_arena/tests/test_live_slots as TestGotaLiveSlots,
+  ../games/gods_of_the_arena/tests/test_auto_seats as TestGotaAutoSeats,
   ../games/gods_of_the_arena/tests/test_match_notice_network as TestGotaLocalNotices,
   ../games/light_vs_dark/tests/test_live_slots as TestLvdLiveSlots,
   ../games/light_vs_dark/tests/test_match_clock as TestLvdLocalNotices,

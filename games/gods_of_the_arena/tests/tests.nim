@@ -73,6 +73,7 @@ import
   test_walls,
   test_multiplayer,
   test_live_slots,
+  test_auto_seats,
   test_two_human_draft,
   test_same_room_rematch,
   test_cosmetic_start,

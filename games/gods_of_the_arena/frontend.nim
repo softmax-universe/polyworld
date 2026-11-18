@@ -4,7 +4,7 @@ import
   polyworld/[displays, chrome, connections, menus, roomclients, rooms, policies,
     sounds, viewers],
   content, controls, game, graphics, homes, lobbies, multiplayer, playernames,
-  pointers, presets, replays, settings
+  pointers, presets, replays, settings, joiningseats
 
 const AppName = "Polyworld GotA"
 
@@ -29,6 +29,7 @@ proc runFrontend*() =
     invite = inviteParameter("room")
     joinRequested = invite.len > 0
     connection: Connection
+    joiningSeat: JoiningSeat
     prepared: NetworkMatch
     preparedRevision = 0'u32
     viewedRevision = 0'u32
@@ -107,15 +108,21 @@ proc runFrontend*() =
           viewedPayload = ""
           configPending = false
           multiplayerHuman = -1
+          joiningSeat = JoiningSeat()
           networkPolicies = default(array[HeroClassCount, LocalPolicy])
           error = ""
         except CatchableError as problem:
           error = problem.msg
     if connection != nil:
       connection.pump()
-      let client = connection.client
+      let
+        client = connection.client
+        joinedSeat = joiningSeat.claimJoiningSeat(client)
+      if joinedSeat.updated:
+        multiplayerHuman = joinedSeat.seat
       if client.welcomed and joinRequested and invite.len > 0 and
         client.snapshot.room.len == 0:
+        joiningSeat.beginJoiningSeat()
         client.send(RoomMessage(kind: JoinRoom, room: invite))
         joinRequested = false
       if client.snapshot.room.len == 0 and page == LobbyMenu:
@@ -375,6 +382,7 @@ proc runFrontend*() =
               elif watching: "Full" else: "Open", point + vec2(570, 10), 120)
             if sk.lobbyButton(if watching: "Watch" else: "Join",
               point + vec2(rowsSize.x - 156, 8), 128, "arrow_right"):
+                joiningSeat.beginJoiningSeat(watching)
                 connection.client.send(RoomMessage(kind: JoinRoom, room: room.id))
                 lobbyUi.scroll = 0
           sk.popClipRect()
@@ -412,6 +420,7 @@ proc runFrontend*() =
             create + vec2(0, 238), width, tint = LobbyMuted)
           if sk.lobbyButton("Create Room", create + vec2(0, 288), width,
             "cross", connected and roomName.strip().len > 0):
+              joiningSeat.beginJoiningSeat()
               connection.client.send(RoomMessage(
                 kind: CreateRoom, name: roomName, number: HeroClassCount,
                 tickRate: uint32(TickRate), flag: publicRoom,
@@ -445,6 +454,7 @@ proc runFrontend*() =
             snapshot = if online: client.snapshot else: RoomMessage()
             editable = not online or snapshot.phase == rooms.Lobby
             owner = not online or snapshot.participant == client.participant
+            seatPending = online and joiningSeat.joiningSeatPending()
             modal = lobbyUi.selectedSeat != -1 or kickMenu.target != 0
           if online and snapshot.seats.len != HeroClassCount:
             raise newException(MenusError, "GotA rooms require ten seats")
@@ -527,7 +537,7 @@ proc runFrontend*() =
                 chosenPolicy = bot
             if sk.lobbyButton("Fill " & $emptyCount & " slots",
               fill + vec2(444, 0), 198, "cross",
-              editable and emptyCount > 0 and not modal):
+              editable and emptyCount > 0 and not modal and not seatPending):
                 for i in 0 ..< HeroClassCount:
                   if online:
                     if snapshot.seats[i].owner == 0:
@@ -599,7 +609,8 @@ proc runFrontend*() =
             elif owner:
               if sk.lobbyButton("Start Game", layout.primary,
                 250, "arrow_right",
-                owner and editable and not configPending and not modal,
+                owner and editable and not configPending and not modal and
+                  not seatPending,
                 tint = StartGameGreen):
                   var sources: array[HeroClassCount, string]
                   for i, policy in networkPolicies:
@@ -616,6 +627,7 @@ proc runFrontend*() =
                 client.error = ""
                 error = ""
               else:
+                joiningSeat.cancelJoiningSeat()
                 client.send(RoomMessage(kind: LeaveRoom))
                 page = MultiplayerMenu
                 prepared = nil
@@ -653,6 +665,7 @@ proc runFrontend*() =
                 chosenPolicy = selected
                 lobbyUi.selectedBot = selected.name
               if online:
+                joiningSeat.cancelJoiningSeat()
                 if choice.human:
                   client.claimHumanSeat(selectedSeat, multiplayerHuman)
                   for i, seat in snapshot.seats:

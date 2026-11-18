@@ -1,23 +1,28 @@
-import std/[unittest, strutils]
-import polyworld/[rooms, roomclients]
+import std/unittest
+import networkfixtures
 import ../lobbyreadiness
 
 suite "LvD cosmetic readiness":
-  test "toggle never sends packets or changes deterministic preparation":
-    var state: ReadyRefresh
-    let client = RoomClient(participant: 1, connected: true, welcomed: true,
-      snapshot: RoomMessage(room: "ROOM01", phase: Lobby, participant: 1,
-        revision: 4, seats: @[Seat(owner: 1, name: "Human")]))
-    check not state.cosmeticReady
-    for i in 0 ..< 4:
-      state.toggleCosmeticReady()
-      check state.cosmeticReady == (i mod 2 == 0)
-      check client.outgoing.len == 0
-      check client.snapshot.revision == 4
+  test "readiness is visible to the host but changes no setup":
+    let f = newFixture()
+    let before = f.clients[0].snapshot
+    check not f.clients[1].cosmeticReady()
+    f.clients[1].toggleCosmeticReady()
+    f.exchange()
+    check f.clients[1].cosmeticReady()
+    check f.clients[0].snapshot.participants[1].ready
+    check f.clients[0].snapshot.revision == before.revision
+    check f.clients[0].snapshot.setupHash() == before.setupHash()
+    check f.clients[0].events.len == 0
+    f.clients[1].toggleCosmeticReady()
+    f.exchange()
+    check not f.clients[0].snapshot.participants[1].ready
 
-  test "frontend starts independent of ready and uses packed human selection":
-    let source = readFile("games/light_vs_dark/frontend.nim")
-    check "readyRefresh.toggleCosmeticReady()" in source
-    check "readyToStart" notin source
-    check "prepared.humanPlayerFor(connection.client.participant)" in source
-    check "client.send(RoomMessage(kind: Ready," notin source
+  test "host starts with every readiness indicator false":
+    let f = newFixture()
+    f.begin()
+    for i, client in f.clients:
+      check not client.cosmeticReady()
+      check f.sessions[i].started
+      check client.error.len == 0
+      check client.snapshot.phase == Playing

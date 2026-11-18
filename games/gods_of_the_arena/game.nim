@@ -12,7 +12,7 @@ import
   sim,
   bots,
   controls,
-  replays
+  replays, matchnotices
 
 when defined(coworld):
   import polyworld/coworld
@@ -220,6 +220,10 @@ proc advanceGame*() =
       if draftTurn == 0 or draftTurn == run.world.draftHeroId():
         runBotDecisions(run)
   )
+  if not run.replayMode and not run.historyPlayback and run.matchNoticeDue():
+    run.recorder.recordChat(ReplayChat(
+      tick: uint32(run.world.tick), kind: SystemReplayChat,
+      target: -2, text: ThreeMinuteNotice))
   when defined(gotaTestRoom):
     run.finishTestTick()
   else:

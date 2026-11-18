@@ -49,7 +49,7 @@ proc main() =
           writeFile(RoomFile, client.snapshot.room)
           echo "ROOM=", client.snapshot.room, " private=true maxTicks=7200 draft=open"
           for i in 0 ..< 10:
-            client.send(RoomMessage(kind: ClaimSeat, seat: uint32(i), name: "Base"))
+            client.send(RoomMessage(kind: ClaimSeat, seat: uint32(i), seatKind: BotSeat, name: "Base"))
           claimed = true
         var allOwned = true
         for seat in client.snapshot.seats:
@@ -60,25 +60,21 @@ proc main() =
           for vm in session.game.heroVms:
             require(vm != nil, "Every locally owned seat must have a real policy VM")
           revision = client.snapshot.revision
-          client.send(RoomMessage(kind: Ready, revision: revision,
-            hash: session.game.networkHash()))
+          client.send(RoomMessage(kind: ReadyStatus, flag: true))
           startRequested = false
           echo "READY revision=", revision, " ownedSeats=10 realBotVMs=10 hash=",
             session.game.networkHash()
         if session != nil and client.snapshot.phase == Lobby and not startRequested:
-          var hostReady = false
-          for participant in client.snapshot.participants:
-            if participant.id == client.participant:
-              hostReady = participant.ready
-          if hostReady:
-            client.send(RoomMessage(kind: StartMatch))
-            startRequested = true
+          client.send(RoomMessage(kind: StartMatch, revision: client.snapshot.revision,
+            hash: setupHash(client.snapshot)))
+          startRequested = true
       for event in client.events:
         require(session != nil, "BeginMatch arrived before preparation")
         session.start(event)
         echo "STARTED match=", client.match, " room=", client.snapshot.room
       client.events.setLen(0)
       if session != nil and session.started and not session.finished:
+        session.resumeControls()
         var packet: RoomMessage
         while connection.takeTick(packet, 24):
           session.applyPacket(packet)

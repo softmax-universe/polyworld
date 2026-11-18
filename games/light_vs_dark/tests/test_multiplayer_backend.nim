@@ -7,12 +7,14 @@ proc clientFor(id: uint32): RoomClient =
   config.maxTicks = 12
   config.mapSettings = MapSettings(layout: RandomLayout, size: 90, expansions: 0)
   result = RoomClient(identity: lvdIdentity(), participant: id, match: 1,
-    began: true, welcomed: true)
+    began: true, welcomed: true, connected: true)
   result.snapshot = RoomMessage(kind: RoomState, revision: 2, phase: Playing,
     tickRate: uint32(TickRate), payload: config.toJson(), seats: @[
-      Seat(owner: 1, name: "Human"), Seat(owner: 2, name: "Bot"),
-      Seat(owner: 1, name: "Bot")], participants: @[
+      Seat(owner: 1, name: "Human"), Seat(owner: 2, name: "Bot", kind: BotSeat),
+      Seat(owner: 1, name: "Bot", kind: BotSeat)], participants: @[
       Participant(id: 1, name: "Alice"), Participant(id: 2, name: "Bob")])
+  result.initialSnapshot = result.snapshot
+  result.appliedSeats = result.snapshot.seats
 
 block oversizedRoomAndLocalConfigRejectedBeforeAllocation:
   let oversized = LvdConfig(playerCount: 64,
@@ -22,7 +24,9 @@ block oversizedRoomAndLocalConfigRejectedBeforeAllocation:
   remote.snapshot.payload = oversized.toJson()
   remote.snapshot.seats = newSeq[Seat](64)
   for seat in remote.snapshot.seats.mitems:
-    seat = Seat(owner: 1, name: "Bot")
+    seat = Seat(owner: 1, name: "Bot", kind: BotSeat)
+  remote.initialSnapshot = remote.snapshot
+  remote.appliedSeats = remote.snapshot.seats
   let sources = newSeq[string](64)
   var rejected = false
   try: discard prepareNetworkMatch(remote, sources)
@@ -42,7 +46,7 @@ doAssert a.game.world.players.len == 3
 doAssert a.game.networkHash() == b.game.networkHash()
 doAssert a.game.config.players[0].name == "Alice"
 let startEvent = RoomMessage(kind: BeginMatch, revision: 2, match: 1,
-  hash: a.game.networkHash())
+  hash: setupHash(a.client.snapshot))
 a.start(startEvent)
 b.start(startEvent)
 let own = a.game.world.units[0]
@@ -58,7 +62,8 @@ for bytes in a.client.outgoing:
       sequence: message.sequence, payload: message.payload)
 doAssert commands.len == 1
 for tick in 1'u32 .. 12'u32:
-  let packet = RoomMessage(kind: TickPacket, match: 1, tick: tick,
+  let packet = RoomMessage(kind: TickPacket,
+    seats: a.client.snapshot.seats, match: 1, tick: tick,
     commands: (if tick == 1: commands else: @[]))
   a.applyPacket(packet)
   b.applyPacket(packet)
@@ -91,14 +96,15 @@ block rejectsMalformedAtomically:
   session.start(startEvent)
   let baseline = session.game.stateHash()
   for bad in [
-    Command(participant: 2, seat: 0, payload: commands[0].payload),
+    Command(participant: 0, seat: 0, payload: commands[0].payload),
     Command(participant: 1, seat: 2, payload: commands[0].payload),
     Command(participant: 1, seat: 0, payload: ReplayAction(kind: ActionDiplomacy,
       playerId: 0, first: 1, second: 999).encodeSubmission()),
     Command(participant: 1, seat: 0, payload: commands[0].payload & "x")]:
     var rejected = false
     try:
-      session.applyPacket(RoomMessage(kind: TickPacket, match: 1, tick: 1,
+      session.applyPacket(RoomMessage(kind: TickPacket,
+        seats: a.client.snapshot.seats, match: 1, tick: 1,
         commands: @[commands[0], bad]))
     except RoomsError: rejected = true
     doAssert rejected, "Malformed packet must be rejected before mutation"
@@ -124,7 +130,8 @@ block privateBotsAndChat:
       submitted.add Command(participant: 2, seat: message.seat,
         sequence: message.sequence, payload: message.payload)
   doAssert submitted.len == 2
-  let packet = RoomMessage(kind: TickPacket, match: 1, tick: 1, commands: submitted)
+  let packet = RoomMessage(kind: TickPacket,
+    seats: a.client.snapshot.seats, match: 1, tick: 1, commands: submitted)
   host.applyPacket(packet)
   observer.applyPacket(packet)
   doAssert host.game.stateHash() == observer.game.stateHash()

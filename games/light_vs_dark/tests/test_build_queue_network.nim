@@ -10,11 +10,13 @@ proc clientFor(id: uint32): RoomClient =
   config.maxTicks = Duration
   config.mapSettings = MapSettings(layout: RandomLayout, size: 90, expansions: 0)
   result = RoomClient(identity: lvdIdentity(), participant: id, match: 1,
-    began: true, welcomed: true)
+    began: true, welcomed: true, connected: true)
   result.snapshot = RoomMessage(kind: RoomState, revision: 2, phase: Playing,
     tickRate: uint32(TickRate), payload: config.toJson(), seats: @[
       Seat(owner: 1, name: "Human"), Seat(owner: 2, name: "Human")], participants: @[
       Participant(id: 1, name: "Alice"), Participant(id: 2, name: "Bob")])
+  result.initialSnapshot = result.snapshot
+  result.appliedSeats = result.snapshot.seats
 
 proc takeCommands(session: NetworkMatch): seq[Command] =
   ## Captures human submissions without changing authoritative state.
@@ -41,7 +43,7 @@ let
   a = prepareNetworkMatch(clientFor(1), ["", ""])
   b = prepareNetworkMatch(clientFor(2), ["", ""])
   event = RoomMessage(kind: BeginMatch, revision: 2, match: 1,
-    hash: a.game.networkHash())
+    hash: setupHash(a.client.snapshot))
 a.start(event)
 b.start(event)
 let world = a.game.world
@@ -130,7 +132,8 @@ var
   started, waited, supplied, completed: bool
   waitingTicks = 0
 for tick in 1'u32 .. uint32(Duration):
-  let packet = RoomMessage(kind: TickPacket, match: 1, tick: tick,
+  let packet = RoomMessage(kind: TickPacket,
+    seats: a.client.snapshot.seats, match: 1, tick: tick,
     commands: commands)
   a.applyPacket(packet)
   b.applyPacket(packet)

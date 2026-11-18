@@ -18,10 +18,8 @@ proc fixture(): Relay =
   for connection in 1 .. 2:
     result.send(connection, RoomMessage(kind: ClaimSeat,
       seat: uint32(connection - 1), name: "Seat"))
-  for connection in 1 .. 2:
-    result.send(connection, RoomMessage(kind: Ready,
-      revision: room.revision, hash: 42))
-  result.send(1, RoomMessage(kind: StartMatch))
+  result.send(1, RoomMessage(kind: StartMatch, revision: room.revision,
+    hash: setupHash(result.state(room))))
 
 proc advanceTo(relay: Relay, target: uint32, acknowledgeBoth = true) =
   let room = relay.rooms[0]
@@ -132,7 +130,9 @@ suite "Asynchronous historical hash verification":
     relay.send(3, RoomMessage(kind: Hello, identity: room.identity, name: "Spectator"))
     relay.send(3, RoomMessage(kind: JoinRoom, room: room.id))
     relay.advanceTo(30)
-    relay.send(3, RoomMessage(kind: FinishMatch, match: room.match, tick: 29, hash: 900))
+    expect RoomsError:
+      relay.send(3, RoomMessage(kind: FinishMatch,
+        match: room.match, tick: 29, hash: 900))
     relay.advanceTo(40)
 
   test "completed reconnect accepts exact command retransmissions only":

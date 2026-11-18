@@ -95,7 +95,7 @@ proc prepareAll(sources: seq[seq[string]] = @[]) =
 proc beginMatch() =
   ## Starts the prepared lobby and consumes its independent begin messages.
   sessions[0].client.send(RoomMessage(kind: StartMatch,
-    revision: sessions[0].revision, hash: sessions[0].game.networkHash))
+    revision: sessions[0].revision, hash: setupHash(sessions[0].client.snapshot)))
   exchange()
   for session in sessions:
     doAssert session.client.events.len == 1
@@ -218,7 +218,8 @@ proc assertInvalidPackets(session: NetworkMatch) =
   var invalid = valid
   invalid.seat = other.uint32
   session.assertPacketRejected(@[valid, invalid])
-  invalid.participant = session.client.snapshot.seats[other].owner
+  invalid = valid
+  invalid.participant = 0
   session.assertPacketRejected(@[valid, invalid])
   invalid = valid
   invalid.payload = "incomplete"
@@ -227,7 +228,7 @@ proc assertInvalidPackets(session: NetworkMatch) =
   session.assertPacketRejected(@[valid, invalid])
 
 proc assertInitialHashesMatch() =
-  ## Rejects a peer's mismatched state against the host's start checkpoint.
+  ## Compare game-state hashes separately from shared initialization metadata.
   let mismatchRelay = Relay()
   for connection in 1 .. 2:
     mismatchRelay.receive(connection, RoomMessage(kind: Hello,
@@ -239,32 +240,33 @@ proc assertInitialHashesMatch() =
   mismatchRelay.receive(2, RoomMessage(kind: JoinRoom, room: room.id), 0)
   for connection in 1 .. 2:
     mismatchRelay.receive(connection, RoomMessage(kind: ClaimSeat,
-      seat: (connection - 1).uint32, name: "Human"), 0)
+      seat: (connection - 1).uint32, seatKind: HumanSeat, name: "Human"), 0)
   let
     host = RoomClient(participant: 1, snapshot: mismatchRelay.state(room))
     prepared = host.requestStart()
   for bytes in host.outgoing:
     mismatchRelay.receive(1, decode(bytes), 0)
+  host.outgoing = @[]
   doAssert room.phase == Playing
-  let
-    peer = RoomClient(participant: 2, match: room.match,
-      snapshot: mismatchRelay.state(room))
-    incompatible = prepareNetworkMatch(peer)
-  doAssert incompatible.game.networkHash == prepared.game.networkHash
-  dec incompatible.game.players[0].life
   var begin: RoomMessage
   for outgoing in mismatchRelay.outgoing:
     let message = decode(outgoing.bytes)
     if outgoing.connection == 2 and message.kind == BeginMatch:
       begin = message
   doAssert begin.kind == BeginMatch
-  var rejected = false
-  try:
-    incompatible.start(begin)
-  except RoomsError:
-    rejected = true
-  doAssert rejected and not incompatible.started
-  doAssert incompatible.tick == 0
+  begin.delivery = 0
+  begin.timing = PacketTiming()
+  host.accept(begin.encode())
+  prepared.start(begin)
+  for bytes in host.outgoing:
+    mismatchRelay.receive(1, decode(bytes), 0)
+  let peer = RoomClient(participant: 2, snapshot: mismatchRelay.state(room))
+  peer.accept(begin.encode())
+  let incompatible = prepareNetworkMatch(peer)
+  doAssert incompatible.game.networkHash == prepared.game.networkHash
+  dec incompatible.game.players[0].life
+  incompatible.start(begin)
+  doAssert incompatible.started and incompatible.tick == 0
   for bytes in peer.outgoing:
     mismatchRelay.receive(2, decode(bytes), 0)
   doAssert room.phase == Desynced
@@ -392,6 +394,7 @@ let
   beforeDisconnect = sessions[0].tick
 relay.disconnect(1)
 first.lost()
+doAssert not sessions[0].returnedToLobby
 for iteration in 0 ..< 5:
   submitHumans()
   step()
@@ -450,8 +453,8 @@ guest.send(RoomMessage(kind: JoinRoom, room: owner.snapshot.room))
 exchange()
 owner.claimHumanSeat(0)
 guest.claimHumanSeat(1)
-owner.send(RoomMessage(kind: ClaimSeat, seat: 2, name: "Mage bot"))
-guest.send(RoomMessage(kind: ClaimSeat, seat: 3, name: "Archer bot"))
+owner.send(RoomMessage(kind: ClaimSeat, seat: 2, seatKind: BotSeat, name: "Mage bot"))
+guest.send(RoomMessage(kind: ClaimSeat, seat: 3, seatKind: BotSeat, name: "Archer bot"))
 exchange()
 let rosterRevision = owner.snapshot.revision
 for ready in [true, false, true]:
@@ -641,7 +644,7 @@ clients[1].send(RoomMessage(kind: JoinRoom, room: clients[0].snapshot.room))
 exchange()
 for index, client in clients:
   client.send(RoomMessage(kind: ClaimSeat, seat: index.uint32,
-    name: "Talking bot " & $index))
+    seatKind: BotSeat, name: "Talking bot " & $index))
 exchange()
 let talkingPolicy = "sent = sendChat(enemyPlayer, \"From BASIC\")\nendTurn()\nend\n"
 prepareAll(@[@[talkingPolicy, ""], @["", talkingPolicy]])
@@ -663,5 +666,129 @@ for session in sessions:
   session.assertMailbox(0, @["From BASIC"], 1)
   session.assertMailbox(1, @["From BASIC"], 0)
   doAssert session.finished and session.actionCount == 2
+
+echo "Testing live ownership transfer preserves admitted commands and setup"
+createHumanMatch(2, 40)
+let
+  initialSetupHash = setupHash(clients[0].setupSnapshot())
+  transferPlayer = sessions[0].game.actingPlayer()
+  originalController = clients[transferPlayer]
+  joining = addClient()
+joining.send(RoomMessage(kind: JoinRoom, room: clients[0].snapshot.room))
+exchange()
+doAssert joining.events.len == 1
+let transferredAction = sessions[transferPlayer].game.endTurnAction()
+doAssert sessions[transferPlayer].submitAction(transferredAction)
+exchange()
+clients[0].send(RoomMessage(kind: ClaimSeat, seat: transferPlayer.uint32,
+  participant: joining.participant, seatKind: HumanSeat, name: "New controller"))
+exchange()
+doAssert clients[0].snapshot.seats[transferPlayer].owner == joining.participant
+doAssert not originalController.submit(transferPlayer.uint32,
+  ActionSubmission(action: transferredAction).encodeSubmission())
+doAssert setupHash(clients[0].setupSnapshot()) == initialSetupHash
+let takeover = prepareNetworkMatch(joining)
+sessions.add takeover
+takeover.start(joining.events[0])
+joining.events.setLen(0)
+exchange()
+step()
+for session in sessions:
+  doAssert session.actionCount == 1
+  doAssert session.game.stateHash == sessions[0].game.stateHash
+  doAssert setupHash(session.client.setupSnapshot()) == initialSetupHash
+doAssert takeover.humanSeat == transferPlayer
+doAssert sessions[transferPlayer].humanSeat == -1
+doAssert sessions[transferPlayer].isSpectator
+
+echo "Testing live bot removal stops its private policy without changing game"
+clients[0].send(RoomMessage(kind: ClaimSeat, seat: transferPlayer.uint32,
+  participant: joining.participant, seatKind: BotSeat, name: "Human"))
+exchange()
+step()
+doAssert takeover.humanSeat == -1
+# No private policy was supplied for the transferred bot; its owner stays idle.
+doAssert takeover.bots[transferPlayer] == nil
+doAssert not takeover.pendingAction
+clients[0].send(RoomMessage(kind: ReleaseSeat, seat: transferPlayer.uint32))
+exchange()
+step()
+doAssert takeover.isSpectator
+compareGames()
+
+echo "Testing a host kick exits only the removed client's match"
+clients[0].send(RoomMessage(kind: KickParticipant,
+  participant: joining.participant))
+exchange()
+doAssert joining.snapshot.room.len == 0
+doAssert takeover.returnedToLobby
+doAssert not sessions[0].returnedToLobby
+
+echo "Testing ownership revocation acknowledges an in-flight action safely"
+createHumanMatch(2, 40)
+let
+  revokedPlayer = sessions[0].game.actingPlayer()
+  revokedSession = sessions[revokedPlayer]
+for rejection in 1 .. 3:
+  doAssert revokedSession.submitAction(revokedSession.game.endTurnAction())
+  doAssert revokedSession.pendingAction
+  # Process removal before the already-queued command reaches the relay.
+  relay.receive(1, RoomMessage(kind: ReleaseSeat,
+    seat: revokedPlayer.uint32), now)
+  exchange()
+  doAssert revokedSession.client.rejectedCommands == rejection.uint64
+  doAssert not revokedSession.pendingAction
+  var discarded: RoomMessage
+  doAssert not revokedSession.client.takeRejected(discarded),
+    "The normal session pump must drain every discarded acknowledgement."
+  doAssert revokedSession.client.error.len == 0
+  step()
+  doAssert relay.rooms[0].phase == Playing
+  for session in sessions:
+    doAssert session.actionCount == 0
+  clients[0].send(RoomMessage(kind: ClaimSeat, seat: revokedPlayer.uint32,
+    participant: revokedSession.client.participant,
+    seatKind: HumanSeat, name: "Returned controller"))
+  exchange()
+  step()
+# Restored ownership can issue a fresh sequence after repeated cancellations.
+doAssert revokedSession.submitAction(revokedSession.game.endTurnAction())
+step()
+doAssert not revokedSession.pendingAction
+for session in sessions:
+  doAssert session.actionCount == 1
+compareGames()
+
+echo "Testing remote-owned bots without a private policy stay idle"
+resetHarness()
+let
+  idleHost = addClient()
+  idleOwner = addClient()
+idleHost.send(RoomMessage(kind: CreateRoom, name: "CaC idle bot",
+  number: 2, tickRate: CacNetworkTickRate.uint32,
+  payload: defaultBattleSetup().encodeBattleSetup))
+exchange()
+idleOwner.send(RoomMessage(kind: JoinRoom, room: idleHost.snapshot.room))
+exchange()
+idleHost.claimHumanSeat(0)
+idleHost.send(RoomMessage(kind: ClaimSeat, seat: 1,
+  participant: idleOwner.participant, seatKind: BotSeat, name: "Human"))
+exchange()
+prepareAll()
+doAssert sessions[1].humanSeat == -1
+for bot in sessions[1].bots:
+  doAssert bot == nil
+beginMatch()
+step()
+doAssert relay.rooms[0].phase == Playing
+
+echo "Testing multiple owned human slots select one local control view"
+idleHost.send(RoomMessage(kind: ClaimSeat, seat: 1,
+  participant: idleHost.participant, seatKind: HumanSeat, name: "Second human"))
+exchange()
+step()
+doAssert sessions[0].humanSeat == 0
+doAssert sessions[1].isSpectator
+compareGames()
 
 echo "CaC universal relay, humans, distributed bots and match lifecycle passed"

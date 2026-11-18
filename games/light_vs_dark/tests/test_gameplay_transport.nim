@@ -31,7 +31,7 @@ suite "LvD gameplay transport":
     options.playerSlot = 0
     hudNetwork = NetworkMatch(client: RoomClient(participant: 7,
       snapshot: RoomMessage(seats: @[
-        Seat(owner: 7, name: "Basic bot"), Seat(owner: 9, name: "Human")
+        Seat(owner: 7, name: "Basic bot", kind: BotSeat), Seat(owner: 9, name: "Human")
       ])))
     defer:
       run = nil
@@ -64,12 +64,12 @@ suite "LvD gameplay transport":
     run.replayMode = false
     options.playerSlot = 0
     hudNetwork = NetworkMatch(client: RoomClient(participant: 8,
-      snapshot: RoomMessage(seats: @[Seat(owner: 7, name: "Basic bot")])))
+      snapshot: RoomMessage(seats: @[Seat(owner: 7, name: "Basic bot", kind: BotSeat)])))
     check playbackControlsVisible()
     check currentLayout(window).transportHeight == TransportHeight
 
   test "ownership policy ignores seat type, history, and match completion":
-    let seats = [Seat(owner: 7, name: "Basic bot"), Seat(owner: 9, name: "Human"),
+    let seats = [Seat(owner: 7, name: "Basic bot", kind: BotSeat), Seat(owner: 9, name: "Human"),
       Seat(owner: 0)]
     check not showPlaybackControls(false, 1)
     check not showPlaybackControls(false, 0, 7, seats)

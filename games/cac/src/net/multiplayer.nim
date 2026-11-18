@@ -6,7 +6,7 @@ import
 export battlesetup
 
 const
-  CacNetworkProtocol* = 1'u32
+  CacNetworkProtocol* = 2'u32
   CacNetworkTickRate* = SharedTickRate.int
   MaxActionChoices = 64
 
@@ -30,6 +30,8 @@ type
     inboxes*: seq[Mailbox]
     onAction*: proc(before, after: GameState, action: ReplayAction)
     roomSeats: seq[rooms.Seat]
+    sources: seq[string]
+    seed: int64
     playerSlots: seq[int]
     maximumActions: uint32
     matchId: uint32
@@ -43,29 +45,18 @@ proc cacIdentity*(): GameIdentity =
   GameIdentity(game: ReplayGame, gameplay: ReplayGameVersion.uint32,
     protocol: CacNetworkProtocol)
 
-proc lobbyError*(detail: string): string =
-  ## Explain readiness gates from relays that predate CaC host-start support.
-  case detail
-  of "Controllers must automatically prepare the current roster revision",
-      "Every controlling client must load the setup and be ready":
-    "This server needs the Cards and Casters update. Contact the server host."
-  else:
-    detail
-
 proc networkHash*(game: GameState): uint64 =
   ## Reuse the canonical replay hash, excluding presentation event queues.
   game.stateHash()
 
 proc humanSeatFor*(snapshot: RoomMessage, participant: uint32): int =
-  ## Find one participant's human lobby slot and reject ambiguous ownership.
+  ## Selects the first owned human slot for this client's local controls.
   result = -1
   if participant == 0:
     return
   for index, seat in snapshot.seats:
-    if seat.owner == participant and seat.name == "Human":
-      if result >= 0:
-        reject("Each participant can control only one human seat")
-      result = index
+    if seat.owner == participant and seat.kind == HumanSeat:
+      return index
 
 proc claimHumanSeat*(client: RoomClient, seat: int, previous = -1) =
   ## Move the local human without taking another participant's seat.
@@ -74,10 +65,11 @@ proc claimHumanSeat*(client: RoomClient, seat: int, previous = -1) =
     reject("Cannot take another participant's seat")
   for index, current in client.snapshot.seats:
     if index != seat and (index == previous or
-        (current.owner == client.participant and current.name == "Human")):
+        (current.owner == client.participant and current.kind == HumanSeat)):
       if current.owner in [0'u32, client.participant]:
         client.send(RoomMessage(kind: ReleaseSeat, seat: index.uint32))
-  client.send(RoomMessage(kind: ClaimSeat, seat: seat.uint32, name: "Human"))
+  client.send(RoomMessage(kind: ClaimSeat, seat: seat.uint32,
+    seatKind: HumanSeat, name: "Human"))
 
 proc controllersConnected*(snapshot: RoomMessage): bool =
   ## Require two players and connected owners, independent of ready indicators.
@@ -95,18 +87,24 @@ proc controllersConnected*(snapshot: RoomMessage): bool =
   occupied in MinBattlePlayers .. MaxBattlePlayers
 
 proc returnedToLobby*(session: NetworkMatch): bool =
-  ## Retire the old battle when the host returns its room to setup.
+  ## Leaves a retired battle or an explicitly removed room membership.
   session != nil and session.started and
-    session.client.snapshot.room.len > 0 and
-    session.client.snapshot.phase == Lobby
+    (session.client.snapshot.room.len == 0 or
+      session.client.snapshot.phase == Lobby)
 
 proc isSpectator*(session: NetworkMatch): bool =
-  ## Keep the match's controller role stable across lobby changes.
+  ## Reports whether the applied roster assigns any existing player locally.
   session != nil and session.spectator
 
 proc pendingAction*(session: NetworkMatch): bool =
-  ## Block repeated clicks until the authoritative packet carries the intent.
-  session != nil and session.pendingPayload.len > 0
+  ## Clears revoked intents and blocks clicks until the accepted action arrives.
+  if session == nil:
+    return false
+  var rejected: RoomMessage
+  while session.client.takeRejected(rejected):
+    if rejected.payload == session.pendingPayload:
+      session.pendingPayload.setLen(0)
+  session.pendingPayload.len > 0
 
 proc canApplyTick*(session: NetworkMatch, presentationReady: bool): bool =
   ## Keeps empty ticks flowing while an earlier action animates.
@@ -183,6 +181,33 @@ proc decodeSubmission*(bytes: string): ActionSubmission =
   if reader.cursor != bytes.len:
     reject("Trailing CaC command bytes")
 
+proc ownsPlayer(session: NetworkMatch, player: int): bool =
+  ## Requires applied ownership and the latest relay permission to agree.
+  if player notin 0 ..< session.playerSlots.len:
+    return false
+  let slot = session.playerSlots[player]
+  slot < session.roomSeats.len and
+    session.roomSeats[slot].owner == session.client.participant and
+    slot < session.client.snapshot.seats.len and
+    session.client.snapshot.seats[slot].owner == session.client.participant
+
+proc updateControllers(session: NetworkMatch, seats: seq[rooms.Seat]) =
+  ## Transfers existing players after their authoritative roster tick applies.
+  session.roomSeats = seats
+  session.humanSeat = -1
+  session.spectator = true
+  for player, slot in session.playerSlots:
+    if slot >= seats.len or seats[slot].owner != session.client.participant:
+      continue
+    session.spectator = false
+    if seats[slot].kind == HumanSeat:
+      if session.humanSeat < 0:
+        session.humanSeat = player
+    elif session.bots[player] == nil and slot < session.sources.len and
+        session.sources[slot].len > 0:
+      session.bots[player] = loadBot(session.sources[slot], player.int32)
+      session.bots[player].ensureSeed(session.seed)
+
 proc submitMailbox*(session: NetworkMatch, sender, target: int,
     text: openArray[char]): int32 =
   ## Send owned policy mail through the same ordered history as its actions.
@@ -193,7 +218,7 @@ proc submitMailbox*(session: NetworkMatch, sender, target: int,
       text.len > MaxChatBytes or session.messagesQueued >= MaxMailboxMessages:
     return 0
   let slot = session.playerSlots[sender]
-  if session.roomSeats[slot].owner != session.client.participant:
+  if not session.ownsPlayer(sender):
     return 0
   var message = newString(text.len)
   for index, value in text:
@@ -208,14 +233,16 @@ proc prepareNetworkMatch*(client: RoomClient,
     sources: openArray[string] = []): NetworkMatch =
   ## Build identical public decks while compiling only privately owned bots.
   let
-    snapshot = client.snapshot
+    snapshot = client.setupSnapshot()
     setup = parseBattleSetup(snapshot.payload)
   if snapshot.tickRate != CacNetworkTickRate.uint32 or
       snapshot.seats.len != setup.classes.len:
     reject("CaC room settings do not match its seat count or tick rate")
   result = NetworkMatch(client: client, revision: snapshot.revision,
     humanSeat: -1, spectator: true, maximumActions: setup.maxActions,
-    roomSeats: snapshot.seats)
+    roomSeats: snapshot.seats, seed: setup.seed.int64)
+  for source in sources:
+    result.sources.add source
   var
     selected: seq[sim.Seat]
     ownedSources: seq[string]
@@ -224,14 +251,14 @@ proc prepareNetworkMatch*(client: RoomClient,
       continue
     discard snapshot.humanSeatFor(seat.owner)
     var name = seat.name
-    if seat.name == "Human":
+    if seat.kind == HumanSeat:
       name = ""
       for participant in snapshot.participants:
         if participant.id == seat.owner:
           name = participant.name
       if name.len == 0:
         reject("A human seat has no named participant")
-      if seat.owner == client.participant:
+      if seat.owner == client.participant and result.humanSeat < 0:
         result.humanSeat = selected.len
     result.playerSlots.add slot
     result.playerNames.add name
@@ -239,9 +266,7 @@ proc prepareNetworkMatch*(client: RoomClient,
     var source: string
     if seat.owner == client.participant:
       result.spectator = false
-      if seat.name != "Human":
-        if slot >= sources.len or sources[slot].len == 0:
-          reject("Choose a local policy for every bot you control")
+      if seat.kind == BotSeat and slot < sources.len:
         source = sources[slot]
     ownedSources.add source
   if selected.len notin MinBattlePlayers .. MaxBattlePlayers:
@@ -268,7 +293,7 @@ proc requestStart*(client: RoomClient,
     reject("Only the host can start the lobby")
   result = prepareNetworkMatch(client, sources)
   client.send(RoomMessage(kind: StartMatch, revision: result.revision,
-    hash: result.game.networkHash()))
+    hash: setupHash(client.snapshot)))
 
 proc queueAction(session: NetworkMatch, action: ReplayAction): bool =
   ## Submit one legal owned intent without mutating the authoritative game.
@@ -280,7 +305,7 @@ proc queueAction(session: NetworkMatch, action: ReplayAction): bool =
       session.game.actingPlayer() != player:
     return false
   let slot = session.playerSlots[player]
-  if session.roomSeats[slot].owner != session.client.participant:
+  if not session.ownsPlayer(player):
     return false
   var probe = copyGameState(session.game)
   if not probe.applyAction(action):
@@ -303,13 +328,14 @@ proc pumpBots*(session: NetworkMatch) =
       session.client.catchingUp or session.client.snapshot.phase != Playing:
     return
   let player = session.game.actingPlayer()
-  if player notin 0 ..< session.bots.len:
+  if player notin 0 ..< session.bots.len or not session.ownsPlayer(player):
     return
   if session.game.dead(player) and not session.game.waitingChoice:
     discard session.queueAction(ReplayAction(kind: ActionEndTurn,
       playerId: player.int32))
     return
-  if session.bots[player] == nil:
+  if session.roomSeats[session.playerSlots[player]].kind != BotSeat or
+      session.bots[player] == nil:
     return
   let bot = session.bots[player]
   session.messagesQueued = 0
@@ -327,15 +353,15 @@ proc pumpBots*(session: NetworkMatch) =
     reject("Local policy selected an invalid action")
 
 proc start*(session: NetworkMatch, message: RoomMessage) =
-  ## Confirm the exact prepared state before policies or input can execute.
+  ## Confirm shared initialization and report the separate game-state digest.
   if message.kind != BeginMatch or message.revision != session.revision or
       message.match != session.client.match:
     reject("CaC setup changed before the battle started")
   let hash = session.game.networkHash()
   session.client.send(RoomMessage(kind: ReportHash, match: message.match,
     tick: 0, hash: hash))
-  if hash != message.hash:
-    reject("CaC initial state differs from the agreed battle setup")
+  if setupHash(session.client.setupSnapshot()) != message.hash:
+    reject("CaC initial configuration differs from the agreed battle setup")
   session.matchId = message.match
   session.started = true
   if session.automaticBots:
@@ -349,9 +375,8 @@ proc applyPacket*(session: NetworkMatch, packet: RoomMessage) =
   var submissions: seq[ActionSubmission]
   for command in packet.commands:
     if command.participant == 0 or
-        command.seat >= session.roomSeats.len.uint32 or
-        session.roomSeats[command.seat].owner != command.participant:
-      reject("CaC command participant does not own this seat")
+        command.seat >= session.client.setupSnapshot().seats.len.uint32:
+      reject("CaC command has an invalid participant or slot")
     let submission = decodeSubmission(command.payload)
     let player = submission.action.playerId.int
     if player notin 0 ..< session.playerSlots.len or
@@ -395,6 +420,7 @@ proc applyPacket*(session: NetworkMatch, packet: RoomMessage) =
       session.actionCount >= session.maximumActions
   session.tick = packet.tick
   session.client.appliedTick(packet.tick)
+  session.updateControllers(packet.seats)
   if packet.tick mod CacNetworkTickRate.uint32 == 0:
     session.client.send(RoomMessage(kind: ReportHash,
       match: session.matchId, tick: packet.tick,

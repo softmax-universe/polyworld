@@ -40,15 +40,12 @@ exchange()
 for i, client in clients:
   client.claimHumanSeat(i)
   exchange()
-clients[0].send(RoomMessage(kind: ClaimSeat, seat: 2, name: "Bot"))
+clients[0].send(RoomMessage(kind: ClaimSeat, seat: 2, name: "Bot", seatKind: BotSeat))
 exchange()
 let sessions = [prepareNetworkMatch(clients[0], ["", "", ""]),
   prepareNetworkMatch(clients[1], ["", "", ""])]
-for i, session in sessions:
-  clients[i].send(RoomMessage(kind: PreparedDuration, durationTicks: uint32(session.game.maximumTicks), revision: session.revision,
-    hash: session.game.networkHash()))
-  exchange()
-clients[0].send(RoomMessage(kind: StartMatch))
+clients[0].send(RoomMessage(kind: StartMatch, revision: clients[0].snapshot.revision,
+  hash: setupHash(clients[0].snapshot)))
 exchange()
 for i, session in sessions:
   session.start(clients[i].events[0])

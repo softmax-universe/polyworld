@@ -1,6 +1,6 @@
 # GotA packets
 
-Payload protocol **4**, gameplay **83**, outer protocol **4**.
+Payload protocol **5**, gameplay **83**, outer protocol **5**.
 [Outer packets](../../docs/gameserver-packets.md) carry these blobs unchanged.
 
 ## Identity
@@ -11,12 +11,28 @@ Sent inside Hello; GotA requires ten seats at 24 ticks/second.
 | --- | --- | --- |
 | game | `string` | `gods_of_the_arena` |
 | gameplay | `uint32` | 83 |
-| protocol | `uint32` | 4 |
+| protocol | `uint32` | 5 |
 
 ## Setup payload
 
 JSON in CreateRoom, ConfigureRoom and RoomState, capped at 65,536 bytes.
-Clients normalize names from room seats and force `playerSlot = 0`.
+Clients normalize names from typed room seats and force `playerSlot = 0`.
+The relay distributes this JSON without interpreting it. StartMatch hashes the
+shared initial slot responsibilities, owning participant names, tick rate and
+exact JSON bytes through `setupHash`. ReadyStatus is cosmetic. Every game uses
+the same startup rule; GotA validates its world with ReportHash at tick zero.
+
+BeginMatch preserves the initial setup for late joins and reconnects. Live slot
+ownership changes do not rewrite that initial setup. The relay stamps commands
+with the participant and controller kind that were authorized when accepted.
+GotA checks the command's hero/slot mapping, without comparing old commands to
+the latest room roster. Tick packets carry the roster after their commands.
+
+Hosts can replace or remove any slot and kick participants during a match;
+guests may claim empty slots and release their own. Human or bot takeover of an
+existing hero is immediate. Slots that had no hero at startup are reserved for
+the next match; the relay does not invent a hero or change the game's draft.
+A participant assigned multiple human slots uses its first slot in the hero UI.
 
 | Field | Nim value type | Carries / default |
 | --- | --- | --- |
@@ -270,6 +286,14 @@ even when delivery is restricted to a team inbox.
 | 5 | Publish action results, sample metrics, send AppliedTick and required hashes. |
 | 6 | Run only locally owned bot decisions and submit their commands. |
 
+## Local match reminders
+
+Each client derives the three-minute reminder from its simulated battle clock,
+after drafting and preparation. The relay has no countdown, draft policy,
+announcement payload, or game-specific command category. The reminder is local
+system text and may be retained in the client replay transcript; it is never
+attributed to the relay or submitted as a network command.
+
 ## Results, pause and hashes
 
 | Concern | Behavior |
@@ -283,8 +307,8 @@ even when delivery is restricted to a team inbox.
 | Hash upper 32 bits | Hashy digest of normalized immutable config JSON. |
 | Hash lower 32 bits | Existing stateHash: map, draft, RNG, units, navigation, spells, shots and combat stats; exact fields in sim.nim. |
 | Hash exclusions | Private VMs, chat history, mailbox queues, rendering and local performance. Two 32-bit digests, not a cryptographic 64-bit state hash. |
-| Hash timing | Ready at setup; ReportHash at tick 0, 24, 48, etc.; FinishMatch at actual final tick. Comparisons are mandatory. |
-| Replay | Format 7; records hero action attempts, setup, hashes, metrics and a separate chat event stream containing human all/team text, policy broadcast/team/direct messages and authoritative system notices. Chat retains its tick, order, sender and scope. Outer envelopes are not saved. Wall-clock pauses add no replay ticks. |
+| Hash timing | Shared setupHash at StartMatch/BeginMatch; ReportHash of simulation at tick 0, 24, 48, etc.; FinishMatch at actual final tick. Comparisons are mandatory. |
+| Replay | Format 7; records hero action attempts, setup, hashes, metrics and a separate chat event stream containing human all/team text, policy broadcast/team/direct messages and locally generated match reminders. Chat retains its tick, order, sender and scope. Outer envelopes are not saved. Wall-clock pauses add no replay ticks. |
 | Catch-up | Relay history includes mailbox messages and command ownership/order. Spectators reconstruct without VMs. |
 | Reconnect | Original client retains simulation and private VMs. No state snapshots, VM transfers or automatic desync repair. |
 | Versioning | Exact versions only. Payload changes bump GotaNetworkProtocol; gameplay changes bump ReplayGameVersion. |

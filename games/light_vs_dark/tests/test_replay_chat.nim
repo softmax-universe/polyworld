@@ -132,7 +132,7 @@ block authoritativeBatchCapacity:
   sparseConfig.mapSettings = config.mapSettings
   let client = RoomClient(
     identity: lvdIdentity(), participant: 1, match: 1,
-    began: true, welcomed: true
+    began: true, welcomed: true, connected: true
   )
   client.snapshot = RoomMessage(
     kind: RoomState, revision: 2, phase: Playing,
@@ -145,10 +145,12 @@ block authoritativeBatchCapacity:
       Participant(id: 1, name: "Alice"), Participant(id: 2, name: "Bob")
     ]
   )
+  client.initialSnapshot = client.snapshot
+  client.appliedSeats = client.snapshot.seats
   let session = prepareNetworkMatch(client, [])
   session.start(RoomMessage(
     kind: BeginMatch, match: 1, revision: 2,
-    hash: session.game.networkHash()
+    hash: setupHash(session.client.snapshot)
   ))
   session.game.recorder.data.chats.setLen(MaxReplayChats - 1)
   let
@@ -162,7 +164,7 @@ block authoritativeBatchCapacity:
     secondChat = ChatSubmission(player: 1, target: -2, text: "second")
     emptyChat = ChatSubmission(player: 0, target: -2, text: "")
     packet = RoomMessage(
-      kind: TickPacket, match: 1, tick: 1,
+      kind: TickPacket, seats: client.snapshot.seats, match: 1, tick: 1,
       commands: @[
         Command(participant: 1, seat: 1, payload: move.encodeSubmission()),
         Command(participant: 1, seat: 1, payload: emptyChat.encodeChat()),
@@ -185,7 +187,7 @@ block authoritativeBatchCapacity:
   for inbox in session.game.inboxes:
     doAssert inbox.count == 0, "No chat from a rejected batch may be delivered"
   let finalSlot = RoomMessage(
-    kind: TickPacket, match: 1, tick: 1,
+    kind: TickPacket, seats: client.snapshot.seats, match: 1, tick: 1,
     commands: @[
       Command(participant: 1, seat: 1, payload: emptyChat.encodeChat()),
       Command(participant: 2, seat: 3, payload: secondChat.encodeChat())

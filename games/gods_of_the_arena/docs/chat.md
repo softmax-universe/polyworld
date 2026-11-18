@@ -6,9 +6,9 @@ Chat captures match keyboard input and suppresses polled orders, HUD key aliases
 
 ## Routing
 
-The shared relay has no chat opcode: `SubmitCommand` carries opaque game bytes. GotA network protocol **4** uses category **2** for human chat, with the same game-owned string envelope as category **1** policy mailboxes (`heroId`, scope, length-prefixed UTF-8). Scope is -2 for all, -1 for team. Categories 0 (actions) and 1 (bot mailboxes) retain their existing layouts and behavior.
+The shared relay has no chat opcode: `SubmitCommand` carries opaque game bytes. GotA network protocol **5** uses category **2** for human chat, with the same game-owned string envelope as category **1** policy mailboxes (`heroId`, scope, length-prefixed UTF-8). Scope is -2 for all, -1 for team. Categories 0 (actions) and 1 (bot mailboxes) retain their existing layouts and behavior.
 
-Only an authoritative TickPacket creates visible messages; no optimistic echo. Relay seat ownership and game hero/seat/type validation prevent spectators, foreign seats and bot-only controllers from speaking as a human. Display names come from the prepared exact human identity, e.g. `mason :)`, not parsed policy names. Human messages never enter policy inboxes. The bounded independent display history retains 100 messages and renders its latest six; team messages are filtered for human viewers, while omniscient spectators may view both teams. As with every opaque command, team text is present in all authoritative packets: this is a display scope, not encryption/private transport.
+Human chat becomes visible only after an authoritative TickPacket; there is no optimistic echo. Local match reminders are derived separately from the client game clock. Relay seat ownership and game hero/seat/type validation prevent spectators, foreign seats and bot-only controllers from speaking as a human. Display names come from the prepared exact human identity, e.g. `mason :)`, not parsed policy names. Human messages never enter policy inboxes. The bounded independent display history retains 100 messages and renders its latest six; team messages are filtered for human viewers, while omniscient spectators may view both teams. As with every opaque command, team text is present in all authoritative packets: this is a display scope, not encryption/private transport.
 
 ## Replay chat
 

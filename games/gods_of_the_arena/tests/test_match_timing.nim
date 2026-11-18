@@ -31,4 +31,4 @@ block preparationAndReplayCutoff:
   game.replayMode = true
   doAssert game.remainingMatchText() == "6:07", "Short recording is not the configured cutoff"
 
-echo "PASS prep/replay cutoff semantics (server notice coverage: test_server_notice_relay)"
+echo "PASS prep/replay cutoff semantics (local notice coverage: test_match_notice_network)"

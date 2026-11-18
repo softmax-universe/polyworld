@@ -10,7 +10,7 @@ suite "Browser graphics loading gap":
     var clients: array[2, RoomClient]
     for i in 0 .. 1:
       clients[i] = RoomClient(identity: GameIdentity(
-        game: "gods_of_the_arena", gameplay: 77, protocol: 1),
+        game: "loading-gap-game", gameplay: 77, protocol: 19),
         name: if i == 0: "DraftBrowserHost" else: "DraftBrowserGuest")
       clients[i].opened()
 
@@ -36,12 +36,9 @@ suite "Browser graphics loading gap":
     for i, seat in [0'u32, 5'u32]:
       clients[i].send(RoomMessage(kind: ClaimSeat, seat: seat, name: "Human"))
     pump()
-    for client in clients:
-      client.send(RoomMessage(kind: Ready,
-        revision: relay.rooms[0].revision, hash: 42))
-    pump()
     clients[0].send(RoomMessage(kind: StartMatch,
-      revision: relay.rooms[0].revision, hash: 42))
+      revision: relay.rooms[0].revision,
+      hash: setupHash(clients[0].snapshot)))
     pump()
     pump() # Initial Catchup -> CaughtUp(0), before graphics loading.
     check not clients[0].catchupPending

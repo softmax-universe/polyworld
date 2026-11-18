@@ -19,6 +19,7 @@ for bytes in client.outgoing:
   of SubmitCommand:
     inc commands
     doAssert message.sequence == 1 and message.payload == "opaque game command"
+    doAssert message.seatKind == HumanSeat
   of ReportHash:
     inc checkpoints
     doAssert message.tick == 24 and message.hash == 123
@@ -35,8 +36,11 @@ client.opened()
 client.accept(RoomMessage(kind: Welcome, participant: 7, token: "secret").encode)
 for bytes in client.outgoing:
   doAssert decode(bytes).kind != SubmitCommand
-client.accept(RoomMessage(kind: TickPacket, match: 2, tick: 1).encode)
-client.accept(RoomMessage(kind: TickPacket, match: 2, tick: 1).encode)
+let nextSeats = @[Seat(owner: 8, name: "Replacement", kind: BotSeat)]
+client.accept(RoomMessage(kind: TickPacket, match: 2, tick: 1,
+  seats: nextSeats).encode)
+client.accept(RoomMessage(kind: TickPacket, match: 2, tick: 1,
+  seats: nextSeats).encode)
 doAssert client.packets.len == 1
 var failed = false
 try:
@@ -48,6 +52,9 @@ doAssert failed
 var packet: RoomMessage
 doAssert client.takeTick(packet) and packet.tick == 1
 client.appliedTick(1)
+doAssert client.appliedSeats == nextSeats
+doAssert client.snapshot.seats[0].owner == 7,
+  "Applying history must not replace the latest administrative snapshot"
 doAssert not client.takeTick(packet)
 echo "Reconnect receipts, mandatory hashes and immutable ticks passed"
 
@@ -61,6 +68,40 @@ client.accept(RoomMessage(
   flag: false, tick: client.applied, detail: "Waiting for hashes"
 ).encode())
 doAssert not client.snapshot.flag
+
+block discardedReceipts:
+  echo "Testing discarded command acknowledgement and subsequent submissions"
+  let revoked = RoomClient(participant: 7, match: 2,
+    began: true, welcomed: true,
+    snapshot: RoomMessage(phase: Playing,
+      seats: @[Seat(owner: 7, name: "Player")]))
+  doAssert revoked.submit(0, "in flight during reassignment")
+  let discarded = RoomMessage(kind: CommandAck,
+    match: 2, sequence: 1, tick: 0, flag: true)
+  revoked.accept(discarded.encode)
+  revoked.accept(discarded.encode)
+  doAssert revoked.rejectedCommands == 1
+  var rejected: RoomMessage
+  doAssert revoked.takeRejected(rejected)
+  doAssert rejected.kind == SubmitCommand and rejected.sequence == 1
+  doAssert rejected.payload == "in flight during reassignment"
+  doAssert rejected.seatKind == HumanSeat
+  doAssert not revoked.takeRejected(rejected)
+  revoked.outgoing.setLen(0)
+  revoked.snapshot.seats[0].kind = BotSeat
+  doAssert revoked.submit(0, "next authorized command")
+  doAssert decode(revoked.outgoing[^1]).sequence == 2
+  doAssert decode(revoked.outgoing[^1]).seatKind == BotSeat
+  revoked.lost()
+  revoked.opened()
+  revoked.accept(RoomMessage(kind: Welcome, participant: 7).encode)
+  var resumed = 0
+  for bytes in revoked.outgoing:
+    let message = decode(bytes)
+    if message.kind == SubmitCommand:
+      doAssert message.sequence == 2
+      inc resumed
+  doAssert resumed == 1
 
 block consumedEdgeDiscovery:
   echo "Testing bounded discovery at the consumed history edge"
@@ -138,8 +179,26 @@ block consumedEdgeDiscovery:
 
 block recoveryState:
   echo "Testing initial, reconnect and incomplete history recovery"
-  let history = RoomClient(participant: 7, match: 3, began: true,
-    welcomed: true, snapshot: RoomMessage(phase: Playing))
+  let history = RoomClient(participant: 7, welcomed: true,
+    snapshot: RoomMessage(room: "history", phase: Playing))
+  var initial = RoomMessage(kind: BeginMatch, match: 3, room: "history",
+    revision: 1, tickRate: 24, payload: "{}",
+    seats: @[Seat(owner: 7, name: "Human")],
+    participants: @[Participant(id: 7, name: "Player")])
+  initial.hash = setupHash(initial)
+  history.accept(initial.encode)
+  doAssert history.setupSnapshot().payload == "{}"
+  var changedInitial = initial
+  changedInitial.payload = "{\"changed\":true}"
+  changedInitial.hash = setupHash(changedInitial)
+  var changedSetupRejected = false
+  try:
+    history.accept(changedInitial.encode)
+  except RoomsError:
+    changedSetupRejected = true
+  doAssert changedSetupRejected,
+    "Reconnect must not replace an established initial setup"
+  doAssert history.setupSnapshot().payload == "{}"
   history.requestHistory()
   doAssert history.catchingUp
   for tick in 1'u32 .. 2'u32:
@@ -161,7 +220,7 @@ block recoveryState:
   history.accept(RoomMessage(kind: Welcome, participant: 7).encode)
   doAssert history.catchingUp,
     "Reconnect must await history even before the repeated BeginMatch"
-  history.accept(RoomMessage(kind: BeginMatch, match: 3).encode)
+  history.accept(initial.encode)
   history.accept(RoomMessage(kind: CaughtUp, match: 3, tick: 2, number: 2).encode)
   doAssert not history.catchingUp
 

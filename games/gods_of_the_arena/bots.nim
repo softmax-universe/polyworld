@@ -934,21 +934,27 @@ proc neuralLimits(): Limits =
 
 proc loadBotSources*(
     game: Game,
-    sources: openArray[string]
+    sources: openArray[string],
+    preserve = false
 ) =
-  ## Loads bot files into every hero slot except the optional human slot.
+  ## Loads owned bots, optionally preserving unchanged private runtimes.
   activeGame = game
   let
     limits = neuralLimits()
     schema = initHeroHost(0)
-  game.heroVms = newSeq[HeroVm](game.world.heroes.len)
+  if not preserve:
+    game.heroVms = newSeq[HeroVm](game.world.heroes.len)
+    game.inboxes.setLen(game.world.heroes.len)
+    for inbox in game.inboxes.mitems:
+      inbox = newMailbox()
   game.structuredBots = false
-  game.inboxes.setLen(game.world.heroes.len)
-  for inbox in game.inboxes.mitems:
-    inbox = newMailbox()
   var bound = false
   for i in 0 ..< game.world.heroes.len:
     if i >= sources.len or sources[i].len == 0:
+      game.heroVms[i] = nil
+      continue
+    if preserve and game.heroVms[i] != nil:
+      game.structuredBots = game.structuredBots or game.heroVms[i].structured
       continue
     let llm = newLlmClient(i)
     let policy =

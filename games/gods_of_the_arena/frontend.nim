@@ -171,6 +171,14 @@ proc runFrontend*() =
       options.pauseOnStart = false
       options.speed = 1
       let quitToMenu = runGraphics(prepared, connection)
+      for i in 0 ..< min(networkPolicies.len, prepared.sources.len):
+        networkPolicies[i].bytes = prepared.sources[i]
+        if i < connection.client.snapshot.seats.len:
+          let seat = connection.client.snapshot.seats[i]
+          if seat.owner == connection.client.participant and seat.kind == BotSeat:
+            networkPolicies[i].name = seat.name
+      multiplayerHuman = connection.client.snapshot.humanSeatFor(
+        connection.client.participant)
       # Returning from results is not leaving the room. Only its owner reopens
       # the authoritative lobby; guests retain membership and wait for it.
       if not quitToMenu and connection.client.snapshot.participant ==
@@ -463,7 +471,7 @@ proc runFrontend*() =
               empty = if online: seat.owner == 0
                 else: i != humanSeat and localPolicies[i].bytes.len == 0
               mine = not online or seat.owner == client.participant
-              human = if online: seat.name == "Human" else: i == humanSeat
+              human = if online: seat.kind == HumanSeat else: i == humanSeat
             var
               name = if empty: "Add player"
                 elif human:
@@ -485,7 +493,7 @@ proc runFrontend*() =
             if empty:
               inc emptyCount
             if sk.seatButton(layout, i, name, controller, human, empty,
-              editable and (mine or empty) and not modal and not contextBlocked):
+              editable and (owner or mine or empty) and not modal and not contextBlocked):
                 lobbyUi.selectedSeat = i
             if not modal and not contextBlocked and window.buttonPressed[MouseRight] and
               overlaps(sk.mousePos, lobbySeatBounds(layout, i)):
@@ -525,7 +533,7 @@ proc runFrontend*() =
                     if snapshot.seats[i].owner == 0:
                       networkPolicies[i] = chosenPolicy
                       client.send(RoomMessage(kind: ClaimSeat, seat: uint32(i),
-                        name: chosenPolicy.name))
+                        name: chosenPolicy.name, seatKind: BotSeat))
                   elif i != humanSeat and localPolicies[i].bytes.len == 0:
                     localPolicies[i] = chosenPolicy
             if sk.lobbyButton("Shuffle team",
@@ -547,7 +555,8 @@ proc runFrontend*() =
                     if oldHuman == source:
                       multiplayerHuman = destination
                     client.send(RoomMessage(kind: ClaimSeat,
-                      seat: uint32(destination), name: snapshot.seats[source].name))
+                      seat: uint32(destination), name: snapshot.seats[source].name,
+                      seatKind: snapshot.seats[source].kind))
                   else:
                     localPolicies[destination] = oldPolicies[source]
                     if oldHuman == source:
@@ -648,7 +657,7 @@ proc runFrontend*() =
                   client.claimHumanSeat(selectedSeat, multiplayerHuman)
                   for i, seat in snapshot.seats:
                     if i == multiplayerHuman or
-                      (seat.owner == client.participant and seat.name == "Human"):
+                      (seat.owner == client.participant and seat.kind == HumanSeat):
                         networkPolicies[i] = LocalPolicy()
                   multiplayerHuman = selectedSeat
                 else:
@@ -656,7 +665,7 @@ proc runFrontend*() =
                     multiplayerHuman = -1
                   client.send(RoomMessage(
                     kind: if choice.clear: ReleaseSeat else: ClaimSeat,
-                    seat: uint32(selectedSeat), name: selected.name
+                    seat: uint32(selectedSeat), name: selected.name, seatKind: BotSeat
                   ))
                 networkPolicies[selectedSeat] = selected
               else:

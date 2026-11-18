@@ -84,7 +84,7 @@ proc main() =
             echo "CREATED private=true room=", client.snapshot.room
           else:
             echo "JOINED room=", client.snapshot.room
-          client.send(RoomMessage(kind: ClaimSeat, seat: uint32(seat), name: "base"))
+          client.send(RoomMessage(kind: ClaimSeat, seat: uint32(seat), seatKind: BotSeat, name: "base"))
         let full = client.snapshot.seats[0].owner != 0 and
           client.snapshot.seats[1].owner != 0
         if full and client.snapshot.phase == Lobby and revision != client.snapshot.revision:
@@ -96,26 +96,20 @@ proc main() =
           require(session.game.brains[seat] != nil and
             session.game.brains[1 - seat] == nil, "Only the owned private policy may run")
           revision = client.snapshot.revision
-          client.send(RoomMessage(kind: PreparedDuration, durationTicks: uint32(session.game.maximumTicks), revision: revision,
-            hash: session.game.networkHash()))
           startRequested = false
-          echo "READY revision=", revision, " localBrain=", seat,
+          echo "LOADED revision=", revision, " localBrain=", seat,
             " remoteBrain=nil hash=", session.game.networkHash()
         if seat == 0 and session != nil and client.snapshot.phase == Lobby and
             not startRequested:
-          var everyoneReady = true
-          for currentSeat in client.snapshot.seats:
-            var ownerReady = false
-            for participant in client.snapshot.participants:
-              if participant.id == currentSeat.owner: ownerReady = participant.ready
-            everyoneReady = everyoneReady and ownerReady
-          if everyoneReady:
-            client.send(RoomMessage(kind: StartMatch))
-            startRequested = true
-            echo "START requested"
+          client.send(RoomMessage(kind: StartMatch, revision: revision,
+            hash: setupHash(client.snapshot)))
+          startRequested = true
+          echo "START requested"
       for event in client.events:
-        require(session != nil, "BeginMatch arrived before local preparation")
-        session.start(event)
+        if session == nil or session.revision != event.revision:
+          session = prepareNetworkMatch(client, sources)
+        if not session.started:
+          session.start(event)
         echo "STARTED match=", client.match
       client.events.setLen(0)
       if session != nil and session.started and not session.finished and client.welcomed:

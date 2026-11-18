@@ -13,21 +13,28 @@ type
     name*, token*, error*, status*: string
     participant*, match*, applied*, serverTick*: uint32
     connected*, welcomed*, catchupPending*, began*: bool
-    snapshot*: RoomMessage
+    snapshot*, initialSnapshot*: RoomMessage
+    appliedSeats*: seq[Seat]
+    takenTick: uint32
+    takenSeats: seq[Seat]
     listings*: seq[RoomListing]
     packets*: seq[RoomMessage]
     outgoing*: seq[string]
     events*: seq[RoomMessage]
     pending: seq[PendingCommand]
+    rejected: seq[RoomMessage]
     sequence: uint64
     received: uint64
     timing*: PacketTiming
     receiptPending*: bool
+    rejectedCommands*: uint64
     lastHash, finalHash: RoomMessage
-    retainedNotice: RoomMessage
-    noticeShown: bool
     recoveryReplyPending: bool
     recoveryTarget: uint32
+
+proc setupSnapshot*(client: RoomClient): RoomMessage =
+  ## Keeps match initialization separate from live administration changes.
+  if client.began: client.initialSnapshot else: client.snapshot
 
 proc catchingUp*(client: RoomClient): bool =
   ## Distinguishes missing match history from a routine live-edge probe.
@@ -103,7 +110,8 @@ proc submit*(client: RoomClient, seat: uint32, payload: string): bool =
   inc client.sequence
   client.pending.add PendingCommand(message: RoomMessage(
     kind: SubmitCommand, match: client.match,
-    seat: seat, sequence: client.sequence, payload: payload
+    seat: seat, seatKind: client.snapshot.seats[seat].kind,
+    sequence: client.sequence, payload: payload
   ))
   client.flushCommands()
   true
@@ -143,27 +151,42 @@ proc accept*(client: RoomClient, bytes: string) =
       client.serverTick = 0
       client.sequence = 0
       client.pending.setLen(0)
+      client.rejected.setLen(0)
       client.packets.setLen(0)
       client.catchupPending = false
       client.recoveryReplyPending = false
       client.recoveryTarget = 0
       client.lastHash = RoomMessage()
       client.finalHash = RoomMessage()
-      client.retainedNotice = RoomMessage()
-      client.noticeShown = false
+      client.initialSnapshot = RoomMessage()
+      client.appliedSeats.setLen(0)
+      client.takenTick = 0
+      client.takenSeats.setLen(0)
   of BeginMatch:
+    if message.hash != message.setupHash():
+      reject("Initial setup hash does not match the received configuration")
+    var initial = message
+    initial.delivery = 0
+    initial.timing = PacketTiming()
     if client.began and client.match == message.match:
+      if initial != client.initialSnapshot:
+        reject("Immutable match initialization changed")
       client.requestHistory()
     else:
+      client.initialSnapshot = initial
+      client.appliedSeats = initial.seats
+      client.takenTick = 0
+      client.takenSeats.setLen(0)
       client.match = message.match
       client.began = true
-      client.retainedNotice = RoomMessage()
-      client.noticeShown = false
       client.applied = 0
       client.serverTick = 0
       client.sequence = 0
       client.packets.setLen(0)
       client.pending.setLen(0)
+      client.rejected.setLen(0)
+      client.lastHash = RoomMessage()
+      client.finalHash = RoomMessage()
       client.catchupPending = false
       client.recoveryReplyPending = false
       client.recoveryTarget = 0
@@ -199,6 +222,11 @@ proc accept*(client: RoomClient, bytes: string) =
       reject("Unknown command acknowledgement")
     for i in 0 ..< client.pending.len:
       if client.pending[i].message.sequence == message.sequence:
+        if message.flag:
+          if client.rejected.len >= MaxClientCommands:
+            reject("Rejected submission queue exhausted")
+          inc client.rejectedCommands
+          client.rejected.add client.pending[i].message
         client.pending.delete(i)
         break
   of CaughtUp:
@@ -223,18 +251,6 @@ proc accept*(client: RoomClient, bytes: string) =
     client.status = message.detail
     if message.phase == Desynced:
       client.error = message.detail
-  of ServerNotice:
-    # Only accept from the relay transport, never the player command stream.
-    if not client.began or message.match != client.match or
-        message.noticeId != 1 or message.tick == 0:
-      reject("Invalid server notice identity")
-    var notice = message
-    notice.delivery = 0
-    notice.timing = PacketTiming()
-    if client.retainedNotice.kind == ServerNotice:
-      if notice != client.retainedNotice: reject("Immutable server notice changed")
-    else:
-      client.retainedNotice = notice
   of Failure:
     client.error = message.detail
   of Keepalive:
@@ -242,13 +258,13 @@ proc accept*(client: RoomClient, bytes: string) =
   else:
     reject("Unexpected server message")
 
-proc takeNotice*(client: RoomClient, notice: var RoomMessage): bool =
-  ## Retain one immutable match/ID across reconnect, expose only after apply.
-  if client.retainedNotice.kind == ServerNotice and not client.noticeShown and
-      client.applied >= client.retainedNotice.tick:
-    notice = client.retainedNotice
-    client.noticeShown = true
-    return true
+proc takeRejected*(client: RoomClient, submission: var RoomMessage): bool =
+  ## Returns canceled local submissions so games can release UI reservations.
+  if client.rejected.len == 0:
+    return false
+  submission = client.rejected[0]
+  client.rejected.delete(0)
+  true
 
 proc takeTick*(client: RoomClient, packet: var RoomMessage): bool =
   ## Returns only the next authoritative tick, without advancing the cursor.
@@ -257,6 +273,8 @@ proc takeTick*(client: RoomClient, packet: var RoomMessage): bool =
   for i in 0 ..< client.packets.len:
     if client.packets[i].tick == client.applied + 1:
       packet = client.packets[i]
+      client.takenTick = packet.tick
+      client.takenSeats = packet.seats
       client.packets.delete(i)
       return true
   if client.serverTick > client.applied:
@@ -267,6 +285,10 @@ proc appliedTick*(client: RoomClient, tick: uint32) =
   if tick != client.applied + 1:
     reject("Simulation tick did not advance exactly once")
   client.applied = tick
+  if client.takenTick == tick:
+    client.appliedSeats = client.takenSeats
+    client.takenTick = 0
+    client.takenSeats.setLen(0)
   if client.welcomed:
     client.send(RoomMessage(kind: AppliedTick, match: client.match, tick: tick))
   # A consumed push window is not proof that the relay is at this tick: asset

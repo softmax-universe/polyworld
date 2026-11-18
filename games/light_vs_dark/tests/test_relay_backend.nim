@@ -43,8 +43,8 @@ exchange()
 clients[1].send(RoomMessage(kind: JoinRoom, room: clients[0].snapshot.room))
 exchange()
 clients[0].claimHumanSeat(0)
-clients[1].send(RoomMessage(kind: ClaimSeat, seat: 1, name: "base"))
-clients[0].send(RoomMessage(kind: ClaimSeat, seat: 2, name: "base"))
+clients[1].send(RoomMessage(kind: ClaimSeat, seat: 1, name: "base", seatKind: BotSeat))
+clients[0].send(RoomMessage(kind: ClaimSeat, seat: 2, name: "base", seatKind: BotSeat))
 exchange()
 doAssert clients[0].snapshot.humanSeatFor(clients[0].participant) == 0
 let source = readFile("games/light_vs_dark/players/base.bas")
@@ -54,10 +54,10 @@ for client in clients:
     if i != 0 and seat.owner == client.participant: sources[i] = source
   let session = prepareNetworkMatch(client, sources)
   sessions.add session
-  client.send(RoomMessage(kind: PreparedDuration, durationTicks: uint32(session.game.maximumTicks), revision: session.revision,
-    hash: session.game.networkHash()))
+
 exchange()
-clients[0].send(RoomMessage(kind: StartMatch))
+clients[0].send(RoomMessage(kind: StartMatch, revision: clients[0].snapshot.revision,
+  hash: setupHash(clients[0].snapshot)))
 exchange()
 for session in sessions:
   doAssert session.client.events.len == 1

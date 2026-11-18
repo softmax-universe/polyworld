@@ -832,39 +832,35 @@ proc buildOverlordHost*(playerId: int32, llm: LlmClient = nil, policySlot = -1):
 
 ## Lifecycle
 
-proc loadBots*(
-  game: Game, sources: openArray[string]
-) =
-  ## Compiles one script per player and gives each its own runtime.
+proc loadBot*(game: Game, player: int, source: string) =
+  ## Replaces one local controller without changing simulation or inbox state.
+  doAssert player in 0 ..< game.world.players.len
+  game.brains[player] = nil
+  when not defined(coworld):
+    if source.len == 0: return
+  let
+    limits = overlordLimits()
+    schema = buildOverlordHost(0)
+    llm = newLlmClient(player)
+    program =
+      when defined(coworld): compilePlayer(source, schema, limits, player)
+      else: compile(source, schema, limits)
+  game.brains[player] = OverlordVm(
+    runtime: initRuntime(program, buildOverlordHost(player.int32, llm, player), limits),
+    ready: true,
+    prepareDecision: llm.decisionCallback(),
+    pollRequests: llm.requestPoller()
+  )
+  llm.bindRuntime(game.brains[player].runtime)
+  bindOverlordData(program)
+  when defined(coworld):
+    game.brains[player].output = playerPrinter(player)
+
+proc loadBots*(game: Game, sources: openArray[string]) =
+  ## Creates independent local runtimes after initializing game mailboxes.
   doAssert sources.len == game.world.players.len
-  let limits = overlordLimits()
-  let schema = buildOverlordHost(0)
-  for inbox in game.inboxes.mitems:
-    inbox = newMailbox()
-  var bound = false
-  for player in 0'i32 ..< int32(game.world.players.len):
-    when not defined(coworld):
-      if sources[player].len == 0:
-        continue
-    let llm = newLlmClient(int(player))
-    let source = sources[player]
-    let program =
-      when defined(coworld):
-        compilePlayer(source, schema, limits, int(player))
-      else:
-        compile(source, schema, limits)
-    game.brains[player] = OverlordVm(
-      runtime: initRuntime(program, buildOverlordHost(player, llm, int(player)), limits),
-      ready: true,
-      prepareDecision: llm.decisionCallback(),
-      pollRequests: llm.requestPoller()
-    )
-    llm.bindRuntime(game.brains[player].runtime)
-    if not bound:
-      bindOverlordData(program)
-      bound = true
-    when defined(coworld):
-      game.brains[player].output = playerPrinter(int(player))
+  for inbox in game.inboxes.mitems: inbox = newMailbox()
+  for player, source in sources: game.loadBot(player, source)
 
 proc runDecision(game: Game, player: int32) =
   ## Runs one player's script for one decision.

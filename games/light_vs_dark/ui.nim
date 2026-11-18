@@ -168,10 +168,6 @@ proc humanCommunicationRelease*(button: Button) =
 
 proc observeHumanCommunication*(session: NetworkMatch, packet: RoomMessage) =
   commState.observeHumanPacket(session, packet)
-  commState.observeServerNotices(session)
-
-proc observeServerCommunication*(session: NetworkMatch) =
-  commState.observeServerNotices(session)
 
 proc humanCommunicationRune*(rune: Rune): bool =
   commState.chatRune(rune)
@@ -412,7 +408,7 @@ proc drawHumanCommunication(sk: Silky, window: Window) =
     let line = commState.feed[commState.feed.len - shown + row]
     sk.drawLabel(sk.fittedLabel(line.name & ": " & line.text, feedWidth - 12, "Small"),
       feedOrigin + vec2(6, float32(row * 23)), vec2(feedWidth - 12, 23),
-      (if line.serverNotice: rgbx(235,196,95,255) else: ink), "Small")
+      (if line.localNotice: rgbx(235,196,95,255) else: ink), "Small")
   let prompt = if commState.typing: "> " & commState.draft & "|"
     elif run.replayMode: "Replay"
     elif run.historyPlayback: "History"

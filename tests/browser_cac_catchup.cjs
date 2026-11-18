@@ -22,11 +22,7 @@ const report = {url, server, out, delays, observeMs, checks:[], cases:[], steps:
 const peers = [];
 fs.mkdirSync(out, {recursive:true});
 
-const kinds = ('Hello Welcome ListRooms RoomList CreateRoom JoinRoom RoomState ' +
-  'ConfigureRoom ClaimSeat ReleaseSeat Ready StartMatch BeginMatch SubmitCommand ' +
-  'CommandAck TickPacket AppliedTick Catchup CaughtUp ReportHash MatchStatus ' +
-  'LeaveRoom KickParticipant ReturnLobby FinishMatch Received Keepalive Failure ' +
-  'AbortMatch PauseMatch ResizeRoom Prepared ReadyStatus PreparedDuration ServerNotice').split(' ');
+const {decodeRoom} = require('./room_protocol.cjs');
 
 function actionPayload(bytes) {
   assert.ok(bytes.length >= 12, 'CaC command header must be complete');
@@ -41,52 +37,7 @@ function actionPayload(bytes) {
   return result;
 }
 
-function decode(data) {
-  const bytes = Buffer.isBuffer(data) ? data : Buffer.from(data);
-  assert.ok(bytes.length >= 64 && bytes.toString('ascii', 0, 4) === 'PWRM',
-    'Every frame must use the shared room protocol');
-  assert.equal(bytes.readUInt32LE(4), 4, 'Room protocol version');
-  let offset = 64;
-  function u32() { const value=bytes.readUInt32LE(offset); offset+=4; return value; }
-  function u64() { const value=bytes.readBigUInt64LE(offset).toString(); offset+=8; return value; }
-  function raw() {
-    const size=u32();
-    assert.ok(offset+size <= bytes.length, 'Bounded wire string');
-    const value=bytes.subarray(offset, offset+size); offset+=size; return value;
-  }
-  function string() { return raw().toString('utf8'); }
-  const message={kind:kinds[bytes.readUInt32LE(8)], match:bytes.readUInt32LE(20)};
-  if (message.kind === 'Welcome') message.participant=u32();
-  if (message.kind === 'Hello') {
-    message.game=string(); message.gameplay=u32(); message.protocol=u32(); message.name=string();
-  }
-  if (['CreateRoom','ConfigureRoom','ResizeRoom'].includes(message.kind)) {
-    message.name=string(); message.public=!!u32(); message.rate=u32();
-    message.count=u32(); message.config=string();
-  }
-  if (message.kind === 'JoinRoom') message.room=string();
-  if (message.kind === 'ClaimSeat') { message.seat=u32(); message.name=string(); }
-  if (message.kind === 'RoomState') {
-    message.room=string(); message.name=string(); message.owner=u32(); message.revision=u32();
-    message.phase=u32(); message.rate=u32(); message.public=!!u32(); message.config=string();
-    message.participants=Array.from({length:u32()},()=>({id:u32(),name:string(),connected:!!u32(),ready:!!u32()}));
-    message.seats=Array.from({length:u32()},()=>({owner:u32(),name:string()}));
-  }
-  if (message.kind === 'SubmitCommand') {
-    message.seat=u32(); message.sequence=u64(); Object.assign(message,actionPayload(raw()));
-  }
-  if (['ReportHash','FinishMatch'].includes(message.kind)) { message.tick=u32(); message.hash=u64(); }
-  if (message.kind === 'CommandAck') { message.sequence=u64(); message.tick=u32(); }
-  if (message.kind === 'TickPacket') {
-    message.tick=u32();
-    message.commands=Array.from({length:u32()},()=>({participant:u32(),seat:u32(),sequence:u64(),payload:raw().toString('hex')}));
-  }
-  if (['AppliedTick','Catchup','CaughtUp'].includes(message.kind)) message.tick=u32();
-  if (message.kind==='CaughtUp') message.number=u32();
-  if (message.kind==='MatchStatus') { message.paused=!!u32(); message.phase=u32(); message.tick=u32(); message.detail=string(); }
-  if (message.kind === 'Failure') message.detail=string();
-  return message;
-}
+function decode(data) { return decodeRoom(data, actionPayload); }
 
 const sleep = ms => new Promise(resolve=>setTimeout(resolve,ms));
 async function wait(label, predicate, timeout=20000) {
@@ -193,13 +144,16 @@ async function startFive(host) {
   await multiplayer(host);
   await click(host.page,1232,570);
   await wait('room created',()=>last(host,'RoomState')?.room);
-  await wait('human seat claimed',()=>last(host,'RoomState')?.seats[0]?.name==='Human');
+  await wait('human seat claimed',()=>{
+    const seat=last(host,'RoomState')?.seats[0];
+    return seat?.kind===0 && seat.owner===last(host,'Welcome').participant;
+  });
   for(let i=0;i<3;i++) await click(host.page,1438,368);
   await wait('five seats',()=>last(host,'RoomState').seats.length===5);
   await click(host.page,225,790);
   await wait('all five occupied',()=>last(host,'RoomState').seats.every(seat=>seat.owner!==0));
-  await click(host.page,547,914);
-  await wait('ready',()=>last(host,'RoomState').participants.some(p=>p.ready));
+  assert.ok(last(host,'RoomState').participants.every(p=>!p.ready),
+    'Catch-up scenario starts without a ready toggle');
   await click(host.page,1357,914);
   await wait('match begins',()=>last(host,'BeginMatch'),30000);
   await wait('rendered battle',async()=>/Multiplayer match: 5 players/.test(await status(host)),30000);
@@ -238,8 +192,8 @@ async function observe(host) {
   result.catchups=messages.filter(m=>m.direction==='out' && m.kind==='Catchup');
   result.caughtUp=messages.filter(m=>m.direction==='in' && m.kind==='CaughtUp');
   result.applied=messages.filter(m=>m.direction==='out' && m.kind==='AppliedTick');
-  result.botActions=messages.filter(m=>m.direction==='out' && m.kind==='SubmitCommand' && m.category===0 && m.seat>0).length;
-  result.humanActions=messages.filter(m=>m.direction==='out' && m.kind==='SubmitCommand' && m.category===0 && m.seat===0).length;
+  result.botActions=messages.filter(m=>m.direction==='out' && m.kind==='SubmitCommand' && m.category===0 && m.seatKind===1 && m.seat>0).length;
+  result.humanActions=messages.filter(m=>m.direction==='out' && m.kind==='SubmitCommand' && m.category===0 && m.seatKind===0 && m.seat===0).length;
   const entries=result.polls.filter((poll,index)=>poll.catching && (index===0 || !result.polls[index-1].catching));
   result.catchupStatusChanges=entries.length;
   result.steadyCatchups=result.catchups.filter(m=>m.at>=begin+5000).length;

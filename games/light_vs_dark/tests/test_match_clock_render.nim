@@ -67,16 +67,11 @@ suite "native production Tab countdown rendering":
       if output.len > 0: image.writeFile(output / ("lvd-clock-" & $size.x & ".png"))
       echo "Countdown FBO ", size, ": gold glyph pixels=", ink
 
-suite "spectator server notice rendering":
-  test "a seatless spectator sees the authenticated notice feed":
+suite "spectator local match warning rendering":
+  test "a seatless spectator sees the warning from the displayed game clock":
     options.playerSlot = 0
     resetHumanCommunication()
-    let client = RoomClient()
-    client.accept(RoomMessage(kind: BeginMatch, match: 1).encode)
-    client.accept(RoomMessage(kind: ServerNotice, match: 1, noticeId: 1,
-      tick: 1, noticeCode: ThreeMinutesRemain).encode)
-    client.appliedTick(1)
-    observeServerCommunication(NetworkMatch(client: client))
+    run.world.tick = TickRate * 20
     glDisable(GL_SCISSOR_TEST)
     glClearColor(0,0,0,1)
     glClear(GL_COLOR_BUFFER_BIT)

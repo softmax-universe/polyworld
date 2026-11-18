@@ -21,11 +21,7 @@ const report = {url, server, out, receiveDelay, checks:[], steps:[], peers:[], p
 const peers = [];
 fs.mkdirSync(out, {recursive:true});
 
-const kinds = ('Hello Welcome ListRooms RoomList CreateRoom JoinRoom RoomState ' +
-  'ConfigureRoom ClaimSeat ReleaseSeat Ready StartMatch BeginMatch SubmitCommand ' +
-  'CommandAck TickPacket AppliedTick Catchup CaughtUp ReportHash MatchStatus ' +
-  'LeaveRoom KickParticipant ReturnLobby FinishMatch Received Keepalive Failure ' +
-  'AbortMatch PauseMatch ResizeRoom Prepared ReadyStatus PreparedDuration ServerNotice').split(' ');
+const {decodeRoom} = require('./room_protocol.cjs');
 
 function actionPayload(bytes) {
   assert.ok(bytes.length >= 12, 'CaC command header must be complete');
@@ -40,49 +36,7 @@ function actionPayload(bytes) {
   return result;
 }
 
-function decode(data) {
-  const bytes = Buffer.isBuffer(data) ? data : Buffer.from(data);
-  assert.ok(bytes.length >= 64 && bytes.toString('ascii', 0, 4) === 'PWRM',
-    'Every frame must use the shared room protocol');
-  assert.equal(bytes.readUInt32LE(4), 4, 'Room protocol version');
-  let offset = 64;
-  function u32() { const value=bytes.readUInt32LE(offset); offset+=4; return value; }
-  function u64() { const value=bytes.readBigUInt64LE(offset).toString(); offset+=8; return value; }
-  function raw() {
-    const size=u32();
-    assert.ok(offset+size <= bytes.length, 'Bounded wire string');
-    const value=bytes.subarray(offset, offset+size); offset+=size; return value;
-  }
-  function string() { return raw().toString('utf8'); }
-  const message={kind:kinds[bytes.readUInt32LE(8)], match:bytes.readUInt32LE(20)};
-  if (message.kind === 'Welcome') message.participant=u32();
-  if (message.kind === 'Hello') {
-    message.game=string(); message.gameplay=u32(); message.protocol=u32(); message.name=string();
-  }
-  if (['CreateRoom','ConfigureRoom','ResizeRoom'].includes(message.kind)) {
-    message.name=string(); message.public=!!u32(); message.rate=u32();
-    message.count=u32(); message.config=string();
-  }
-  if (message.kind === 'JoinRoom') message.room=string();
-  if (message.kind === 'ClaimSeat') { message.seat=u32(); message.name=string(); }
-  if (message.kind === 'RoomState') {
-    message.room=string(); message.name=string(); message.owner=u32(); message.revision=u32();
-    message.phase=u32(); message.rate=u32(); message.public=!!u32(); message.config=string();
-    message.participants=Array.from({length:u32()},()=>({id:u32(),name:string(),connected:!!u32(),ready:!!u32()}));
-    message.seats=Array.from({length:u32()},()=>({owner:u32(),name:string()}));
-  }
-  if (message.kind === 'SubmitCommand') {
-    message.seat=u32(); message.sequence=u64(); Object.assign(message,actionPayload(raw()));
-  }
-  if (['ReportHash','FinishMatch'].includes(message.kind)) { message.tick=u32(); message.hash=u64(); }
-  if (message.kind === 'CommandAck') { message.sequence=u64(); message.tick=u32(); }
-  if (message.kind === 'TickPacket') {
-    message.tick=u32();
-    message.commands=Array.from({length:u32()},()=>({participant:u32(),seat:u32(),sequence:u64(),payload:raw().toString('hex')}));
-  }
-  if (message.kind === 'Failure') message.detail=string();
-  return message;
-}
+function decode(data) { return decodeRoom(data, actionPayload); }
 
 const sleep = ms => new Promise(resolve=>setTimeout(resolve,ms));
 async function wait(label, predicate, timeout=20000) {
@@ -207,7 +161,8 @@ async function main() {
     await shot(host,'default-room-name');
     await click(host.page,1232,570);
     await wait('room created',()=>last(host,'RoomState')?.room);
-    await wait('automatic human seat',()=>last(host,'RoomState')?.seats.some(s=>s.name==='Human'));
+    await wait('automatic human seat',()=>last(host,'RoomState')?.seats.some(s=>
+      s.kind===0 && s.owner===last(host,'Welcome').participant));
     check('default room name follows the saved player name',
       last(host,'CreateRoom','out').name==="Treeform's room",last(host,'CreateRoom','out').name);
     assert.equal(last(host,'RoomState').seats.length,2);
@@ -222,7 +177,7 @@ async function main() {
     await click(host.page,757,485);
     await sleep(600);
     const fifth=last(host,'RoomState').seats[4];
-    check('fifth seat accepts a bot',!!fifth && fifth.owner!==0 && fifth.name!=='Human',fifth);
+    check('fifth seat accepts a bot',!!fifth && fifth.owner!==0 && fifth.kind===1,fifth);
     await renameRoom(host,"Treeform's automatic room");
     check('paced room-name typing auto-publishes without losing focus',
       last(host,'RoomState').name==="Treeform's automatic room");
@@ -249,11 +204,11 @@ async function main() {
     await sleep(1200);
     await shot(host,'filled-with-bots');
     const slots=last(host,'RoomState').seats;
-    const filled=slots.length===5 && slots.every(s=>s.owner!==0) && slots.filter(s=>s.name==='Human').length===1;
+    const filled=slots.length===5 && slots.every(s=>s.owner!==0) && slots.filter(s=>s.kind===0).length===1;
     check('Fill empty slots assigns all four bots',filled,slots);
     if(filled) {
       await click(host.page,547,914);
-      await wait('host and bots ready',()=>last(host,'RoomState').participants.some(p=>p.ready));
+      await wait('host cosmetic ready status',()=>last(host,'RoomState').participants.some(p=>p.ready));
       await shot(host,'five-player-ready');
       // Delay is scoped to lobby synchronization. Drain pending replies before
       // starting, so the rendering test does not become a catch-up load test.
@@ -272,8 +227,8 @@ async function main() {
         return settled && (await status(host)).includes('Ready for your action.');
       },45000);
       await host.page.keyboard.press('Enter',{delay:140});
-      await wait('human action submitted',()=>host.messages.some(m=>m.direction==='out' && m.kind==='SubmitCommand' && m.category===0 && m.seat===0));
-      await wait('bots submit decisions',()=>host.messages.some(m=>m.direction==='out' && m.kind==='SubmitCommand' && m.category===0 && m.seat>0),30000);
+      await wait('human action submitted',()=>host.messages.some(m=>m.direction==='out' && m.kind==='SubmitCommand' && m.category===0 && m.seatKind===0 && m.seat===0));
+      await wait('bots submit decisions',()=>host.messages.some(m=>m.direction==='out' && m.kind==='SubmitCommand' && m.category===0 && m.seatKind===1 && m.seat>0),30000);
       check('human and bot inputs run in five-player match',true);
     }
     const errors=host.console.filter(c=>['decode','pageerror','error'].includes(c.type));

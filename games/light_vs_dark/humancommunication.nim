@@ -1,7 +1,7 @@
 ## Presentation-only human communication. Never drains simulation mailboxes.
 import std/unicode
-import polyworld/[mailboxes, rooms, roomclients, tapes, configs]
-import bots, sim, multiplayer, diplomacies, replays
+import polyworld/[mailboxes, rooms, tapes, configs]
+import bots, content, sim, multiplayer, diplomacies, replays
 export diplomacies
 
 const MaxHumanChatLines* = 100
@@ -9,7 +9,7 @@ const MaxHumanChatLines* = 100
 type
   HumanChatLine* = object
     player*: int32
-    serverNotice*: bool
+    localNotice*: bool
     name*, text*: string
   HumanCommunication* = object
     typing*, diplomacyOpen*, blockedFrame*: bool
@@ -18,6 +18,7 @@ type
     chatGame: Game
     chatTick: uint32
     chatIndex: int
+    matchNoticeShown: bool
     diplomacyPage*: int
 
 proc reset*(state: var HumanCommunication) =
@@ -33,6 +34,17 @@ proc addLine(state: var HumanCommunication, game: Game, sender: int32, text: str
   if state.feed.len >= MaxHumanChatLines: state.feed.delete(0)
   state.feed.add HumanChatLine(player: sender,
     name: game.config.players[sender].displayName(int(sender)), text: text)
+
+proc addMatchNotice(state: var HumanCommunication, game: Game, tick: uint32) =
+  ## Derives the local warning from applied game time, including replay seeks.
+  let trigger = int64(game.maximumTicks) - 180'i64 * TickRate
+  if state.matchNoticeShown or trigger <= 0 or int64(tick) < trigger:
+    return
+  state.matchNoticeShown = true
+  if state.feed.len >= MaxHumanChatLines:
+    state.feed.delete(0)
+  state.feed.add HumanChatLine(player: -1, name: "Match",
+    text: "3 minutes remain", localNotice: true)
 
 proc publicChat(chat: ReplayChat, players: int): bool =
   ## Keeps direct messages and invalid display text out of the public feed.
@@ -55,6 +67,7 @@ proc syncChatFeed(
   state.chatGame = game
   state.chatTick = tick
   if rebuild:
+    state.matchNoticeShown = false
     if clearFeed:
       state.feed.setLen(0)
     var
@@ -77,7 +90,9 @@ proc syncChatFeed(
       let chat = chats[state.chatIndex]
       inc state.chatIndex
       if chat.publicChat(players):
+        state.addMatchNotice(game, chat.tick)
         state.addLine(game, chat.playerId, chat.text)
+  state.addMatchNotice(game, tick)
 
 proc syncChatFeed*(state: var HumanCommunication, game: Game) =
   ## Reads recorded chat at the displayed tick without consuming bot mailboxes.
@@ -87,17 +102,6 @@ proc syncChatFeed*(state: var HumanCommunication, game: Game) =
     state.syncChatFeed(game, game.recorder.data.chats)
   else:
     state.syncChatFeed(game, game.replayData.chats)
-
-proc observeServerNotices*(state: var HumanCommunication, session: NetworkMatch) =
-  ## Only RoomClient relay notices, never player-authored chat or replay tapes.
-  if session == nil or session.client == nil: return
-  var notice: RoomMessage
-  if session.client.takeNotice(notice):
-    if state.feed.len >= MaxHumanChatLines: state.feed.delete(0)
-    case notice.noticeCode
-    of ThreeMinutesRemain:
-      state.feed.add HumanChatLine(player: -1, name: "Server",
-        text: "3 minutes remain", serverNotice: true)
 
 proc chatRune*(state: var HumanCommunication, rune: Rune): bool =
   if not state.typing: return false

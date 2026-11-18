@@ -39,14 +39,14 @@ for seats in [@[8], @[3, 8], @[0, 4, 8], @[0, 1, 3, 4, 5, 7, 9], @[0, 2, 4]]:
   for mode in ["unique", "team", "open"]:
     for timeout in [false, true]:
       let config = parseConfig("{\"maxTicks\":3,\"draftMode\":\"" & mode & "\"}")
-      var snapshot = RoomMessage(kind: RoomState, revision: 1, tickRate: 24,
+      var snapshot = RoomMessage(kind: RoomState, phase: rooms.Playing, revision: 1, tickRate: 24,
         payload: config.toJson(), seats: newSeq[Seat](10),
         participants: @[Participant(id: 99, name: "Peer")])
       for seat in seats:
         snapshot.participants.add Participant(id: uint32(seat + 1), name: "Player " & $seat)
         snapshot.seats[seat] = Seat(owner: uint32(seat + 1), name: "Human")
-      let a = RoomClient(began: true, welcomed: true, match: 1, participant: uint32(seats[0] + 1), snapshot: snapshot)
-      let b = RoomClient(began: true, welcomed: true, match: 1, participant: 99, snapshot: snapshot)
+      let a = RoomClient(began: true, connected: true, welcomed: true, match: 1, participant: uint32(seats[0] + 1), snapshot: snapshot, initialSnapshot: snapshot)
+      let b = RoomClient(began: true, connected: true, welcomed: true, match: 1, participant: 99, snapshot: snapshot, initialSnapshot: snapshot)
       let first = prepareNetworkMatch(a, newSeq[string](10))
       let second = prepareNetworkMatch(b, newSeq[string](10))
       let world = first.game.world
@@ -71,15 +71,15 @@ for seats in [@[8], @[3, 8], @[0, 4, 8], @[0, 1, 3, 4, 5, 7, 9], @[0, 2, 4]]:
         team = 1 - team
       for i, index in world.draftOrder:
         doAssert world.heroes[index].id == expected[i]
-      let begin = RoomMessage(kind: BeginMatch, revision: 1, match: 1, hash: first.game.networkHash())
-      doAssert begin.hash == second.game.networkHash()
+      let begin = RoomMessage(kind: BeginMatch, revision: 1, match: 1, hash: setupHash(snapshot))
+      doAssert first.game.networkHash() == second.game.networkHash()
       first.start(begin)
       second.start(begin)
       var tick = 0'u32
       while not first.finished:
         inc tick
         let oldTurn = world.draftTurn
-        var packet = RoomMessage(kind: TickPacket, match: 1, tick: tick)
+        var packet = RoomMessage(kind: TickPacket, match: 1, tick: tick, seats: snapshot.seats)
         if world.phase == Drafting:
           doAssert world.draftHeroId() == expected[oldTurn]
           if not timeout:

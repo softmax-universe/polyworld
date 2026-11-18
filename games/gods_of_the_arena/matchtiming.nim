@@ -2,7 +2,7 @@
 import std/strutils
 import content, sim
 
-# System notices are emitted only by relaynotice and consumed from TickPacket.
+# Local match notices use the same simulated battle clock.
 
 proc remainingMatchTicks*(game: Game): int32 =
   ## durationTicks includes draft deadlines and the full preparation budget.

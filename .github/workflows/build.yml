@@ -32,6 +32,8 @@ jobs:
           cd ..
           nimby create
           nimby sync "${{ github.event.repository.name }}/nimby.lock"
+      - name: Build relay without game sources
+        run: python tests/test_server_boundary.py
       - name: Run release tests and all-game determinism
         run: nim r -d:release -d:audioTest -d:bassyNativeStrict -d:replayEvents tests/all.nim
       - name: Test display settings
@@ -49,5 +51,10 @@ jobs:
         run: |
           node tests/test_webinputs.js
           node tests/test_replay_audio.js
+      - name: Test browser relay protocol
+        shell: bash
+        run: |
+          nim c -r --hints:off --nimcache:"$RUNNER_TEMP/room-wire-cache" -o:"$RUNNER_TEMP/room-wire-fixture" tests/room_protocol_fixture.nim > "$RUNNER_TEMP/room-wire.json"
+          node tests/test_room_protocol.cjs "$RUNNER_TEMP/room-wire.json"
       - name: Check neural converters
         run: python games/gods_of_the_arena/tests/test_neural_converters.py

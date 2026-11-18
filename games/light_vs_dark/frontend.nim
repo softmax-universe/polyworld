@@ -32,7 +32,6 @@ proc runFrontend*() =
     connection: Connection
     prepared: NetworkMatch
     preparedRevision = 0'u32
-    readyRefresh: ReadyRefresh
     joiningSeat: JoiningSeat
     viewedRevision = 0'u32
     config = defaultConfig()
@@ -97,7 +96,6 @@ proc runFrontend*() =
           prepared = nil
           preparedRevision = 0
           viewedRevision = 0
-          readyRefresh = ReadyRefresh()
           joiningSeat = JoiningSeat()
           viewedPayload = ""
           roster = RosterState()
@@ -123,7 +121,6 @@ proc runFrontend*() =
         if page == LobbyMenu: page = MultiplayerMenu
         prepared = nil
         preparedRevision = 0
-        readyRefresh = ReadyRefresh()
         viewedRevision = 0
         viewedPayload = ""
         roster = RosterState()
@@ -145,14 +142,6 @@ proc runFrontend*() =
             except CatchableError as problem:
               error = problem.msg
           viewedRevision = client.snapshot.revision
-        try:
-          var sources = newSeq[string](networkPolicies.len)
-          for i, policy in networkPolicies:
-            sources[i] = policy.bytes
-          discard readyRefresh.refreshRetainedReady(client, sources,
-            prepared, preparedRevision)
-        except CatchableError as problem:
-          error = problem.msg
       if client.events.len > 0:
         let event = client.events[0]
         client.events.delete(0)
@@ -201,7 +190,6 @@ proc runFrontend*() =
       prepared = nil
       preparedRevision = 0
       clearPlayerCommands()
-      readyRefresh = ReadyRefresh()
       run = nil
       continue
 
@@ -489,14 +477,14 @@ proc runFrontend*() =
           var
             emptyCount = 0
             ownCount = 0
-            selfReady = readyRefresh.cosmeticReady
+            selfReady = client.cosmeticReady()
           for i in 0 ..< config.playerCount:
             let
               seat = if online and i < snapshot.seats.len: snapshot.seats[i] else: Seat()
               empty = if online: seat.owner == 0
                 else: i != humanSeat and localPolicies[i].bytes.len == 0
               mine = not online or seat.owner == client.participant
-              human = if online: seat.name == "Human" else: i == humanSeat
+              human = if online: seat.kind == HumanSeat else: i == humanSeat
             var
               name = if empty: "Add player"
                 elif human:
@@ -507,8 +495,7 @@ proc runFrontend*() =
               for participant in snapshot.participants:
                 if participant.id == seat.owner:
                   controller = participant.name
-                  if mine:
-                    controller.add(if selfReady: " / Ready" else: " / Not ready")
+                  controller.add(if participant.ready: " / Ready" else: " / Not ready")
                   if human:
                     name = participant.name
 
@@ -517,7 +504,7 @@ proc runFrontend*() =
             if empty:
               inc emptyCount
             if sk.seatButton(layout, i, rosterScroll.scrollPos.y, name, controller, human, empty,
-              editable and (mine or empty) and not modal and
+              editable and (owner or mine or empty) and not modal and
                 roster.assignmentsEnabled(online), config.seed,
               team = if config.diplomacySettings.enabled: -1
                 else: config.playerTeam(i).int):
@@ -576,7 +563,7 @@ proc runFrontend*() =
                     if snapshot.seats[i].owner == 0 and i != multiplayerHuman:
                       networkPolicies[i] = chosenPolicy
                       client.send(RoomMessage(kind: ClaimSeat, seat: uint32(i),
-                        name: chosenPolicy.name))
+                        name: chosenPolicy.name, seatKind: BotSeat))
                   elif i != humanSeat and localPolicies[i].bytes.len == 0:
                     localPolicies[i] = chosenPolicy
             if sk.lobbyButton("Shuffle players",
@@ -598,13 +585,14 @@ proc runFrontend*() =
                     if oldHuman == source:
                       multiplayerHuman = destination
                     client.send(RoomMessage(kind: ClaimSeat,
-                      seat: uint32(destination), name: snapshot.seats[source].name))
+                      seat: uint32(destination), name: snapshot.seats[source].name,
+                      seatKind: snapshot.seats[source].kind))
                   else:
                     localPolicies[destination] = oldPolicies[source]
                     if oldHuman == source:
                       humanSeat = destination
             sk.lobbyLabel(if online and roster.pending: "Saving roster / settings..."
-              elif online: "Host-owned slots only; guests keep their seats."
+              elif online: "The host manages all slots. Ready is only an indicator."
               else: "Fill keeps assigned humans and bots. Clear a slot to replace it.",
               fill + vec2(0, 54), layout.leftWidth - 44, tint = LobbyMuted)
           if sk.configPanel(window, lobbyUi, config, layout.right,
@@ -630,7 +618,7 @@ proc runFrontend*() =
               layout.footer + vec2(420, 0), 190, "status",
               editable and ownCount > 0 and not roster.dirty and not roster.pending and not modal,
               iconTint = readinessColor(selfReady)):
-                readyRefresh.toggleCosmeticReady()
+                client.toggleCosmeticReady()
             if roster.dirty and owner and editable:
               if sk.lobbyButton("Apply Settings", layout.primary,
                 250, "settings", not modal and not roster.pending):
@@ -647,7 +635,10 @@ proc runFrontend*() =
                 250, "arrow_right",
                 owner and editable and not roster.pending and not modal,
                 tint = LobbyGreen):
-                  client.send(RoomMessage(kind: StartMatch))
+                  var sources = newSeq[string](networkPolicies.len)
+                  for i, policy in networkPolicies: sources[i] = policy.bytes
+                  prepared = client.requestStart(sources)
+                  preparedRevision = prepared.revision
             if sk.lobbyButton(
               if owner and snapshot.phase in {rooms.Ended, Desynced}:
                 "Return to lobby" else: "Leave room",
@@ -662,7 +653,6 @@ proc runFrontend*() =
                 page = MultiplayerMenu
                 prepared = nil
                 preparedRevision = 0
-                readyRefresh = ReadyRefresh()
                 viewedRevision = 0
                 viewedPayload = ""
                 roster = RosterState()
@@ -699,7 +689,7 @@ proc runFrontend*() =
                   client.claimHumanSeat(selectedSeat, multiplayerHuman)
                   for i, seat in snapshot.seats:
                     if i == multiplayerHuman or
-                      (seat.owner == client.participant and seat.name == "Human"):
+                      (seat.owner == client.participant and seat.kind == HumanSeat):
                         networkPolicies[i] = LocalPolicy()
                   multiplayerHuman = selectedSeat
                 else:
@@ -707,7 +697,7 @@ proc runFrontend*() =
                     multiplayerHuman = -1
                   client.send(RoomMessage(
                     kind: if choice.clear: ReleaseSeat else: ClaimSeat,
-                    seat: uint32(selectedSeat), name: selected.name
+                    seat: uint32(selectedSeat), name: selected.name, seatKind: BotSeat
                   ))
                 networkPolicies[selectedSeat] = selected
               else:

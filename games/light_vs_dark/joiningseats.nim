@@ -43,7 +43,7 @@ proc claimJoiningSeat*(state: var JoiningSeat,
   if state.pendingSeat >= 0:
     if client.error == "Seat belongs to another participant" or
       (state.pendingSeat >= snapshot.seats.len and
-      client.error == "Seats can only change in the lobby"):
+      client.error == "Seat is outside this room"):
         # Concurrent claims or a roster shrink can invalidate the chosen slot.
         client.error = ""
         state.pendingSeat = -1

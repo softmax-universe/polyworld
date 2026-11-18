@@ -41,7 +41,8 @@ suite "Rooms require a connected person":
     let host = r.connect(1)
     let room = r.create()
     let invite = room.id
-    r.send(1, RoomMessage(kind: ClaimSeat, seat: 0, name: "Private bot"))
+    r.send(1, RoomMessage(kind: ClaimSeat, seat: 0, name: "Private bot",
+      seatKind: BotSeat))
     let watcher = r.connect(2)
     r.send(2, RoomMessage(kind: JoinRoom, room: invite))
     r.disconnect(1)
@@ -61,7 +62,8 @@ suite "Rooms require a connected person":
         let host = r.connect(1)
         let room = r.create()
         let invite = room.id
-        r.send(1, RoomMessage(kind: ClaimSeat, seat: 0, name: "Private bot"))
+        r.send(1, RoomMessage(kind: ClaimSeat, seat: 0, name: "Private bot",
+          seatKind: BotSeat))
         room.phase = phase
         room.paused = phase == Waiting
         room.pending = @[Command(participant: host.id, payload: "queued")]
@@ -89,7 +91,8 @@ suite "Rooms require a connected person":
       let host = r.connect(1)
       let room = r.create()
       let invite = room.id
-      r.send(1, RoomMessage(kind: ClaimSeat, seat: 0, name: "Private bot"))
+      r.send(1, RoomMessage(kind: ClaimSeat, seat: 0, name: "Private bot",
+        seatKind: BotSeat))
       let watcher = r.connect(2)
       r.send(2, RoomMessage(kind: JoinRoom, room: invite))
       room.phase = phase
@@ -101,12 +104,12 @@ suite "Rooms require a connected person":
       check r.room(invite) == nil
       check host.room == "" and watcher.room == ""
 
-  test "explicit final Leave retires the departing controller's preparation":
+  test "explicit final Leave retires the departing controller's cosmetic readiness":
     let r = Relay()
     let host = r.connect(1)
     let room = r.create()
     r.send(1, RoomMessage(kind: ClaimSeat, seat: 0, name: "Human"))
-    r.send(1, RoomMessage(kind: Ready, revision: room.revision, hash: 42))
+    r.send(1, RoomMessage(kind: ReadyStatus, flag: true))
     check host.ready
     r.send(1, RoomMessage(kind: LeaveRoom))
     check not host.ready
@@ -117,7 +120,8 @@ suite "Rooms require a connected person":
     let r = Relay()
     discard r.connect(1)
     let room = r.create()
-    r.send(1, RoomMessage(kind: ClaimSeat, seat: 0, name: "Private bot"))
+    r.send(1, RoomMessage(kind: ClaimSeat, seat: 0, name: "Private bot",
+      seatKind: BotSeat))
     r.advance(1)
     check r.room(room.id) == room
     r.send(1, RoomMessage(kind: ReleaseSeat, seat: 0))

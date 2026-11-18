@@ -471,6 +471,16 @@ when not defined(headless):
           app.network.abort(error.msg)
           app.network.client.error = error.msg
         match.game = app.network.game
+        if match.humanSeat != app.network.humanSeat:
+          match.humanSeat = app.network.humanSeat
+          play.stopTargeting()
+          play.tossPicking = false
+          play.selectedAttacker = 0
+          orbit.aimAt(layout.balconies[match.viewedSeat].yaw)
+          if not towerArena:
+            table = seatTable(layout, previewView, match.viewedSeat,
+              match.humanSeat, hideHands = match.humanSeat < 0)
+            networkTable = table
         let client = app.network.client
         networkBlocked = app.network.pendingAction or app.network.finished or
           not client.connected or not client.welcomed or

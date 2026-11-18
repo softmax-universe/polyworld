@@ -41,11 +41,10 @@ block twoHumans:
   let sessions = [prepareNetworkMatch(clients[0], []), prepareNetworkMatch(clients[1], []),
     prepareNetworkMatch(clients[2], [])]
   for i in 0 .. 1:
-    clients[i].send(RoomMessage(kind: Ready, revision: sessions[i].revision,
-      hash: sessions[i].game.networkHash()))
+    clients[i].send(RoomMessage(kind: ReadyStatus, flag: true))
   exchange()
   clients[0].send(RoomMessage(kind: StartMatch, revision: sessions[0].revision,
-    hash: sessions[0].game.networkHash()))
+    hash: setupHash(clients[0].snapshot)))
   exchange()
   for i, session in sessions:
     doAssert clients[i].error.len == 0, clients[i].error
@@ -157,8 +156,8 @@ block twoHumans:
   doAssert rejected and sessions[0].game.world.tick == before
   doAssert sessions[0].humanChat.len == 3
   # Game category cannot let even an owned bot speak as a human.
-  let humanName = clients[0].snapshot.seats[1].name
-  clients[0].snapshot.seats[1].name = "private bot"
+  let humanKind = clients[0].snapshot.seats[1].kind
+  clients[0].snapshot.seats[1].kind = BotSeat
   doAssert not sessions[0].sendHumanChat("bot impersonation")
-  clients[0].snapshot.seats[1].name = humanName
+  clients[0].snapshot.seats[1].kind = humanKind
   echo "Two-human relay chat: exact names/text, team filtering, policy isolation, ownership passed"

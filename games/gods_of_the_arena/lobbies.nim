@@ -33,10 +33,9 @@ proc canEditGameName*(snapshot: RoomMessage, self: uint32): bool =
   snapshot.phase == Lobby and snapshot.participant == self
 
 proc canKick*(snapshot: RoomMessage, self, target: uint32): bool =
-  ## Match the relay's lobby-owner authorization, never offering self removal.
-  if snapshot.phase != Lobby or snapshot.participant != self or
-    target == 0 or target == self:
-      return false
+  ## Hosts manage participants in any phase; self-release uses the slot picker.
+  if snapshot.participant != self or target == 0 or target == self:
+    return false
   for participant in snapshot.participants:
     if participant.id == target:
       return true
@@ -45,19 +44,18 @@ proc openSeatContext*(menu: var KickMenu, snapshot: RoomMessage,
     self: uint32, seatIndex: int, at: Vec2): bool =
   ## Human actions target a participant; bot actions target exactly one seat.
   menu = KickMenu()
-  if snapshot.phase != Lobby or snapshot.participant != self or
-    seatIndex notin 0 ..< snapshot.seats.len:
+  if seatIndex notin 0 ..< snapshot.seats.len:
     return false
   let seat = snapshot.seats[seatIndex]
   if seat.owner == 0:
     return false
-  if seat.name == "Human":
+  if seat.kind == HumanSeat:
     if not snapshot.canKick(self, seat.owner):
       return false
   elif self != seat.owner and self != snapshot.participant:
     return false
   menu = KickMenu(target: seat.owner, room: snapshot.room, at: at,
-    botSeat: if seat.name == "Human": -1 else: seatIndex)
+    botSeat: if seat.kind == HumanSeat: -1 else: seatIndex)
   true
 
 proc openLocalBot*(menu: var KickMenu, seat: int, occupiedBot: bool,
@@ -73,14 +71,14 @@ proc contextLabel*(menu: KickMenu): string =
 proc canUseContext*(menu: KickMenu, snapshot: RoomMessage, self: uint32): bool =
   ## Revalidate the room, owner and slot kind against the latest snapshot.
   if menu.local or menu.target == 0 or snapshot.room != menu.room or
-    snapshot.phase != Lobby or snapshot.participant != self:
+    (snapshot.participant != self and menu.target != self):
       return false
   if menu.botSeat < 0:
     return snapshot.canKick(self, menu.target)
   if menu.botSeat >= snapshot.seats.len:
     return false
   let seat = snapshot.seats[menu.botSeat]
-  seat.owner == menu.target and seat.name != "Human" and
+  seat.owner == menu.target and seat.kind == BotSeat and
     (self == seat.owner or self == snapshot.participant)
 
 proc contextCommand*(menu: KickMenu, snapshot: RoomMessage,

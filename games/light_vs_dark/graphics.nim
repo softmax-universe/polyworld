@@ -2118,7 +2118,14 @@ proc runGraphics*(network: NetworkMatch = nil,
         except RoomsError as error:
           network.abort(error.msg)
         connection.pump()
-        observeServerCommunication(network)
+        network.resumeControllers()
+        let assignedSlot = int32(network.humanPlayerFor(network.client.participant) + 1)
+        if options.playerSlot != assignedSlot:
+          options.playerSlot = assignedSlot
+          viewMode = assignedSlot
+          selectedIds.setLen(0)
+          primaryId = NoEntity
+          cancelGameplayGestures()
         transport.sync(run.world.tick, run.world.tick, run.world.over)
       else:
         let restoreTick = transport.takeRestore()
@@ -2413,7 +2420,7 @@ proc runGraphics*(network: NetworkMatch = nil,
                   network.client.send(RoomMessage(kind: LeaveRoom))
                   leaveRequested = true
               sk.menuLabel(if network == nil: "Use Pause match to stop the game."
-                else: "Quitting as a player ends the match for everyone.",
+                else: "Unused slots join next match; existing kingdoms can change controllers.",
                 origin + vec2(0, 332), 464)
               sk.menuLabel("Drag: select group / Shift: add / Ctrl+A: all units",
                 origin + vec2(0, 368), 464)

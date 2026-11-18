@@ -31,6 +31,7 @@ import
   test_cosmetic_ready,
   test_sparse_preparation,
   test_automatic_start,
+  test_live_slots,
   test_same_room_rematch,
   test_lobby_defaults,
   test_lobby_admin_ui,

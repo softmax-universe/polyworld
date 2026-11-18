@@ -2,10 +2,11 @@ import std/unittest
 import polyworld/[rooms, relays]
 
 proc send(relay: Relay, connection: int, message: RoomMessage) =
-  ## Exercise the existing wire envelope without loading a game.
+  ## Exercises the wire envelope without loading a game.
   relay.receive(connection, decode(message.encode()), 0)
 
 proc lobby(): Relay =
+  ## Creates independent controllers and cosmetic readiness.
   result = Relay()
   for connection in 1 .. 2:
     result.send(connection, RoomMessage(
@@ -13,22 +14,35 @@ proc lobby(): Relay =
       identity: GameIdentity(game: "resize-test", gameplay: 1, protocol: 1)
     ))
   result.send(1, RoomMessage(kind: CreateRoom, name: "Original", number: 3,
-    tickRate: 24, payload: "original payload", flag: false))
+    tickRate: 24, payload: "{\"players\":\"game-owned\"}", flag: false))
   let room = result.rooms[0]
   result.send(2, RoomMessage(kind: JoinRoom, room: room.id))
   result.send(1, RoomMessage(kind: ClaimSeat, seat: 0, name: "Host"))
-  result.send(2, RoomMessage(kind: ClaimSeat, seat: 1, name: "Guest bot"))
+  result.send(2, RoomMessage(kind: ClaimSeat, seat: 1, name: "Guest bot",
+    seatKind: BotSeat))
   for connection in 1 .. 2:
-    result.send(connection, RoomMessage(kind: Ready,
-      revision: room.revision, hash: 42))
+    result.send(connection, RoomMessage(kind: ReadyStatus, flag: true))
   result.outgoing = @[]
 
 proc configure(count: uint32): RoomMessage =
+  ## Replaces game-owned settings without exposing their schema.
   RoomMessage(kind: ConfigureRoom, name: "Resized", number: count,
-    tickRate: 30, payload: "\x00\xffopaque resized setup", flag: true)
+    tickRate: 30, payload: "{\"teams\":[99],\"duration\":\"unbounded\"}",
+    flag: true)
+
+proc resize(room: RelayRoom, count: uint32): RoomMessage =
+  ## Changes shared roster metadata while preserving the game setup.
+  RoomMessage(kind: ResizeRoom, name: "Resized", number: count,
+    tickRate: room.tickRate, payload: room.payload, flag: true)
+
+proc start(relay: Relay) =
+  ## Starts from the exact generic initialization envelope.
+  let room = relay.rooms[0]
+  relay.send(1, RoomMessage(kind: StartMatch, revision: room.revision,
+    hash: relay.state(room).setupHash()))
 
 proc expectUnchanged(relay: Relay, connection: int, message: RoomMessage) =
-  ## Rejections must preserve the entire lobby snapshot and its visibility.
+  ## Requires rejected operations to preserve state and outgoing deliveries.
   let
     room = relay.rooms[0]
     before = relay.state(room).encode()
@@ -40,8 +54,8 @@ proc expectUnchanged(relay: Relay, connection: int, message: RoomMessage) =
   check room.public == wasPublic
   check relay.outgoing.len == outgoingCount
 
-suite "Generic relay lobby seat resize":
-  test "owner grows with empty seats preserving assignments and invalidating readiness":
+suite "Generic relay roster resize":
+  test "owner grows with empty slots and preserves cosmetic readiness":
     let
       relay = lobby()
       room = relay.rooms[0]
@@ -57,7 +71,7 @@ suite "Generic relay lobby seat resize":
     check room.tickRate == message.tickRate
     check room.public
     for id in room.participants:
-      check not relay.guest(id).ready
+      check relay.guest(id).ready
     check relay.outgoing.len == 2
     for output in relay.outgoing:
       let snapshot = decode(output.bytes)
@@ -66,63 +80,32 @@ suite "Generic relay lobby seat resize":
       check snapshot.payload == message.payload
       check snapshot.revision == room.revision
       for participant in snapshot.participants:
-        check not participant.ready
-    expect RoomsError:
-      relay.send(1, RoomMessage(kind: Ready, revision: before.revision, hash: 42))
-    relay.send(1, RoomMessage(kind: ClaimSeat, seat: 4, name: "New bot"))
-    check room.seats[4] == Seat(owner: room.owner, name: "New bot")
+        check participant.ready
+    relay.send(1, RoomMessage(kind: ClaimSeat, seat: 4, name: "New bot",
+      seatKind: BotSeat))
+    check room.seats[4] == Seat(owner: room.owner, name: "New bot",
+      kind: BotSeat)
 
-  test "owner shrinks an empty tail preserving another participant's retained seat":
+  test "host may shrink away another controller's slots":
     let
       relay = lobby()
       room = relay.rooms[0]
       before = relay.state(room)
-      message = configure(2)
-    relay.send(1, message)
-    check room.seats == before.seats[0 ..< 2]
-    check room.payload == message.payload
-    check room.revision == before.revision + 1
-    for id in room.participants:
-      check not relay.guest(id).ready
-
-  test "shrink cannot remove another participant's seat":
-    let relay = lobby()
-    relay.expectUnchanged(1, configure(1))
-
-  test "owner can remove host-owned and empty seats down to one":
-    let
-      relay = lobby()
-      room = relay.rooms[0]
-    relay.send(2, RoomMessage(kind: ReleaseSeat, seat: 1))
-    relay.send(1, RoomMessage(kind: ClaimSeat, seat: 2, name: "Host bot"))
-    relay.send(1, RoomMessage(kind: Ready,
-      revision: room.revision, hash: 42))
-    check not relay.guest(2).ready
-    let before = relay.state(room)
     relay.send(1, configure(1))
     check room.seats == @[before.seats[0]]
+    check room.participants == @[1'u32, 2'u32]
     check room.revision == before.revision + 1
-    for id in room.participants:
-      check not relay.guest(id).ready
     relay.send(1, configure(3))
     check room.seats == @[before.seats[0], Seat(), Seat()]
 
-  test "shrink checks the entire tail before changing any state":
+  test "disconnected controllers do not prevent host roster management":
     let
       relay = lobby()
       room = relay.rooms[0]
-    relay.send(2, RoomMessage(kind: ReleaseSeat, seat: 1))
-    relay.send(1, RoomMessage(kind: ClaimSeat, seat: 1, name: "Host bot"))
-    relay.send(2, RoomMessage(kind: ClaimSeat, seat: 2, name: "Guest bot"))
-    for connection in 1 .. 2:
-      relay.send(connection, RoomMessage(kind: Ready,
-        revision: room.revision, hash: 42))
-    relay.expectUnchanged(1, configure(1))
-
-  test "disconnected participants retain protection against shrink":
-    let relay = lobby()
     relay.disconnect(2)
-    relay.expectUnchanged(1, configure(1))
+    relay.send(1, configure(1))
+    check room.seats.len == 1
+    check room.seats[0].owner == 1
 
   test "growth accepts MaxSeats without changing old assignments":
     let
@@ -135,25 +118,25 @@ suite "Generic relay lobby seat resize":
     for index in 3 ..< MaxSeats:
       check room.seats[index] == Seat()
 
-  test "unchanged count still updates opaque settings and invalidates readiness":
+  test "opaque JSON changes invalidate a stale start envelope":
     let
       relay = lobby()
       room = relay.rooms[0]
       before = relay.state(room)
-      message = configure(3)
-    relay.send(1, message)
+    relay.send(1, configure(3))
     check room.seats == before.seats
-    check room.payload == message.payload
-    check room.revision == before.revision + 1
-    for id in room.participants:
-      check not relay.guest(id).ready
+    check relay.state(room).setupHash() != before.setupHash()
+    relay.expectUnchanged(1, RoomMessage(kind: StartMatch,
+      revision: before.revision, hash: before.setupHash()))
+    relay.expectUnchanged(1, RoomMessage(kind: StartMatch,
+      revision: room.revision, hash: before.setupHash()))
+    relay.start()
+    check room.phase == Playing
 
-  test "invalid seat counts leave the complete configuration untouched":
+  test "invalid counts and settings leave the configuration untouched":
     for count in [0'u32, uint32(MaxSeats + 1), uint32.high]:
       let relay = lobby()
       relay.expectUnchanged(1, configure(count))
-
-  test "invalid settings cannot partially resize or replace the payload":
     for count in [2'u32, 3'u32, 5'u32]:
       for tickRate in [0'u32, 121'u32]:
         let relay = lobby()
@@ -166,13 +149,56 @@ suite "Generic relay lobby seat resize":
       relay.expectUnchanged(1, message)
 
   test "nonowner cannot grow shrink or reconfigure":
-    for count in [2'u32, 3'u32, 5'u32]:
+    for count in [1'u32, 3'u32, 5'u32]:
       let relay = lobby()
       relay.expectUnchanged(2, configure(count))
+      relay.expectUnchanged(2, resize(relay.rooms[0], count))
 
-  test "owner cannot resize or reconfigure outside Lobby":
+  test "host live resizing preserves the immutable initialization":
+    let
+      relay = lobby()
+      room = relay.rooms[0]
+      initial = relay.state(room)
+    relay.start()
+    relay.outgoing.setLen(0)
+    relay.send(1, resize(room, 1))
+    check room.phase == Playing
+    check room.seats == @[initial.seats[0]]
+    relay.advance(0.05)
+    var ticks = 0
+    for output in relay.outgoing:
+      let packet = decode(output.bytes)
+      if packet.kind == TickPacket:
+        inc ticks
+        check packet.seats == room.seats
+    check ticks == 2
+    relay.send(3, RoomMessage(kind: Hello, name: "Late watcher",
+      identity: GameIdentity(game: "resize-test", gameplay: 1, protocol: 1)))
+    relay.outgoing.setLen(0)
+    relay.send(3, RoomMessage(kind: JoinRoom, room: room.id))
+    var found = false
+    for output in relay.outgoing:
+      let packet = decode(output.bytes)
+      if output.connection == 3 and packet.kind == BeginMatch:
+        found = true
+        check packet.seats == initial.seats
+        check packet.payload == initial.payload
+        check packet.tickRate == initial.tickRate
+        check packet.hash == initial.setupHash()
+    check found
+
+  test "live resize cannot rewrite game configuration or clock rate":
     for phase in [Playing, Waiting, Ended, Desynced]:
-      for count in [2'u32, 3'u32, 5'u32]:
-        let relay = lobby()
-        relay.rooms[0].phase = phase
-        relay.expectUnchanged(1, configure(count))
+      let relay = lobby()
+      let room = relay.rooms[0]
+      relay.start()
+      room.phase = phase
+      relay.expectUnchanged(1, configure(5))
+      var message = resize(room, 5)
+      message.payload = "{\"new-game\":true}"
+      relay.expectUnchanged(1, message)
+      message = resize(room, 5)
+      message.tickRate = 30
+      relay.expectUnchanged(1, message)
+      relay.send(1, resize(room, 5))
+      check room.seats.len == 5

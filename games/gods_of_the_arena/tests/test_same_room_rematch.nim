@@ -84,7 +84,7 @@ proc sameRoomRematch() =
   exchange()
   clients[0].claimHumanSeat(0)
   clients[1].claimHumanSeat(5)
-  clients[0].send(RoomMessage(kind: ClaimSeat, seat: 2, name: "Private base bot"))
+  clients[0].send(RoomMessage(kind: ClaimSeat, seat: 2, seatKind: BotSeat, name: "Private base bot"))
   exchange()
   var sources: array[HeroClassCount, string]
   sources[2] = readFile(currentSourcePath().parentDir.parentDir / "players/base.bas")

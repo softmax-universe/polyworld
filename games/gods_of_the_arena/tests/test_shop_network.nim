@@ -38,7 +38,7 @@ block authoritativeShop:
   exchange()
   let sessions = [prepareNetworkMatch(clients[0], []), prepareNetworkMatch(clients[1], [])]
   clients[0].send(RoomMessage(kind: StartMatch, revision: sessions[0].revision,
-    hash: sessions[0].game.networkHash()))
+    hash: setupHash(clients[0].snapshot)))
   exchange()
   for i, session in sessions:
     session.start(clients[i].events[0])

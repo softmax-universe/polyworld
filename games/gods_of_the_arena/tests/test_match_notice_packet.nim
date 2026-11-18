@@ -1,7 +1,7 @@
-## Recorded server event consumption; empty ticks must not fabricate notices.
+## Each client derives the warning from its own authoritative simulation.
 import std/importutils
 import polyworld/[rooms, roomclients]
-import ../[chats, content, maps, relaynotice, multiplayer, replays, sim]
+import ../[chats, content, maps, matchnotices, multiplayer, replays, sim]
 privateAccess(NetworkMatch)
 
 proc fixture(limit = 182 * TickRate): NetworkMatch =
@@ -18,9 +18,6 @@ let first = fixture()
 let second = fixture()
 proc packetAt(tick: uint32): RoomMessage =
   result = RoomMessage(kind: TickPacket, match: 1, tick: tick)
-  if tick == 2 * TickRate.uint32:
-    result.commands.add Command(participant: 0, seat: ServerNoticeSeat,
-      sequence: 1, payload: noticePayload())
 
 var beforeCrossing: World
 for tick in 1'u32 .. 3'u32 * TickRate.uint32:
@@ -38,7 +35,7 @@ for session in [first, second]:
   doAssert session.humanChat[0].text == ThreeMinuteNotice
   doAssert session.humanChat[0].tick == 2 * TickRate.uint32
   doAssert session.humanChat[0].system and session.humanChat[0].sender.len == 0
-  doAssert session.client.outgoing.len == 0, "No forged outgoing command"
+  doAssert session.client.outgoing.len == 0, "The local notice never submits a command"
   let tape = decodeReplay(encodeReplay(session.game.recorder.data))
   doAssert tape.events.len == 1
   doAssert tape.events[0].kind == SystemReplayChat
@@ -69,15 +66,5 @@ for message in first.humanChat:
 let emptyTicks = fixture()
 for tick in 1'u32 .. 3'u32 * TickRate.uint32:
   emptyTicks.applyPacket(RoomMessage(kind: TickPacket, match: 1, tick: tick), localPlayback = true)
-doAssert emptyTicks.humanChat.len == 0, "No client fallback at the threshold"
-for forged in [Command(participant: 1, seat: ServerNoticeSeat, sequence: 1, payload: noticePayload()),
-    Command(participant: 0, seat: 0, sequence: 1, payload: noticePayload()),
-    Command(participant: 0, seat: ServerNoticeSeat, sequence: 2, payload: noticePayload())]:
-  let session = fixture()
-  var rejected = false
-  try:
-    session.applyPacket(RoomMessage(kind: TickPacket, match: 1, tick: 1,
-      commands: @[forged]), localPlayback = true)
-  except RoomsError: rejected = true
-  doAssert rejected and session.game.world.tick == 0 and session.humanChat.len == 0
-echo "PASS recorded server event, no fallback, reconnect, short match, seek/eviction dedupe, sentinel validation"
+doAssert emptyTicks.humanChat.len == 1, "Empty relay ticks need no notice payload"
+echo "PASS local warning, replay capture, reconnect, short matches and seek dedupe"

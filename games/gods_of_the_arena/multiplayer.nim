@@ -1,11 +1,9 @@
 import
   jsony,
   polyworld/[rooms, roomclients, tapes, metrics, mailboxes, bodies, hashes, menus],
-  bots, chats, content, controls, maps, presets, replays, sim, relaynotice
+  bots, chats, content, controls, maps, presets, replays, sim, matchnotices
 
-const GotaNetworkProtocol* = NoticeProtocol
-static: doAssert uint32(ReplayGameVersion) == NoticeGameplay,
-  "Review the game-owned relay draft clock when changing GotA gameplay"
+const GotaNetworkProtocol* = 5'u32
 
 type NetworkMatch* = ref object
   client*: RoomClient
@@ -14,6 +12,8 @@ type NetworkMatch* = ref object
   started*, finished*: bool
   match: uint32
   seats: seq[Seat]
+  sources*: seq[string]
+  loadedSources: seq[string]
   spectator: bool
   heroSeats: seq[int]
   decisionTick: int32 = -1
@@ -39,39 +39,12 @@ proc localActiveSeats*(policies: openArray[LocalPolicy], humanSeat: int): seq[in
     if i == humanSeat or policy.bytes.len > 0:
       result.add i
 
-proc controllersReady*(snapshot: RoomMessage): bool =
-  ## Only occupied seats require connected, consenting controllers.
-  var occupied = false
-  for seat in snapshot.seats:
-    if seat.owner == 0:
-      continue
-    occupied = true
-    var ready = false
-    for participant in snapshot.participants:
-      if participant.id == seat.owner:
-        ready = participant.connected and participant.ready
-    if not ready:
-      return false
-  occupied
-
-proc needsReadyRefresh*(client: RoomClient, preparedRevision: uint32): bool =
-  ## Rehash roster changes only for a controller who already consented.
-  if client.snapshot.phase != Lobby or preparedRevision == client.snapshot.revision:
-    return false
-  for seat in client.snapshot.seats:
-    if seat.owner != 0 and seat.owner == client.participant:
-      for participant in client.snapshot.participants:
-        if participant.id == client.participant:
-          return participant.ready and participant.connected
-
 proc humanSeatFor*(snapshot: RoomMessage, participant: uint32): int =
-  ## Finds a participant's human seat and rejects duplicate assignments.
+  ## Selects the first human-controlled slot for the local hero interface.
   result = -1
   for i, seat in snapshot.seats:
-    if seat.owner == participant and participant != 0 and seat.name == "Human":
-      if result >= 0:
-        reject("Each participant can control only one human slot")
-      result = i
+    if seat.owner == participant and participant != 0 and seat.kind == HumanSeat:
+      return i
 
 proc humanHeroIndex*(session: NetworkMatch): int =
   ## Maps the lobby's stable seat to the packed active-hero array used by UI.
@@ -84,14 +57,16 @@ proc humanHeroIndex*(session: NetworkMatch): int =
 proc claimHumanSeat*(client: RoomClient, seat: int, previous = -1) =
   ## Moves the local human, including a claim still awaiting acknowledgement.
   if seat < 0 or seat >= client.snapshot.seats.len or
-    client.snapshot.seats[seat].owner notin [0'u32, client.participant]:
+    (client.snapshot.participant != client.participant and
+      client.snapshot.seats[seat].owner notin [0'u32, client.participant]):
       reject("Cannot take another participant's slot")
   for i, current in client.snapshot.seats:
     if i != seat and (i == previous or
-      (current.owner == client.participant and current.name == "Human")):
+      (current.owner == client.participant and current.kind == HumanSeat)):
         if current.owner in [0'u32, client.participant]:
           client.send(RoomMessage(kind: ReleaseSeat, seat: uint32(i)))
-  client.send(RoomMessage(kind: ClaimSeat, seat: uint32(seat), name: "Human"))
+  client.send(RoomMessage(kind: ClaimSeat, seat: uint32(seat),
+    seatKind: HumanSeat, name: client.name))
 
 proc encodeSubmission*(submission: GameSubmission): string =
   ## Encodes game-owned bytes that the relay never interprets.
@@ -146,20 +121,17 @@ proc decodeSubmission*(bytes: string): GameSubmission =
 proc returnedToLobby*(session: NetworkMatch): bool =
   ## A room snapshot retires the old result view even for guests who have not
   ## clicked Back. Setup revisions alone cannot identify a match lifetime.
-  session != nil and session.started and session.client.snapshot.room.len > 0 and
-    session.client.snapshot.phase == Lobby
+  session != nil and session.started and
+    (session.client.snapshot.room.len == 0 or session.client.snapshot.phase == Lobby)
 
 proc prepareNetworkMatch*(
     client: RoomClient, sources: openArray[string]
 ): NetworkMatch =
   ## Loads only locally owned policies and builds the shared initial world.
-  let snapshot = client.snapshot
+  let snapshot = client.setupSnapshot()
   if snapshot.tickRate != uint32(TickRate) or
     snapshot.seats.len != HeroClassCount:
       reject("GotA requires ten seats and 24 ticks per second")
-  for seat in snapshot.seats:
-    if seat.owner != 0 and seat.name == "Human":
-      discard snapshot.humanSeatFor(seat.owner)
   var config = parseConfig(snapshot.payload)
   config.playerSlot = 0
   config.players = newSeq[PlayerConfig](HeroClassCount)
@@ -170,7 +142,7 @@ proc prepareNetworkMatch*(
     let index = activeSeats.len
     activeSeats.add i
     config.players[index].name = seat.name
-    if seat.name == "Human":
+    if seat.kind == HumanSeat:
       config.players[index].name = ""
       for participant in snapshot.participants:
         if participant.id == seat.owner:
@@ -195,11 +167,12 @@ proc prepareNetworkMatch*(
   var ownedSources = newSeq[string](activeSeats.len)
   for index, i in activeSeats:
     let seat = snapshot.seats[i]
-    if seat.owner == client.participant and seat.name != "Human" and i < sources.len:
+    if seat.owner == client.participant and seat.kind == BotSeat and i < sources.len:
       ownedSources[index] = sources[i]
   game.loadBotSources(ownedSources)
   result = NetworkMatch(client: client, game: game, revision: snapshot.revision,
-    spectator: true, heroSeats: activeSeats)
+    spectator: true, heroSeats: activeSeats, sources: @sources,
+    loadedSources: ownedSources)
   for seat in snapshot.seats:
     result.seats.add seat
     if seat.owner != 0 and seat.owner == client.participant:
@@ -212,30 +185,84 @@ proc requestStart*(client: RoomClient, sources: openArray[string]): NetworkMatch
     reject("Only the owner can start a lobby")
   result = prepareNetworkMatch(client, sources)
   client.send(RoomMessage(kind: StartMatch, revision: result.revision,
-    hash: result.game.networkHash()))
+    hash: setupHash(client.snapshot)))
 
 proc isSpectator*(session: NetworkMatch): bool =
   ## Bot owners are controllers too; only seatless participants watch locally.
   ## Keep this match's role even after a lobby update clears/reassigns seats.
   session != nil and session.spectator
 
+proc hasLocalControl*(session: NetworkMatch): bool =
+  ## Only existing match actors can be taken over without a new game setup.
+  if session == nil or session.client.participant == 0: return false
+  for seat in session.heroSeats:
+    if seat < session.client.snapshot.seats.len and
+        session.client.snapshot.seats[seat].owner == session.client.participant:
+      return true
+
+proc syncControllers*(session: NetworkMatch) =
+  ## Changes local policy ownership without resetting other private runtimes.
+  var desired = newSeq[string](session.heroSeats.len)
+  for index, seat in session.heroSeats:
+    if seat >= session.seats.len or seat >= session.client.snapshot.seats.len:
+      continue
+    let
+      applied = session.seats[seat]
+      current = session.client.snapshot.seats[seat]
+    if applied.owner == session.client.participant and
+        current.owner == session.client.participant and
+        applied.kind == BotSeat and current.kind == BotSeat and
+        seat < session.sources.len:
+      desired[index] = session.sources[seat]
+  if desired != session.loadedSources:
+    for index, source in desired:
+      if index >= session.loadedSources.len or
+          source != session.loadedSources[index]:
+        session.game.heroVms[index] = nil
+    session.game.loadBotSources(desired, preserve = true)
+    session.loadedSources = desired
+
+proc promoteController*(session: NetworkMatch) =
+  ## Leaves local spectator playback only once the archive reaches its live edge.
+  session.spectator = false
+  session.seats = session.client.appliedSeats
+  session.syncControllers()
+
+proc liveControlReady*(session: NetworkMatch): bool =
+  ## Recovery replays packets without generating new human or policy intents.
+  session != nil and session.started and session.client.connected and
+    session.client.welcomed and not session.client.catchingUp and
+    session.client.snapshot.phase == Playing and not session.finished and
+    uint32(session.game.world.tick) == session.client.applied
+
 proc flushSubmissions*(session: NetworkMatch) =
   ## Submits human and private bot intents through one ownership-checked path.
-  if session.isSpectator:
+  var rejected: RoomMessage
+  while session.client.takeRejected(rejected):
+    discard
+  session.syncControllers()
+  if not session.hasLocalControl() or not session.liveControlReady():
+    clearPlayerCommands()
+    session.game.submissions.setLen(0)
     return
   session.game.flushPlayerCommands()
   for submission in session.game.submissions:
     let index = session.game.world.heroIndex(submission.action.heroId)
-    if index < 0 or not session.client.submit(
-      uint32(session.heroSeats[index]), submission.encodeSubmission()
-    ):
+    if index < 0:
+      reject("Unable to find the local GotA actor")
+    let seat = session.heroSeats[index]
+    if seat >= session.client.snapshot.seats.len or
+        session.client.snapshot.seats[seat].owner != session.client.participant or
+        (submission.humanChat and
+          session.client.snapshot.seats[seat].kind != HumanSeat):
+      continue
+    if not session.client.submit(uint32(seat), submission.encodeSubmission()):
       reject("Unable to queue a local GotA command")
   session.game.submissions.setLen(0)
 
 proc canHumanChat*(session: NetworkMatch): bool =
   ## A bot controller or spectator cannot impersonate an unassigned human.
-  session != nil and session.started and not session.finished and
-    session.humanHeroIndex() >= 0
+  session.liveControlReady() and session.humanHeroIndex() >= 0
 
 proc sendHumanChat*(session: NetworkMatch, text: string, team = false): bool =
   ## Reuse the game submission envelope, never a second shared chat protocol.
@@ -257,7 +284,8 @@ proc visibleHumanChat*(session: NetworkMatch): seq[HumanChatMessage] =
 
 proc decide(session: NetworkMatch) =
   ## Runs owned VMs for live rooms while closed rooms only drain buffered ticks.
-  if session.isSpectator or
+  session.syncControllers()
+  if not session.hasLocalControl() or not session.liveControlReady() or
     session.decisionTick == session.game.world.tick or
     session.finished or session.client.snapshot.phase in {Ended, Desynced}:
       return
@@ -265,22 +293,26 @@ proc decide(session: NetworkMatch) =
   session.game.runBotDecisions()
   session.flushSubmissions()
 
+proc resumeControls*(session: NetworkMatch) =
+  ## Resumes decisions after CaughtUp even when no new tick was delivered.
+  session.decide()
+
 proc start*(session: NetworkMatch, message: RoomMessage) =
   ## Confirms the immutable setup before any VM or live tick executes.
   if message.revision != session.revision:
     reject("GotA setup revision changed before startup")
+  if setupHash(session.client.setupSnapshot()) != message.hash:
+    reject("GotA initial configuration differs from the agreed setup hash")
   session.match = message.match
   session.client.send(RoomMessage(
     kind: ReportHash, match: session.client.match, tick: 0,
     hash: session.game.networkHash()
   ))
-  if session.game.networkHash() != message.hash:
-    reject("GotA initial state differs from the agreed setup hash")
   session.started = true
   session.decide()
 
 proc applyPacket*(session: NetworkMatch, packet: RoomMessage, localPlayback = false) =
-  ## Validates ownership and executes a server tick in canonical sim phases.
+  ## Validates game payloads and executes an admitted tick in canonical phases.
   let
     game = session.game
     client = session.client
@@ -289,21 +321,14 @@ proc applyPacket*(session: NetworkMatch, packet: RoomMessage, localPlayback = fa
       reject("GotA received an unexpected simulation tick")
   # Validate the entire packet before applying any part of it.
   var submissions: seq[GameSubmission]
-  var serverNotice = false
   for command in packet.commands:
-    if command.participant == 0 or command.seat == ServerNoticeSeat:
-      if not command.validNotice() or serverNotice:
-        reject("Invalid GotA server notice")
-      serverNotice = true
-      continue
-    if command.seat >= uint32(session.seats.len) or
-      session.seats[command.seat].owner != command.participant:
-        reject("Command participant does not own this seat")
+    if command.participant == 0 or command.seat >= uint32(HeroClassCount):
+      reject("GotA command refers to an invalid slot")
     let submission = decodeSubmission(command.payload)
     let heroIndex = game.world.heroIndex(submission.action.heroId)
     if heroIndex < 0 or session.heroSeats[heroIndex] != int(command.seat):
       reject("GotA command hero does not belong to this seat")
-    if submission.humanChat and session.seats[command.seat].name != "Human":
+    if submission.humanChat and command.seatKind != HumanSeat:
       reject("Human chat requires a human seat")
     submissions.add submission
   # A cached spectator packet is replayed with its mailbox commands as well as
@@ -345,13 +370,13 @@ proc applyPacket*(session: NetworkMatch, packet: RoomMessage, localPlayback = fa
   game.tickWorld(nil)
   if uint32(game.world.tick) != packet.tick:
     reject("GotA failed to execute the authoritative tick")
-  # Only the recorded server command emits a system notice. Retain this latch
-  # outside rewindable worlds even after bounded display history evicts it.
-  if serverNotice:
+  # The game clock owns presentation reminders, including during local replay.
+  let noticeDue = game.matchNoticeDue()
+  if noticeDue:
     game.recorder.recordChat(ReplayChat(
       tick: packet.tick, kind: SystemReplayChat,
       target: -2, text: ThreeMinuteNotice))
-  if serverNotice and not session.noticeDelivered:
+  if noticeDue and not session.noticeDelivered:
     session.noticeDelivered = true
     session.humanChat.appendHumanChat(HumanChatMessage(
       tick: packet.tick, ordinal: -1, system: true,
@@ -362,6 +387,7 @@ proc applyPacket*(session: NetworkMatch, packet: RoomMessage, localPlayback = fa
     game.publishActionResult(outcome.action.heroId, outcome.accepted)
     let seat = game.world.heroIndex(outcome.action.heroId)
     if outcome.action.kind == ActionBuyItem and seat >= 0 and
+      session.heroSeats[seat] < client.snapshot.seats.len and
       client.snapshot.seats[session.heroSeats[seat]].owner == client.participant and
       game.heroVms[seat] == nil:
         purchaseReceipt = PurchaseReceipt(
@@ -380,6 +406,8 @@ proc applyPacket*(session: NetworkMatch, packet: RoomMessage, localPlayback = fa
         reject("Spectator replay state hash differs")
     return
   client.appliedTick(packet.tick)
+  if packet.seats.len > 0:
+    session.seats = packet.seats
   if packet.tick mod uint32(TickRate) == 0:
     client.send(RoomMessage(
       kind: ReportHash, match: client.match, tick: packet.tick,

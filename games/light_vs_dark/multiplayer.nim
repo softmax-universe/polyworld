@@ -2,7 +2,7 @@
 import jsony, polyworld/[rooms, roomclients, tapes, metrics, bodies, hashes, mailboxes],
   bots, content, controls, presets, replays, sim
 
-const LvdNetworkProtocol* = 4'u32
+const LvdNetworkProtocol* = 5'u32
 
 type NetworkMatch* = ref object
   client*: RoomClient
@@ -10,6 +10,9 @@ type NetworkMatch* = ref object
   revision*: uint32
   playerSeats*: seq[int] ## Packed simulation player -> stable lobby seat.
   started*, finished*: bool
+  setupDigest: uint64
+  sources: seq[string]
+  controllers: seq[Seat]
   decisionTick: int32 = -1
 
 proc lvdIdentity*(): GameIdentity =
@@ -27,20 +30,21 @@ proc networkHash*(game: Game): uint64 =
 proc humanSeatFor*(snapshot: RoomMessage, participant: uint32): int =
   result = -1
   for i, seat in snapshot.seats:
-    if participant != 0 and seat.owner == participant and seat.name == "Human":
-      if result >= 0: reject("Each participant can control only one human slot")
-      result = i
+    if participant != 0 and seat.owner == participant and seat.kind == HumanSeat:
+      return i
 
 proc claimHumanSeat*(client: RoomClient, seat: int, previous = -1) =
   if client.participant == 0 or seat notin 0 ..< client.snapshot.seats.len or
-    client.snapshot.seats[seat].owner notin [0'u32, client.participant]:
+    (client.snapshot.participant != client.participant and
+      client.snapshot.seats[seat].owner notin [0'u32, client.participant]):
       reject("Cannot take another participant's slot")
   for i, current in client.snapshot.seats:
     if i != seat and (i == previous or
-      (current.owner == client.participant and current.name == "Human")) and
+      (current.owner == client.participant and current.kind == HumanSeat)) and
       current.owner in [0'u32, client.participant]:
         client.send(RoomMessage(kind: ReleaseSeat, seat: uint32(i)))
-  client.send(RoomMessage(kind: ClaimSeat, seat: uint32(seat), name: "Human"))
+  client.send(RoomMessage(kind: ClaimSeat, seat: uint32(seat),
+    seatKind: HumanSeat, name: "Human"))
 
 proc encodeSubmission*(action: ReplayAction): string =
   for value in [int32(action.kind), action.playerId, action.entityId,
@@ -109,7 +113,7 @@ proc newLocalMatch*(config: LvdConfig, sources: openArray[string]): Game =
 
 proc prepareNetworkMatch*(client: RoomClient,
     sources: openArray[string]): NetworkMatch =
-  let snapshot = client.snapshot
+  let snapshot = client.setupSnapshot()
   var config = parseConfig(snapshot.payload)
   if client.identity != lvdIdentity() or snapshot.tickRate != uint32(TickRate) or
     snapshot.seats.len != config.playerCount:
@@ -131,7 +135,7 @@ proc prepareNetworkMatch*(client: RoomClient,
     playerSeats.add i
     owned.add ""
     config.players[player].name = seat.name
-    if seat.name == "Human":
+    if seat.kind == HumanSeat:
       config.players[player].name = ""
       for participant in snapshot.participants:
         if participant.id == seat.owner:
@@ -144,14 +148,25 @@ proc prepareNetworkMatch*(client: RoomClient,
   if config.playerCount == 0: reject("At least one occupied seat is required")
   let game = newLocalMatch(config, owned)
   game.networked = true
-  NetworkMatch(client: client, game: game, revision: snapshot.revision,
-    playerSeats: playerSeats)
+  result = NetworkMatch(client: client, game: game, revision: snapshot.revision,
+    playerSeats: playerSeats, setupDigest: snapshot.setupHash())
+  for source in sources: result.sources.add source
+  for seat in snapshot.seats: result.controllers.add seat
+
+proc requestStart*(client: RoomClient, sources: openArray[string]): NetworkMatch =
+  ## Starts the exact shared setup without requiring readiness from any player.
+  if client.snapshot.phase != Lobby or
+      client.snapshot.participant != client.participant:
+    reject("Only the owner can start a lobby")
+  result = prepareNetworkMatch(client, sources)
+  client.send(RoomMessage(kind: StartMatch, revision: client.snapshot.revision,
+    hash: client.snapshot.setupHash()))
 
 proc reopenedLobby*(session: NetworkMatch): bool =
   ## The owner may reopen while another participant still views the results.
   ## Yield the finished renderer so the frontend can prepare the next revision.
   session != nil and session.started and session.client != nil and
-    session.client.snapshot.room.len > 0 and session.client.snapshot.phase == Lobby
+    (session.client.snapshot.room.len == 0 or session.client.snapshot.phase == Lobby)
 
 proc playerForSeat*(session: NetworkMatch, seat: int): int =
   result = -1
@@ -159,7 +174,47 @@ proc playerForSeat*(session: NetworkMatch, seat: int): int =
     if stableSeat == seat: return player
 
 proc humanPlayerFor*(session: NetworkMatch, participant: uint32): int =
-  session.playerForSeat(session.client.snapshot.humanSeatFor(participant))
+  var roster = RoomMessage(seats: session.client.appliedSeats)
+  if not session.started: roster = session.client.setupSnapshot()
+  session.playerForSeat(roster.humanSeatFor(participant))
+
+proc syncControllers*(session: NetworkMatch) =
+  ## Changes local command producers after the authoritative roster is applied.
+  let seats = session.client.appliedSeats
+  for player, stableSeat in session.playerSeats:
+    let
+      previous = if stableSeat < session.controllers.len:
+          session.controllers[stableSeat] else: Seat()
+      current = if stableSeat < seats.len: seats[stableSeat] else: Seat()
+      wasLocalBot = previous.owner == session.client.participant and
+        previous.owner != 0 and previous.kind == BotSeat
+      isLocalBot = current.owner == session.client.participant and
+        current.owner != 0 and current.kind == BotSeat
+    if not isLocalBot:
+      session.game.brains[player] = nil
+    elif not wasLocalBot or previous.name != current.name:
+      let source = if stableSeat < session.sources.len:
+          session.sources[stableSeat] else: ""
+      session.game.loadBot(player, source)
+  session.controllers = @[]
+  for seat in seats: session.controllers.add seat
+
+proc setBotSource*(session: NetworkMatch, seat: int, source: string) =
+  ## Registers private code for a locally owned bot, including live takeovers.
+  if seat < 0: reject("Invalid bot seat")
+  if seat >= session.sources.len: session.sources.setLen(seat + 1)
+  session.sources[seat] = source
+  let player = session.playerForSeat(seat)
+  if player >= 0 and seat < session.client.appliedSeats.len:
+    let slot = session.client.appliedSeats[seat]
+    if slot.owner == session.client.participant and slot.kind == BotSeat:
+      session.game.loadBot(player, source)
+
+proc nextMatchSeats*(session: NetworkMatch): seq[int] =
+  ## Newly occupied slots without an initial kingdom enter on the next match.
+  for seat, slot in session.client.snapshot.seats:
+    if slot.owner != 0 and session.playerForSeat(seat) < 0:
+      result.add seat
 
 proc submissionSeat(session: NetworkMatch, player: int32): uint32 =
   if player < 0 or player >= session.playerSeats.len:
@@ -167,20 +222,45 @@ proc submissionSeat(session: NetworkMatch, player: int32): uint32 =
   uint32(session.playerSeats[player])
 
 proc flushSubmissions*(session: NetworkMatch) =
+  ## Discards stale input and retires reservations for rejected local commands.
+  var rejected: RoomMessage
+  while session.client.takeRejected(rejected):
+    var reader = PacketReader(data: rejected.payload)
+    if reader.get32() != 0:
+      session.game.world.retireProductionReservation(
+        rejected.payload.decodeSubmission())
   session.game.flushPlayerCommands()
+  if not session.client.connected or not session.client.welcomed or
+      session.client.catchingUp or session.client.snapshot.phase != Playing:
+    for action in session.game.submissions:
+      session.game.world.retireProductionReservation(action)
+    session.game.submissions.setLen(0)
+    session.game.chatSubmissions.setLen(0)
+    return
   for action in session.game.submissions:
-    if action.playerId < 0 or not session.client.submit(
-      session.submissionSeat(action.playerId), action.encodeSubmission()):
-        reject("Unable to queue a local LvD command")
+    if action.playerId < 0: continue
+    let seat = session.submissionSeat(action.playerId)
+    if seat >= uint32(session.client.snapshot.seats.len) or
+        session.client.snapshot.seats[seat].owner != session.client.participant:
+      session.game.world.retireProductionReservation(action)
+      continue
+    if not session.client.submit(seat, action.encodeSubmission()):
+      reject("Unable to queue a local LvD command")
   session.game.submissions.setLen(0)
   for chat in session.game.chatSubmissions:
-    if chat.player < 0 or not session.client.submit(
-      session.submissionSeat(chat.player), chat.encodeChat()):
-        reject("Unable to queue a local LvD mailbox message")
+    if chat.player < 0: continue
+    let seat = session.submissionSeat(chat.player)
+    if seat >= uint32(session.client.snapshot.seats.len) or
+        session.client.snapshot.seats[seat].owner != session.client.participant:
+      continue
+    if not session.client.submit(seat, chat.encodeChat()):
+      reject("Unable to queue a local LvD mailbox message")
   session.game.chatSubmissions.setLen(0)
 
 proc decide(session: NetworkMatch) =
-  if session.decisionTick == session.game.world.tick or session.finished:
+  if session.decisionTick == session.game.world.tick or session.finished or
+      not session.client.connected or not session.client.welcomed or
+      session.client.catchingUp or session.client.snapshot.phase != Playing:
     return
   session.decisionTick = session.game.world.tick
   if session.game.world.tick mod DecisionTicks == 0:
@@ -191,8 +271,8 @@ proc start*(session: NetworkMatch, event: RoomMessage) =
   if session.started or event.kind != BeginMatch or
     event.match != session.client.match or event.revision != session.revision:
       reject("LvD setup changed before startup")
-  if event.hash != session.game.networkHash():
-    reject("LvD initial state differs from agreed hash")
+  if event.hash != session.setupDigest:
+    reject("LvD initialization differs from the shared setup hash")
   session.client.send(RoomMessage(kind: ReportHash, match: session.client.match,
     tick: 0, hash: session.game.networkHash()))
   session.started = true
@@ -207,9 +287,10 @@ proc applyPacket*(session: NetworkMatch, packet: RoomMessage) =
   var actions: seq[ReplayAction]
   var chats: seq[ChatSubmission]
   for command in packet.commands:
-    if command.participant == 0 or command.seat >= uint32(client.snapshot.seats.len) or
-      client.snapshot.seats[command.seat].owner != command.participant:
-        reject("Command participant does not own this seat")
+    # The relay authenticates ownership when accepting each command. Later
+    # roster snapshots must never invalidate an earlier accepted command.
+    if command.participant == 0 or session.playerForSeat(int(command.seat)) < 0:
+      reject("Command refers to an uninitialized LvD player")
     var reader = PacketReader(data: command.payload)
     if reader.get32() == 0:
       let chat = decodeChat(command.payload)
@@ -262,6 +343,9 @@ proc applyPacket*(session: NetworkMatch, packet: RoomMessage) =
   game.sampleMetrics(session.finished)
   game.metrics.finishTick(game.world.tick)
   client.appliedTick(packet.tick)
+  client.appliedSeats = @[]
+  for seat in packet.seats: client.appliedSeats.add seat
+  session.syncControllers()
   if packet.tick mod uint32(TickRate) == 0:
     client.send(RoomMessage(kind: ReportHash, match: client.match,
       tick: packet.tick, hash: game.networkHash()))
@@ -277,8 +361,13 @@ proc advance*(session: NetworkMatch): bool =
     session.applyPacket(packet)
     result = true
 
+proc resumeControllers*(session: NetworkMatch) =
+  ## Resumes live decisions when catch-up completes without another tick.
+  session.decide()
+
 proc pump*(session: NetworkMatch, maxTicks = 8): int =
   while result < maxTicks and session.advance(): inc result
+  session.resumeControllers()
 
 proc abort*(session: NetworkMatch, detail: string) =
   session.client.error = detail

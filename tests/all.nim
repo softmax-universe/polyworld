@@ -43,15 +43,28 @@ import
   test_llms,
   test_llm_hosts,
   test_rooms,
+  test_generic_relay,
+  test_cosmetic_ready,
   test_room_codes,
   test_relay_async_hashes,
   test_relay_readiness,
+  test_start_intent,
   test_sparse_rooms,
   test_room_resize,
-  test_galcon_relay_support,
+  test_opaque_setup,
   test_client_loading_gap,
   test_roomclients,
   test_networks,
   ../games/gods_of_the_arena/tests/test_multiplayer as TestGotaMultiplayer
+
+# Exercise game adapters against the shared relay, including live ownership,
+# reconnect recovery, and warnings derived only from the local simulation.
+import
+  ../games/gods_of_the_arena/tests/test_live_slots as TestGotaLiveSlots,
+  ../games/gods_of_the_arena/tests/test_match_notice_network as TestGotaLocalNotices,
+  ../games/light_vs_dark/tests/test_live_slots as TestLvdLiveSlots,
+  ../games/light_vs_dark/tests/test_match_clock as TestLvdLocalNotices,
+  ../games/cac/tests/test_network as TestCacNetwork,
+  ../games/cac/tests/test_network_catchup as TestCacCatchup
 
 echo "CI tests passed"

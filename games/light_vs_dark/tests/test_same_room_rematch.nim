@@ -1,7 +1,7 @@
 ## Native binary-relay lifecycle regression; no fabricated BeginMatch or world edits.
 import std/[unittest, macros, strutils, importutils]
 import jsony, polyworld/[rooms, relays, roomclients, tapes]
-import ../[multiplayer, presets, content, lobbyreadiness, controls, sim, replays]
+import ../[multiplayer, presets, content, controls, sim, replays]
 when defined(liveSameRoomRematch):
   import std/[os, times]
   import windy, vmath, polyworld/connections
@@ -31,7 +31,6 @@ type Fixture = ref object
   relay: Relay
   clients: array[2, RoomClient]
   sessions: array[2, NetworkMatch]
-  readiness: array[2, ReadyRefresh]
   revisions: array[2, uint32]
   sources: array[2, seq[string]]
   inMatch: array[2, bool]
@@ -84,8 +83,9 @@ proc frame(f: Fixture, i: int) =
     renderedFrame()
     if not leaveMatch: return
     f.inMatch[i] = false
-  discard f.readiness[i].refreshRetainedReady(f.clients[i], f.sources[i],
-    f.sessions[i], f.revisions[i])
+  if f.clients[i].snapshot.phase == Lobby:
+    f.sessions[i] = nil
+    f.revisions[i] = 0
 
 proc lobby(): Fixture =
   result = Fixture(relay: Relay())
@@ -115,13 +115,13 @@ proc lobby(): Fixture =
   result.exchange()
   result.awaitState(result.clients[1].snapshot.room == result.clients[0].snapshot.room)
   result.clients[0].claimHumanSeat(1)
-  result.clients[0].send(RoomMessage(kind: ClaimSeat, seat: 0, name: "Private policy"))
+  result.clients[0].send(RoomMessage(kind: ClaimSeat, seat: 0, seatKind: BotSeat, name: "Private policy"))
   result.clients[1].claimHumanSeat(3)
   result.sources[0] = @[readFile("games/light_vs_dark/players/base.bas"), "", "", ""]
   result.sources[1] = @["", "", "", ""]
   result.exchange()
   let f = result
-  let expected = @[Seat(owner: f.clients[0].participant, name: "Private policy"),
+  let expected = @[Seat(owner: f.clients[0].participant, kind: BotSeat, name: "Private policy"),
     Seat(owner: f.clients[0].participant, name: "Human"), Seat(),
     Seat(owner: f.clients[1].participant, name: "Human")]
   f.awaitState(f.clients[0].snapshot.seats == expected and f.clients[1].snapshot.seats == expected)
@@ -142,7 +142,8 @@ proc cleanup(f: Fixture) =
     f.window.close()
 
 proc playRound(f: Fixture): uint64 =
-  f.clients[0].send(RoomMessage(kind: StartMatch))
+  for i in 0 .. 1: f.frame(i)
+  f.sessions[0] = requestStart(f.clients[0], f.sources[0])
   f.exchange()
   for frame in 0 ..< 5:
     for i in 0 .. 1: f.frame(i)
@@ -150,13 +151,18 @@ proc playRound(f: Fixture): uint64 =
   doAssert f.clients[0].snapshot.phase == Playing,
     "Rematch stuck: guest still owns finished renderer, no new preparation"
   result = f.clients[0].match
+  for i in 0 .. 1:
+    if f.sessions[i] == nil:
+      f.sessions[i] = prepareNetworkMatch(f.clients[i], f.sources[i])
+    f.revisions[i] = f.sessions[i].revision
   for i, session in f.sessions:
     doAssert f.clients[i].events.len == 1
     doAssert not session.started and not session.finished
     doAssert session.game.world.tick == 0
     doAssert session.playerSeats == @[0, 1, 3]
     doAssert session.humanPlayerFor(f.clients[i].participant) == i + 1
-    doAssert not f.readiness[i].cosmeticReady
+    for participant in f.clients[i].snapshot.participants:
+      doAssert not participant.ready
     doAssert (session.game.brains[0] != nil) == (i == 0)
     session.start(f.clients[i].events[0])
     f.clients[i].events.setLen(0)
@@ -267,51 +273,40 @@ suite "LvD reusable same room":
         check client.packets.len == 0
       check f.sources == sources
 
-  test "reopened preparation failure retires old world and retries only next revision":
+  test "invalid private policy fails an explicit rematch before sending start":
     let f = lobby()
     defer: f.cleanup()
     discard f.playRound()
     check returnToMatchLobby(f.sessions[0])
     f.exchange()
     f.inMatch = [false, false]
+    for i in 0 .. 1: f.frame(i)
     f.sources[0][0] = "this is not BASIC !!!"
-    var failures = 0
-    for frame in 0 ..< 5:
-      try: f.frame(0)
-      except CatchableError: inc failures
-    check failures == 1
-    check f.sessions[0] == nil
-    check f.revisions[0] == 0
+    expect CatchableError:
+      discard requestStart(f.clients[0], f.sources[0])
+    check f.clients[0].snapshot.phase == Lobby
     check f.clients[0].outgoing.len == 0
+    check f.sessions[0] == nil
     f.sources[0][0] = readFile("games/light_vs_dark/players/base.bas")
-    f.clients[0].send(RoomMessage(kind: ClaimSeat, seat: 0, name: "Repaired private policy"))
-    f.exchange()
-    f.frame(0)
-    require f.sessions[0] != nil
-    check not f.sessions[0].started
-    check f.sessions[0].game.world.tick == 0
-    check f.revisions[0] == f.clients[0].snapshot.revision
-    check f.clients[0].outgoing.len == 1
-    f.frame(0)
-    check f.clients[0].outgoing.len == 1
+    discard f.playRound()
 
-  test "mismatched preparation desync can reopen without retry loops or seat resets":
+  test "tick-zero simulation disagreement can reopen without losing the roster":
     let f = lobby()
     defer: f.cleanup()
-    f.frame(0)
+    f.sessions[0] = requestStart(f.clients[0], f.sources[0])
     f.exchange()
-    let revision = f.clients[0].snapshot.revision
+    f.sessions[1] = prepareNetworkMatch(f.clients[1], f.sources[1])
+    for i in 0 .. 1:
+      f.sessions[i].start(f.clients[i].events[0])
+      f.clients[i].events.setLen(0)
+    f.exchange()
     let wrongHash = f.sessions[0].game.networkHash() xor 1'u64
-    f.clients[0].send(RoomMessage(kind: StartMatch))
-    f.clients[1].send(RoomMessage(kind: PreparedDuration, durationTicks: uint32(f.sessions[0].game.maximumTicks), revision: revision, hash: wrongHash))
+    f.clients[1].send(RoomMessage(kind: ReportHash, match: f.clients[1].match,
+      tick: 0, hash: wrongHash))
     f.exchange()
     for client in f.clients:
       check client.snapshot.phase == Desynced
-      check client.events.len == 0
     let originalSeats = f.clients[0].snapshot.seats
-    for frame in 0 ..< 5: f.frame(0)
-    check f.clients[0].outgoing.len == 0
-    # The owner can reopen even if BeginMatch was never emitted.
     check returnToMatchLobby(f.sessions[0])
     f.exchange()
     for client in f.clients:
@@ -320,7 +315,6 @@ suite "LvD reusable same room":
       check client.snapshot.seats == originalSeats
     for i in 0 .. 1: f.frame(i)
     f.exchange()
-    # Reopening must cancel the previous host intent.
     check f.clients[0].snapshot.phase == Lobby
     check f.clients[0].events.len == 0
     discard f.playRound()

@@ -1,4 +1,4 @@
-## Inspect literal Relay.advance history bytes BEFORE any client consumes them.
+## Real relay packets stay opaque while each client derives its own warning.
 import jsony
 import polyworld/[rooms, roomclients, relays]
 import ../[chats, content, matchtiming, multiplayer, presets, replays, sim]
@@ -33,7 +33,7 @@ proc run(limit: int32, pickEarly: bool, mode = UniqueDraft, seed = 54'i32) =
   config.maxTicks = limit
   config.draftMode = mode
   config.seed = seed
-  clients[0].send(RoomMessage(kind: CreateRoom, name: "Server notice QA",
+  clients[0].send(RoomMessage(kind: CreateRoom, name: "Local notice QA",
     number: 10, tickRate: 24, payload: config.toJson()))
   exchange()
   clients[1].send(RoomMessage(kind: JoinRoom, room: clients[0].snapshot.room))
@@ -43,7 +43,7 @@ proc run(limit: int32, pickEarly: bool, mode = UniqueDraft, seed = 54'i32) =
   exchange()
   let sessions = [prepareNetworkMatch(clients[0], []), prepareNetworkMatch(clients[1], [])]
   clients[0].send(RoomMessage(kind: StartMatch, revision: sessions[0].revision,
-    hash: sessions[0].game.networkHash()))
+    hash: setupHash(clients[0].snapshot)))
   exchange()
   for i, session in sessions:
     doAssert clients[i].error.len == 0, clients[i].error
@@ -51,7 +51,6 @@ proc run(limit: int32, pickEarly: bool, mode = UniqueDraft, seed = 54'i32) =
     clients[i].events.setLen(0)
   exchange()
   let room = relay.room(clients[0].snapshot.room)
-  var notices = 0
   var expected = 0'u32
   var captured: seq[RoomMessage]
   var beforeNotice: World
@@ -63,18 +62,12 @@ proc run(limit: int32, pickEarly: bool, mode = UniqueDraft, seed = 54'i32) =
       let packet = decode(room.history[^1])
       captured.add packet
       for command in packet.commands:
-        if command.participant == 0:
-          inc notices
-          doAssert command.seat == high(uint32)
-          doAssert packet.tick == expected and expected > 0
-          doAssert command.sequence == 1
-          doAssert command.payload.len == 8
-          doAssert sessions[0].game.remainingMatchTicks() == 180 * TickRate + 1,
-            "Actual simulation must have exactly 3 minutes left after this tick"
-          var reader = PacketReader(data: command.payload)
-          doAssert reader.get32() == 3 and reader.get32() == 1
-          doAssert sessions[0].humanChat.len == 0, "Inspect server bytes before display"
-          beforeNotice = sessions[0].game.world.clone()
+        doAssert command.participant != 0,
+          "The relay must not inject game-specific notice commands"
+      if expected > 0 and packet.tick == expected:
+        doAssert sessions[0].game.remainingMatchTicks() == 180 * TickRate + 1
+        doAssert sessions[0].humanChat.len == 0
+        beforeNotice = sessions[0].game.world.clone()
     exchange()
     for i, session in sessions:
       var packet: RoomMessage
@@ -84,20 +77,6 @@ proc run(limit: int32, pickEarly: bool, mode = UniqueDraft, seed = 54'i32) =
     doAssert sessions[0].humanChat == sessions[1].humanChat
     if expected == 0 and sessions[0].game.world.phase == Playing:
       expected = uint32(sessions[0].game.world.draftTicks + PreparationTicks + limit - 180 * TickRate)
-  # A forged human may not queue a reserved server notice even on its own seat.
-  var forged: string
-  forged.put32(3)
-  forged.put32(1)
-  clients[0].send(RoomMessage(kind: SubmitCommand, match: clients[0].match,
-    seat: 1, sequence: 1, payload: forged))
-  exchange()
-  doAssert clients[0].error.len > 0, "Relay must reject reserved server payload from a human"
-  clients[0].error = ""
-  clients[0].send(RoomMessage(kind: SubmitCommand, match: clients[0].match,
-    seat: high(uint32), sequence: 1, payload: forged))
-  exchange()
-  doAssert clients[0].error.len > 0
-  clients[0].error = ""
   var paused = false
   var reconnected = false
   while room.tick < 2 * DraftPickTicks.uint32 + PreparationTicks.uint32 + 3 * TickRate.uint32:
@@ -122,22 +101,22 @@ proc run(limit: int32, pickEarly: bool, mode = UniqueDraft, seed = 54'i32) =
       exchange()
       let frozen = room.tick
       for i in 0 ..< 5: step()
-      doAssert room.tick == frozen and notices == 0
+      doAssert room.tick == frozen and sessions[0].humanChat.len == 0
       clients[0].send(RoomMessage(kind: PauseMatch, match: room.match, flag: false))
       exchange()
       paused = true
     step()
-    if limit > 180 * TickRate and notices > 0 and room.tick > expected + 2: break
+    if limit > 180 * TickRate and sessions[0].humanChat.len > 0 and room.tick > expected + 2: break
     if limit <= 180 * TickRate and room.tick > 2 * DraftPickTicks.uint32 + PreparationTicks.uint32 + 2: break
   if limit <= 180 * TickRate:
-    doAssert notices == 0 and sessions[0].humanChat.len == 0
+    doAssert sessions[0].humanChat.len == 0
   else:
     doAssert reconnected
-    doAssert notices == 1 and sessions[0].humanChat.len == 1
+    doAssert sessions[0].humanChat.len == 1
     doAssert sessions[0].humanChat[0].system
     doAssert sessions[0].humanChat[0].text == "3 minutes remain"
     doAssert sessions[0].humanChat[0].tick == expected
-    # A real late spectator joins and obtains the server-recorded Catchup bytes.
+    # A late spectator derives the same notice from ordinary catch-up ticks.
     clients.add RoomClient(identity: gotaIdentity(), name: "Late spectator")
     clients[2].opened()
     exchange()
@@ -154,7 +133,7 @@ proc run(limit: int32, pickEarly: bool, mode = UniqueDraft, seed = 54'i32) =
       exchange()
     doAssert late.humanChat == sessions[0].humanChat
     doAssert late.game.networkHash() == sessions[0].game.networkHash()
-    # Fresh reconnect/packet replay consumes the recorded server command.
+    # Fresh local history playback derives the same game-owned warning.
     let watcher = prepareNetworkMatch(clients[1], [])
     watcher.started = true
     watcher.match = room.match
@@ -164,9 +143,9 @@ proc run(limit: int32, pickEarly: bool, mode = UniqueDraft, seed = 54'i32) =
     doAssert watcher.game.networkHash() == sessions[0].game.networkHash()
     watcher.game.world.restore(beforeNotice)
     watcher.applyPacket(captured[int(expected) - 1], localPlayback = true)
-    doAssert watcher.humanChat.len == 1, "Seek may not duplicate recorded notice"
-  echo "Server notice real Relay.advance: limit=", limit, " early=", pickEarly,
-    " mode=", mode, " seed=", seed, " notices=", notices, " tick=", expected
+    doAssert watcher.humanChat.len == 1, "Seek may not duplicate the local notice"
+  echo "Local notice with real relay: limit=", limit, " early=", pickEarly,
+    " mode=", mode, " seed=", seed, " tick=", expected
 
 run(182 * TickRate, false)
 run(182 * TickRate, true)

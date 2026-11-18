@@ -1,166 +1,177 @@
 # Polyworld gameserver
 
-The gameserver is a WebSocket switchboard. It knows exact game identities,
-participants, seats and ticks. Setup and command payloads are opaque bytes.
-It never imports a game simulation, executes a bot, or receives bot programs,
-weights or private VM memory. GotA is the first client integration.
+The gameserver is a WebSocket relay for game clients. It owns rooms,
+participants, slot assignments, command ordering, retained packets and hash
+comparison. It treats game identity fields as compatibility labels and game
+configuration JSON and command payloads as opaque bytes. It has no game
+imports, gameplay rules, team rules, draft logic or match-duration clock.
+
+The shared room protocol is version 5. Rebuild the relay and every client
+using it together. Earlier wire versions are rejected; there are no legacy
+game adapters in the server. See [the packet reference](gameserver-packets.md)
+for the complete wire layout.
 
 ## Run locally
 
 Install the repository's locked Nim dependencies, then run from the checkout:
 
 ```sh
-nim r tools/gameserver.nim --port 9911 --address 0.0.0.0
-nim r games/gods_of_the_arena/gota.nim --server ws://127.0.0.1:9911/ws
+nim r tools/gameserver.nim --port 9911 --address 127.0.0.1
 ```
 
-The relay defaults to `ws://127.0.0.1:8090/ws`. `BIND` and `PORT` change the
-listening address and port; `--address` overrides `BIND` and `--port` overrides
-`PORT`. Use `--address 0.0.0.0` to accept connections on all IPv4 interfaces,
-including Tailscale. `GET /healthz` is a
-health check. Native and browser
-clients use Windy's WebSocket API. The server uses Mummy and one explicit room
-event loop. Mummy's workers pass bounded events into that loop.
+Connect a native or browser game client to `ws://localhost:9911/ws`. Each
+game owns its launch options and menus. An HTTPS game page needs a `wss://`
+relay. `GET /healthz` provides a health check.
 
-`--server` opens Multiplayer and connects automatically. Choose human and bot
-seats in the lobby. Without `--server`, GotA opens the main menu as usual.
+The executable defaults to port 8090 on `127.0.0.1`. `PORT` and `BIND`
+override those defaults; `--port` and `--address` override the environment.
+Use `--address 0.0.0.0` to listen on all IPv4 interfaces, including Tailscale.
+The server uses Mummy's socket workers and one room event loop. Workers pass
+bounded transport events to that loop; only the loop mutates room state.
 
-Set and remember your display name with `--player "Andre"` on native or
-`?player=Andre` in the web URL. Spaces in URLs use `%20`, for example
-`?player=Andre%20von%20Houck`. This skips the first-time name prompt.
-Numeric values still select a human seat, such as `--player:2` or `?player=2`.
+## Rooms and identities
 
-A normal graphical launch opens Single player, Multiplayer and Settings.
-Native builds also offer Exit to OS. Single player defaults to one human and
-nine base bots. Choose another seat, load local BASIC or ZIP policies, or
-spectate ten bots. Match settings expose the existing game configuration.
-Explicit `--bot`, `--replay`, headless and Coworld runs bypass the menu.
+Clients supply a game name, gameplay version and game payload protocol
+version. The relay compares all three fields for exact equality when listing
+rooms, joining and reconnecting. Their values never select different server
+behavior. The outer room protocol version is checked independently.
 
-For the browser build, with Emscripten installed:
+The creator owns the room, chooses public or unlisted visibility and manages
+its configuration and participants. New invitation codes contain six
+uppercase letters or digits. They identify rooms; they are not reconnect
+credentials. Reconnect tokens are private, randomly generated secrets and
+are never included in room snapshots or invitations.
 
-```sh
-nim c -d:emscripten games/gods_of_the_arena/gota.nim
-python3 -m http.server 8776 --bind 127.0.0.1
-```
+A participant may own human or bot slots, or watch without owning a slot.
+Each slot has an explicit controller kind, owner participant and display
+name. A display name never grants permissions or identifies a bot. Teams,
+factions and other game groupings belong to the game's configuration.
 
-Open `http://127.0.0.1:8776/games/gods_of_the_arena/emscripten/gota.html`.
-The bundled base policy is in the data bundle. The file picker reads local
-`.bas` or policy `.zip` files into WASM memory. It does not upload their bytes.
-An HTTPS game page needs a `wss://` relay.
+The same ownership rules apply to every game and in every match phase:
 
-## Rooms and ownership
+- The host may assign or reassign any slot to a room participant, remove any
+  human or bot slot assignment, and remove other participants.
+- Other participants may claim empty slots for themselves or their bots,
+  update their own assignments, and release only assignments they own.
+- Removing a participant releases that participant's assignments.
+- Resizing may add empty slots or remove trailing slots. During a match it
+  cannot change the game's initial configuration bytes or tick rate.
 
-Clients identify a game name, exact gameplay version, exact game payload
-protocol version and display name. The outer binary protocol also has an
-exact version. Different identities can use the same server but cannot join
-the same room.
+Bots run in their owners' clients. The relay receives their ordinary
+commands and routing metadata, never bot source, weights or VM memory.
+Assigning a bot slot does not transfer a bot implementation between clients.
+Each game's client decides how a newly controlled slot maps to its gameplay.
 
-The creator chooses public or unlisted visibility, manages settings, removes
-lobby participants and starts the match. Invite links include the server and
-room identifier, never the reconnect token. Guest tokens are private and
-remain only in the running client's memory.
+A room exists while at least one participant remains connected, including
+seatless spectators and bot owners. The last departure, disconnect or
+15-second inactivity timeout deletes the room and its history. A reconnect
+token can restore a participant identity, but cannot restore a deleted room.
+Replacing an existing connection with its authenticated reconnect token
+counts as continuous presence.
 
-Each participant may own several seats. A participant can bring only bots
-and watch them play. Each bot runs solely in its owner's client. Remote seats
-have no VM. Startup policy depends on the adapter: GotA uses a host-prepared
-hash and sparse seats; Galcon protocol 2+ and LvD protocol 3+ use automatic
-revision-bound preparation, independently of cosmetic Ready. Older policies
-retain their readiness gates, and older LvD requires a dense roster. At least
-one seat must be occupied and all controllers must be connected. Spectators
-may join after the match starts. See the packet reference for details.
+## Initialization and readiness
 
-Rooms exist only while at least one participant is connected. Controllers,
-bot-only seat owners and seatless spectators all count as people watching;
-bot seats do not independently keep a room alive. The last departure,
-disconnect or 15-second inactivity timeout deletes the room in every phase,
-including paused, completed and desynced matches. Its listing, history, queued
-commands and membership are removed. The old invite cannot join it, and a
-reconnect token can restore the participant identity but never the deleted room.
-An authenticated replacement of an existing socket is continuous presence.
-The relay cannot distinguish an automated protocol participant from a person;
-any connected participant keeps the room alive.
+The initial setup consists of the ordered slot responsibilities and opaque
+game configuration, together with the chosen tick rate and initial owner
+display names. `setupHash` in `rooms.nim` hashes this shared representation
+identically for every game. It hashes the exact configuration bytes; it does
+not parse, normalize or compare JSON fields.
 
-## Timeline and mandatory hash checks
+The host starts by sending the current room revision and `setupHash` of that
+snapshot. The relay validates those two values and starts immediately. There
+is no manual readiness gate, preparation handshake or wait for connected
+controllers. `ReadyStatus` changes only the visible ready flag so that the
+host can see participants' intentions.
 
-The server assigns consecutive command sequences to execution ticks in
-receipt order. It sends immutable tick packets at the room's tick rate,
-including empty packets. GotA uses 24 Hz. Every client applies the same packet
-exactly once and never advances without a packet. The server checks seat
-ownership and envelope bounds. Each game checks its own payload semantics.
+`BeginMatch` contains the immutable initial setup and its hash. Every client
+checks that hash, then lets its game parse the JSON and build the initial
+simulation. Invalid game settings are handled by the game client, not by
+server-specific rules. Clients report the resulting simulation hash at tick
+zero. That simulation hash is separate from the shared setup hash: the first
+report establishes the checkpoint and later reports must match it.
 
-Hash checking cannot be disabled. Galcon and LvD automatic preparation
-compares current-revision controller hashes before startup. GotA instead starts
-from the host's prepared hash; peers validate and report tick zero. During play,
-clients report a hash every simulated second. The first
-report for a match/tick establishes its historical hash; subsequent reports
-compare against that same checkpoint. Missing or late hashes never delay ticks.
-A differing hash stops the match and reports the tick and hash values. The first
-controller completion ends tick production; later final reports are compared
-asynchronously too. Historical checkpoints remain available to late clients. GotA's network digest includes
-its immutable game configuration and its normal replay state digest.
+Initial setup stays immutable throughout the match. Later `RoomState`
+snapshots describe current room membership and assignments; they must not be
+used to reconstruct the starting world. `RoomClient.initialSnapshot` and
+`setupSnapshot(client)` provide the initial setup after a match begins.
 
-While another participant remains connected, slow or disconnected controllers
-do not pause the room. Reconnection restores
-the same participant, seats, unacknowledged command sequences and local VMs.
-The returning client replays missing packets while the room keeps running. Outstanding hash and completion
-reports are retransmitted. This supports connection interruptions while the
-original application remains open, not browser refreshes or process restarts.
-No substitute bots, state repair or silent desync recovery are performed.
+## Commands and live ownership changes
 
-Late spectators replay the setup and history without running bots. Slow
-spectators do not hold up controllers. Disagreeing spectator hashes still
-report a desync and stop the match. This is consistency checking, not
-anti-cheat: clients remain trusted to submit their own commands and hashes.
+The server admits commands only for slots currently owned by their sender,
+assigns them to the next tick and preserves receipt order. Each retained
+command records its submitting participant, slot and controller kind at
+admission. Game clients validate gameplay payloads and game-specific actor
+ownership; they do not recheck historical commands against the latest room
+snapshot.
 
-## GotA command results and replays
+Each `TickPacket` contains the full routing roster at the end of that tick.
+Apply the commands using their retained provenance, then adopt that roster
+for subsequent control decisions. `RoomClient.appliedSeats` advances with
+`appliedTick`. This separates the current administrative snapshot from the
+roster at a client's actual simulation position. Reassigning or releasing a
+slot does not rewrite commands already accepted for it. Input that arrives
+after its sender loses the slot is acknowledged as discarded, so the client
+can retire it without breaking its command sequence.
 
-In multiplayer, an immediate action return means that the command was queued.
-It does not promise that the action will succeed when its server tick executes.
-The existing BASIC action-result fields update from authoritative execution,
-including rejected actions. Offline action returns retain their existing
-immediate behavior. Human and local bot actions use the same submission path.
-Bot mailbox messages travel in GotA's opaque game payload.
+Every client executes each consecutive tick exactly once, including empty
+ticks. Clients do not advance live simulation without an authoritative
+packet. They report a simulation hash every simulated second. The relay
+compares each report to that tick's historical checkpoint; missing or late
+reports never hold up tick production. A mismatch stops the match visibly.
+There is no state repair or gameplay validation in the relay.
 
-Normal game replays record executed action packets using the existing exact
-replay format. Playback does not need the relay, bot source, weights or VM
-memory. Use Save replay after a multiplayer match to save it natively or
-download it in the browser. There are no historical replay compatibility
-branches. The outer protocol is version 4 and the GotA command protocol is
-version 3; action replay files do not contain human chat messages.
+Games decide when they have finished and report the final tick and hash.
+The relay compares completion reports and stops producing ticks. It never
+calculates a winner, enforces a game duration, or emits gameplay warnings.
+Countdowns and notices such as remaining-time popups belong to each game's
+client and replay presentation.
 
-## Escape menu and pause
+## Joining, reconnecting and catch-up
 
-Escape opens Return to game, Pause/Resume match, Settings and Quit to main menu.
-Opening it alone leaves the match running. Offline pause stops local simulation.
-In multiplayer any controlling participant may pause or resume the room;
-spectators cannot. The server stops emitting ticks, preserves pending commands
-and continues checking arriving hashes. Reconnection does not clear a pause.
+A new connection identifies itself with an empty reconnect token. A returning
+connection uses its existing token to resume the same participant identity.
+A participant joining a running room initially owns no slots, but may claim
+an empty slot or receive an assignment under the ordinary ownership rules.
+The game determines what that assignment means for its existing world.
 
-Settings remain local and are persisted. A live controller quitting explicitly
-aborts the match for everyone before leaving the room. Spectators can leave
-without ending it. There is no silent controller replacement.
+The relay sends the immutable `BeginMatch` setup separately from the current
+`RoomState`. A late client can reconstruct from that setup and replay retained
+tick packets. A reconnecting live client keeps its simulation and private bot
+VMs and requests packets after its applied tick. Unacknowledged commands and
+hash reports are retried without duplicating accepted commands.
 
-## Limits and failure behavior
+Slow or disconnected controllers do not pause the room while another
+participant remains connected. Slow clients pull bounded history batches
+instead of accumulating unbounded live packets. Spectators use the same
+history and hash checks without executing other participants' bots.
 
-The relay limits rooms to 64, guests to 512 and live sockets to 256. A room
-supports up to 64 seats and 64 participants. Messages are at most 256 KiB,
-setup blobs 64 KiB and individual commands 4 KiB. Each pending tick is bounded
-by command count and encoded byte size. Exhausting pending/history capacity
-stops the match visibly instead of dropping accepted commands.
+Room state is in memory. Restarting the relay loses its rooms. Recovering a
+private bot VM after a browser refresh or client process restart is not
+provided by the relay. Clients remain trusted to submit their own commands
+and simulation hashes; hash agreement is consistency checking, not
+server-authoritative anti-cheat.
 
-History is limited to 128 MiB per room, 512 MiB across rooms, and
-345,600 ticks per room. Transport credit is 512 KiB per participant, released
-by receipt acknowledgements. Incoming
-traffic is limited to 256 KiB per second per identified client. Catch-up sends
-16 ticks per batch. Clients more than 16 ticks behind pull history instead of
-receiving unbounded live ticks; they never pause production.
-Inactive connections are closed after 15 seconds and can reconnect. Disconnected
-controllers retain membership only while another connected participant keeps
-the room alive; there is no separate controller-removal timeout.
+## Pause, departure and limits
 
-The relay has no accounts, shared chat opcode, ranked matchmaking, cold recovery,
-late players taking seats or authoritative anti-cheat. Restarting the relay
-ends its rooms. Deployment to Softmax is separate from this implementation.
+The host or a controller can pause or resume tick production. Already issued ticks remain
+immutable, queued commands stay queued, and acknowledgements and hash checks
+continue. Resume resets the scheduling deadline without producing a burst of
+missed wall-clock ticks. Leaving or being removed releases assignments; the
+remaining participants can continue. An explicit `AbortMatch` reports a fatal
+client-side failure and stops the match.
+
+There is no fixed match-duration or history-tick ceiling. Resource limits
+still bound memory and traffic: 64 rooms, 512 guests, 256 live sockets, and
+64 slots and participants per room. Packets are at most 256 KiB, setup payloads
+64 KiB and individual commands 4 KiB. Pending commands and retained history
+are bounded by encoded size. Exhaustion stops a match visibly instead of
+dropping accepted commands.
+
+History has a 128 MiB accounting budget per room and 512 MiB across rooms.
+Outgoing transport credit is 512 KiB per participant, released by receipt
+acknowledgements. Incoming traffic is limited to 256 KiB per second per
+identified participant. Catch-up transfers at most 16 ticks per batch.
+These are service resource bounds, not gameplay duration rules.
 
 ## Hosting
 
@@ -170,77 +181,28 @@ A container example is in `tools/gameserver/Dockerfile`. From the checkout:
 docker compose -f tools/gameserver/compose.yaml up --build -d
 ```
 
-The compose file publishes only loopback port 8090. Put the supplied
-`tools/gameserver/nginx.conf` locations inside an existing TLS-enabled nginx
-server block with your domain and certificate. Keep the relay private behind
-that proxy and expose `/ws` as `wss://your-domain/ws`. The container runs as a
-non-root user. Set host resource limits for the intended number of rooms.
+The compose file publishes loopback port 8090. Put the supplied
+`tools/gameserver/nginx.conf` locations inside a TLS-enabled nginx server
+block and expose `/ws` as `wss://your-domain/ws`. The container runs as a
+non-root user. Configure host resource limits for the expected room count.
+The server build requires shared server/protocol modules, not game sources.
 
-## Extending another game
+## Integrating a game
 
-Use `rooms`, `roomclients` and `connections` for the shared protocol and Windy
-transport. Define an exact `GameIdentity`, encode your setup and commands,
-create the local simulation, and supply hashes. `menus` supplies common menu
-widgets, settings storage and local policy selection. GotA's `multiplayer.nim`
-shows game-owned payload validation and tick application; the relay imports
-none of it.
+Games import `rooms`, `roomclients` and `connections`. The dependency points
+from games to the shared relay protocol; the relay imports no game adapter.
+A game supplies its exact compatibility identity, JSON setup, command codec,
+local simulation, replay representation and simulation hash function.
 
-Focused regressions are `tests/test_relay_async_hashes.nim`, `tests/test_rooms.nim` and
-`games/gods_of_the_arena/tests/test_multiplayer.nim`. `games/gods_of_the_arena/tests/manual_network.nim` supplies a
-native Windy client that owns five base bots and can play against a browser
-client. Its `GOTA_ROOM`, `GOTA_SEAT_START`, `GOTA_SEAT_COUNT`, `GOTA_NAME` and
-`GOTA_SERVER` environment variables configure a local transport check.
+Use explicit human/bot slot kinds and the common ownership operations.
+Send `ReadyStatus` only for display. Start with the current revision and
+`setupHash`; reconstruct with `setupSnapshot(client)`. During play, process
+opaque game commands from each tick, apply the tick's ending roster and
+report simulation hashes. Keep teams, drafting, duration, rules and notices
+inside the game. No server change is needed to introduce another game.
 
-## Validation of this implementation
-
-The server echoes timestamped lifecycle events to stdout: connections,
-identification and reconnects, room membership and settings, match starts,
-pauses, resume requests, completion and stops. Rejected requests, timeouts,
-and outgoing buffer limits include their reason. Names are escaped to keep
-each event on one line. Reconnect tokens, invite codes and game payloads
-are omitted, as are routine ticks, commands and successful hash checks.
-
-GotA's F1 Network tab uses the normal Silky controls. Its scrolling graphs
-show received/sent KB and packets per second, server-measured RTT, and the
-absolute change between successive RTT samples. The ticks-per-second chart
-counts simulation ticks actually executed per elapsed second, with a gray
-line at the normal tick rate. Stalls lower it; catch-up can raise it above
-the normal rate. RTT and jitter are averaged
-over each second and the readouts update once per second. Counts include the
-binary room envelope, but exclude WebSocket, TCP and TLS framing.
-
-The delay controls add constant lag plus random jitter to each direction,
-while preserving packet order. Reset clears the settings; already queued
-packets finish their scheduled delay. RTT includes that delay and client
-turnaround. Timestamps and echoes travel in ordinary packets, without ping
-messages or comparisons between client and server clocks. State hashes
-remain mandatory, but simulated lag delays verification rather than the match.
-
-The complete headless suite and CI suite pass, including deterministic replay
-checks. The native graphical, headless, Coworld check and WASM builds pass.
-A real native/WASM match with five privately owned bots on each client ended
-at tick 496 with matching state hash 1986491943. Its normal replay plays
-headlessly without a mismatch. The browser loaded both a local BASIC file
-and a local ZIP, and returned from multiplayer to another local human match
-without replacing its window.
-
-A separate real-socket test disconnected a controlling native client at tick
-100. That client, its peer and a late spectator all finished at tick 490 with
-state hash 253292187. Regressions also inject initial, checkpoint and final
-hash mismatches, missing hashes, lost acknowledgements, duplicate commands,
-wrong seat ownership, malformed payloads and exhausted queues. They cover
-two human seats, distributed bot owners and cross-client bot mail.
-
-The local policy picker, invite join, lobby claims, readiness, gameplay,
-match completion and return flows were exercised in the browser. A browser
-replay download played headlessly with all 90 actions and matching hashes.
-The Docker
-and reverse-proxy files are hosting examples; a public TLS deployment has
-not been performed here.
-
-“Smooth network playback” in F1 → Network is enabled by default. Steady
-packets play immediately. Bursts play at 90% of the normal tick interval,
-shortening further as the queue grows (down to 20%) so playback catches up.
-There is no fixed startup delay. Control messages and RTT receipts remain
-immediate. History catch-up bypasses pacing; tick order, gameplay, and
-mandatory hash checks are unchanged.
+The server logs lifecycle events, rejected requests, timeouts and exhausted
+traffic limits. Logs omit reconnect tokens, invitation codes, game payloads
+and routine tick/hash traffic. Transport RTT uses echoed server timestamps,
+so client clock synchronization is unnecessary. Replayed history receives
+fresh transport timestamps; those timestamps never enter gameplay state.

@@ -3,7 +3,7 @@ import polyworld/rooms
 import ../lobbies
 var snapshot = RoomMessage(room: "room-a", phase: Lobby, participant: 1,
   seats: @[Seat(owner: 2, name: "Human"), Seat(owner: 1, name: "Human"),
-    Seat(owner: 2, name: "Base bot"), Seat(owner: 1, name: "Base bot"), Seat()],
+    Seat(owner: 2, kind: BotSeat, name: "Base bot"), Seat(owner: 1, kind: BotSeat, name: "Base bot"), Seat()],
   participants: @[Participant(id: 1), Participant(id: 2), Participant(id: 3)])
 var menu: KickMenu
 doAssert menu.openSeatContext(snapshot, 1, 0, vec2(40, 50))
@@ -28,14 +28,14 @@ var changed = snapshot
 changed.seats[2].owner = 3
 doAssert not menu.canUseContext(changed, 1)
 changed = snapshot
-changed.seats[2].name = "Human"
+changed.seats[2].kind = HumanSeat
 doAssert not menu.canUseContext(changed, 1)
 changed = snapshot
 changed.room = "room-b"
 doAssert not menu.canUseContext(changed, 1)
-# Only the host may open a removal context, even for a guest's own bot.
-doAssert not menu.openSeatContext(snapshot, 2, 2, vec2(0))
-doAssert menu.target == 0
+# A guest may remove a bot they own.
+doAssert menu.openSeatContext(snapshot, 2, 2, vec2(0))
+doAssert menu.contextCommand(snapshot, 2).kind == ReleaseSeat
 doAssert not menu.openSeatContext(snapshot, 3, 2, vec2(0))
 # A stale host menu cannot issue a command after ownership changes.
 doAssert menu.openSeatContext(snapshot, 1, 2, vec2(0))
@@ -52,7 +52,7 @@ doAssert menu.openSeatContext(snapshot, 1, 3, vec2(0))
 menu.dismissKick(vec2(0), true, false)
 doAssert menu.target == 0
 snapshot.phase = Playing
-doAssert not menu.openSeatContext(snapshot, 1, 2, vec2(0))
+doAssert menu.openSeatContext(snapshot, 1, 2, vec2(0))
 doAssert menu.openLocalBot(3, true, vec2(0))
 doAssert menu.local and menu.botSeat == 3 and menu.contextLabel == "Remove bot"
 doAssert not menu.openLocalBot(3, false, vec2(0))

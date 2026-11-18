@@ -5,7 +5,7 @@ proc send(relay: Relay, connection: int, message: RoomMessage) =
   ## Exercise the wire codec, including room IDs in both directions.
   relay.receive(connection, decode(message.encode()), 0)
 
-proc connect(relay: Relay, connection: int, game = "galcon"): RoomMessage =
+proc connect(relay: Relay, connection: int, game = "invite-board"): RoomMessage =
   relay.send(connection, RoomMessage(kind: Hello, name: "Guest " & $connection,
     identity: GameIdentity(game: game, gameplay: 7, protocol: 1)))
   result = decode(relay.outgoing[^1].bytes)
@@ -35,7 +35,7 @@ block:
   doAssert joined.participants.len == 2
   relay.disconnect(1)
   relay.send(3, RoomMessage(kind: Hello, name: "Restored", token: host.token,
-    identity: GameIdentity(game: "galcon", gameplay: 7, protocol: 1)))
+    identity: GameIdentity(game: "invite-board", gameplay: 7, protocol: 1)))
   doAssert relay.guest(host.participant).connection == 3
   doAssert relay.guest(host.participant).token == host.token
   doAssert decode(relay.outgoing[^1].bytes).room == created.room
@@ -43,7 +43,7 @@ block:
 block:
   # Collisions must be checked globally, not only within a game's listings.
   let occupied = RelayRoom(id: "AAAAAA",
-    identity: GameIdentity(game: "light_vs_dark", gameplay: 7, protocol: 1))
+    identity: GameIdentity(game: "invite-racing", gameplay: 7, protocol: 1))
   let relay = Relay(rooms: @[occupied])
   var draws = 0
   proc entropy(bytes: var openArray[byte]): bool =
@@ -122,8 +122,8 @@ block:
   doAssert rejected and relay.rooms.len == 0
 
 block:
-  # Fill live shared-relay capacity repeatedly using all three actual game IDs.
-  const games = ["galcon", "gods_of_the_arena", "light_vs_dark"]
+  # Fill live shared-relay capacity repeatedly using three unrelated game IDs.
+  const games = ["invite-board", "invite-cards", "invite-racing"]
   var creations = 0
   for batch in 0 ..< 16:
     let relay = Relay()
@@ -144,13 +144,13 @@ block:
   let relay = Relay()
   let host = relay.connect(1)
   discard relay.create(1)
-  let legacy = repeat("0123456789abcdef", 4)
-  relay.rooms[0].id = legacy
-  relay.guest(host.participant).room = legacy
+  let exactId = repeat("0123456789abcdef", 4)
+  relay.rooms[0].id = exactId
+  relay.guest(host.participant).room = exactId
   discard relay.connect(2)
-  relay.send(2, RoomMessage(kind: JoinRoom, room: legacy))
+  relay.send(2, RoomMessage(kind: JoinRoom, room: exactId))
   let joined = decode(relay.outgoing[^1].bytes)
-  doAssert joined.kind == RoomState and joined.room == legacy
+  doAssert joined.kind == RoomState and joined.room == exactId
   doAssert joined.participants.len == 2
 
 block:
@@ -166,22 +166,22 @@ block:
   doAssert relay.guests[1].room == "ABC123"
 
 block:
-  # Unknown codes, legacy case, game identity and host permissions stay strict.
+  # Unknown codes, exact case, game identity and host permissions stay strict.
   let relay = Relay()
   let host = relay.connect(1)
   discard relay.create(1)
-  let legacy = repeat("aBcD0123", 6)
-  relay.rooms[0].id = legacy
-  relay.guests[0].room = legacy
+  let exactId = repeat("aBcD0123", 6)
+  relay.rooms[0].id = exactId
+  relay.guests[0].room = exactId
   discard relay.connect(2)
-  for invalid in ["ZZZZZZ", legacy.toUpperAscii, " abc123", "abc12!"]:
+  for invalid in ["ZZZZZZ", exactId.toUpperAscii, " abc123", "abc12!"]:
     var rejected = false
     try:
       relay.send(2, RoomMessage(kind: JoinRoom, room: invalid))
     except RoomsError:
       rejected = true
     doAssert rejected and relay.guests[1].room == ""
-  relay.send(2, RoomMessage(kind: JoinRoom, room: legacy))
+  relay.send(2, RoomMessage(kind: JoinRoom, room: exactId))
   for operation in [
       RoomMessage(kind: ConfigureRoom, name: "Hijacked", number: 2, tickRate: 24),
       RoomMessage(kind: StartMatch),
@@ -194,24 +194,24 @@ block:
     doAssert rejected
   doAssert relay.rooms[0].owner == host.participant
   doAssert relay.rooms[0].name == "Invite test"
-  discard relay.connect(3, "light_vs_dark")
+  discard relay.connect(3, "invite-racing")
   var rejected = false
   try:
-    relay.send(3, RoomMessage(kind: JoinRoom, room: legacy))
+    relay.send(3, RoomMessage(kind: JoinRoom, room: exactId))
   except RoomsError:
     rejected = true
   doAssert rejected and relay.guests[2].room == ""
   # A public invite can never be substituted for the private reconnect secret.
   rejected = false
   try:
-    relay.send(4, RoomMessage(kind: Hello, name: "Impostor", token: legacy,
-      identity: GameIdentity(game: "galcon", gameplay: 7, protocol: 1)))
+    relay.send(4, RoomMessage(kind: Hello, name: "Impostor", token: exactId,
+      identity: GameIdentity(game: "invite-board", gameplay: 7, protocol: 1)))
   except RoomsError:
     rejected = true
   doAssert rejected and relay.guests.len == 3
 
 block:
-  # Exact old IDs win even if a case-folded six-character room also exists.
+  # Exact IDs win even if a case-folded six-character room also exists.
   let relay = Relay()
   discard relay.connect(1)
   discard relay.create(1)
@@ -222,4 +222,4 @@ block:
   relay.send(2, RoomMessage(kind: JoinRoom, room: "abc123"))
   doAssert relay.guests[1].room == "abc123"
 
-echo "Room codes: format, snapshots, joins, legacy IDs, reconnect, authorization, unbiased entropy and bounded collisions passed"
+echo "Room codes: format, snapshots, joins, exact IDs, reconnect, authorization, unbiased entropy and bounded collisions passed"

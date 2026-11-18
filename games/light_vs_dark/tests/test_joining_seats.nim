@@ -170,7 +170,7 @@ block rosterShrinkInvalidatesPendingSeat:
   let f = lobby(seats = 3)
   discard f.claim(0)
   f.confirm(0)
-  f.clients[0].send(RoomMessage(kind: ClaimSeat, seat: 1, name: "Host bot"))
+  f.clients[0].send(RoomMessage(kind: ClaimSeat, seat: 1, name: "Host bot", seatKind: BotSeat))
   f.exchange()
   f.join(1)
   doAssert f.claim(1).seat == 2
@@ -179,7 +179,7 @@ block rosterShrinkInvalidatesPendingSeat:
   f.clients[0].send(RoomMessage(kind: ReleaseSeat, seat: 1))
   f.exchange()
   doAssert f.clients[1].snapshot.seats.len == 2
-  doAssert f.clients[1].error == "Seats can only change in the lobby"
+  doAssert f.clients[1].error == "Seat is outside this room"
   doAssert f.claim(1).seat == 1
   f.confirm(1)
   doAssert f.human(1) == 1
@@ -187,12 +187,12 @@ block rosterShrinkInvalidatesPendingSeat:
 block preserveExistingAssignments:
   let f = lobby()
   f.clients[0].claimHumanSeat(0)
-  f.clients[0].send(RoomMessage(kind: ClaimSeat, seat: 2, name: "Host bot"))
+  f.clients[0].send(RoomMessage(kind: ClaimSeat, seat: 2, name: "Host bot", seatKind: BotSeat))
   f.exchange()
   discard f.claim(0)
   doAssert f.clients[0].outgoing.len == 0
   f.join(1)
-  f.clients[1].send(RoomMessage(kind: ClaimSeat, seat: 1, name: "Guest bot"))
+  f.clients[1].send(RoomMessage(kind: ClaimSeat, seat: 1, name: "Guest bot", seatKind: BotSeat))
   f.exchange()
   doAssert f.claim(1) == (true, -1), "An existing bot controller keeps its choice"
   doAssert f.clients[1].outgoing.len == 0
@@ -201,8 +201,8 @@ block preserveExistingAssignments:
   f.confirm(2)
   let seats = f.clients[0].snapshot.seats
   doAssert seats[0] == Seat(owner: f.clients[0].participant, name: "Human")
-  doAssert seats[1] == Seat(owner: f.clients[1].participant, name: "Guest bot")
-  doAssert seats[2] == Seat(owner: f.clients[0].participant, name: "Host bot")
+  doAssert seats[1] == Seat(owner: f.clients[1].participant, name: "Guest bot", kind: BotSeat)
+  doAssert seats[2] == Seat(owner: f.clients[0].participant, name: "Host bot", kind: BotSeat)
 
 block fullRoomStaysSpectator:
   let f = lobby(seats = 1)
@@ -222,9 +222,9 @@ block playingRoomStaysSpectatorOnRematch:
   discard f.claim(0)
   f.confirm(0)
   let host = f.clients[0]
-  host.send(RoomMessage(kind: PreparedDuration,
-    revision: host.snapshot.revision, hash: 123, durationTicks: 24))
-  host.send(RoomMessage(kind: StartMatch))
+
+  host.send(RoomMessage(kind: StartMatch, revision: host.snapshot.revision,
+    hash: setupHash(host.snapshot)))
   f.exchange()
   doAssert host.snapshot.phase == Playing
   f.join(1)
@@ -274,7 +274,7 @@ block reconnectPreservesHumanAndBot:
   let f = lobby()
   discard f.claim(0)
   f.confirm(0)
-  f.clients[0].send(RoomMessage(kind: ClaimSeat, seat: 2, name: "Private bot"))
+  f.clients[0].send(RoomMessage(kind: ClaimSeat, seat: 2, name: "Private bot", seatKind: BotSeat))
   f.exchange()
   let participant = f.clients[0].participant
   f.join(1)
@@ -283,7 +283,7 @@ block reconnectPreservesHumanAndBot:
   discard f.claim(0)
   doAssert f.human(0) == 0
   doAssert f.clients[0].snapshot.seats[2] ==
-    Seat(owner: participant, name: "Private bot")
+    Seat(owner: participant, name: "Private bot", kind: BotSeat)
   doAssert f.clients[0].outgoing.len == 0
 
 block reconnectRetriesUndeliveredClaim:

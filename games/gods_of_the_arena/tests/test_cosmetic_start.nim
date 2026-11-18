@@ -25,38 +25,40 @@ suite "GotA cosmetic ready and authoritative startup":
       relay.send(2, RoomMessage(kind: ReadyStatus, flag: status))
       check relay.guest(2).ready == status
       check room.phase == Lobby
-    relay.send(1, RoomMessage(kind: StartMatch, revision: room.revision, hash: 42))
+    relay.send(1, RoomMessage(kind: StartMatch, revision: room.revision, hash: setupHash(relay.state(room))))
     check room.phase == Playing
 
   test "only owner can start and stale roster and configuration are rejected":
     let relay = lobby()
     let room = relay.rooms[0]
     expect RoomsError:
-      relay.send(2, RoomMessage(kind: StartMatch, revision: room.revision, hash: 42))
+      relay.send(2, RoomMessage(kind: StartMatch, revision: room.revision, hash: setupHash(relay.state(room))))
     let oldRevision = room.revision
     relay.send(2, RoomMessage(kind: ReleaseSeat, seat: 8))
     expect RoomsError:
-      relay.send(1, RoomMessage(kind: StartMatch, revision: oldRevision, hash: 42))
+      relay.send(1, RoomMessage(kind: StartMatch, revision: oldRevision, hash: setupHash(relay.state(room))))
     let rosterRevision = room.revision
     relay.send(1, RoomMessage(kind: ConfigureRoom, name: room.name, number: 10,
       tickRate: 24, payload: "changed"))
     expect RoomsError:
-      relay.send(1, RoomMessage(kind: StartMatch, revision: rosterRevision, hash: 42))
+      relay.send(1, RoomMessage(kind: StartMatch, revision: rosterRevision, hash: setupHash(relay.state(room))))
     check room.phase == Lobby
 
-  test "zero controllers cannot start":
+  test "GotA requires an occupied hero before preparing a match":
     let relay = lobby()
     let room = relay.rooms[0]
     relay.send(1, RoomMessage(kind: ReleaseSeat, seat: 1))
     relay.send(2, RoomMessage(kind: ReleaseSeat, seat: 8))
+    let client = RoomClient(participant: 1, snapshot: relay.state(room))
     expect RoomsError:
-      relay.send(1, RoomMessage(kind: StartMatch, revision: room.revision, hash: 42))
+      discard client.requestStart([])
     check room.phase == Lobby
 
   test "tick zero mismatch still stops the relay":
     let relay = lobby()
     let room = relay.rooms[0]
-    relay.send(1, RoomMessage(kind: StartMatch, revision: room.revision, hash: 42))
+    relay.send(1, RoomMessage(kind: StartMatch, revision: room.revision, hash: setupHash(relay.state(room))))
+    relay.send(1, RoomMessage(kind: ReportHash, match: room.match, tick: 0, hash: 42))
     relay.send(2, RoomMessage(kind: ReportHash, match: room.match, tick: 0, hash: 99))
     check room.phase == Desynced
 
@@ -67,7 +69,7 @@ suite "GotA cosmetic ready and authoritative startup":
     for stale in [false, true]:
       let session = prepareNetworkMatch(client, [])
       var begin = RoomMessage(kind: BeginMatch, revision: room.revision,
-        hash: session.game.networkHash(), match: 1)
+        hash: setupHash(client.snapshot), match: 1)
       if stale: dec begin.revision
       else: begin.hash = begin.hash xor 1
       expect RoomsError:
@@ -78,12 +80,13 @@ suite "GotA cosmetic ready and authoritative startup":
     expect CatchableError:
       discard prepareNetworkMatch(client, [])
 
-  test "Generic games and LvD retain their existing ready gate":
-    for game in ["generic-ready-test", "light_vs_dark"]:
+  test "Every game starts independently of cosmetic readiness":
+    for game in ["generic-ready-test", "light_vs_dark", "galcon"]:
       let relay = lobby(game)
-      expect RoomsError:
-        relay.send(1, RoomMessage(kind: StartMatch, revision: relay.rooms[0].revision, hash: 42))
-      check relay.rooms[0].phase == Lobby
+      let room = relay.rooms[0]
+      relay.send(1, RoomMessage(kind: StartMatch, revision: room.revision,
+        hash: setupHash(relay.state(room))))
+      check room.phase == Playing
 
   test "host frontend startup prepares exact current snapshot without Ready":
     let relay = lobby()
@@ -95,7 +98,7 @@ suite "GotA cosmetic ready and authoritative startup":
     let message = decode(client.outgoing[0])
     check message.kind == StartMatch
     check message.revision == room.revision
-    check message.hash == session.game.networkHash()
+    check message.hash == setupHash(client.snapshot)
     relay.send(1, message)
     check room.phase == Playing
     let guest = RoomClient(participant: 2, snapshot: relay.state(room))

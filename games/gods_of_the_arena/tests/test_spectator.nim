@@ -38,7 +38,7 @@ exchange()
 viewer.send(RoomMessage(kind: JoinRoom, room: owner.snapshot.room))
 exchange()
 for i in 0 ..< 10:
-  owner.send(RoomMessage(kind: ClaimSeat, seat: uint32(i), name: "Bot"))
+  owner.send(RoomMessage(kind: ClaimSeat, seat: uint32(i), seatKind: BotSeat, name: "Bot"))
 exchange()
 var sources = newSeq[string](10)
 for source in sources.mitems:
@@ -47,11 +47,10 @@ let controller = prepareNetworkMatch(owner, sources)
 let watched = prepareNetworkMatch(viewer, [])
 doAssert not controller.isSpectator, "Bot ownership is still control"
 doAssert watched.isSpectator
-owner.send(RoomMessage(kind: Ready, revision: controller.revision,
-  hash: controller.game.networkHash))
+owner.send(RoomMessage(kind: ReadyStatus, flag: true))
 exchange()
 owner.send(RoomMessage(kind: StartMatch, revision: controller.revision,
-  hash: controller.game.networkHash()))
+  hash: setupHash(owner.snapshot)))
 exchange()
 controller.start(owner.events[0])
 watched.start(viewer.events[0])

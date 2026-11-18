@@ -125,9 +125,9 @@ proc drawCacHome(sk: Silky, window: Window, focus: var int): HomeAction =
         result = HomeAction(index + 1)
         playSound(ClickSound)
 
-proc removeBotPicker(sk: Silky, window: Window,
+proc removePlayerPicker(sk: Silky, window: Window,
     ui: var LobbyUi): SlotChoice =
-  ## Let the host remove a guest's bot without claiming their controller.
+  ## Lets the host release any guest slot without removing their other seats.
   sk.pushLayer(PopupsLayer)
   let
     view = window.size.vec2 / sk.uiScale
@@ -135,9 +135,9 @@ proc removeBotPicker(sk: Silky, window: Window,
   discard sk.interact(rect(vec2(0), view), true)
   sk.drawRect(vec2(0), view, rgbx(0, 0, 0, 180))
   sk.lobbyPanel(at, vec2(520, 220))
-  sk.lobbyLabel("Remove bot from this slot?", at + vec2(24, 24), 472,
+  sk.lobbyLabel("Remove player from this slot?", at + vec2(24, 24), 472,
     "LobbyHeading")
-  if sk.lobbyButton("Remove bot", at + vec2(24, 132), 226, "minus"):
+  if sk.lobbyButton("Remove player", at + vec2(24, 132), 226, "minus"):
     result = SlotChoice(chosen: true, clear: true)
   if sk.lobbyButton("Cancel", at + vec2(270, 132), 226, "arrow_left") or
     window.buttonPressed[KeyEscape]:
@@ -355,7 +355,7 @@ proc runFrontend*(app: App, connection: var Connection,
             client.send(RoomMessage(kind: AbortMatch,
               match: event.match, detail: error))
       if client.error.len > 0:
-        error = client.error.lobbyError()
+        error = client.error
       if client.error.len > 0 or (configPending and not client.connected):
         if configPending and pendingResize and client.error.len > 0:
           let
@@ -640,7 +640,7 @@ proc runFrontend*(app: App, connection: var Connection,
                 else: index != frontendState.humanSeat and
                   frontendState.localPolicies[index].bytes.len == 0
               mine = not online or seat.owner == client.participant
-              human = if online: seat.name == "Human"
+              human = if online: seat.kind == HumanSeat
                 else: index == frontendState.humanSeat
               at = layout.left + vec2(22, 84 + index.float32 * 72)
               seatWidth = layout.leftWidth - 294
@@ -670,7 +670,7 @@ proc runFrontend*(app: App, connection: var Connection,
                 inc ownCount
             if sk.lobbyButton("", at, seatWidth,
               enabled = editable and exists and
-                (empty or mine or (owner and not human)) and
+                (empty or mine or owner) and
                 not modal and not rosterPending, height = 62):
                   lobbyUi.selectedSeat = index
             sk.lobbyLabel($(index + 1), at + vec2(10, 10), 32,
@@ -699,7 +699,8 @@ proc runFrontend*(app: App, connection: var Connection,
                       snapshot.seats[index].owner == 0:
                         frontendState.networkPolicies[index] = bot
                         client.send(RoomMessage(kind: ClaimSeat,
-                          seat: index.uint32, name: bot.name))
+                          seat: index.uint32, seatKind: BotSeat,
+                          name: bot.name))
                   elif index != frontendState.humanSeat and
                     frontendState.localPolicies[index].bytes.len == 0:
                       frontendState.localPolicies[index] = bot
@@ -779,7 +780,8 @@ proc runFrontend*(app: App, connection: var Connection,
               if sk.lobbyButton("Start Game", layout.primary, 250,
                 "arrow_right", editable and not configDirty and
                   not configPending and
-                  not modal and snapshot.controllersConnected()):
+                  not modal and
+                  occupied in MinBattlePlayers .. MaxBattlePlayers):
                     client.error = ""
                     error = ""
                     prepared = client.requestStart(
@@ -820,10 +822,10 @@ proc runFrontend*(app: App, connection: var Connection,
                 else:
                   launchLocal = true
           let selectedSeat = lobbyUi.selectedSeat
-          let foreignBot = online and selectedSeat in 0 ..< snapshot.seats.len and
+          let foreignSeat = online and selectedSeat in 0 ..< snapshot.seats.len and
             snapshot.seats[selectedSeat].owner notin [0'u32, client.participant]
           let choice =
-            if foreignBot: sk.removeBotPicker(window, lobbyUi)
+            if foreignSeat: sk.removePlayerPicker(window, lobbyUi)
             elif selectedSeat >= 0: sk.seatPicker(window, lobbyUi, bots)
             else: SlotChoice()
           if choice.chosen:
@@ -840,12 +842,14 @@ proc runFrontend*(app: App, connection: var Connection,
                   client.claimHumanSeat(selectedSeat,
                     snapshot.humanSeatFor(client.participant))
                   for index, seat in snapshot.seats:
-                    if seat.owner == client.participant and seat.name == "Human":
-                      frontendState.networkPolicies[index] = LocalPolicy()
+                    if seat.owner == client.participant and
+                      seat.kind == HumanSeat:
+                        frontendState.networkPolicies[index] = LocalPolicy()
                 else:
                   client.send(RoomMessage(
                     kind: if choice.clear: ReleaseSeat else: ClaimSeat,
-                    seat: selectedSeat.uint32, name: selected.name))
+                    seat: selectedSeat.uint32, seatKind: BotSeat,
+                    name: selected.name))
                 frontendState.networkPolicies[selectedSeat] = selected
               else:
                 if choice.human:

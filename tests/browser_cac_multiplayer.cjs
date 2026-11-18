@@ -20,11 +20,7 @@ const report = {url, server, out, steps:[], peers:[], passed:false};
 const peers = [];
 fs.mkdirSync(out, {recursive:true});
 
-const kinds = ('Hello Welcome ListRooms RoomList CreateRoom JoinRoom RoomState ' +
-  'ConfigureRoom ClaimSeat ReleaseSeat Ready StartMatch BeginMatch SubmitCommand ' +
-  'CommandAck TickPacket AppliedTick Catchup CaughtUp ReportHash MatchStatus ' +
-  'LeaveRoom KickParticipant ReturnLobby FinishMatch Received Keepalive Failure ' +
-  'AbortMatch PauseMatch ResizeRoom Prepared ReadyStatus PreparedDuration ServerNotice').split(' ');
+const {decodeRoom} = require('./room_protocol.cjs');
 
 function actionPayload(bytes) {
   assert.ok(bytes.length >= 12, 'CaC command header must be complete');
@@ -39,50 +35,7 @@ function actionPayload(bytes) {
   return result;
 }
 
-function decode(data) {
-  const bytes = Buffer.isBuffer(data) ? data : Buffer.from(data);
-  assert.ok(bytes.length >= 64 && bytes.toString('ascii', 0, 4) === 'PWRM',
-    'Every frame must use the shared room protocol');
-  assert.equal(bytes.readUInt32LE(4), 4, 'Room protocol version');
-  let offset = 64;
-  function u32() { const value=bytes.readUInt32LE(offset); offset+=4; return value; }
-  function u64() { const value=bytes.readBigUInt64LE(offset).toString(); offset+=8; return value; }
-  function raw() {
-    const size=u32();
-    assert.ok(offset+size <= bytes.length, 'Bounded wire string');
-    const value=bytes.subarray(offset, offset+size); offset+=size; return value;
-  }
-  function string() { return raw().toString('utf8'); }
-  const message={kind:kinds[bytes.readUInt32LE(8)], match:bytes.readUInt32LE(20)};
-  if (message.kind === 'Welcome') message.participant=u32();
-  if (message.kind === 'Hello') {
-    message.game=string(); message.gameplay=u32(); message.protocol=u32(); message.name=string();
-  }
-  if (['CreateRoom','ConfigureRoom','ResizeRoom'].includes(message.kind)) {
-    message.name=string(); message.public=!!u32(); message.rate=u32();
-    message.count=u32(); message.config=string();
-  }
-  if (message.kind === 'JoinRoom') message.room=string();
-  if (message.kind === 'ClaimSeat') { message.seat=u32(); message.name=string(); }
-  if (message.kind === 'ReadyStatus') message.flag=!!u32();
-  if (message.kind === 'RoomState') {
-    message.room=string(); message.name=string(); message.owner=u32(); message.revision=u32();
-    message.phase=u32(); message.rate=u32(); message.public=!!u32(); message.config=string();
-    message.participants=Array.from({length:u32()},()=>({id:u32(),name:string(),connected:!!u32(),ready:!!u32()}));
-    message.seats=Array.from({length:u32()},()=>({owner:u32(),name:string()}));
-  }
-  if (message.kind === 'SubmitCommand') {
-    message.seat=u32(); message.sequence=u64(); Object.assign(message,actionPayload(raw()));
-  }
-  if (['ReportHash','FinishMatch'].includes(message.kind)) { message.tick=u32(); message.hash=u64(); }
-  if (message.kind === 'CommandAck') { message.sequence=u64(); message.tick=u32(); }
-  if (message.kind === 'TickPacket') {
-    message.tick=u32();
-    message.commands=Array.from({length:u32()},()=>({participant:u32(),seat:u32(),sequence:u64(),payload:raw().toString('hex')}));
-  }
-  if (message.kind === 'Failure') message.detail=string();
-  return message;
-}
+function decode(data) { return decodeRoom(data, actionPayload); }
 
 const sleep = ms => new Promise(resolve=>setTimeout(resolve,ms));
 async function wait(label, predicate, timeout=20000) {
@@ -322,21 +275,30 @@ async function main() {
       await click(peer.page,757,339);
       await wait(peer.role+' owns human seat',()=>{
         const slot=last(peer,'RoomState').seats[seat];
-        return slot.owner===last(peer,'Welcome').participant && slot.name==='Human';
+        return slot.owner===last(peer,'Welcome').participant && slot.kind===0;
       });
     }
     for (const peer of peers) {
       await wait(peer.role+' sees both human seats',()=>
-        last(peer,'RoomState').seats.every(seat=>seat.owner!==0 && seat.name==='Human'));
+        last(peer,'RoomState').seats.every(seat=>seat.owner!==0 && seat.kind===0));
       assert.ok(last(peer,'RoomState').participants.every(participant=>!participant.ready),
         'Nobody must have readied before the host starts');
       assert.ok(!peer.messages.some(message=>message.direction==='out' &&
-        ['Ready','Prepared','PreparedDuration'].includes(message.kind)),
-        'Starting must not require a client readiness or preparation message');
+        message.kind==='ReadyStatus'),
+        'Starting must not require a cosmetic ready toggle');
     }
     await shot(host,'unready-start');
     await click(host.page,1357,914);
     for (const peer of peers) await wait(peer.role+' BeginMatch',()=>last(peer,'BeginMatch'));
+    const initialization=last(host,'BeginMatch');
+    assert.equal(initialization.hash,last(host,'StartMatch','out').hash);
+    for (const peer of peers) {
+      const begin=last(peer,'BeginMatch');
+      assert.equal(begin.config,initialization.config);
+      assert.equal(begin.hash,initialization.hash);
+      assert.deepEqual(begin.seats,initialization.seats);
+      assert.deepEqual(begin.participants,initialization.participants);
+    }
     await sleep(3000);
     for (const peer of peers) {
       assert.match(await status(peer),/Tower Arena\./);
@@ -356,12 +318,14 @@ async function main() {
         message=>message.direction==='out'&&message.kind==='SubmitCommand').length>count);
       const command=last(peer,'SubmitCommand','out');
       assert.equal(command.category,0); assert.equal(command.action,3);
+      assert.equal(command.seatKind,0,'human input carries a human controller kind');
       assert.equal(command.seat,seat); assert.equal(command.player,seat);
       for (const receiver of peers) {
         await wait(receiver.role+' received '+peer.role+' action',()=>receiver.messages.some(message=>
           message.direction==='in' && message.kind==='TickPacket' && message.commands.some(receipt=>
             receipt.participant===last(peer,'Welcome').participant && receipt.sequence===command.sequence &&
-            receipt.seat===seat && receipt.payload===command.payload)));
+            receipt.seat===seat && receipt.seatKind===command.seatKind &&
+            receipt.payload===command.payload)));
       }
       const receipt=peer.messages.find(message=>message.direction==='in' && message.kind==='TickPacket' &&
         message.commands.some(candidate=>candidate.sequence===command.sequence && candidate.seat===seat));
@@ -405,7 +369,7 @@ async function main() {
           last(receiver,'RoomState').participants.some(participant=>
             participant.id===participantId && participant.ready===flag));
         assert.equal(last(receiver,'RoomState').revision,rematchRevision,
-          'Cosmetic readiness must not change the prepared setup revision');
+          'Cosmetic readiness must not change the setup revision');
       }
     }
     for (const peer of peers) {
@@ -414,9 +378,6 @@ async function main() {
         participant.id===last(host,'Welcome').participant).ready,true);
       assert.equal(participants.find(participant=>
         participant.id===last(guest,'Welcome').participant).ready,false);
-      assert.ok(!peer.messages.some(message=>message.direction==='out' &&
-        ['Ready','Prepared','PreparedDuration'].includes(message.kind)),
-        'Ready toggles must only send cosmetic ReadyStatus messages');
     }
     await shot(host,'mixed-readiness');
     await click(host.page,1357,914);

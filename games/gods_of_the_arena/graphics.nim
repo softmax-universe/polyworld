@@ -160,7 +160,7 @@ const
 
 type
   MatchMenuPage = enum
-    HiddenMatchMenu, PauseMenu, MatchSettings, MatchResults
+    HiddenMatchMenu, PauseMenu, MatchSettings, MatchPlayers, MatchResults
   GraphicsError = object of CatchableError
   GodAnimation = enum
     GodIdle, GodDeath, GodVictory
@@ -1295,6 +1295,9 @@ proc runGraphics*(
     heldRightMove = false
     nextRightMoveTick = 0'i32
     resultsInputReady = false
+    slotHumanLabel = ""
+    slotBotName = ""
+    slotBotSource = ""
     aimSpell: SpellCast
     aimTargetId = 0'i32
     aimVisible = false
@@ -1407,7 +1410,7 @@ proc runGraphics*(
       playSound(ClickSound)
       matchMenu =
         if matchMenu == HiddenMatchMenu: PauseMenu
-        elif matchMenu == MatchSettings: PauseMenu
+        elif matchMenu in {MatchSettings, MatchPlayers}: PauseMenu
         else: HiddenMatchMenu
       shopOpen = false
       armedAbility = -1
@@ -2776,6 +2779,44 @@ proc runGraphics*(
       transport.durationTicks = run.durationTicks()
       transport.sync(int32(run.world.tick), recorded, run.finished())
       run.world.keepDraftPlaying(transport)
+      if network != nil:
+        connection.pump()
+        if network.returnedToLobby():
+          leaveMatch = true
+          return
+        if spectatorStream != nil and network.hasLocalControl():
+          spectatorStream.receive()
+          transport.restoreTick = -1
+          transport.targetTick = -1
+          let catchupStarted = epochTime()
+          while run.world.tick < spectatorStream.receivedEnd:
+            advanceRenderedSimulation()
+            if epochTime() - catchupStarted > 0.012:
+              break
+          if run.world.tick == spectatorStream.receivedEnd:
+            spectatorStream = nil
+            network.promoteController()
+            networkSpectator = false
+            transport.streamed = false
+            transport.speedIndex = 0
+            transport.playing = true
+            transport.accumulator = 0
+            run.historyPlayback = false
+        if not network.isSpectator:
+          let playerSlot = int32(network.humanHeroIndex() + 1)
+          if options.playerSlot != playerSlot:
+            options.playerSlot = playerSlot
+            clearPlayerCommands()
+            heldRightMove = false
+            attackMoveArmed = false
+            armedAbility = -1
+            armedItem = -1
+            selectionStarted = false
+            shopOpen = false
+            if playerSlot > 0:
+              primaryId = run.world.heroes[playerSlot - 1].id
+              selectedIds = @[primaryId]
+              focusPlayerHero = true
       if network != nil and not network.isSpectator:
         connection.stats.tickRate = int(TickRate)
         connection.pump()
@@ -2795,6 +2836,7 @@ proc runGraphics*(
         run.historyPlayback = false
         networkElapsed += dt
         try:
+          network.resumeControls()
           network.flushSubmissions()
           var packet: RoomMessage
           let started = epochTime()
@@ -3269,6 +3311,10 @@ proc runGraphics*(
             sk.beginUi(window, window.size)
           elif matchMenu == MatchSettings:
             menuOrigin = sk.beginOverlay(window, vec2(768, 488)) + vec2(24)
+          elif matchMenu == MatchPlayers:
+            let panel = sk.beginOverlay(window, vec2(900, 720))
+            sk.lobbyPanel(panel, vec2(900, 720))
+            menuOrigin = panel + vec2(24)
           else:
             let panel = sk.beginOverlay(window, vec2(480, 620))
             sk.lobbyPanel(panel, vec2(480, 620))
@@ -3322,6 +3368,96 @@ proc runGraphics*(
                 sk.menuLabel("Leaving match...", origin + vec2(0, 64), 416)
                 sk.menuLabel("Waiting for the server to confirm.",
                   origin + vec2(0, 100), 416, sk.theme.disabledTextColor)
+              elif matchMenu == MatchPlayers and network != nil:
+                let
+                  client = network.client
+                  snapshot = client.snapshot
+                  host = snapshot.participant == client.participant
+                sk.drawLabel("Players", origin, vec2(852, 36),
+                  sk.theme.defaultTextColor, "H1", CenterAlign)
+                var names: seq[string]
+                var owners: seq[uint32]
+                for participant in snapshot.participants:
+                  if host or participant.id == client.participant:
+                    let label = participant.name & " (#" & $participant.id & ")"
+                    names.add label
+                    owners.add participant.id
+                    if slotHumanLabel.len == 0 and
+                        participant.id == client.participant:
+                      slotHumanLabel = label
+                if slotHumanLabel notin names and names.len > 0:
+                  slotHumanLabel = names[0]
+                var humanOwner = client.participant
+                for i, label in names:
+                  if label == slotHumanLabel:
+                    humanOwner = owners[i]
+                sk.lobbyLabel("Human player", origin + vec2(0, 48), 140)
+                if names.len > 0:
+                  sk.lobbySelect(window, slotHumanLabel, names,
+                    origin + vec2(140, 44), 480, host)
+                if host and humanOwner != client.participant and
+                    sk.lobbyButton("Kick player", origin + vec2(634, 44), 218):
+                  client.send(RoomMessage(kind: KickParticipant,
+                    participant: humanOwner))
+                if slotBotSource.len == 0:
+                  for i, source in network.sources:
+                    if source.len > 0:
+                      slotBotSource = source
+                      slotBotName = if i < snapshot.seats.len:
+                        snapshot.seats[i].name else: "Local bot"
+                      break
+                if sk.lobbyButton("Choose bot file", origin + vec2(0, 96), 218):
+                  let chosen = selectPolicy()
+                  if chosen.bytes.len > 0:
+                    slotBotName = chosen.name
+                    slotBotSource = chosen.bytes
+                sk.lobbyLabel(if slotBotSource.len > 0: slotBotName
+                  else: "Choose a local bot to add", origin + vec2(234, 100), 618)
+                for index in 0 ..< min(HeroClassCount, snapshot.seats.len):
+                  let
+                    seat = snapshot.seats[index]
+                    empty = seat.owner == 0
+                    editable = host or empty or seat.owner == client.participant
+                    at = origin + vec2(0, 150 + index.float32 * 44)
+                    initial = client.initialSnapshot.seats
+                    reserved = index >= initial.len or initial[index].owner == 0
+                  var ownerName = seat.name
+                  for participant in snapshot.participants:
+                    if participant.id == seat.owner:
+                      ownerName = participant.name
+                  let label = "Slot " & $(index + 1) & "  " &
+                    (if empty: "Empty"
+                     elif seat.kind == HumanSeat: ownerName
+                     else: seat.name & " / " & ownerName) &
+                    (if reserved: " (next match)" else: "")
+                  sk.lobbyLabel(label, at + vec2(0, 4), 420)
+                  if sk.lobbyButton(if host: "Assign human" else: "Join",
+                      at + vec2(430, 0), 146, enabled = editable, height = 38):
+                    if network.sources.len <= index:
+                      network.sources.setLen(index + 1)
+                    network.sources[index] = ""
+                    client.send(RoomMessage(kind: ClaimSeat,
+                      seat: uint32(index), participant: humanOwner,
+                      seatKind: HumanSeat, name: slotHumanLabel))
+                  if sk.lobbyButton("My bot", at + vec2(586, 0), 128,
+                      enabled = editable and slotBotSource.len > 0, height = 38):
+                    if network.sources.len <= index:
+                      network.sources.setLen(index + 1)
+                    network.sources[index] = slotBotSource
+                    client.send(RoomMessage(kind: ClaimSeat,
+                      seat: uint32(index), seatKind: BotSeat, name: slotBotName))
+                  if sk.lobbyButton("Remove", at + vec2(724, 0), 128,
+                      enabled = editable and not empty, height = 38):
+                    if index < network.sources.len:
+                      network.sources[index] = ""
+                    client.send(RoomMessage(kind: ReleaseSeat,
+                      seat: uint32(index)))
+                sk.lobbyLabel("Existing heroes can change controllers immediately.",
+                  origin + vec2(0, 596), 852, tint = sk.theme.disabledTextColor)
+                sk.lobbyLabel("Slots empty at match start join the next match. Bots run on their owner's computer.",
+                  origin + vec2(0, 620), 852, tint = sk.theme.disabledTextColor)
+                if sk.lobbyButton("Back", origin + vec2(0, 648), 218):
+                  matchMenu = PauseMenu
               elif matchMenu == MatchSettings:
                 if sk.settingsPanel(
                   window, preferences, "Polyworld GotA", origin,
@@ -3360,7 +3496,11 @@ proc runGraphics*(
                       ))
                 if sk.lobbyButton("Settings", origin + vec2(0, 200), 416):
                   matchMenu = MatchSettings
-                if sk.lobbyButton("Save replay", origin + vec2(0, 256), 416,
+                if network != nil and sk.lobbyButton("Players",
+                    origin + vec2(218, 256), 198):
+                  matchMenu = MatchPlayers
+                if sk.lobbyButton("Save replay", origin + vec2(0, 256),
+                  (if network != nil: 204.0'f else: 416.0'f),
                   enabled = run.recorder != nil and
                     run.world.tick == run.recorder.data.hashes.len):
                       run.sampleMetrics(true)

@@ -134,12 +134,36 @@ doAssert not playback.takeTick(paced, tick, 20, 24, true)
 doAssert playback.takeTick(paced, tick, 20, 24, false)
 paced.appliedTick(tick.tick)
 doAssert not playback.started
-paced.catchupPending = true
+paced.began = true
+paced.welcomed = true
+paced.requestHistory()
 doAssert playback.takeTick(paced, tick, 20, 24, true)
 paced.appliedTick(tick.tick)
 paced.snapshot.phase = Desynced
 doAssert not playback.takeTick(paced, tick, 30, 24, true)
 echo "Adaptive playback catches up without changing tick order"
+
+block liveProbes:
+  let live = RoomClient(match: 6, began: true, welcomed: true,
+    snapshot: RoomMessage(phase: Playing))
+  var playback: TickPlayback
+  live.accept(RoomMessage(kind: TickPacket, match: 6, tick: 1).encode)
+  doAssert playback.takeTick(live, tick, 1, 24, true)
+  live.appliedTick(tick.tick)
+  doAssert live.catchupPending and not live.catchingUp
+  live.accept(RoomMessage(kind: TickPacket, match: 6, tick: 2).encode)
+  doAssert not playback.takeTick(live, tick, 1.001, 24, true),
+    "A pending edge probe must not bypass playback pacing"
+  doAssert playback.started
+  doAssert playback.takeTick(live, tick, 1.05, 24, true)
+  live.appliedTick(tick.tick)
+  live.requestHistory()
+  doAssert live.catchingUp
+  live.accept(RoomMessage(kind: TickPacket, match: 6, tick: 3).encode)
+  doAssert playback.takeTick(live, tick, 1.05, 24, true),
+    "Actual recovery must drain history without presentation pacing"
+  live.appliedTick(tick.tick)
+  doAssert not playback.started
 
 # Repeated jitter at 60 FPS must not grow an ever-larger playback backlog.
 let jittered = RoomClient(match: 5)

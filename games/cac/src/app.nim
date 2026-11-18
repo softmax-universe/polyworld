@@ -1,15 +1,21 @@
 ## What every game mode shares: the window, the renderers, the heroes and
 ## the class choice. A mode is a client of the core that presents its match
 ## with these.
-import std/[math, options, os]
+import std/[options, os]
 import chroma, opengl, pixie, silky, vmath, windy
 import core/sim, core/sessions, ui/cardfaces, scene/cardrenderer,
   vfx/vfxrenderer, scene/post, scene/table, scene/courtyard, scene/heroes,
-  ui/hud, ui/heroselect, scene/heroselectstage, paths, replayer
-import polyworld/[assets, characters, chargen, chrome, common, viewers]
+  ui/hud, ui/heroselect, ui/frontendassets, scene/heroselectstage, paths,
+  replayer, net/multiplayer
+import polyworld/[assets, characters, chargen, connections,
+  menus, viewers]
+
+when PostPanelControls:
+  import polyworld/common
 
 const
   WindowTitle = "Cards and Casters"
+  AppName* = "Polyworld CaC"
   CameraNear* = 0.1'f32
   CameraFar* = 100.0'f32
   ClassChoiceTarget* = HeroSelectCameraTarget
@@ -22,6 +28,19 @@ when PostLayerControls:
 type
   App* = ref object
     options*: SessionOptions
+    preferences*: Preferences
+    preferenceError*: string
+    connection*: Connection
+    network*: NetworkMatch
+    configuredSeats*: seq[Seat]
+    configuredBotSources*: seq[string]
+    configuredHumanSeat*: int = -1
+    playerNames*: seq[string]
+    returnToMenu*: bool
+    battlefieldPlayers: int
+    captureFramebuffer*: GLuint
+    captureTexture, captureDepth: GLuint
+    captureSize: IVec2
     humanSeat*: Option[Seat]
       ## The class and deck the human brought with `--human PATH.bas`;
       ## without one they choose a class and play its precon.
@@ -95,6 +114,7 @@ proc buildUiAtlas*(cardAssets: string): AtlasBuilder =
   ## The UI atlas: every card face part, the HUD's images and its fonts.
   ## Raises when they outgrow it. Call initCardAssets first.
   result = newHudAtlas(5632)
+  result.addFrontendAssets()
   result.addFaceAssets()
   result.addCacHudAssets(cardAssets)
   when PostPanelControls:
@@ -166,10 +186,72 @@ proc initApp*(sessionOptions: SessionOptions): App =
         models[seat][heroClass].clipIndex(HeroIdleClips[heroClass])
       deathClips[seat][heroClass] =
         models[seat][heroClass].clipIndex(HeroDeathClip)
-  App(options: sessionOptions, appDir: appDir, window: window, sk: sk,
+  result = App(options: sessionOptions, appDir: appDir, window: window, sk: sk,
     solid: solid, cards: cardSurfaces, vfx: vfx, post: post,
     courtyard: courtyard, selectionStage: selectionStage, scene: scene, models: models,
-    idleClips: idleClips, deathClips: deathClips)
+    idleClips: idleClips, deathClips: deathClips,
+    battlefieldPlayers: sessionOptions.playerCount)
+  try:
+    result.preferences = readPreferences(AppName)
+  except MenusError, IOError, OSError:
+    result.preferenceError = getCurrentExceptionMsg()
+    result.preferences = Preferences()
+  result.preferences.applyPreferences(window,
+    configureDisplay = not defined(takeScreenshot))
+
+proc setBattlefield*(app: App, playerCount: int) =
+  ## Uses Tower Arena for two players and the ring for larger matches.
+  if app.battlefieldPlayers == playerCount:
+    return
+  var replacement = initCourtyardRenderer(playerCount)
+  replacement.material = app.courtyard.material
+  app.courtyard.dispose()
+  app.courtyard = replacement
+  app.battlefieldPlayers = playerCount
+
+proc closeCapture*(app: App) =
+  ## Releases the hidden capture target while the window context is alive.
+  if app.captureFramebuffer == 0:
+    return
+  glBindFramebuffer(GL_FRAMEBUFFER, 0)
+  glDeleteFramebuffers(1, app.captureFramebuffer.addr)
+  glDeleteTextures(1, app.captureTexture.addr)
+  glDeleteRenderbuffers(1, app.captureDepth.addr)
+  app.captureFramebuffer = 0
+  app.captureTexture = 0
+  app.captureDepth = 0
+  app.captureSize = ivec2(0)
+
+proc beginCaptureFrame*(app: App) =
+  ## Renders screenshots offscreen without depending on a visible Cocoa drawable.
+  when defined(takeScreenshot):
+    when not defined(emscripten):
+      doAssert not app.window.visible, "Capture windows must stay hidden"
+    let size = app.window.size
+    if app.captureFramebuffer == 0 or app.captureSize != size:
+      app.closeCapture()
+      glGenFramebuffers(1, app.captureFramebuffer.addr)
+      glBindFramebuffer(GL_FRAMEBUFFER, app.captureFramebuffer)
+      glGenTextures(1, app.captureTexture.addr)
+      glBindTexture(GL_TEXTURE_2D, app.captureTexture)
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8.GLint, size.x, size.y,
+        0, GL_RGBA, GL_UNSIGNED_BYTE, nil)
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST.GLint)
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST.GLint)
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+        GL_TEXTURE_2D, app.captureTexture, 0)
+      glGenRenderbuffers(1, app.captureDepth.addr)
+      glBindRenderbuffer(GL_RENDERBUFFER, app.captureDepth)
+      glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8,
+        size.x, size.y)
+      glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+        GL_RENDERBUFFER, app.captureDepth)
+      if glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE:
+        app.closeCapture()
+        raise newException(IOError, "Unable to allocate screenshot target")
+      app.captureSize = size
+    glBindFramebuffer(GL_FRAMEBUFFER, app.captureFramebuffer)
+    glViewport(0, 0, size.x, size.y)
 
 proc heroClip*(app: App, model: int, heroClass: HeroClass,
     dying, idleTime: float32): tuple[clip: int, time: float32] =

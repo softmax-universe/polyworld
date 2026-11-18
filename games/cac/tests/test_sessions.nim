@@ -9,6 +9,24 @@ suite "session options":
     check options.playerCount == 2
     check options.human == false
     check options.soundMuted
+    check options.menu
+
+  test "menus are the default and direct launches remain available":
+    check parseSessionOptions(["--seed=42"]).menu
+    check not parseSessionOptions(["--direct"]).menu
+    check not parseSessionOptions(["--human"]).menu
+    check not parseSessionOptions(["--players=5"]).menu
+    check parseSessionOptions(["--menu", "--players=5"]).menu
+    check not parseSessionOptions(["--menu", "--replay=a.replay"]).menu
+    let network = parseSessionOptions([
+      "--players=5", "--server=127.0.0.1:8090", "--room", "abc"])
+    check network.menu
+    check network.serverAddress == "127.0.0.1:8090"
+    check network.roomCode == "abc"
+    for args in [@["--server"], @["--room="], @["--menu=false"],
+        @["--direct=true"], @["--players=8"]]:
+      expect ValueError:
+        discard parseSessionOptions(args)
 
   test "audio flags preserve session arguments and the last choice wins":
     check SessionOptions().soundMuted

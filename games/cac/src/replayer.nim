@@ -5,7 +5,7 @@
 ## animation. Every tick's state is checked against the recorded hash.
 import std/[strformat, times]
 import silky, vmath, windy
-import core/[sim, match, replays], play, scene/table, ui/hud
+import core/[sim, match, replays], play, ui/hud
 import polyworld/[actioncam, chrome, gameuis, player, viewers]
 
 const

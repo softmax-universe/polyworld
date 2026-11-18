@@ -3,12 +3,14 @@
 ## control, grouped by the layer it shapes; "Print settings" writes them as
 ## Nim to paste into defaultPostSettings.
 
-import
-  std/strutils,
-  silky, vmath, windy,
-  ../scene/courtyard, ../scene/post
+import ../scene/post
 
 when PostPanelControls:
+  import
+    std/strutils,
+    silky, vmath, windy,
+    ../scene/courtyard
+
   const
     PanelTitle = "Screen effects"
     PanelOrigin = vec2(24, 150)

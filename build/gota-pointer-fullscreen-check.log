@@ -1,0 +1,12 @@
+Hint: used config file '/Users/me/.nimby/nim/config/nim.cfg' [Conf]
+Hint: used config file '/Users/me/.nimby/nim/config/config.nims' [Conf]
+Hint: used config file '/Users/me/p/nim.cfg' [Conf]
+Hint: used config file '/Users/me/p/polyworld/config.nims' [Conf]
+..................................................................................................................................................................................................................................
+/Users/me/p/windy/src/windy/platforms/macos/platform.nim(14, 9) Hint: Using OpenGL backend [User]
+.........................
+/Users/me/p/polyworld/games/gods_of_the_arena/pointers.nim(2, 3) Hint: duplicate import of 'windy'; previous import here: /Users/me/p/polyworld/build/gota_pointer_fullscreen_check.nim(1, 25) [DuplicateModuleImport]
+...
+/Users/me/p/polyworld/build/gota_pointer_fullscreen_check.nim(1, 13) Warning: imported and not used: 'os' [UnusedImport]
+Hint: 
+155529 lines; 1.728s; 422.855MiB peakmem; proj: /Users/me/p/polyworld/build/gota_pointer_fullscreen_check.nim; out: unknownOutput [SuccessX]

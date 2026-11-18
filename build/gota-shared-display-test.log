@@ -1,0 +1,17 @@
+Hint: used config file '/Users/me/.nimby/nim/config/nim.cfg' [Conf]
+Hint: used config file '/Users/me/.nimby/nim/config/config.nims' [Conf]
+Hint: used config file '/Users/me/p/nim.cfg' [Conf]
+Hint: used config file '/Users/me/p/polyworld/config.nims' [Conf]
+..................................................................................................................................................................................................................................
+/Users/me/p/windy/src/windy/platforms/macos/platform.nim(14, 9) Hint: Using OpenGL backend [User]
+..........................
+/Users/me/p/windy/src/windy/platforms/macos/objc.nim(159, 14) Hint: 'addProtocol' is declared but not used [XDeclaredButNotUsed]
+CC: system.nim
+CC: polyworld/fullscreens.nim
+CC: polyworld/displays.nim
+CC: test_displays.nim
+Hint:  [Link]
+Hint: mm: orc; threads: on; opt: speed; options: -d:release
+155163 lines; 2.135s; 420.723MiB peakmem; proj: /Users/me/p/polyworld/tests/test_displays.nim; out: /Users/me/p/polyworld/build/test-shared-displays [SuccessX]
+Hint: /Users/me/p/polyworld/build/test-shared-displays [Exec]
+PASS shared default fullscreen, independent windows and restoration

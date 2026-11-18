@@ -3,7 +3,7 @@
 import
   std/[math, os, strutils, times],
   chroma, opengl, pixie, silky, vmath, windy,
-  actioncam, assets, player
+  actioncam, assets, fullscreens, player
 
 when defined(emscripten):
   {.emit: "#include <emscripten.h>".}
@@ -159,16 +159,18 @@ proc initGameWindow*(
     atlasPath: string,
     size = DefaultWindowSize,
     vsync = true,
-    msaa = msaaDisabled
+    msaa = msaaDisabled,
+    visible = true
 ): (Window, Silky) =
   ## Creates the viewer and GL context, keeping screenshot captures hidden.
   let window = newWindow(
     title,
     size,
-    visible = not defined(takeScreenshot),
+    visible = visible and not defined(takeScreenshot),
     vsync = vsync,
     msaa = msaa
   )
+  window.prepareDesktopFullscreen()
   window.makeContextCurrent()
   loadExtensions()
   let sk = newSilky(window, atlasPath)
@@ -187,10 +189,11 @@ proc drawSplash*(
     let
       uv = sk.atlas.entries[name]
       src = vec2(uv.width.float32, uv.height.float32)
-      area = window.size.vec2 * 0.78
+      view = window.size.vec2 / sk.uiScale
+      area = view * 0.78
       scale = min(area.x / max(src.x, 1), area.y / max(src.y, 1))
       dest = src * scale
-      pos = (window.size.vec2 - dest) * 0.5
+      pos = (view - dest) * 0.5
     sk.drawQuad(
       pos,
       dest,
@@ -221,12 +224,12 @@ proc holdSplash*(
   ## Keeps the splash up until the hold time elapses.
   when defined(takeScreenshot) or defined(emscripten):
     drawSplash(sk, window, splash.name)
-    return
-  while epochTime() - splash.startedAt < seconds:
-    if window.closeRequested:
-      quit(0)
-    drawSplash(sk, window, splash.name)
-    sleep(10)
+  else:
+    while epochTime() - splash.startedAt < seconds:
+      if window.closeRequested:
+        quit(0)
+      drawSplash(sk, window, splash.name)
+      sleep(10)
 
 var
   presentDeadline = 0.0

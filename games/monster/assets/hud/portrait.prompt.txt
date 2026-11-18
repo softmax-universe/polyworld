@@ -1,0 +1,6 @@
+Use case: background-extraction.
+Asset type: square game character portrait sprite.
+
+Isolate and refine the blue Moss portrait visible in the lower-right oval medallion of the reference HUD. Preserve its character design and hand-painted old-fantasy-strategy-game style: friendly smooth blue Elemental, broad rounded head, small glowing pale eyes, gold zigzag circlet, head and shoulders. This exact character should be immediately recognizable from the reference.
+
+Output ONLY the bust portrait, facing slightly forward, centered in a square transparent RGBA PNG. NO oval rim, no frame, no energy bar, no name or other text, no numbers, no landscape, no other UI. Include the full golden circlet and shoulders without cropping the silhouette. Leave transparent breathing room at all edges. Keep details readable when scaled down to96pixels; painterly shaded blue rather than photorealistic. The background must have genuine alpha transparency, not an opaque black square or checkerboard.

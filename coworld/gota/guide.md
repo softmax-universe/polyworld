@@ -3,29 +3,32 @@
 **New GotA week: everyone needs to update their bot.** Handle the draft, spend ability points, buy only in your own keep, and review the new BASIC number semantics and lane rewards; start from the updated `players/base.bas`.
 
 Two teams of five BASIC heroes battle to slay the enemy god. The official
-Softmax ladder uses OpenSkill with rating-based matchmaking and a mean-score
-column. Open Draft allows duplicate hero picks. Game results report
-**Emmett's Glory**: each winning hero's lifetime XP divided by
-elapsed simulated minutes, rounded down to whole points. Fractional minutes
-and drafting time count. Losing teams, draws, and timeouts score zero.
-There is no fixed XP penalty per minute. Zero-duration games score zero.
+Softmax ladder uses OpenSkill based only on team wins, losses, and draws,
+with rating-based matchmaking. Team Draft allows one of each hero per team;
+opposing teams may pick the same hero. Hosted results give every winning
+hero 1 and every losing hero 0. Draws and timeouts give all heroes 0.
+XP, Glory, match duration, and winning margins do not affect ladder ratings.
+Lifetime XP remains available separately for analysis.
 
 Destroying the enemy god grants every hero on your team a flat 1,000 XP,
 including dead heroes and heroes elsewhere on the map, regardless of who lands
 the last hit. This is awarded once on the final tick and included in lifetime XP
-before calculating Emmett's Glory. Finishing sooner increases the XP-per-minute
-score. Timeouts grant no god reward.
+for analysis. It does not affect ladder ratings. Timeouts grant no god reward.
 Destroying a tower or barracks grants its killer 200 XP and 75 gold.
 Towers fire once per second, and reload continues when they lose or switch
 targets. Their homing fireballs deal damage on arrival and follow the original
 target beyond range and into fog, even if the tower is destroyed. Shots disappear
 if their target dies before impact.
 
+Heroes start at 2.69–3.32 tiles per second before equipment, averaging 2.99.
+Each hero keeps its own speed gain per level. Heroes reveal a 12-tile radius
+for their team, with terrain and brush still blocking line of sight.
+
 The gods are the objectives: Hades for Red and Zeus for Blue. Each god has two level-3 guard towers. Clearing all three towers in any one lane exposes the guards. The god cannot take damage from attacks or spells until both of its guards are destroyed. Guards have the same 3900 HP and 60 damage as level-3 lane towers.
 
 Slots 0–4 are Red and slots 5–9 are Blue. Platform slots are zero-based. Upload a `.bas` file containing BASIC source. The game reads the staged file directly, with no player container or network connection.
 
-Start with the bundled `players/base.bas`. The [game documentation](https://github.com/Metta-AI/polyworld/blob/main/examples/gods_of_the_arena/docs/index.html) describes observations and available BASIC commands. The same source is available under `examples/gods_of_the_arena/bots.nim` and `content.nim`.
+Start with the bundled `players/base.bas`. The [game documentation](https://github.com/Metta-AI/polyworld/blob/main/games/gods_of_the_arena/docs/index.html) describes observations and available BASIC commands. The same source is available under `games/gods_of_the_arena/bots.nim` and `content.nim`.
 
 The baseline is a playable reference using structured GotA observations. It drafts
 missing roles, farms lanes, prioritizes last hits, pushes exposed buildings and
@@ -76,7 +79,7 @@ next i
 ```
 
 The host supplies the types and declarations in
-[`structures.bas`](https://github.com/Metta-AI/polyworld/blob/main/examples/gods_of_the_arena/structures.bas).
+[`structures.bas`](https://github.com/Metta-AI/polyworld/blob/main/games/gods_of_the_arena/structures.bas).
 Do not redeclare these names. Additional policy-defined types are allowed.
 
 | Record | Contents |
@@ -131,6 +134,55 @@ the same decision snapshot and does not change instruction or work budgets.
 
 The baseline now uses these records. The legacy scalar variables, functions,
 math helpers, neural functions, and chat/LLM APIs remain available.
+
+### Last hits and denies
+
+Bassy policies can deliberately last-hit enemies and deny allied lane creeps
+with `attackTarget(id)`. This uses the same attack command as human A-targeting;
+pass a stable object ID, not the observation index. It starts normal basic
+attacks, including their windup and any movement into range. Acceptance does
+not mean the killing hit has landed, and other units can win the last hit.
+
+Allied lane creeps (`kind = 3`) can be targeted only while alive and strictly
+below 50% health: `hp * 2 < maxHp`. The simulation checks again when the hit
+lands. Automatic targeting does not select allies, and offensive spells/items
+cannot deny. The denying hero receives no gold or XP; nearby enemy heroes
+retain the normal shared creep XP, without a last-hit bonus. These attack
+commands are recorded for deterministic replay.
+
+| Information | Structured API | Legacy API |
+| --- | --- | --- |
+| Creep health | `objects(i).hp` | `objectHp(i)` |
+| Creep maximum health | `objects(i).maxHp` | `objectInfo(i, 2)` |
+| Stable target ID | `objects(i).id` | `objectId(i)` |
+| Basic-attack damage | `self.attackDamage` | `selfAttackDamage` |
+| Ticks until the next hit in range | `self.attackCooldownTicks` | `selfAttackCooldown` |
+| Attack range | `self.attackRange` (tiles) | `selfAttackRange` (world units) |
+
+An idle hero reports a full windup, so do not wait for attack cooldown to
+become zero before issuing the first attack. The example below selects a
+visible lane creep already in range that one basic hit can kill. For a deny,
+the one-hit check is a policy choice; any allied creep below half health can
+be attacked repeatedly until it dies.
+
+```basic
+' @gota-structures
+for i = 0 to match.objectCount - 1
+  if objects(i).kind = 3 and objects(i).alive then
+    enemy = objects(i).team <> self.team
+    deny = objects(i).team = self.team and objects(i).hp * 2 < objects(i).maxHp
+    dx = objects(i).position.x - self.position.x
+    dy = objects(i).position.y - self.position.y
+    inRange = dx * dx + dy * dy <= self.attackRange * self.attackRange
+    if (enemy or deny) and inRange and objects(i).hp <= self.attackDamage then
+      accepted = attackTarget(objects(i).id)
+      if accepted then
+        exit for
+      end if
+    end if
+  end if
+next i
+```
 
 ## BASIC-defined neural networks
 
@@ -247,6 +299,9 @@ Each hero level grants another point. Points remain banked until a command
 spends them. `levelAbility(slot)` spends one point to unlock rank 1 or upgrade
 an already learned ability. Slots 0, 1, 2, and 3 correspond to Q, W, E, and R.
 
+Q is the primary spell, W the secondary combat spell, E the recovery or
+utility spell, and R the ultimate. All ten kits use this order.
+
 Q, W, and E have four ranks requiring hero levels 1, 3, 5, and 7.
 R has three ranks requiring hero levels 6, 12, and 18. Each additional rank
 adds 50% of the rank-1 damage, healing, or mana restoration, rounded down.
@@ -258,11 +313,26 @@ points and refills only learned abilities.
 
 Hero stats, including basic-attack damage, still grow automatically with
 hero level. Ability ranks never increase automatically. The bundled base
-and rusher policies explicitly spend points, prioritizing R, W, E, then Q.
+and rusher policies explicitly spend points, prioritizing R, Q, W, then E.
 Ability use requires explicit `castTarget` or `castPoint` commands, including
 slot 0 and ultimates. Items require `useItem` or `useItemAt`. Custom policies
 can bank points, choose another upgrade order, and reserve any ability. At
 level 20, fully ranking all four abilities leaves five banked points.
+
+A valid spell aimed beyond its range queues an approach: the hero walks into
+range, stops, faces the target, and casts. Mana, charges, and cooldowns are
+spent only when the spell is released. A successful command can therefore
+mean the cast was queued. New movement, attack, or spell orders replace it.
+Object targets must remain alive and visible; losing the target cancels the
+cast. Ground casts keep the requested point instead of clamping it to range.
+This is the same behavior for humans and BASIC bots. For example,
+`accepted = castPoint(1, x, y)` needs no separate `walkTo` call or repeated
+casting command. `self.hasQueuedCast` reports that approach and
+`self.castTicks` reports remaining casting-animation ticks. Legacy policies
+can read the same values with `selfInfo(19)` and `selfInfo(20)`. The bundled base
+policy leaves these orders running unless it needs to dodge or retreat.
+Do not issue another movement order while approaching
+unless you intend to cancel the pending spell.
 
 Thorn Bloom and Kindred Renewal heal every allied hero and damage enemies
 in their area. Either spell can target an ally, an enemy, or the ground.
@@ -272,10 +342,10 @@ All four spells reach six tiles. Healing is capped at maximum HP.
 
 | Support spell | Healing at ranks 1 / 2 / 3 / 4 | Targets |
 | --- | --- | --- |
-| Druid W: Thorn Bloom | 150 / 225 / 300 / 375 | Allies within a 2-tile circle. |
-| Druid E: Kindred Renewal | 160 / 240 / 320 / 400 | Allies within a 2.5-tile circle. |
-| Warlock W: Mending Hex | 220 / 330 / 440 / 550 | One selected allied hero. |
-| Warlock E: Dread Pact | 240 / 360 / 480 / 600 | One selected allied hero. |
+| Druid Q: Thorn Bloom | 150 / 225 / 300 / 375 | Allies within a 2-tile circle. |
+| Druid W: Kindred Renewal | 160 / 240 / 320 / 400 | Allies within a 2.5-tile circle. |
+| Warlock Q: Mending Hex | 220 / 330 / 440 / 550 | One selected allied hero. |
+| Warlock W: Dread Pact | 240 / 360 / 480 / 600 | One selected allied hero. |
 
 Warlock's ground projectiles remain offensive. Use `castTarget` with an
 allied hero's ID to heal. Druid's area casts can heal multiple allies while
@@ -304,8 +374,8 @@ Upgrade actions and rejected attempts are recorded for deterministic replays.
 ```basic
 if canLevelAbility(3) then
   levelAbility(3)
-elseif canLevelAbility(1) then
-  levelAbility(1)
+elseif canLevelAbility(0) then
+  levelAbility(0)
 end if
 ```
 
@@ -398,6 +468,10 @@ Attack range, vision, and portal landing range share this same radius. Barracks 
 anchors. A distant requested point is clamped into this area; there is no
 travel-distance limit. The selected tower must survive until arrival.
 
+Your own spawn room is also a valid destination and does not require a tower.
+Human players can double-click a scroll in either the inventory or action bar,
+or double-tap its hotkey, to return there. This uses the same channel and cooldown.
+
 The hero cannot move, attack, or cast while channeling, and still takes
 damage. Stuns, roots, death, or loss of the anchor interrupt the channel.
 The scroll is spent when the channel begins. Completion or interruption
@@ -479,14 +553,14 @@ end if
 
 | Hero | Ability | Effect | Rank-one damage |
 | --- | --- | --- | --- |
-| Vanguard | W: Firebrand Sword | Stun for 0.5 seconds | 37 |
+| Vanguard | Q: Firebrand Sword | Stun for 0.5 seconds | 37 |
 | Vanguard | R: Blazing Blade | Stun for 1 second | 204 |
-| Death Knight | W: Afterlight Sickle | Root for 0.5 seconds | 37 |
-| Demon Hunter | E: Gale Slash | Root for 0.5 seconds | 60 |
-| Berserker | E: Winged Boot | Root for 0.75 seconds | 35 |
-| Warlock | E: Dread Pact | Silence for 2 seconds | 84 |
+| Death Knight | Q: Afterlight Sickle | Root for 0.5 seconds | 37 |
+| Demon Hunter | W: Gale Slash | Root for 0.5 seconds | 60 |
+| Berserker | W: Winged Boot | Root for 0.75 seconds | 35 |
+| Warlock | W: Dread Pact | Silence for 2 seconds | 84 |
 | Druid | R: Golem Seed | Root for 2 seconds | 49 |
-| Lich | E: Bone Marionette | Root for 1.5 seconds | 49 |
+| Lich | W: Bone Marionette | Root for 1.5 seconds | 49 |
 
 Control durations stay fixed at every rank. Effects apply on impact to enemy
 heroes and creeps; buildings and gods are immune. A stun stops movement,
@@ -556,11 +630,17 @@ their average game score, so extra seats do not multiply it.
 
 Standings use OpenSkill Plackett-Luce, starting with skill (`mu`) 25 and
 uncertainty (`sigma`) 25/3. The board shows conservative MMR (`mu - 3 * sigma`),
-skill, uncertainty, win rate, and mean game score. Teams are ranked by average
-game score. Rating updates use placements rather than the score margin.
+skill, uncertainty, win rate, and mean game score. MMR uses only team wins,
+losses, and draws. Keep `margin_scale: null`: XP, Glory, and the size of a win
+must not affect rating changes. The platform derives team placements from
+binary results: every winning hero has 1 and every losing hero has 0;
+draws and timeouts give both teams zero. OpenSkill receives only
+those placements. The mean-score column is the fraction of appearances won.
 Matchmaking uses estimated skill (`mu`), including initial skill for new
 entrants, while the leaderboard uses conservative MMR.
 
+The main league selects the `team-draft` variant (`draft_mode: "team"`).
+Keep the existing `competition` variant on Open Draft for the student league.
 The former GotA OpenSkill league is retired. The student league,
 NeuralHub at Diablo Valley College, has independent settings and must remain
 unchanged when publishing game updates.
@@ -606,7 +686,7 @@ Only the last-hitting unit's team receives neutral XP. Eligible living heroes
 within six tiles on the same navigation floor split the pool. An eligible hero
 last hitter receives 15% first; the other 85% is shared among all eligible
 heroes, including that hero. Otherwise the full pool is shared. Only a hero
-last hitter receives gold. XP contributes to Emmett's Glory when the hero's team wins.
+last hitter receives gold. XP does not affect ladder ratings.
 
 Neutral objects use `objectKind(i) = 6`, `objectTeam(i) = 2`, and
 `objectClass(i) = 1`, `2`, or `3` for difficulty. Existing health, facing,
@@ -636,5 +716,5 @@ times out. Attempts last at most 15 seconds, with 20 seconds between attempts.
 To test five base bots against five pullers from the repository root:
 
 ```sh
-nim r examples/gods_of_the_arena/gota.nim --bot examples/gods_of_the_arena/players/base.bas:5 --bot examples/gods_of_the_arena/players/puller.bas:5
+nim r games/gods_of_the_arena/gota.nim --bot games/gods_of_the_arena/players/base.bas:5 --bot games/gods_of_the_arena/players/puller.bas:5
 ```

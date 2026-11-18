@@ -1,0 +1,3 @@
+/Users/me/p/polyworld/games/gods_of_the_arena/game.nim(8, 39) Warning: imported and not used: 'times' [UnusedImport]
+/Users/me/p/polyworld/games/gods_of_the_arena/game.nim(9, 65) Warning: imported and not used: 'timings' [UnusedImport]
+/Users/me/p/polyworld/games/gods_of_the_arena/graphics.nim(10, 35) Warning: imported and not used: 'fxshapes' [UnusedImport]

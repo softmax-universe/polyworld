@@ -1,0 +1,16 @@
+Use case: background-extraction.
+Asset type: reusable hand-painted fantasy resource icon atlas for a game.
+
+Extract/recreate ONLY the six resource illustrations visible in the lower-right inventory of the reference HUD. Match their exact visual style: old fantasy RTS painted inventory art, warm lighting, detailed but legible at 64 pixels, black edge shading, realistic stylized materials. Remove all frames, numbers, labels, interface, and landscape.
+
+Output one transparent RGBA sprite sheet with EXACTLY three equal columns and two equal rows, ideally 768x512 pixels. Each cell is an independent square of256x256, with the icon centered and at least32 pixels of TRANSPARENT clearance around its edges. Nothing overlaps cell boundaries. Every icon has similar scale and visual weight. No grid lines, no painted checkerboard, no text, no labels, no numbers, no shadows outside each icon, no border, no buttons.
+
+Reading order of the six cells is mandatory:
+top-left: cluster of red wild berries with two green leaves.
+top-middle: three golden grain/wheat ears.
+top-right: one silver-blue whole fish angled diagonally.
+bottom-left: neatly stacked pale pine logs with light golden wood rings.
+bottom-middle: stacked dark oak logs, noticeably deeper brown and textured bark than pine.
+bottom-right: cluster of angular grey quarried stones.
+
+These are the six icons from the screenshot, isolated as game sprites. The rest of the sheet must be genuinely transparent.

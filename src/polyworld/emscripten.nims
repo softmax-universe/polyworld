@@ -1,15 +1,15 @@
 ## Shared Emscripten compile recipe for Polyworld games.
 
 import
-  std/[os, strformat, strutils]
+  std/[hashes, os, strformat, strutils]
 
-proc setupEmscripten*(exampleDir: string, game = "") =
+proc setupEmscripten*(gameDir: string, game = "") =
   ## Configures the wasm backend and writes the bundle next to the game.
   when defined(emscripten):
     let
-      repoDir = exampleDir / ".." / ".."
+      repoDir = gameDir / ".." / ".."
       dataDir = getEnv("POLYWORLD_ART", repoDir / ".." / "polyworld_art")
-      outputDir = exampleDir / "emscripten"
+      outputDir = gameDir / "emscripten"
       shellTemplate = repoDir / "src" / "polyworld" /
         (if defined(replayViewer): "replay.html" else: "emscripten.html")
       shellFile = outputDir / "shell.html"
@@ -33,7 +33,7 @@ proc setupEmscripten*(exampleDir: string, game = "") =
       exec quoteShell(getCurrentCompilerExe()) & " c --hints:off" & options &
         " --nimcache:" & quoteShell(cache / "nimcache") &
         " -o:" & quoteShell(packer) & " " &
-        quoteShell(exampleDir / "pack_assets.nim")
+        quoteShell(gameDir / "pack_assets.nim")
       exec quoteShell(packer) & " " & quoteShell(dataDir) &
         " " & quoteShell(cache)
       let
@@ -42,9 +42,25 @@ proc setupEmscripten*(exampleDir: string, game = "") =
       if not fileExists(logoFile) or readFile(logoFile) != logoData:
         writeFile(logoFile, logoData)
       logo = "<img id=\"loading-logo\" alt=\"Game logo\" " &
-        "width=\"320\" height=\"240\" src=\"loading-logo.png\" " &
+        "width=\"320\" height=\"240\" src=\"loading-logo.png?v=" &
+        $hash(logoData) & "\" " &
         "fetchpriority=\"high\">"
       preload = "--preload-file " & quoteShell(cache / "stage" & "@/polyworld_art")
+    if game in ["gota", "lvd"]:
+      let bots =
+        if game == "gota":
+          @["base", "rusher", "puller", "jev", "khors", "lane_sustain",
+            "red-kite", "black-kite", "cogas"]
+        else:
+          @["base"]
+      for bot in bots:
+        preload.add " --preload-file " & quoteShell(
+          gameDir / "players" / (bot & ".bas") &
+          "@/policies/" & game & "/" & bot & ".bas")
+      switch("passL", "-s EXPORTED_FUNCTIONS=" &
+        "_main,_malloc,_free,_windy_websocket_open_callback," &
+        "_windy_websocket_message_callback,_windy_websocket_error_callback," &
+        "_windy_websocket_close_callback")
     let shell = readFile(shellTemplate).replace("<!-- GAME_LOGO -->", logo)
     if not fileExists(shellFile) or readFile(shellFile) != shell:
       writeFile(shellFile, shell)

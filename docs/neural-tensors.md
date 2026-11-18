@@ -122,11 +122,11 @@ The three existing converters accept `--tensors`. Their default output remains a
 named-runner ZIP. To convert an existing Richard, David, Andre or Fly runner ZIP:
 
 ```sh
-python examples/gods_of_the_arena/tools/tensor_packages.py input.zip output.zip
+python games/gods_of_the_arena/tools/tensor_packages.py input.zip output.zip
 ```
 
 This retains observations, inference cadence, reset behavior, sampling and action
-code. The forward passes live in `examples/gods_of_the_arena/neural/tensors/`:
+code. The forward passes live in `games/gods_of_the_arena/neural/tensors/`:
 Richard is affine/ReLU/affine; David and Andre compose recurrent gates and highway
 mixtures; Fly composes sparse updates, gather and readout. No native MinGRU,
 PufferNet or Fly-specific operator is required for these tensor implementations.
@@ -136,8 +136,8 @@ ZIP tensors. Convolution, attention and training are outside this operator set.
 Synthetic runnable packages are `neural/examples/tensor-{author}.zip`. For example:
 
 ```sh
-nim r examples/gods_of_the_arena/gota.nim \
-  --bot examples/gods_of_the_arena/neural/examples/tensor-fly.zip:10
+nim r games/gods_of_the_arena/gota.nim \
+  --bot games/gods_of_the_arena/neural/examples/tensor-fly.zip:10
 ```
 
 ## Validation
@@ -149,7 +149,7 @@ exactly in the reference fixtures. David's largest measured state difference was
 5.96e-8, with at most one raw Q16.16 output unit of difference. Differences are
 reported and bounded, not replaced with updated reference outputs.
 
-`tests/test_tensor_matches.nim` runs ten-player matches for all four public
+`games/gods_of_the_arena/tests/test_tensor_matches.nim` runs ten-player matches for all four public
 synthetic policies, compares every action and simulation hash against the named
 runners, and verifies recorded replay playback. Replays retain recorded commands;
 playback does not rerun inference or suppress mismatches.
@@ -179,3 +179,18 @@ plus BASIC compilation took 0.15..0.46 ms for the small models, 4.22 ms for Davi
 and 17.53 ms for Fly. The ten-player, 2,400-battle-tick synthetic matches had
 identical command sequences and simulation hashes for every author. Whole replay
 file hashes differ because policy source and names are part of the replay header.
+
+### Convolutional policies
+
+`tensorConv2d(input, weights, bias, stride, padding, output)` accepts float32
+CHW inputs, OIHW weights and a vector bias. Stride and symmetric zero padding
+are explicit integers. `tensorGroupNorm(input, scale, bias, groups, epsilon,
+output)` normalizes contiguous channel groups. Epsilon is a positive float32
+scalar tensor. Both operations validate shapes, charge work, and publish the
+output only after successful evaluation. Group normalization can run in place.
+
+The optional `-d:tensorBlas` build uses Accelerate on macOS and OpenBLAS on
+Linux for float32 dense layers and convolution. Integer and fixed operations
+retain their ordered arithmetic. Accelerated float32 rounding can differ from
+the portable implementation; games still replay recorded actions exactly.
+Set `OPENBLAS_NUM_THREADS=1` for games evaluating small per-player networks.

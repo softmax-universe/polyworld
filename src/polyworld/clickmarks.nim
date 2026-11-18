@@ -1,4 +1,4 @@
-## Accepted ground-click marks drawn with the shared fx mesh cylinder.
+## Local ground-click feedback drawn with the shared fx mesh cylinder.
 
 import
   std/math,
@@ -58,13 +58,13 @@ proc clickMarkSettings*(): FxSettings =
   result.startColor = vec4(1.0, 0.86, 0.32, 0.9)
   result.endColor = vec4(1.0, 0.55, 0.12, 0.0)
   result.edgeColor = vec4(1.0, 0.92, 0.55, 1.0)
-  result.fadeIn = 0.08
+  result.fadeIn = 0
   result.fadeOut = 0.45
 
-proc initClickMarks*(): ClickMarkSystem =
+proc initClickMarks*(settings = clickMarkSettings()): ClickMarkSystem =
   ## Creates the shared click cylinder and uploads it once.
   result.renderer = initFxRenderer()
-  result.settings = clickMarkSettings()
+  result.settings = settings
   result.renderer.uploadFxMesh(result.settings)
 
 proc emitClickMark*(system: var ClickMarkSystem, origin: Vec3) =
@@ -85,10 +85,14 @@ proc advanceClickMarks*(system: var ClickMarkSystem, delta: float32) =
 
 proc drawClickMarks*(
     system: ClickMarkSystem,
-    viewProjection: Mat4
+    viewProjection: Mat4,
+    visible: proc(origin: Vec3, radius: float32): bool {.closure.} = nil
 ) =
+  ## Optional game-owned current-sight bound; default preserves other games.
   ## Draws every live click cylinder through the shared fx mesh.
   for mark in system.marks:
+    let radius = system.settings.radius * max(system.settings.expandStart, system.settings.expandEnd)
+    if visible != nil and not visible(mark.origin, radius): continue
     let life = clickMarkLife(
       system.time - mark.startTime,
       system.settings.duration
@@ -97,6 +101,27 @@ proc drawClickMarks*(
       system.settings,
       viewProjection,
       translate(mark.origin) * fxModel(system.settings.axis),
+      system.time,
+      life
+    )
+
+proc drawLoopingClickMarks*(
+    system: ClickMarkSystem,
+    viewProjection: Mat4,
+    origins: openArray[Vec3],
+    visible: proc(origin: Vec3, radius: float32): bool {.closure.} = nil
+) =
+  ## Loops current destinations without storing or capping transient clicks.
+  let
+    life = fxLife(system.time, system.settings.duration, true)
+    radius = system.settings.radius *
+      max(system.settings.expandStart, system.settings.expandEnd)
+  for origin in origins:
+    if visible != nil and not visible(origin, radius): continue
+    system.renderer.drawFxMesh(
+      system.settings,
+      viewProjection,
+      translate(origin) * fxModel(system.settings.axis),
       system.time,
       life
     )

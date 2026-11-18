@@ -16,13 +16,18 @@ type
 proc neighborhood(
   layer: QuadLayer,
   materials: openArray[int],
-  x, z, cornerIndex: int
+  x, z, cornerIndex: int,
+  hardMaterials: openArray[int]
 ): Vec4 {.raises: [].} =
   ## Collects only the material centers sharing this exact corner height.
   let
     cornerX = x + (cornerIndex and 1)
     cornerZ = z + (cornerIndex shr 1)
-    height = layer.tiles[z * layer.width + x].tops[cornerIndex]
+    index = z * layer.width + x
+    height = layer.tiles[index].tops[cornerIndex]
+    material = materials[index]
+  if material in hardMaterials:
+    return vec4(material.float32)
   result = vec4(-1)
   for slot, (tileX, tileZ, corner) in [
     (cornerX - 1, cornerZ - 1, 3), (cornerX, cornerZ - 1, 2),
@@ -32,7 +37,8 @@ proc neighborhood(
       tileZ < 0 or tileZ >= layer.depth:
         continue
     let i = tileZ * layer.width + tileX
-    if layer.tiles[i].exists and layer.tiles[i].tops[corner] == height:
+    if layer.tiles[i].exists and layer.tiles[i].tops[corner] == height and
+        materials[i] notin hardMaterials:
       result[slot] = materials[i].float32
 
 proc buildTerrainMap*(
@@ -45,7 +51,8 @@ proc buildTerrainMap*(
   count = 1,
   chance = 0.4'f,
   materialCount = SurfaceNames.len,
-  groundMaterials: openArray[int] = []
+  groundMaterials: openArray[int] = [],
+  hardMaterials: openArray[int] = []
 ): TerrainMap {.raises: [TerrainMapError].} =
   ## Builds visual material and splat buffers without changing game map data.
   if kindMaterials.len == 0 or not (patchSize > 0 and patchSize < Inf) or
@@ -126,13 +133,14 @@ proc buildTerrainMap*(
           first = result.blends.len div 4
         ranges[i] = vec3(
           (span.first + splats.len).float32,
-          span.count.float32,
+          if materials[i] in hardMaterials: 0'f32 else: span.count.float32,
           first.float32
         )
         result.peak = max(result.peak, span.count)
         for corner in 0 .. 3:
           let neighbors = neighborhood(
-            layer, materials, i mod layer.width, i div layer.width, corner
+            layer, materials, i mod layer.width, i div layer.width, corner,
+            hardMaterials
           )
           result.blends.add [neighbors.x, neighbors.y, neighbors.z, neighbors.w]
       splats.add(map.splats)

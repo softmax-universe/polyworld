@@ -1,0 +1,41 @@
+Hint: used config file '/Users/me/.nimby/nim/config/nim.cfg' [Conf]
+Hint: used config file '/Users/me/.nimby/nim/config/config.nims' [Conf]
+Hint: used config file '/Users/me/p/nim.cfg' [Conf]
+Hint: used config file '/Users/me/p/polyworld/config.nims' [Conf]
+Hint: used config file '/Users/me/p/polyworld/games/gods_of_the_arena/config.nims' [Conf]
+...................................................................................................................................................................................................................................
+/Users/me/p/windy/src/windy/platforms/macos/platform.nim(14, 9) Hint: Using OpenGL backend [User]
+.........................................................................................................................................................................................
+/Users/me/p/polyworld/games/gods_of_the_arena/sim.nim(1911, 6) Hint: 'currentWaypointLayer' is declared but not used [XDeclaredButNotUsed]
+/Users/me/p/polyworld/games/gods_of_the_arena/sim.nim(5977, 6) Hint: 'settleSurface' is declared but not used [XDeclaredButNotUsed]
+........
+/Users/me/p/polyworld/src/polyworld/tensors.nim(649, 5) Hint: 'area' is declared but not used [XDeclaredButNotUsed]
+..........
+/Users/me/p/polyworld/games/gods_of_the_arena/game.nim(230, 6) Hint: 'teamHeroLevels' is declared but not used [XDeclaredButNotUsed]
+/Users/me/p/polyworld/games/gods_of_the_arena/game.nim(239, 6) Hint: 'teamHeroXp' is declared but not used [XDeclaredButNotUsed]
+/Users/me/p/polyworld/games/gods_of_the_arena/game.nim(245, 6) Hint: 'teamHeroXps' is declared but not used [XDeclaredButNotUsed]
+/Users/me/p/polyworld/games/gods_of_the_arena/game.nim(254, 6) Hint: 'teamHeroGold' is declared but not used [XDeclaredButNotUsed]
+/Users/me/p/polyworld/games/gods_of_the_arena/game.nim(260, 6) Hint: 'teamTowerCount' is declared but not used [XDeclaredButNotUsed]
+/Users/me/p/polyworld/games/gods_of_the_arena/game.nim(8, 39) Warning: imported and not used: 'times' [UnusedImport]
+/Users/me/p/polyworld/games/gods_of_the_arena/game.nim(9, 65) Warning: imported and not used: 'timings' [UnusedImport]
+...
+/Users/me/p/windy/src/windy/platforms/macos/objc.nim(159, 14) Hint: 'addProtocol' is declared but not used [XDeclaredButNotUsed]
+.
+/Users/me/p/polyworld/games/gods_of_the_arena/controls.nim(7, 3) Hint: duplicate import of 'content'; previous import here: /Users/me/p/polyworld/games/gods_of_the_arena/tests/test_human_controls.nim(9, 8) [DuplicateModuleImport]
+/Users/me/p/polyworld/games/gods_of_the_arena/controls.nim(7, 12) Hint: duplicate import of 'sim'; previous import here: /Users/me/p/polyworld/games/gods_of_the_arena/tests/test_human_controls.nim(9, 8) [DuplicateModuleImport]
+CC: system.nim
+CC: windy/platforms/macos/platform.nim
+CC: polyworld/rtscameras.nim
+CC: polyworld/shadows.nim
+CC: ../pointers.nim
+CC: test_human_controls.nim
+Hint:  [Link]
+Hint: mm: orc; threads: on; opt: speed; options: -d:release
+291275 lines; 6.080s; 1009.07MiB peakmem; proj: /Users/me/p/polyworld/games/gods_of_the_arena/tests/test_human_controls.nim; out: /Users/me/.cache/nim/test_human_controls_r/test_human_controls_1B59D7C20138C1A12DE6FF988F3BB66B4D21A565 [SuccessX]
+Hint: /Users/me/.cache/nim/test_human_controls_r/test_human_controls_1B59D7C20138C1A12DE6FF988F3BB66B4D21A565 [Exec]
+PASS human left-click inspection uses production selection and empty command queue
+PASS production right-click ownhero, retained inspection, A-move red / move green minimap routes
+PASS production hold/release camera, modal/focus gates, portrait one-shot
+PASS continuous 60-pixel edge band, release, both camera modes and modal/focus gates
+PASS production callbacks: human Space camera-only, replay pause, A-move, chat/menu/draft
+PASS every class/slot cooldown blocks HUD helper and production spell keys; ready casts preserved

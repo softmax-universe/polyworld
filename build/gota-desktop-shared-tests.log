@@ -1,0 +1,8 @@
+Hint: used config file '/Users/me/.nimby/nim/config/nim.cfg' [Conf]
+Hint: used config file '/Users/me/.nimby/nim/config/config.nims' [Conf]
+Hint: used config file '/Users/me/p/nim.cfg' [Conf]
+Hint: used config file '/Users/me/p/polyworld/config.nims' [Conf]
+Hint: mm: orc; threads: on; opt: speed; options: -d:release
+40288 lines; 0.018s; 47.812MiB peakmem; proj: /Users/me/p/polyworld/tests/test_displays.nim; out: /Users/me/p/polyworld/build/test-shared-displays [SuccessX]
+Hint: /Users/me/p/polyworld/build/test-shared-displays [Exec]
+PASS shared default fullscreen, independent windows and restoration

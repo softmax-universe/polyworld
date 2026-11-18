@@ -12,7 +12,7 @@
 import
   std/[tables, json, strutils, sets, os, options],
   chroma, gltf, vmath, windy,
-  animblend, picking, shadows, toon
+  animblend, charactermeshes, picking, shadows, toon
 
 type
   CharacterShading* = enum
@@ -25,6 +25,8 @@ type
     partNodes*: seq[Node]       # modular only: every swappable mesh node
     shownParts*: seq[Node]      # modular only: the outfit this model shows
     unlitParts*: seq[string]    # modular only: eyes, mouth, brows
+    mergedMeshes*: seq[Node]
+    mergedMesh*: int
 
   CharacterScene* = ref object
     renderer*: Renderer
@@ -236,6 +238,13 @@ proc prepareCharacterParts(model: CharacterModel) =
       node.baseVisible = true
       node.visible = true
 
+proc mergeCharacterParts*(model: CharacterModel): int =
+  ## Compiles a shared toon mesh for the current immutable outfit and face.
+  model.prepareCharacterParts()
+  model.file.root.updateAnimation(0)
+  result = model.mergedMeshes.len
+  model.mergedMeshes.add mergeCharacterMesh(model.file.root, model.unlitParts)
+
 proc setCharacterPose(
     model: CharacterModel, clip: int, animTime: float32
 ) =
@@ -321,6 +330,7 @@ proc drawModel(
       scene.toon.unlitNodes.incl name
     scene.toon.transform = transform
     scene.toon.tint = tint
+    scene.toon.glaze = color(0, 0, 0, 0)
     scene.toon.draw(root)
 
 proc visibleIn(node, root: Node): bool =
@@ -386,20 +396,30 @@ proc prepareCharacter*(
   pose.clip = clip
   pose.animTime = animTime
   pose.sizeFactor = sizeFactor
+  model.setCharacterPose(clip, animTime)
   if scene.shading == ToonCharacters:
-    model.setCharacterPose(clip, animTime)
     pose.toon.prepareToonPose(
       model.file.root,
       model.characterTransform(position, facing, sizeFactor),
-      model.unlitParts
+      model.unlitParts,
+      (if model.mergedMeshes.len > 0:
+        model.mergedMeshes[model.mergedMesh]
+      else:
+        nil)
+    )
+  else:
+    model.file.root.updateTransforms(
+      model.characterTransform(position, facing, sizeFactor)
     )
 
 proc drawCharacter*(
   scene: CharacterScene,
   pose: var CharacterPose,
-  tint = color(1, 1, 1, 1)
+  tint = color(1, 1, 1, 1),
+  glaze = color(0, 0, 0, 0)
 ) =
   ## Reuses prepared toon geometry while preserving the PBR debug renderer.
+  ## A `glaze` lays its colour over the toon body by its alpha.
   let model = pose.model
   if scene.shading == PbrCharacters:
     scene.drawCharacter(
@@ -411,6 +431,7 @@ proc drawCharacter*(
   else:
     scene.toon.unlitNodes.clear()
     scene.toon.tint = tint
+    scene.toon.glaze = glaze
     scene.toon.draw(model.file.root, pose.toon.addr)
 
 proc finishCharacters*(scene: CharacterScene) =

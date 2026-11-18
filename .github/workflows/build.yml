@@ -10,6 +10,8 @@ concurrency:
   cancel-in-progress: true
 jobs:
   build:
+    env:
+      POLYWORLD_DEPS: ${{ github.workspace }}/..
     strategy:
       fail-fast: false
       matrix:
@@ -29,11 +31,30 @@ jobs:
         run: |
           cd ..
           nimby create
-          nimby install "${{ github.event.repository.name }}/${{ github.event.repository.name }}.nimble"
           nimby sync "${{ github.event.repository.name }}/nimby.lock"
+      - name: Build relay without game sources
+        run: python tests/test_server_boundary.py
       - name: Run release tests and all-game determinism
-        run: nim r -d:release -d:bassyNativeStrict tests/all.nim
+        run: nim r -d:release -d:audioTest -d:bassyNativeStrict -d:replayEvents tests/all.nim
+      - name: Test display settings
+        run: nim r -d:release tests/test_displays.nim
       - name: Test lockstep training API
-        run: nim r -d:release -d:headless -d:bassyNativeStrict tests/test_gota_lockstep.nim
+        run: nim r -d:release -d:headless -d:bassyNativeStrict games/gods_of_the_arena/tests/test_lockstep.nim
+      - name: Test presentation audio without an output device
+        shell: bash
+        run: |
+          nim r -d:release -d:audioTest tests/test_sound_startup.nim
+          nim r -d:release -d:audioTest -d:nimAllocStats tests/test_sounds.nim
+          nim r -d:release -d:audioTest -d:nimAllocStats games/gods_of_the_arena/tests/test_audio.nim
+          nim r -d:release -d:audioTest -d:nimAllocStats games/light_vs_dark/tests/test_battle_sounds.nim
+      - name: Test browser launch arguments
+        run: |
+          node tests/test_webinputs.js
+          node tests/test_replay_audio.js
+      - name: Test browser relay protocol
+        shell: bash
+        run: |
+          nim c -r --hints:off --nimcache:"$RUNNER_TEMP/room-wire-cache" -o:"$RUNNER_TEMP/room-wire-fixture" tests/room_protocol_fixture.nim > "$RUNNER_TEMP/room-wire.json"
+          node tests/test_room_protocol.cjs "$RUNNER_TEMP/room-wire.json"
       - name: Check neural converters
-        run: python tests/test_neural_converters.py
+        run: python games/gods_of_the_arena/tests/test_neural_converters.py

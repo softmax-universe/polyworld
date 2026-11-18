@@ -1,7 +1,7 @@
 ## Bounded GPU particle effects shared by Polyworld game renderers.
 
 import
-  std/strutils,
+  std/[math, strutils],
   opengl, shady, vmath,
   particleshaders
 
@@ -18,16 +18,26 @@ const
     "uParticleSeed",
     "uParticleEffectKind",
     "uParticleOrigin",
-    "uParticleTarget"
+    "uParticleTarget",
+    "uParticleSight",
+    "uParticleSightOrigin",
+    "uParticleSightWidth",
+    "uParticleClipSight"
   ]
   ParticleVertexSource =
     when defined(emscripten):
-      toShader(gameParticleVertex, glsl3WebGL, shaderVertex)
+      toShader(gameParticleVertex, glsl3WebGL, shaderVertex).replace(
+        "precision highp float;",
+        "precision highp float;\nprecision highp int;"
+      )
     else:
       toShader(gameParticleVertex, glsl4Desktop, shaderVertex)
   ParticleFragmentSource =
     when defined(emscripten):
-      toShader(gameParticleFragment, glsl3WebGL, shaderFragment)
+      toShader(gameParticleFragment, glsl3WebGL, shaderFragment).replace(
+        "precision highp float;",
+        "precision highp float;\nprecision highp int;"
+      )
     else:
       toShader(gameParticleFragment, glsl4Desktop, shaderFragment)
 
@@ -45,7 +55,11 @@ type
     SeedUniform,
     EffectKindUniform,
     OriginUniform,
-    TargetUniform
+    TargetUniform,
+    SightUniform,
+    SightOriginUniform,
+    SightWidthUniform,
+    ClipSightUniform
 
   ParticleProgram = object
     id: GLuint
@@ -59,6 +73,9 @@ type
     travelTime: float32
     endTime: float32
     seed: uint32
+    owner: int32
+    anchor: int32
+      ## What the effect travels with, or 0; see `followParticleAnchors`.
 
   ParticleSystem* = object
     program: ParticleProgram
@@ -66,6 +83,7 @@ type
     effects: seq[ParticleEffect]
     time: float32
     nextSeed: uint32
+    sightTexture: GLuint
 
 proc compileParticleStage(
     kind: GLenum,
@@ -134,6 +152,19 @@ proc initParticleSystem*(): ParticleSystem =
   result.program = compileParticleProgram()
   result.nextSeed = 1
   glGenVertexArrays(1, result.vertexArray.addr)
+  var previous: GLint
+  glGetIntegerv(GL_TEXTURE_BINDING_2D, previous.addr)
+  glGenTextures(1, result.sightTexture.addr)
+  glBindTexture(GL_TEXTURE_2D, result.sightTexture)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST.GLint)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST.GLint)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE.GLint)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE.GLint)
+  # Keep the sampler complete even for callers that don't use sight clipping.
+  var white = [255'u8, 255, 255, 255]
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8.GLint, 1, 1, 0,
+    GL_RGBA, GL_UNSIGNED_BYTE, white[0].addr)
+  glBindTexture(GL_TEXTURE_2D, previous.GLuint)
 
 proc effectParticleCount(kind: ParticleEffectKind): int =
   ## Returns the bounded instance count for one semantic effect.
@@ -142,7 +173,7 @@ proc effectParticleCount(kind: ParticleEffectKind): int =
     24
   of MagicBolt:
     36
-  of MagicBurst:
+  of MagicBurst, PortalBurst, PoisonBurst:
     32
   of Fireball:
     52
@@ -150,8 +181,42 @@ proc effectParticleCount(kind: ParticleEffectKind): int =
     40
   of ArrowWake:
     24
-  of HealingAura:
+  of PoisonCapsule:
+    24
+  of LeafBolt, LeafBurst:
+    12
+  of HealingAura, ManaAura, PoisonAura:
     48
+  of BloomSeed:
+    24
+  of BloomPetals:
+    56
+  of RootLeaves:
+    36
+  of SolarOrb:
+    48
+  of SolarFlames:
+    112
+  of MendingAura:
+    40
+  of BladeFlame:
+    24
+  of FireWave:
+    160
+  of HeatEmbers:
+    40
+  of IceShard:
+    28
+  of FrostBurst:
+    30
+  of IceShatter:
+    90
+  of BlizzardShards:
+    48
+  of SnowSquall:
+    220
+  of LightningBolt:
+    LightningParticleCount
 
 proc effectLifetime(
     kind: ParticleEffectKind,
@@ -163,7 +228,7 @@ proc effectLifetime(
     0.9'f32
   of MagicBolt:
     travelTime + 0.7'f32
-  of MagicBurst:
+  of MagicBurst, PortalBurst, PoisonBurst:
     1.25'f32
   of Fireball:
     travelTime + 0.8'f32
@@ -171,8 +236,38 @@ proc effectLifetime(
     1.0'f32
   of ArrowWake:
     travelTime + 0.35'f32
-  of HealingAura:
+  of PoisonCapsule:
+    travelTime + 0.25'f
+  of LeafBolt:
+    travelTime
+  of LeafBurst:
+    0.6'f
+  of BloomSeed, SolarOrb:
+    travelTime + 0.1'f32
+  of BloomPetals, RootLeaves:
+    1.8'f32
+  of SolarFlames:
+    1.65'f32
+  of HealingAura, ManaAura, PoisonAura, MendingAura:
     1.75'f32
+  of BladeFlame:
+    0.5'f32
+  of FireWave:
+    0.55'f32
+  of HeatEmbers:
+    1.25'f32
+  of IceShard:
+    travelTime + 0.6'f32
+  of FrostBurst:
+    0.9'f32
+  of IceShatter:
+    1.3'f32
+  of BlizzardShards:
+    travelTime + 0.4'f32
+  of SnowSquall:
+    travelTime + 0.1'f32
+  of LightningBolt:
+    0.45'f32
 
 proc addParticleEffect(
     system: var ParticleSystem,
@@ -180,7 +275,9 @@ proc addParticleEffect(
     origin,
     target: Vec3,
     travelTime,
-    delay: float32
+    delay: float32,
+    anchor = 0'i32,
+    owner = -1'i32
 ) =
   ## Adds one effect while keeping the presentation queue bounded.
   if system.effects.len >= MaximumParticleEffects:
@@ -193,7 +290,9 @@ proc addParticleEffect(
     startTime: startTime,
     travelTime: max(travelTime, 0.05'f32),
     endTime: startTime + kind.effectLifetime(travelTime),
-    seed: system.nextSeed
+    seed: system.nextSeed,
+    anchor: anchor,
+    owner: owner
   )
   inc system.nextSeed
 
@@ -201,16 +300,47 @@ proc emitParticleBurst*(
     system: var ParticleSystem,
     kind: ParticleEffectKind,
     position: Vec3,
-    delay = 0.0'f32
+    delay = 0.0'f32,
+    anchor = 0'i32,
+    owner = -1'i32
 ) =
-  ## Emits one stationary burst now or after a short presentation delay.
+  ## Emits one burst now or after a short presentation delay. It stays
+  ## where it was emitted unless it has an anchor to follow.
   system.addParticleEffect(
     kind,
     position,
     position,
     0.05'f32,
+    delay,
+    anchor,
+    owner
+  )
+
+proc emitParticleSpan*(
+    system: var ParticleSystem,
+    kind: ParticleEffectKind,
+    origin,
+    target: Vec3,
+    delay = 0.0'f32
+) =
+  ## Emits one effect that spreads between two points without travelling.
+  system.addParticleEffect(
+    kind,
+    origin,
+    target,
+    0.05'f32,
     delay
   )
+
+proc emitParticleFlight*(
+    system: var ParticleSystem,
+    kind: ParticleEffectKind,
+    origin, target: Vec3,
+    travelTime: float32
+) =
+  ## A travelling visual whose impact is emitted by the simulation event.
+  system.addParticleEffect(kind, origin, target,
+    max(travelTime, 0.05'f32), 0.0'f32)
 
 proc emitParticleProjectile*(
     system: var ParticleSystem,
@@ -218,7 +348,8 @@ proc emitParticleProjectile*(
     impact: ParticleEffectKind,
     origin,
     target: Vec3,
-    travelTime: float32
+    travelTime: float32,
+    owner = -1'i32
 ) =
   ## Emits a travelling effect and a matching impact at its destination.
   let duration = max(travelTime, 0.05'f32)
@@ -227,9 +358,25 @@ proc emitParticleProjectile*(
     origin,
     target,
     duration,
-    0.0'f32
+    0.0'f32,
+    owner = owner
   )
-  system.emitParticleBurst(impact, target, duration)
+  system.emitParticleBurst(impact, target, duration, owner = owner)
+
+proc followParticleAnchors*(
+    system: var ParticleSystem,
+    place: proc(anchor: int32, position: var Vec3): bool
+) =
+  ## Moves every anchored effect to where `place` puts its anchor now, so
+  ## it travels with whatever it was emitted on. An anchor `place` no
+  ## longer finds leaves its effects where they last were.
+  for effect in system.effects.mitems:
+    if effect.anchor == 0:
+      continue
+    var position = effect.origin
+    if place(effect.anchor, position):
+      effect.target += position - effect.origin
+      effect.origin = position
 
 proc advanceParticles*(system: var ParticleSystem, delta: float32) =
   ## Advances presentation time and removes every finished effect.
@@ -300,27 +447,101 @@ proc uploadParticleEffect(
     effect.target.z
   )
 
+proc particlePathVisible*(
+    origin, target: Vec3,
+    visibility: openArray[uint8],
+    width: int,
+    mapOrigin: Vec2,
+    padding = 0
+): bool =
+  ## Hides an effect if any part of its travel path enters unseen tiles.
+  if visibility.len == 0:
+    return true
+  if width <= 0 or visibility.len != width * width:
+    return false
+  let
+    delta = target - origin
+    steps = max(1, int(ceil(max(abs(delta.x), abs(delta.z)) * 2)))
+  for i in 0 .. steps:
+    let
+      point = origin + delta * (i.float32 / steps.float32)
+      x = int(floor(point.x - mapOrigin.x))
+      z = int(floor(point.z - mapOrigin.y))
+    if x < 0 or z < 0 or x >= width or z >= width or
+      visibility[z * width + x] == 0:
+        return false
+    if padding > 0:
+      for row in z-padding .. z+padding:
+        for col in x-padding .. x+padding:
+          if col < 0 or row < 0 or col >= width or row >= width or
+              visibility[row * width + col] == 0: return false
+  true
+
 proc drawParticles*(
     system: ParticleSystem,
     viewProjection: Mat4,
     cameraRight,
     cameraUp,
-    cameraForward: Vec3
+    cameraForward: Vec3,
+    visibility: openArray[uint8] = [],
+    visibilityWidth = 0,
+    visibilityOrigin = vec2(0),
+    visibilityPadding = 0,
+    viewer = -1'i32,
+    clipToSight = false
 ) =
-  ## Draws every active effect with instanced, depth-tested billboards.
+  ## Draws every visible active effect with instanced, depth-tested billboards.
   if system.program.id == 0 or system.effects.len == 0:
     return
+  # Opt-in exact fragment clipping preserves the default path policy for other
+  # games, without suppressing a whole incoming shot at a sight boundary.
+  let clip = clipToSight and visibility.len > 0
+  if clip and (visibilityWidth <= 0 or visibility.len != visibilityWidth * visibilityWidth):
+    return
+  var oldActive, oldTexture, oldAlignment: GLint
+  glGetIntegerv(GL_ACTIVE_TEXTURE, oldActive.addr)
+  glActiveTexture(GL_TEXTURE0)
+  glGetIntegerv(GL_TEXTURE_BINDING_2D, oldTexture.addr)
+  glBindTexture(GL_TEXTURE_2D, system.sightTexture)
+  if clip:
+    glGetIntegerv(GL_UNPACK_ALIGNMENT, oldAlignment.addr)
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8.GLint, visibilityWidth.GLsizei,
+      visibilityWidth.GLsizei, 0, GL_RED, GL_UNSIGNED_BYTE, visibility[0].unsafeAddr)
+    glPixelStorei(GL_UNPACK_ALIGNMENT, oldAlignment)
   var matrix = viewProjection
   glEnable(GL_DEPTH_TEST)
   glDepthMask(GL_FALSE)
   glEnable(GL_BLEND)
   glDisable(GL_CULL_FACE)
   glUseProgram(system.program.id)
+  let clipLocation = system.program.locations[ClipSightUniform]
+  glUniform1i(system.program.locations[SightUniform], 0)
+  glUniform1i(clipLocation, 0)
+  if clip:
+    glUniform2f(system.program.locations[SightOriginUniform],
+      visibilityOrigin.x, visibilityOrigin.y)
+    glUniform1f(system.program.locations[SightWidthUniform],
+      visibilityWidth.float32)
   glBindVertexArray(system.vertexArray)
   for effect in system.effects:
     if effect.startTime > system.time:
       continue
-    if effect.kind == ArrowWake:
+    let owned = viewer >= 0 and effect.owner == viewer
+    glUniform1i(clipLocation, (clip and not owned).GLint)
+    if not clip and not owned:
+      if not particlePathVisible(
+        effect.origin,
+        effect.target,
+        visibility,
+        visibilityWidth,
+        visibilityOrigin,
+        visibilityPadding
+      ):
+        continue
+    if effect.kind in
+        {ArrowWake, LeafBolt, LeafBurst, BloomSeed, BloomPetals, RootLeaves,
+         IceShard, FrostBurst, IceShatter, BlizzardShards, SnowSquall}:
       glBlendFuncSeparate(
         GL_SRC_ALPHA,
         GL_ONE_MINUS_SRC_ALPHA,
@@ -351,6 +572,8 @@ proc drawParticles*(
   glUseProgram(0)
   glDepthMask(GL_TRUE)
   glDisable(GL_BLEND)
+  glBindTexture(GL_TEXTURE_2D, oldTexture.GLuint)
+  glActiveTexture(oldActive.GLenum)
 
 proc closeParticles*(system: var ParticleSystem) =
   ## Releases particle GPU resources and clears presentation state.
@@ -358,4 +581,6 @@ proc closeParticles*(system: var ParticleSystem) =
     glDeleteProgram(system.program.id)
   if system.vertexArray != 0:
     glDeleteVertexArrays(1, system.vertexArray.addr)
+  if system.sightTexture != 0:
+    glDeleteTextures(1, system.sightTexture.addr)
   system = ParticleSystem()

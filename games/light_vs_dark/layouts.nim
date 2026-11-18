@@ -1,0 +1,87 @@
+## Current-frame HUD rectangles, composed from fixed rows and columns.
+
+import
+  vmath,
+  polyworld/[gameuis, rooms, stackpanels]
+
+const
+  PanelScore* = vec2(298, 156)
+  PanelResources* = vec2(432, 56)
+  PanelMinimap* = vec2(282, 320)
+  PanelSelection* = vec2(364, 225)
+  PanelBuild* = vec2(358, 310)
+
+type
+  MinimapPanels* = object
+    map*, sun*, clock*: GameUiPanel
+    views*: array[2, GameUiPanel]
+
+  SelectionPanels* = object
+    portrait*, hp*, name*, details*, cargo*: GameUiPanel
+    units*: array[9, GameUiPanel]
+
+  BuildPanels* = object
+    contents*: GameUiPanel
+    slots*: array[16, GameUiPanel]
+
+proc showPlaybackControls*(replayMode: bool, playerSlot: int32,
+    participant = 0'u32, seats: openArray[Seat] = []): bool =
+  ## Recorded replays always have transport. A live human or any owned
+  ## network seat (including bots) is a controller, not a watch client.
+  if replayMode: return true
+  if playerSlot > 0: return false
+  if participant != 0:
+    for seat in seats:
+      if seat.owner == participant: return false
+  true
+
+proc resourcePanel*(layout: GameUiLayout): GameUiPanel =
+  ## Anchors the resource ribbon just left of the top-right minimap.
+  result = layout.panel(GameUiRegion.TopRight, PanelResources)
+  result.origin.x -= PanelMinimap.x + 48
+
+proc resourcePanels*(panel: GameUiPanel): array[3, GameUiPanel] =
+  ## Places three equal resource cells across the top ribbon.
+  var row = panel.stack(LeftToRight, vec2(12, 14))
+  for cell in result.mitems:
+    cell = row.take(vec2(130, 28), 9)
+
+proc minimapPanels*(panel: GameUiPanel): MinimapPanels =
+  ## Stacks the map above the clock and previous/next view controls.
+  var rows = panel.stack(TopToBottom, vec2(13, 12))
+  result.map = rows.take(vec2(256), 6)
+  var footer = rows.takeRow(32).stack(LeftToRight)
+  result.sun = footer.take(vec2(32), 15)
+  result.clock = footer.take(vec2(80, 32))
+  var buttons = footer.takeRest().stack(RightToLeft)
+  for i in countdown(result.views.high, 0):
+    result.views[i] = buttons.take(vec2(32), 11)
+
+proc diplomacyButtonPanel*(layout: GameUiLayout): GameUiPanel =
+  ## Anchors the diplomacy shortcut just below the minimap's right edge.
+  let minimap = layout.panel(GameUiRegion.TopRight, PanelMinimap)
+  result.size = vec2(48)
+  result.origin = minimap.origin + vec2(minimap.size.x - result.size.x,
+    minimap.size.y + 8)
+
+proc selectionPanels*(panel: GameUiPanel, workerCargo = false): SelectionPanels =
+  ## Separates the main selection column from the three-by-three unit grid.
+  var columns = panel.stack(LeftToRight, vec2(14))
+  var portrait = columns.takeColumn(136, 12).stack(TopToBottom)
+  result.portrait = portrait.takeRow(136, 9)
+  portrait.indent = 4
+  result.hp = portrait.take(vec2(128, 23), 3)
+  result.name = portrait.take(vec2(128, 22))
+  result.details = columns.takeRest()
+  if workerCargo:
+    var rows = result.details.stack(TopToBottom)
+    result.cargo = rows.takeRow(52, 5)
+    stackGrid(rows.takeRest(), vec2(44), 3, vec2(10, 4), result.units)
+  else:
+    stackGrid(result.details, vec2(56), 3, vec2(10, 8), result.units)
+
+proc buildPanels*(panel: GameUiPanel): BuildPanels =
+  ## A single contextual palette, with no navigation strip.
+  var rows = panel.stack(TopToBottom, vec2(20, 12))
+  result.contents = rows.takeRest()
+  stackGrid(result.contents, vec2(64), 4, vec2(10), result.slots)

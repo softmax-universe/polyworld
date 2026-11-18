@@ -2,7 +2,8 @@
 
 import
   std/math,
-  vmath, windy
+  vmath, windy,
+  displays, inputs
 
 const
   RtsCameraYaw* = 0.0'f32
@@ -10,7 +11,6 @@ const
   RtsFieldOfView* = 45.0'f32
   RtsEdgePanMargin* = 16.0'f32
     ## Pixel band at the window edge that pans the camera.
-    ## Edge pan is only used while the window is fullscreen.
   RtsPanSpeed* = 0.96'f32
     ## World units per second per unit of camera distance.
   RtsFollowLift* = 0.25'f32
@@ -22,6 +22,10 @@ const
     ## Ease-in-out duration when a HUD portrait pans to a hero.
 
 type
+  EdgeScrollMode* = enum
+    NoEdgeScroll = "Off"
+    FullscreenEdgeScroll = "Fullscreen only"
+    AlwaysEdgeScroll = "Always"
   MinimapViewRect* = object
     ## Describes the visible ground footprint inside a minimap rectangle.
     origin*: Vec2
@@ -33,28 +37,33 @@ type
     elapsed*: float32
     duration*: float32
 
-proc rtsCameraEye*(target: Vec3, distance: float32): Vec3 =
+proc rtsCameraEye*(
+    target: Vec3,
+    distance: float32,
+    pitch = RtsCameraPitch
+): Vec3 =
   ## Returns the locked north-facing RTS camera position.
   target + vec3(
-    sin(RtsCameraYaw) * cos(RtsCameraPitch),
-    sin(RtsCameraPitch),
-    cos(RtsCameraYaw) * cos(RtsCameraPitch)
+    sin(RtsCameraYaw) * cos(pitch),
+    sin(pitch),
+    cos(RtsCameraYaw) * cos(pitch)
   ) * distance
 
 proc rtsFollowFrame*(
     subject: Vec3,
     distance: float32,
-    liftAmount = RtsFollowLift
+    liftAmount = RtsFollowLift,
+    pitch = RtsCameraPitch
 ): Vec3 =
   ## Returns the look-at that places `subject` above the optical center.
   let
     halfVerticalFov = RtsFieldOfView * PI.float32 / 360.0'f32
-    cameraHeight = distance * sin(RtsCameraPitch)
-    cameraForward = distance * cos(RtsCameraPitch)
+    cameraHeight = distance * sin(pitch)
+    cameraForward = distance * cos(pitch)
     farOffset = cameraForward -
-      cameraHeight / tan(RtsCameraPitch - halfVerticalFov)
+      cameraHeight / tan(pitch - halfVerticalFov)
     nearOffset = cameraForward -
-      cameraHeight / tan(RtsCameraPitch + halfVerticalFov)
+      cameraHeight / tan(pitch + halfVerticalFov)
     lift = (nearOffset - farOffset) * liftAmount
   subject + vec3(
     sin(RtsCameraYaw) * lift,
@@ -85,17 +94,18 @@ proc minimapViewport*(
     aspect: float32,
     origin,
     size: Vec2,
-    worldHalfSize: float32
+    worldHalfSize: float32,
+    pitch = RtsCameraPitch
 ): MinimapViewRect =
   ## Approximates the camera's ground footprint in minimap pixels.
   let
     halfVerticalFov = RtsFieldOfView * PI.float32 / 360.0'f32
-    cameraHeight = distance * sin(RtsCameraPitch)
-    cameraForward = distance * cos(RtsCameraPitch)
+    cameraHeight = distance * sin(pitch)
+    cameraForward = distance * cos(pitch)
     farOffset = cameraForward -
-      cameraHeight / tan(RtsCameraPitch - halfVerticalFov)
+      cameraHeight / tan(pitch - halfVerticalFov)
     nearOffset = cameraForward -
-      cameraHeight / tan(RtsCameraPitch + halfVerticalFov)
+      cameraHeight / tan(pitch + halfVerticalFov)
     halfHorizontalFov = arctan(tan(halfVerticalFov) * aspect)
     halfWidth = max(distance * tan(halfHorizontalFov), 1.0'f32)
     minimum = vec2(
@@ -151,6 +161,18 @@ proc rtsEdgePanDir*(
 
 proc rtsKeyPanDir*(window: Window): Vec2 =
   ## Returns a pan from arrow keys.
+  if customBindingsEnabled:
+    if window.actionDown(ControlInput):
+      return
+    if window.actionDown(PanRightInput):
+      result.x += 1
+    if window.actionDown(PanLeftInput):
+      result.x -= 1
+    if window.actionDown(PanDownInput):
+      result.y += 1
+    if window.actionDown(PanUpInput):
+      result.y -= 1
+    return
   if window.buttonDown[KeyLeftControl] or
       window.buttonDown[KeyRightControl] or
       window.buttonDown[KeyLeftSuper] or
@@ -180,22 +202,37 @@ proc rtsPointerInside(window: Window): bool =
     true
 
 proc rtsEdgePanAllowed*(
-    fullscreen, inside, captured: bool
+    fullscreen, inside, captured: bool,
+    mode = FullscreenEdgeScroll
 ): bool =
-  ## Edge pan is only live in fullscreen with a free cursor over the window.
-  fullscreen and inside and not captured
+  ## Applies the scrolling preference while keeping the cursor in the window.
+  if not inside or captured:
+    return false
+  case mode
+  of NoEdgeScroll:
+    false
+  of FullscreenEdgeScroll:
+    fullscreen
+  of AlwaysEdgeScroll:
+    true
 
-proc rtsPanDir*(window: Window): Vec2 =
+proc rtsPanDir*(
+    window: Window,
+    edgeScrolling = FullscreenEdgeScroll,
+    edgeMargin = RtsEdgePanMargin,
+    pointerConfined = false
+): Vec2 =
   ## Returns the combined keyboard and screen-edge pan for this frame.
-  ## Edge pan only runs in fullscreen so a windowed game does not drift
-  ## when the pointer sits on a chrome border.
   if not window.focused:
     return
   let edge =
     if rtsEdgePanAllowed(
-      window.fullscreen, rtsPointerInside(window), window.mouseCaptured
+      window.isFullscreen,
+      rtsPointerInside(window) or pointerConfined,
+      window.mouseCaptured,
+      edgeScrolling
     ):
-      rtsEdgePanDir(window.mousePos.vec2, window.size.vec2)
+      rtsEdgePanDir(window.mousePos.vec2, window.size.vec2, edgeMargin)
     else:
       vec2(0)
   rtsPanDir(rtsKeyPanDir(window), edge)

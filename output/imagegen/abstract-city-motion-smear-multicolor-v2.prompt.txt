@@ -1,0 +1,7 @@
+Generated using the built-in image_gen tool.
+
+Use case: style-transfer
+Input image: edit target, the supplied blue-gray abstract city zoom-smear image.
+Edit request: Make the apparent forward motion dramatically faster. Recompose every architectural smear and light trail to converge on ONE single vanishing point at the EXACT geometric center of the frame (50% width, 50% height). Replace the current lower-right vanishing point. Make the streaks much longer, rushing from that central point all the way beyond the frame edges, with stronger broad radial motion smearing and intense acceleration.
+Add many vivid red, purple, and yellow light streaks integrated into the night city: red pairs from the backs of cars on the roadway, warm yellow streetlamps along the sides, purple urban lighting. The cars and lamps are only abstract ghosted hints, their lights stretched into long bright radial trails. Keep a convincing unified city-road perspective with the horizon through frame center, no other vanishing points. Mix broad soft blue-gray smears with fine long colored light trails and restrained white highlights.
+Preserve: dark near-black background, deep blue and slate-gray architectural masses, cinematic long-exposure photographic texture, abstract atmosphere, wide landscape aspect ratio, rich black space between lights. Keep the center small and dark rather than a white glowing orb. Lights should feel integrated and streaky, not crisp objects. No text, logos, or watermark.

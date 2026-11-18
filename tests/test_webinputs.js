@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import { gzipSync } from "node:zlib";
 const source = fs.readFileSync("src/polyworld/webinputs.js", "utf8");
 const cacSource = fs.readFileSync("games/cac/web/inputs.js", "utf8");
 
@@ -59,4 +60,53 @@ assert.deepEqual(configure("?bot=https://example.com/%252Fescape.bas"), [
 assert.deepEqual(configure("?draft-mode=open&player=1"), [
   "--draft-mode", "open", "--player=1"
 ]);
-console.log("Browser input names and audio controls passed");
+
+function loadReplay(query, hash, body) {
+  return new Promise((resolve, reject) => {
+    const Module = {
+      FS_createPath() {},
+      FS_createDataFile(directory, name, bytes) {
+        assert.equal(directory + "/" + name, "/web/replay.replay");
+        this.replay = Buffer.from(bytes);
+      },
+      addRunDependency() {},
+      removeRunDependency() { resolve(this.replay); },
+      polyworldError(message) { reject(new Error(message)); }
+    };
+    vm.runInNewContext(source, {
+      Module, URL, URLSearchParams, Uint8Array, Blob, DecompressionStream,
+      window: {location: {search: query, hash,
+        href: "https://example.com/games/game.html" + query + hash}},
+      console: {error() {}},
+      async fetch(url) {
+        assert.equal(url, "https://example.com/games/record.replay");
+        return {ok: true, body};
+      }
+    });
+    assert.deepEqual(Array.from(Module.arguments), ["--replay", "/web/replay.replay"]);
+    Module.preRun[0]();
+  });
+}
+
+const replay = Buffer.from("POLYWORLDREPLAY test bytes");
+assert.deepEqual(await loadReplay("?replay=record.replay", "#replay=ignored",
+  new Blob([replay]).stream()), replay);
+assert.deepEqual(await loadReplay("", "#replay=record.replay",
+  new Blob([gzipSync(replay)]).stream()), replay);
+
+const mebibyte = new Uint8Array(1024 * 1024);
+let rawChunks = 0;
+const oversized = new ReadableStream({pull(controller) {
+  if (rawChunks === 65) {
+    controller.close();
+  } else {
+    rawChunks++;
+    controller.enqueue(mebibyte);
+  }
+}});
+await assert.rejects(loadReplay("?replay=record.replay", "", oversized), /64 MiB/);
+const compressed = gzipSync(Buffer.alloc(64 * 1024 * 1024 + 1));
+await assert.rejects(loadReplay("?replay=record.replay", "",
+  new Blob([compressed]).stream()), /64 MiB/);
+
+console.log("Browser input arguments and bounded replay loading passed");

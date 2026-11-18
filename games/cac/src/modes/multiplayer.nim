@@ -128,7 +128,7 @@ when not defined(headless):
   import ../app, ../bench, ../ui/hud, ../scene/table, ../play,
     ../scene/cardrenderer,
     ../vfx/vfxrenderer, ../scene/post, ../scene/courtyard,
-    ../scene/heroes, ../ui/tuning, ../ui/matchmenu, ../ui/controls,
+    ../scene/heroes, ../ui/tuning, ../ui/matchmenu, ../ui/controls, ../audios,
     ../net/multiplayer as networkplay
   import polyworld/[characters, chrome, connections, menus,
     roomclients, sounds, viewers]
@@ -315,7 +315,9 @@ when not defined(headless):
         play.stopTargeting()
         play.tossPicking = false
         play.selectedAttacker = 0
-        if not app.network.client.catchingUp:
+        if app.network.client.catchingUp:
+          play.silenceAudioThrough(after)
+        else:
           if action.kind == ActionAttack and action.choices.len > 0:
             play.startAttack(before, networkTable, @[action.attacker.int],
               action.choices[0].toChoice)
@@ -383,6 +385,20 @@ when not defined(headless):
       menu.handleEscape(window, play.pendingTargeting or
         play.selectedAttacker != 0)
       battleInputEnabled = not menuWasVisible and not menu.visible
+      let audible = window.focused and not defined(takeScreenshot) and
+        not menu.visible and not menu.paused and
+        (app.replay == nil or (app.replay.transport.playing and
+          app.replay.timeScale == 1 and app.replay.transport.targetTick < 0 and
+          app.replay.transport.restoreTick < 0))
+      let networkAudible = audible and
+        (not online or (app.network.client.connected and
+          app.network.client.welcomed and not app.network.client.catchingUp and
+          not app.network.client.snapshot.flag))
+      if not networkAudible and not play.audio.silent:
+        stopSounds()
+      play.setAudioEnabled(match.game, networkAudible)
+      if not menuWasVisible and menu.visible:
+        playSound(ClickSound)
       if menu.paused and not online:
         previewDt = 0
       if app.replay != nil:
@@ -668,6 +684,14 @@ when not defined(headless):
               game.players[match.viewedSeat].hand.len > 0:
             hoverIndex = 0
       if not choosingClasses:
+        let stillAudible = audible and
+          (not online or (app.network.client.connected and
+            app.network.client.welcomed and
+            not app.network.client.catchingUp and
+            not app.network.client.snapshot.flag))
+        if not stillAudible and not play.audio.silent:
+          stopSounds()
+        play.setAudioEnabled(match.game, stillAudible)
         play.presentVisualEvents(match.game, table, previewTime)
         if online:
           # Presentation events are consumed once, outside the state hash.
@@ -858,6 +882,7 @@ when not defined(headless):
           if drawEndTurnButton(sk, window,
               (if match.game.gameOver: "MATCH ENDED"
                elif yourTurn: "END TURN" else: "WAITING"), canFinish):
+            play.audio.queueSound(ClickSound)
             play.stopTargeting()
             play.selectedAttacker = 0
             if online:
@@ -899,6 +924,11 @@ when not defined(headless):
         if not menu.visible:
           drawPostPanel(sk, window, post, courtyard)
       benchQuads(cardSurfaces.quadCount, sk.instanceCount div 6)
+      if not choosingClasses:
+        play.audio.updateAudio(match.game, match.humanSeat,
+          play.presentationIdle(match.game) and not play.attackActive)
+        for cue in play.audio.takeSounds():
+          playSound(cue)
       menu.draw(app)
       sk.endUi()
       sk.drawHudFaces()
@@ -916,6 +946,7 @@ when not defined(headless):
         pollEvents()
         waitForDisplay()
     finally:
+      stopSounds()
       window.onFrame = nil
       window.onButtonPress = nil
       play.submitAction = nil

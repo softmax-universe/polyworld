@@ -5,7 +5,8 @@
 import std/[math, options, random, strformat]
 import chroma, silky, vmath, windy
 import core/sim, scene/table, scene/heroes, core/bots, core/replays,
-  scene/cardrenderer, vfx/vfxrenderer
+  scene/cardrenderer, vfx/vfxrenderer, audios
+import polyworld/soundassets
 
 type
   TableLayout* = object
@@ -69,6 +70,9 @@ type
 
   TablePlay* = object
     ## What the table shows on top of the game's state.
+    audio*: TableAudio
+    silentThroughBeat: int = -1
+      ## Hidden or recovered beats remain silent after playback resumes.
     submitAction*: proc(action: ReplayAction): bool
       ## Queues a human action for a network match instead of changing its
       ## confirmed game state. Nil keeps local play immediate.
@@ -177,6 +181,19 @@ proc initTablePlay*(visualSeed: int64): TablePlay =
 proc initTablePlay*(): TablePlay =
   TablePlay(pendingCardIndex: -1, attackTarget: Canceled,
     attackForward: true, visualRng: initRand())
+
+proc silenceAudioThrough*(play: var TablePlay, game: GameState) =
+  ## Silences queued history without discarding its visual presentation.
+  play.silentThroughBeat = max(play.silentThroughBeat, game.visualBeat)
+  for event in play.queuedEvents:
+    play.silentThroughBeat = max(play.silentThroughBeat, event.beat)
+  play.audio.syncAudio(game)
+
+proc setAudioEnabled*(play: var TablePlay, game: GameState, enabled: bool) =
+  ## Sets presentation audibility and quietly consumes hidden notifications.
+  play.audio.silent = not enabled
+  if not enabled:
+    play.silenceAudioThrough(game)
 
 proc queuedDraw*(queued: openArray[VisualEvent], owner, index: int): bool =
   ## A card still on its way to the hand (drawn or bounced) whose beat
@@ -423,6 +440,7 @@ proc addOpeningHands*(play: var TablePlay, game: GameState,
   ## The deal that starts a game: every card in every hand flies from its
   ## own deck, a seat at a time around the table, each leaving before the
   ## one before it lands.
+  play.audio.syncAudio(game)
   var
     dealt = 0
     widest = 0
@@ -430,6 +448,8 @@ proc addOpeningHands*(play: var TablePlay, game: GameState,
   for player in game.players:
     widest = max(widest, player.hand.len)
     total += player.hand.len
+  if total > 0:
+    play.audio.queueSound(CardDrawSound)
   # A table of seven deals faster instead of taking half a minute.
   let stagger =
     if total > 1: min(DrawStagger, OpeningDealSeconds / (total - 1).float32)
@@ -455,6 +475,7 @@ proc holdCastSpell*(play: var TablePlay, layout: TableLayout, card: Card,
   ## A played spell flies from the hand to the spot it floats in, and waits
   ## there. Two spells never overlap, but if one somehow arrives while
   ## another floats, the older one leaves for the pile.
+  play.audio.queueSound(CardPlaySound)
   if play.castSpell.isSome:
     let held = play.castSpell.get
     play.discardFlights.add newCardAnimation(held.card, held.heroClass,
@@ -492,6 +513,7 @@ proc animateTransition*(play: var TablePlay, layout: TableLayout,
     # summoned enter after it and appear on their own beat.
     for i, minion in newPlayer.board:
       if not before.minionLocation(minion.id).found:
+        play.audio.queueSound(CardPlaySound)
         play.animations.add newCardAnimation(minion.card, newPlayer.heroClass,
           source, layout.boardPoses(owner, i + 1)[i],
           suppressBoardId = minion.id)
@@ -504,6 +526,7 @@ proc animateTransition*(play: var TablePlay, layout: TableLayout,
           played.pickedFace(choices, before.boardCards()),
           newPlayer.heroClass, owner, source)
       else:
+        play.audio.queueSound(CardPlaySound)
         play.animations.add newCardAnimation(played,
           newPlayer.heroClass, source,
           stackTopPose(layout.discardPose(owner), newPlayer.discardPile.len),
@@ -558,6 +581,7 @@ proc dyingDiscards*(play: TablePlay, owner: int): int =
 proc resetTable*(play: var TablePlay) =
   ## A new game: nothing from the last one is still on its way.
   play = TablePlay(
+    audio: TableAudio(silent: play.audio.silent),
     submitAction: play.submitAction,
     pendingCardIndex: -1,
     attackTarget: Canceled,
@@ -687,6 +711,7 @@ proc playHandCard*(
     player = game.players[game.currentPlayer]
     card = player.hand[handIndex]
   if game.playCost(game.currentPlayer, card) > player.energy:
+    play.audio.queueSound(ErrorSound)
     play.statusMessage =
       &"Not enough energy to play {card.name}."
   elif play.submitAction != nil:
@@ -700,6 +725,7 @@ proc playHandCard*(
         var preview = game.copyGameState()
         play.pendingSourceId = preview.playMinion(handIndex)
         if play.pendingSourceId == 0:
+          play.audio.queueSound(ErrorSound)
           play.pendingCardIndex = -1
           play.statusMessage = &"{card.name} cannot enter play."
           return false
@@ -719,10 +745,12 @@ proc playHandCard*(
           if result: &"{card.name} submitted."
           else: &"{card.name} could not be submitted."
       elif play.pendingChoices.len == 0:
+        play.audio.queueSound(ErrorSound)
         play.pendingCardIndex = -1
         play.pendingPreview = none(GameState)
         play.statusMessage = &"{card.name} has no valid targets."
       else:
+        play.audio.queueSound(SelectSound)
         play.pendingTargeting = true
         play.selectedAttacker = 0
         play.statusMessage =
@@ -746,6 +774,7 @@ proc playHandCard*(
         )[handIndex]
         minionId = game.playMinion(handIndex)
       if minionId != 0:
+        play.audio.queueSound(CardPlaySound)
         # Its own slot, counting only the cards up to it: minions
         # its rules summon come after it and appear later.
         let
@@ -782,11 +811,13 @@ proc playHandCard*(
       play.pendingPicks.setLen(0)
       play.pendingChoices = game.availableChoices(handIndex)
       if play.pendingChoices.len == 0:
+        play.audio.queueSound(ErrorSound)
         play.pendingCardIndex = -1
         play.pendingChoices.setLen(0)
         play.statusMessage =
           &"{card.name} has no valid targets."
       else:
+        play.audio.queueSound(SelectSound)
         play.pendingTargeting = true
         play.selectedAttacker = 0
         play.statusMessage =
@@ -801,6 +832,7 @@ proc playHandCard*(
     of Minion, Trinket:
       let minionId = game.playMinion(handIndex)
       if minionId != 0:
+        play.audio.queueSound(CardPlaySound)
         discard game.finishPlay(card, @[NoTarget], minionId)
         # Its own slot, counting only the cards up to it: minions
         # its rules summon come after it and appear later.
@@ -834,9 +866,11 @@ proc updateTossPicking*(
   ## The discarding player clicks cards in hand; the last pick discards.
   let pending = game.pendingToss
   if clear:
+    play.audio.queueSound(CancelSound)
     play.tossPicks.setLen(0)
     play.statusMessage = "Discard picks cleared."
   elif pick and hoverIndex >= 0:
+    play.audio.queueSound(SelectSound)
     let at = play.tossPicks.find(hoverIndex)
     if at >= 0:
       play.tossPicks.delete(at)
@@ -888,6 +922,7 @@ proc takePick*(
   ## Records one answered choice. The card resolves once its last choice is
   ## in; a `choose` reveals the branch's own targets when its option lands.
   ## A target chosen leaves its arrow behind, fading.
+  play.audio.queueSound(SelectSound)
   play.addChoiceArrows(game, layout, play.aimSource(game, layout), [selected])
   let card = play.pendingCard
   let picks = play.pendingPicks & selected
@@ -1003,6 +1038,7 @@ proc updateChoosing*(
     play.statusMessage = &"{name}: nothing chosen."
     return
   if cancel:
+    play.audio.queueSound(CancelSound)
     play.statusMessage = &"{play.pendingCard.name} canceled."
     play.pendingTargeting = false
     play.pendingCardIndex = -1
@@ -1011,6 +1047,7 @@ proc updateChoosing*(
     play.pendingChoices.setLen(0)
     return
   if pick and hovered >= 0 and hovered < play.pendingChoices.len:
+    play.audio.queueSound(SelectSound)
     play.choosePicked = some(hovered)
     play.choosePickedAt = time
 
@@ -1034,9 +1071,11 @@ proc updateTargeting*(
     result = selfTarget
   let card = play.pendingCard
   if play.pendingTrigger and cancel:
+    play.audio.queueSound(ErrorSound)
     play.statusMessage =
       &"{game.waitingTriggerName()} can't be canceled: choose a target."
   elif cancel:
+    play.audio.queueSound(CancelSound)
     if card.kind != Spell:
       if play.submitAction != nil:
         let submitted = play.submitAction(ReplayAction(
@@ -1107,6 +1146,12 @@ proc startAttack*(play: var TablePlay, game: GameState, layout: TableLayout,
     attackers: seq[int], target: Choice) =
   ## The attackers lunge at `target` one after another; each hits when its
   ## lunge lands. Attacks never end a turn.
+  if attackers.len > 0:
+    let location = game.minionLocation(attackers[0])
+    if location.found:
+      let ranged = game.players[location.player].board[location.index].
+        hasKeyword(Ranged)
+      play.audio.queueSound(if ranged: BowSound else: SwordSound)
   play.attackActive = true
   play.attackSteps = attackers
   play.attackTarget = target
@@ -1189,15 +1234,19 @@ proc updateAttack*(
         hoveredBoard.owner == game.currentPlayer:
       let minionId = hoveredBoard.creatureId
       if minionId == play.selectedAttacker:
+        play.audio.queueSound(CancelSound)
         play.selectedAttacker = 0
         play.statusMessage = "Attack canceled."
       elif game.attackTargets(minionId).len > 0:
+        play.audio.queueSound(SelectSound)
         play.selectedAttacker = minionId
         play.statusMessage =
           "Click an enemy minion or hero to attack. Right-click cancels."
       else:
+        play.audio.queueSound(ErrorSound)
         play.statusMessage = "That minion can't attack this turn."
   elif play.selectedAttacker != 0 and cancel:
+    play.audio.queueSound(CancelSound)
     play.selectedAttacker = 0
     play.statusMessage = "Attack canceled."
 
@@ -1237,6 +1286,8 @@ proc presentVisualEvents*(
   ## beats' animations and effects finish; a draw right after a draw
   ## only waits 0.25 s, so draws overlap. Until its beat plays, a slain
   ## card holds its place and a summoned or drawn card stays hidden.
+  if play.audio.silent:
+    play.silenceAudioThrough(game)
   for event in game.takeVisualEvents():
     if event.kind == DeathVfx:
       var dying = DyingMinion(target: event.target, card: event.card,
@@ -1293,6 +1344,8 @@ proc presentVisualEvents*(
       break
     var drawsThisBeat = 0
     for event in play.queuedEvents[0 ..< count]:
+      if event.beat > play.silentThroughBeat:
+        play.audio.queueVisualSound(event.kind)
       case event.kind
       of DrawVfx:
         let owner = event.target.owner

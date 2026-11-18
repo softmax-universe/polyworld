@@ -9,7 +9,7 @@ import ../core/sim, ../core/sessions, ../core/bots, ../core/eventtext
 import ../app, ../bench, ../ui/hud, ../scene/table, ../play,
   ../scene/cardrenderer, ../vfx/vfxrenderer, ../scene/post,
   ../scene/courtyard, ../scene/placement,
-  ../ui/tuning, ../ui/matchmenu, ../ui/controls, ../replayer
+  ../ui/tuning, ../ui/matchmenu, ../ui/controls, ../replayer, ../audios
 import polyworld/[characters, chrome, menus, sounds, viewers]
 when defined(emscripten):
   import ../net/web
@@ -718,6 +718,16 @@ proc runDuel*(app: App) =
     menu.handleEscape(window, play.pendingTargeting or
       play.selectedAttacker != 0)
     battleInputEnabled = not menuWasVisible and not menu.visible
+    let audible = window.focused and
+      not defined(takeScreenshot) and not menu.visible and not menu.paused and
+      (app.replay == nil or (app.replay.transport.playing and
+        app.replay.timeScale == 1 and app.replay.transport.targetTick < 0 and
+        app.replay.transport.restoreTick < 0))
+    if not audible and not play.audio.silent:
+      stopSounds()
+    play.setAudioEnabled(game, audible)
+    if not menuWasVisible and menu.visible:
+      playSound(ClickSound)
     if menu.paused:
       dt = 0
     if app.replay != nil:
@@ -1061,6 +1071,7 @@ proc runDuel*(app: App) =
               (if game.gameOver: "MATCH ENDED"
                elif not humanTurn(): "OPPONENT"
                else: "END TURN"), canFinish):
+            play.audio.queueSound(ClickSound)
             play.selectedAttacker = 0
             game.finishTurn()
             botClock.wait = 1.2'f32
@@ -1114,6 +1125,12 @@ proc runDuel*(app: App) =
       if not menu.visible:
         drawPostPanel(sk, window, post, courtyard)
     benchQuads(cardSurfaces.quadCount, sk.instanceCount div 6)
+    if phase == PlayGame:
+      play.audio.updateAudio(game,
+        if sessionOptions.human and app.replay == nil: 0 else: -1,
+        play.presentationIdle(game) and not play.attackActive)
+      for cue in play.audio.takeSounds():
+        playSound(cue)
     menu.draw(app)
     sk.endUi()
     sk.drawHudFaces()
@@ -1150,6 +1167,7 @@ proc runDuel*(app: App) =
       pollEvents()
       waitForDisplay()
   finally:
+    stopSounds()
     window.onFrame = nil
     window.onButtonPress = nil
     activeCameraPlayer = nil

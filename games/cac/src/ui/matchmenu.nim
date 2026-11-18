@@ -1,7 +1,8 @@
 import
   std/tables,
   pixie, silky, vmath, windy,
-  polyworld/[chrome, connections, inputs, lobbies, menus, rooms, roomclients],
+  polyworld/[chrome, connections, inputs, lobbies, menus, rooms, roomclients,
+    sounds],
   ../app, ../net/multiplayer, controls
 
 const
@@ -32,8 +33,10 @@ proc handleEscape*(menu: var MatchMenu, window: Window,
     return
   case menu.page
   of MenuSettings:
+    playSound(CancelSound)
     menu.page = MenuBattle
   of MenuBattle:
+    playSound(CancelSound)
     menu.page = MenuHidden
   of MenuHidden:
     if not cancelingAction:

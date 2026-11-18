@@ -64,5 +64,17 @@ for cue in [ClickSound, SelectSound, MoveOrderSound, AttackOrderSound,
 for cue in [SwordSound, ImpactSound, BowSound, MagicSound, FireSound,
     HealSound, HumanDeathSound, CreatureDeathSound, BuildingDeathSound,
     ChopSound, MineSound, DeliverWoodSound, DeliverGoldSound,
-    BuildPlaceSound, BuildStartSound]:
+    BuildPlaceSound, BuildStartSound, CardDrawSound, CardPlaySound]:
   doAssert not cue.isInterfaceSound
+
+echo "Testing card sounds have variations and bounded repetition"
+for cue in [CardDrawSound, CardPlaySound]:
+  var clips = 0
+  for clip in SoundClips:
+    if clip.cue == cue:
+      inc clips
+  doAssert clips == 2
+  var gate: SoundGate
+  doAssert gate.acceptSound(cue, 1.0)
+  doAssert not gate.acceptSound(cue, 1.01)
+  doAssert gate.acceptSound(cue, 1.25)

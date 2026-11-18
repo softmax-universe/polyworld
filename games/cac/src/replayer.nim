@@ -40,7 +40,7 @@ proc newReplayer*(data: ReplayData): Replayer =
     {.emit: """
     `startTick` = EM_ASM_INT({
       const t = new URLSearchParams(location.search).get('t');
-      return t !== null && /^\d+$/.test(t) ? Math.min(Number(t), 2147483647) : -1;
+      return t !== null && /^[0-9]+$/.test(t) ? Math.min(Number(t), 2147483647) : -1;
     });
     """.}
     if startTick >= 0:

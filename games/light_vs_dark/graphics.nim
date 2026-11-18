@@ -40,6 +40,8 @@ const
     ## Batches nearby harvest and construction changes into one scene update.
   SelectionDragPixels = 10.0'f32
     ## Pointer travel that turns a click into a box select.
+  SelectionReach = 2.0'f
+    ## World-tile distance for selecting beside a unit or building.
 
 type
   GraphicsHooks* = object
@@ -950,6 +952,45 @@ proc runGraphics*(network: NetworkMatch = nil,
             0.6'f32
           )
 
+  proc pickSelectionEntity(viewProjection: Mat4): int32 =
+    ## Keeps direct hits, then finds the closest visible entity within two tiles.
+    result = pickEntity(viewProjection)
+    if result != NoEntity:
+      if run.world.hasUnit(result):
+        if run.world.units[run.world.unitIndex(result)].hp > 0: return
+      elif run.world.hasBuilding(result):
+        if run.world.buildings[run.world.buildingIndex(result)].hp > 0: return
+      result = NoEntity
+    let ground = pickGroundPoint(window.mousePos.vec2, window.size.vec2,
+      viewProjection, cameraTarget.y)
+    var bestDistance = SelectionReach * SelectionReach
+    template consider(id: int32, candidateX, candidateZ: float32) =
+      block:
+        let
+          dx = candidateX - ground.x
+          dz = candidateZ - ground.z
+          distance = dx * dx + dz * dz
+        if distance <= bestDistance and
+            (result == NoEntity or distance < bestDistance or id < result):
+          bestDistance = distance
+          result = id
+    for unit in run.world.units:
+      if unit.hp <= 0 or unit.state in {UnitDying, UnitInMine} or
+          not shownUnit(unit):
+        continue
+      let position = renderPoint(unit)
+      consider(unit.id, position.x, position.z)
+    for structure in run.world.buildings:
+      if structure.hp <= 0 or structure.state == BuildingDying or
+          not shownBuilding(structure):
+        continue
+      let
+        left = structure.origin.x.float32 - mapHalf()
+        top = structure.origin.y.float32 - mapHalf()
+        x = clamp(ground.x, left, left + structure.footprint.width.float32)
+        z = clamp(ground.z, top, top + structure.footprint.depth.float32)
+      consider(structure.id, x, z)
+
   proc structureAtTile(x, y: int32): int32 =
     ## Standing structure whose footprint contains this tile.
     result = NoEntity
@@ -1193,7 +1234,7 @@ proc runGraphics*(network: NetworkMatch = nil,
         if playerMode(): options.playerSlot - 1
         elif viewMode > 0: viewMode - 1
         else: -1'i32
-      let clicked = pickEntity(viewProjection)
+      let clicked = pickSelectionEntity(viewProjection)
       var ids = run.world.matchingUnitIds(clicked, owner)
       if clicked.isBuildingId and run.world.hasBuilding(clicked):
         let source = run.world.buildings[run.world.buildingIndex(clicked)]
@@ -1224,7 +1265,7 @@ proc runGraphics*(network: NetworkMatch = nil,
       )
     elif not overUi:
       if not (playerMode() and pendingBuild >= 0):
-        let picked = pickEntity(viewProjection)
+        let picked = pickSelectionEntity(viewProjection)
         if picked != NoEntity:
           selectEntity(picked, selectionAdditive)
         elif not selectionAdditive:

@@ -49,6 +49,7 @@ proc main() =
   production("selectedRadius")
   production("screenPosition")
   production("pickEntity")
+  production("pickSelectionEntity")
   production("structureAtTile")
   production("insideBox")
   production("boxedUnits")
@@ -126,6 +127,12 @@ proc main() =
     let unit = run.world.units[run.world.unitIndex(id)]
     pointAt(screenPosition(renderPoint(unit) +
       vec3(0, UnitHeights[unit.kind] * 0.5'f, 0), vp))
+
+  proc pointNearUnit(id: int32, offset: Vec2) =
+    ## Aims at ground beside the rendered unit, beyond direct pixel picking.
+    let position = renderPoint(run.world.units[run.world.unitIndex(id)])
+    pointAt(screenPosition(vec3(position.x + offset.x, cameraTarget.y,
+      position.z + offset.y), vp))
 
   proc leftClick() =
     ## Drives an ordinary primary press and release through the real callbacks.
@@ -450,6 +457,114 @@ proc main() =
       selectEntity(other)
       inputFrame({KeyA})
       check not attackMoveArmed
+
+  suite "LvD nearby selection":
+    test "nearby ground single and double clicks use the same unit":
+      fixture()
+      pointNearUnit(soldier, vec2(1.8, 0))
+      require pickEntity(vp) == NoEntity
+      require pickSelectionEntity(vp) == soldier
+      selectedIds = @[other]
+      primaryId = other
+      leftClick()
+      check selectedIds == @[soldier]
+      inputFrame({MouseLeft, DoubleClick})
+      inputFrame(released = {MouseLeft, DoubleClick})
+      check selectedIds == @[soldier, other]
+      check primaryId == soldier
+      check run.submissions.len == 0
+
+    test "nearest eligible unit wins and ground beyond two tiles clears selection":
+      fixture()
+      pointNearUnit(soldier, vec2(1.4, 1.4))
+      require pickEntity(vp) == NoEntity
+      check pickSelectionEntity(vp) == other
+      leftClick()
+      check selectedIds == @[other]
+      run.world.units[run.world.unitIndex(other)].state = UnitDying
+      pointNearUnit(soldier, vec2(1.95, 0))
+      require pickEntity(vp) == NoEntity
+      check pickSelectionEntity(vp) == soldier
+      pointNearUnit(soldier, vec2(2.1, 0))
+      require pickEntity(vp) == NoEntity
+      check pickSelectionEntity(vp) == NoEntity
+      leftClick()
+      check selectedIds.len == 0
+      check primaryId == NoEntity
+
+    test "nearby picking ignores dead hidden and mining units":
+      fixture()
+      run.world.units[run.world.unitIndex(other)].state = UnitDying
+      pointNearUnit(soldier, vec2(1.8, 0))
+      let unit = run.world.units[run.world.unitIndex(soldier)]
+      for state in [UnitDying, UnitInMine]:
+        unit.state = state
+        check pickSelectionEntity(vp) == NoEntity
+      unit.state = UnitIdle
+      unit.hp = 0
+      check pickSelectionEntity(vp) == NoEntity
+      unit.hp = 100
+      unit.owner = 1
+      viewMode = 1
+      for stamp in run.world.visibleStamp[0].mitems: stamp = 0
+      require not shownUnit(unit)
+      check pickSelectionEntity(vp) == NoEntity
+      viewMode = 0
+      check pickSelectionEntity(vp) == soldier
+
+    test "two tile selection reach stays constant at different camera distances":
+      fixture()
+      run.world.units[run.world.unitIndex(other)].state = UnitDying
+      let position = renderPoint(run.world.units[run.world.unitIndex(soldier)])
+      for height in [12'f, 22'f, 34'f]:
+        let zoom = perspective(45'f, 1.6'f, 0.1'f, 1000'f) *
+          lookAt(vec3(0, height, height * 18 / 22), vec3(0), vec3(0, 1, 0))
+        for distance in [1.9'f, 2.1'f]:
+          pointAt(screenPosition(vec3(position.x + distance, cameraTarget.y,
+            position.z), zoom))
+          require pickEntity(zoom) == NoEntity
+          check pickSelectionEntity(zoom) ==
+            (if distance < 2: soldier else: NoEntity)
+
+    test "near a large building edge selects and expands its type":
+      fixture()
+      run.world.units.setLen(0)
+      selectedIds.setLen(0)
+      primaryId = NoEntity
+      let half = run.world.map.side div 2
+      for i in 0 .. 1:
+        run.world.buildings.add Building(id: FirstBuildingId + i.int32,
+          owner: 0, kind: TownHallBuilding, hp: 100,
+          state: BuildingComplete,
+          footprint: BuildingTable[TownHallBuilding].footprint,
+          origin: tile2(half - 5 + i.int32 * 9, half - 2))
+      run.world.buildingSlot.setLen(run.world.map.mines.len + 2)
+      for i in 0 .. 1:
+        run.world.buildingSlot[run.world.map.mines.len + i] = i.int32
+      let
+        building = run.world.buildings[0]
+        edge = building.origin.x.float32 + building.footprint.width.float32 - mapHalf()
+        point = vec3(edge + 1.8'f, cameraTarget.y, buildingCentre(building).z)
+      pointAt(screenPosition(point, vp))
+      require pickEntity(vp) == NoEntity
+      check pickSelectionEntity(vp) == FirstBuildingId
+      leftClick()
+      check selectedIds == @[FirstBuildingId]
+      inputFrame({MouseLeft, DoubleClick})
+      inputFrame(released = {MouseLeft, DoubleClick})
+      check selectedIds == @[FirstBuildingId, FirstBuildingId + 1]
+      check run.submissions.len == 0
+      run.world.buildings[0].state = BuildingDying
+      check pickSelectionEntity(vp) == NoEntity
+      run.world.buildings[0].state = BuildingComplete
+      run.world.buildings[0].hp = 0
+      check pickSelectionEntity(vp) == NoEntity
+      run.world.buildings[0].hp = 100
+      run.world.buildings[0].owner = 1
+      viewMode = 1
+      for stamp in run.world.visibleStamp[0].mitems: stamp = 0
+      require not shownBuilding(run.world.buildings[0])
+      check pickSelectionEntity(vp) == NoEntity
 
   suite "LvD multiple building selection":
     test "box and on-screen owned building double click retain group through release":

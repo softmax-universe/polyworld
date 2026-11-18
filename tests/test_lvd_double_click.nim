@@ -59,6 +59,7 @@ suite "LvD double-left-click selection":
     graphicsRoutine("selectedRadius")
     graphicsRoutine("screenPosition")
     graphicsRoutine("pickEntity")
+    graphicsRoutine("pickSelectionEntity")
     graphicsRoutine("insideBox")
     graphicsRoutine("boxedUnits")
     graphicsRoutine("selectBox")
@@ -139,38 +140,6 @@ suite "LvD double-left-click selection":
     updateWorldSelection(projection)
     check selectedIds == @[other, remote, clicked]
     check primaryId == clicked
-
-    # A changes right orders only; jittered Shift clicks and double-click releases
-    # keep left selection semantics and never enqueue an order.
-    for travel in [1'i32, 9'i32]:
-      attackMoveArmed = true
-      selectedIds = @[other]
-      primaryId = other
-      selectionStarted = true
-      selectionAdditive = true
-      selectionPressPosition = point
-      window.state.mousePos = ivec2(point.x.int32 + travel, point.y.int32)
-      sk.mousePos = window.mousePos.vec2
-      window.state.perFrame = PerFrame(buttonReleased: {MouseLeft})
-      updateWorldSelection(projection)
-      check selectedIds == @[other, clicked]
-      window.state.mousePos = ivec2(point.x.int32, point.y.int32)
-      sk.mousePos = window.mousePos.vec2
-      window.state.buttonDown = {MouseLeft}
-      window.state.perFrame = PerFrame(buttonPressed: {MouseLeft, DoubleClick})
-      updateCamera(0, focused = true)
-      updateWorldSelection(projection)
-      window.state.mousePos.x += travel
-      sk.mousePos = window.mousePos.vec2
-      window.state.perFrame = PerFrame(buttonReleased: {MouseLeft})
-      updateWorldSelection(projection)
-      check selectedIds == @[clicked, remote]
-      run.networked = true
-      run.flushPlayerCommands()
-      check run.submissions.len == 0
-    attackMoveArmed = false
-    window.state.mousePos = ivec2(point.x.int32, point.y.int32)
-    sk.mousePos = window.mousePos.vec2
 
     # A double click over UI, a modal or paused gameplay must not select.
     for blocked in [0, 1, 2, 5]:

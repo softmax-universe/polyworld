@@ -68,6 +68,7 @@ proc main() =
   productionRoutine("selectedRadius")
   productionRoutine("screenPosition")
   productionRoutine("pickEntity")
+  productionRoutine("pickSelectionEntity")
   productionRoutine("structureAtTile")
   productionRoutine("insideBox")
   productionRoutine("boxedUnits")

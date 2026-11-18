@@ -106,19 +106,32 @@ var
   shortcutState: ShortcutState
   shortcutHeldButtons, shortcutFrameButtons: set[Button]
   attackHeldButtons: set[Button]
+  attackPressedButtons: set[Button]
+  attackSelection: seq[int32]
   attackHoldConsumed = false
+  attackLeftStarted = false
   rightOrderFromBuild = false
 
 ## Presentation helpers
 
 proc cancelAttackModifier() =
+  ## Clears targeting without allowing held keys to rearm on repeat.
   attackMoveArmed = false
   attackHeldButtons = {}
   attackHoldConsumed = false
+  attackSelection.setLen(0)
+
+proc checkAttackSelection() =
+  ## Keeps attack targeting bound to the selection that armed it.
+  if attackMoveArmed and
+      (selectedIds != attackSelection or pendingBuild >= 0):
+    cancelAttackModifier()
 
 proc pressAttackModifier(button: Button) =
+  ## Captures the selection for a fresh attack key press.
   if attackHeldButtons == {}: attackHoldConsumed = false
   attackHeldButtons.incl button
+  attackSelection = selectedIds
 
 proc consumeAttackModifier() =
   ## A tap is one-shot; an active hold can issue multiple accepted orders.
@@ -126,6 +139,8 @@ proc consumeAttackModifier() =
   attackMoveArmed = attackHeldButtons != {}
 
 proc releaseAttackModifier(button: Button) =
+  ## Ends held targeting while preserving an unused tap.
+  attackPressedButtons.excl button
   attackHeldButtons.excl button
   if attackHeldButtons == {} and attackHoldConsumed:
     attackMoveArmed = false
@@ -139,6 +154,7 @@ proc cancelGameplayGestures() =
   minimapPanning = false
   rightOrderStarted = false
   rightOrderFromBuild = false
+  attackLeftStarted = false
   lineGesture.cancelLine()
   cancelAttackModifier()
 
@@ -407,6 +423,7 @@ proc runGraphics*(network: NetworkMatch = nil,
   shortcutState.resetShortcut()
   shortcutHeldButtons = {}
   shortcutFrameButtons = {}
+  attackPressedButtons = {}
   endShortcutEditing()
   hudNetwork = network
   resetHudTooltips()
@@ -753,6 +770,7 @@ proc runGraphics*(network: NetworkMatch = nil,
 
   proc selectEntity(id: int32, additive = false) =
     ## Selects or toggles one entity. Spectator mode follows the selection.
+    defer: checkAttackSelection()
     if not selectionTarget(id).found:
       return
     playSound(SelectSound)
@@ -779,6 +797,7 @@ proc runGraphics*(network: NetworkMatch = nil,
 
   proc clearSelection() =
     ## Clears the selection and leaves the camera free-floating.
+    defer: checkAttackSelection()
     let hadSelection =
       selectedIds.len > 0 or
       primaryId != NoEntity or
@@ -791,6 +810,7 @@ proc runGraphics*(network: NetworkMatch = nil,
 
   proc selectAllUnits() =
     ## Selects all living mobile units for group following.
+    defer: checkAttackSelection()
     selectedIds.setLen(0)
     let owner =
       if options.playerSlot > 0 and not run.replayMode:
@@ -812,6 +832,7 @@ proc runGraphics*(network: NetworkMatch = nil,
 
   proc pruneSelection() =
     ## Removes entities that have died or left the selectable world.
+    defer: checkAttackSelection()
     var i = selectedIds.high
     while i >= 0:
       if not selectionTarget(selectedIds[i]).found:
@@ -985,6 +1006,7 @@ proc runGraphics*(network: NetworkMatch = nil,
 
   proc selectBox(ids: seq[int32], additive: bool) =
     ## Replaces or extends the selection with boxed units.
+    defer: checkAttackSelection()
     if ids.len == 0:
       if not additive:
         clearSelection()
@@ -1045,6 +1067,7 @@ proc runGraphics*(network: NetworkMatch = nil,
       shortcutState.resetShortcut()
       shortcutHeldButtons = {}
       shortcutFrameButtons = {}
+      attackPressedButtons = {}
       cancelHumanCommunicationInput()
       window.runeInputEnabled = false
     if not focused or matchMenu != HiddenMatchMenu or bindingCapture or
@@ -1052,18 +1075,26 @@ proc runGraphics*(network: NetworkMatch = nil,
       cancelGameplayGestures()
       return
     pruneSelection()
-    updateMinimapCamera(
-      window, sk.mousePos, cameraTarget, minimapPanning, followSelection
-    )
+    if window.mousePressed(MouseLeft):
+      attackLeftStarted = playerMode() and attackMoveArmed and pendingBuild < 0
+    elif not window.mouseDown(MouseLeft) and not window.mouseReleased(MouseLeft):
+      attackLeftStarted = false
+    if attackLeftStarted:
+      selectionStarted = false
+      minimapPanning = false
+    else:
+      updateMinimapCamera(
+        window, sk.mousePos, cameraTarget, minimapPanning, followSelection
+      )
     if minimapPanning:
       actionCam.takeManual()
     let overUi = mouseOverUi(window, sk.mousePos)
     if window.buttonPressed[KeyA] and
         window.actionDown(ControlInput):
-      attackMoveArmed = false
+      cancelAttackModifier()
       selectAllUnits()
     elif window.mousePressed(MouseLeft) and not overUi and
-        pendingBuild < 0:
+        pendingBuild < 0 and not attackLeftStarted:
       selectionPressPosition = window.mousePos.vec2
       selectionStarted = true
       selectionAdditive =
@@ -1148,6 +1179,9 @@ proc runGraphics*(network: NetworkMatch = nil,
   proc updateWorldSelection(viewProjection: Mat4) =
     ## Windy raises DoubleClick on the second left press, not its release.
     if refreshPendingBuild(): return
+    if attackLeftStarted:
+      selectionStarted = false
+      return
     if window.buttonPressed[DoubleClick]:
       # Consume the second release even when a modal/HUD/command owns input.
       selectionStarted = false
@@ -1251,8 +1285,9 @@ proc runGraphics*(network: NetworkMatch = nil,
               break
 
   proc updatePlayerOrder(viewProjection: Mat4, focused = window.focused) =
-    ## Left-click places; right-click cancels placement and issues movement.
+    ## Armed clicks attack; otherwise left places and right moves.
     if refreshPendingBuild(): return
+    checkAttackSelection()
     if not playerMode():
       lineGesture.cancelLine()
       rightOrderStarted = false
@@ -1287,9 +1322,15 @@ proc runGraphics*(network: NetworkMatch = nil,
           linePoint(window.mousePos.x, window.mousePos.y), attackMoveArmed)
     let
       buildClick = pendingBuild >= 0 and window.mousePressed(MouseLeft)
-      attackClick = pendingBuild < 0 and attackMoveArmed and rightOrder
+      leftAttack = attackLeftStarted and window.mousePressed(MouseLeft)
+      attackClick = pendingBuild < 0 and attackMoveArmed and
+        (rightOrder or leftAttack)
       moveOnly = rightOrderFromBuild
     if rightOrder: rightOrderFromBuild = false
+    if leftAttack:
+      lineGesture.cancelLine()
+      rightOrderStarted = false
+      if not inside or not focused: return
     if lineGesture.active:
       if not inside or not focused or pendingBuild >= 0:
         lineGesture.cancelLine()
@@ -2236,6 +2277,7 @@ proc runGraphics*(network: NetworkMatch = nil,
             teamColors,
             if connection != nil: connection.stats else: nil
           )
+          checkAttackSelection()
           if attackMoveArmed:
             if pendingBuild >= 0:
               attackMoveArmed = false
@@ -2337,6 +2379,7 @@ proc runGraphics*(network: NetworkMatch = nil,
 
   window.onButtonPress = proc(button: Button) =
     window.captureCursorConfinement(button)
+    checkAttackSelection()
     if bindingCapture: return
     if matchMenu == HiddenMatchMenu and humanCommunicationKey(button):
       shortcutState.resetShortcut()
@@ -2381,13 +2424,15 @@ proc runGraphics*(network: NetworkMatch = nil,
     if matchMenu == HiddenMatchMenu and playerMode() and
         AttackMoveInput.matches(button) and not window.scaleModifier and
         not window.actionDown(ControlInput) and
-        not window.buttonDown[KeyLeftAlt] and not window.buttonDown[KeyRightAlt] and
-        run.world.armSelectedAttackMove(options.playerSlot - 1, selectedIds):
-      pressAttackModifier(button)
-      shortcutState.cancelShortcut()
-      selectionStarted = false
-      minimapPanning = false
-      return
+        not window.buttonDown[KeyLeftAlt] and not window.buttonDown[KeyRightAlt]:
+      if button in attackPressedButtons: return
+      attackPressedButtons.incl button
+      if run.world.armSelectedAttackMove(options.playerSlot - 1, selectedIds):
+        pressAttackModifier(button)
+        shortcutState.cancelShortcut()
+        selectionStarted = false
+        minimapPanning = false
+        return
     let key = shortcutKey(button)
     if key != '\0':
       let matched = shortcutState.pressShortcut(currentShortcuts, key, epochTime(),
@@ -2446,10 +2491,6 @@ proc runGraphics*(network: NetworkMatch = nil,
       return
     if AttackMoveInput.matches(button) and not window.actionDown(ControlInput) and
         not window.scaleModifier:
-      if playerMode() and run.world.armSelectedAttackMove(options.playerSlot - 1, selectedIds):
-        pressAttackModifier(button)
-        selectionStarted = false
-        minimapPanning = false
       return
     if PauseInput.matches(button):
       if network == nil: transport.togglePlay()
@@ -2489,6 +2530,7 @@ proc runGraphics*(network: NetworkMatch = nil,
       shortcutState.resetShortcut()
       shortcutHeldButtons = {}
       shortcutFrameButtons = {}
+      attackPressedButtons = {}
       cancelGameplayGestures()
       window.runeInputEnabled = false
 

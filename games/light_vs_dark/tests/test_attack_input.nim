@@ -77,6 +77,7 @@ proc main() =
   proc fixture() =
     clearPlayerCommands()
     cancelGameplayGestures()
+    attackPressedButtons = {}
     attackMoveArmed = false
     pendingBuild = -1
     resetHumanCommunication()
@@ -117,8 +118,20 @@ proc main() =
     updateCamera(0, focused = focused)
     if focused and matchMenu == HiddenMatchMenu and not humanCommunicationBlocksGameplay() and
         not bindingCapture:
-      updatePlayerOrder(vp, focused = focused)
       updateWorldSelection(vp)
+      updatePlayerOrder(vp, focused = focused)
+
+  proc pointAtUnit(id: int32) =
+    ## Places the cursor on the rendered body used by production picking.
+    let unit = run.world.units[run.world.unitIndex(id)]
+    pointAt(screenPosition(renderPoint(unit) +
+      vec3(0, UnitHeights[unit.kind] * 0.5'f, 0), vp))
+
+  proc leftClick() =
+    ## Drives an ordinary primary press and release through the real callbacks.
+    inputFrame({MouseLeft})
+    inputFrame(released = {MouseLeft})
+    run.flushPlayerCommands()
 
   proc rightClick() =
     inputFrame({MouseRight})
@@ -232,21 +245,131 @@ proc main() =
       require run.submissions.len == 3
       check run.submissions[2].kind == ActionMove
 
-    test "armed left click double click box and minimap remain selection and navigation":
+    test "tapped A left ground orders on press once and preserves selection":
       fixture()
       inputFrame({KeyA})
       inputFrame(released = {KeyA})
-      pointAt(screenPosition(renderPoint(run.world.units[run.world.unitIndex(other)]) +
-        vec3(0, UnitHeights[SoldierUnit] * 0.5'f32, 0), vp))
+      let before = run.stateHash()
       inputFrame({MouseLeft})
+      run.flushPlayerCommands()
+      require run.submissions.len == 1
+      check run.submissions[0].kind == ActionAttackMove
+      check run.submissions[0].entityId == soldier
+      check selectedIds == @[soldier]
+      check primaryId == soldier
+      check not attackMoveArmed
+      check not selectionStarted
+      check not lineGesture.active
+      check run.stateHash() == before
       inputFrame(released = {MouseLeft})
+      run.flushPlayerCommands()
+      check run.submissions.len == 1
+      check selectedIds == @[soldier]
+      pointAtUnit(other)
+      leftClick()
       check selectedIds == @[other]
+      check run.submissions.len == 1
+
+    test "held A left drag and double click never start selection or a line":
+      fixture()
+      inputFrame({KeyA})
+      inputFrame({MouseLeft})
+      run.flushPlayerCommands()
+      require run.submissions.len == 1
       check attackMoveArmed
+      pointAtUnit(other)
+      for i in 0 .. 2:
+        inputFrame()
+        check not selectionStarted
+        check not lineGesture.active
+      inputFrame(released = {MouseLeft})
+      run.flushPlayerCommands()
+      check run.submissions.len == 1
+      check selectedIds == @[soldier]
+      pointAtTile(target)
+      inputFrame({MouseLeft, DoubleClick, KeyLeftShift})
+      inputFrame(released = {MouseLeft, DoubleClick})
+      run.flushPlayerCommands()
+      require run.submissions.len == 2
+      for action in run.submissions:
+        check action.kind == ActionAttackMove
+        check action.entityId == soldier
+      check not run.submissions[0].append
+      check run.submissions[1].append
+      check selectedIds == @[soldier]
+      inputFrame(released = {KeyA, KeyLeftShift})
+      check not attackMoveArmed
+      rightClick()
+      require run.submissions.len == 3
+      check run.submissions[2].kind == ActionMove
+
+    test "armed left target attacks enemies without selecting friendlies":
+      for owner in [0'i32, 1'i32]:
+        fixture()
+        let unit = run.world.units[run.world.unitIndex(other)]
+        unit.owner = owner
+        for stamp in run.world.visibleStamp[0].mitems:
+          stamp = run.world.visionGeneration[0]
+        inputFrame({KeyA})
+        inputFrame(released = {KeyA})
+        pointAtUnit(other)
+        require pickEntity(vp) == other
+        let before = run.stateHash()
+        leftClick()
+        check selectedIds == @[soldier]
+        check primaryId == soldier
+        check run.stateHash() == before
+        if owner == 1:
+          require run.submissions.len == 1
+          check run.submissions[0].kind == ActionAttack
+          check run.submissions[0].entityId == soldier
+          check run.submissions[0].first == other
+          check not attackMoveArmed
+        else:
+          check run.submissions.len == 0
+          check attackMoveArmed
+
+    test "armed minimap left click orders without panning or dragging":
+      fixture()
+      inputFrame({KeyA})
+      inputFrame(released = {KeyA})
+      let
+        area = attackMinimapArea(currentLayout(window))
+        relative = vec2(target.x.float32 + 0.5'f,
+          target.y.float32 + 0.5'f) / run.world.map.side.float32
+      pointAt((area.origin + area.size * relative) * sk.uiScale)
+      let mini = attackMinimapTile(currentLayout(window), sk.mousePos,
+        run.world.map.side)
+      require mini != NoTile
+      require run.world.terrainOpen(mini.x.int32, mini.y.int32)
+      let beforeCamera = cameraTarget
+      inputFrame({MouseLeft})
+      run.flushPlayerCommands()
+      require run.submissions.len == 1
+      check run.submissions[0].kind == ActionAttackMove
+      check run.submissions[0].first == mini.x.int32
+      check run.submissions[0].second == mini.y.int32
+      check not minimapPanning
+      check cameraTarget == beforeCamera
+      pointAt((area.origin + area.size * 0.75'f) * sk.uiScale)
+      inputFrame()
+      inputFrame(released = {MouseLeft})
+      run.flushPlayerCommands()
+      check run.submissions.len == 1
+      check selectedIds == @[soldier]
+      check not minimapPanning
+      check cameraTarget == beforeCamera
+
+    test "unarmed left click double click box and minimap keep normal behavior":
+      fixture()
+      pointAtUnit(other)
+      leftClick()
+      check selectedIds == @[other]
       inputFrame({MouseLeft, DoubleClick})
       inputFrame(released = {MouseLeft, DoubleClick})
       check selectedIds.len == 2
       check primaryId == other
-      selectedIds = @[other]
+      selectEntity(other)
       pointAt(vec2(450, 250))
       inputFrame({MouseLeft})
       pointAt(vec2(850, 650))
@@ -254,15 +377,80 @@ proc main() =
       inputFrame(released = {MouseLeft})
       check selectedIds.len == 2
       let area = attackMinimapArea(currentLayout(window))
-      pointAt((area.origin + area.size * 0.75'f32) * sk.uiScale)
+      pointAt((area.origin + area.size * 0.75'f) * sk.uiScale)
       let beforeCamera = cameraTarget
       inputFrame({MouseLeft})
       check minimapPanning
       check cameraTarget != beforeCamera
       inputFrame(released = {MouseLeft})
-      check attackMoveArmed
+      check not attackMoveArmed
       run.flushPlayerCommands()
       check run.submissions.len == 0
+
+    test "selection changes cancel held A until release and a fresh press":
+      for change in 0 .. 6:
+        fixture()
+        if change == 4:
+          selectedIds.add other
+        inputFrame({KeyA})
+        require attackMoveArmed
+        case change
+        of 0:
+          selectEntity(other)
+        of 1:
+          clearSelection()
+        of 2:
+          selectAllUnits()
+        of 3:
+          selectBox(@[other], false)
+        of 4:
+          run.world.units[run.world.unitIndex(soldier)].state = UnitDying
+          pruneSelection()
+        of 5:
+          inputFrame({KeyLeftControl, KeyA})
+          inputFrame(released = {KeyLeftControl})
+        else:
+          selectedIds = @[other]
+          primaryId = other
+        inputFrame()
+        check not attackMoveArmed
+        inputFrame({KeyA})
+        check not attackMoveArmed
+        inputFrame(released = {KeyA})
+        check not attackMoveArmed
+        if selectedIds.len == 0:
+          selectEntity(other)
+        inputFrame({KeyA})
+        check attackMoveArmed
+
+    test "empty A cannot arm a unit selected while the key is still held":
+      fixture()
+      clearSelection()
+      inputFrame({KeyA})
+      check not attackMoveArmed
+      pointAtUnit(other)
+      leftClick()
+      check selectedIds == @[other]
+      check not attackMoveArmed
+      inputFrame({KeyA})
+      check not attackMoveArmed
+      inputFrame(released = {KeyA})
+      check not attackMoveArmed
+      inputFrame({KeyA})
+      check attackMoveArmed
+      check run.submissions.len == 0
+
+    test "A cannot arm a selection containing only buildings or enemies":
+      discard depotFixture(TownHallBuilding)
+      selectEntity(FirstBuildingId)
+      inputFrame({KeyA})
+      check not attackMoveArmed
+      fixture()
+      run.world.units[run.world.unitIndex(other)].owner = 1
+      selectEntity(other)
+      inputFrame({KeyA})
+      check not attackMoveArmed
+
   suite "LvD multiple building selection":
     test "box and on-screen owned building double click retain group through release":
       fixture()

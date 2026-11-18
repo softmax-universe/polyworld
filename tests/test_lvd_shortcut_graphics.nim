@@ -65,6 +65,7 @@ suite "LvD production shortcut routing":
     selectedIds = @[run.world.spawnUnit(0, SoldierUnit, tile2(30, 30))]
     window.onButtonPress(KeyA)
     check attackMoveArmed
+    window.onButtonRelease(KeyA)
     attackMoveArmed = false
     shortcutState.resetShortcut()
     matchMenu = MatchSettings
@@ -114,12 +115,15 @@ suite "LvD production shortcut routing":
     window.onButtonPress(KeyEscape)
     check not attackMoveArmed
     check matchMenu == HiddenMatchMenu
+    window.onButtonRelease(KeyA)
     shortcutState.resetShortcut()
     inputBindings[AttackMoveInput] = [KeyW, ButtonUnknown]
     window.onButtonPress(KeyA)
     check not attackMoveArmed
+    window.onButtonRelease(KeyA)
     window.onButtonPress(KeyW)
     check attackMoveArmed
+    window.onButtonRelease(KeyW)
     inputBindings[StopInput] = [KeyJ, ButtonUnknown]
     window.onButtonPress(KeyJ)
     check not attackMoveArmed
@@ -142,17 +146,21 @@ suite "LvD production shortcut routing":
     selectedIds = @[soldier]
     window.onButtonPress(KeyEnter)
     require humanCommunicationBlocksGameplay()
-    for key in [KeyE, KeyT, KeyA]: window.onButtonPress(key)
+    for key in [KeyE, KeyT, KeyA]:
+      window.onButtonPress(key)
+      window.onButtonRelease(key)
     check not attackMoveArmed
     check pendingBuild == -1
     resetHumanCommunication()
     matchMenu = MatchSettings
     window.onButtonPress(KeyA)
     check not attackMoveArmed
+    window.onButtonRelease(KeyA)
     matchMenu = HiddenMatchMenu
     bindingCapture = true
     window.onButtonPress(KeyA)
     check not attackMoveArmed
+    window.onButtonRelease(KeyA)
     bindingCapture = false
 
     # X abandons previews without clearing the worker's actual orders.

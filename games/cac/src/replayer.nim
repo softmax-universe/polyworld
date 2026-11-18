@@ -44,6 +44,7 @@ proc newReplayer*(data: ReplayData): Replayer =
     });
     """.}
     if startTick >= 0:
+      result.transport.sync(0, data.actions.len.int32, over = false)
       result.transport.seekTo(startTick)
 
 proc timeScale*(replayer: Replayer): float32 =

@@ -29,6 +29,7 @@ type
     receiptPending*: bool
     rejectedCommands*: uint64
     lastHash, finalHash: RoomMessage
+    awaitingRoomState: bool
     recoveryReplyPending: bool
     recoveryTarget: uint32
 
@@ -58,6 +59,7 @@ proc opened*(client: RoomClient) =
   ## Identifies this connection without persisting the private reconnect token.
   client.connected = true
   client.welcomed = false
+  client.awaitingRoomState = false
   client.received = 0
   client.timing = PacketTiming()
   client.receiptPending = false
@@ -70,6 +72,7 @@ proc lost*(client: RoomClient) =
   ## Retains simulation, local VMs and unacknowledged submissions in memory.
   client.connected = false
   client.welcomed = false
+  client.awaitingRoomState = false
   client.catchupPending = false
   client.recoveryReplyPending = client.began
   client.status = "Disconnected. Reconnecting with the same seats."
@@ -122,6 +125,27 @@ proc submit*(client: RoomClient, seat: uint32, payload: string): bool =
   client.flushCommands()
   true
 
+proc clearMatch(client: RoomClient) =
+  ## Discards playback and submissions when their match cannot continue.
+  client.began = false
+  client.match = 0
+  client.applied = 0
+  client.serverTick = 0
+  client.sequence = 0
+  client.pending.setLen(0)
+  client.rejected.setLen(0)
+  client.packets.setLen(0)
+  client.events.setLen(0)
+  client.catchupPending = false
+  client.recoveryReplyPending = false
+  client.recoveryTarget = 0
+  client.lastHash = RoomMessage()
+  client.finalHash = RoomMessage()
+  client.initialSnapshot = RoomMessage()
+  client.appliedSeats.setLen(0)
+  client.takenTick = 0
+  client.takenSeats.setLen(0)
+
 proc accept*(client: RoomClient, bytes: string) =
   ## Validates relay messages and preserves packets until their exact tick runs.
   let message = decode(bytes)
@@ -137,37 +161,40 @@ proc accept*(client: RoomClient, bytes: string) =
       reject("Reconnect changed participant identity")
     client.participant = message.participant
     client.token = message.token
-    client.welcomed = true
-    client.status = "Connected"
-    client.flushCommands()
-    if client.began:
+    client.awaitingRoomState = client.snapshot.room.len > 0
+    client.welcomed = not client.awaitingRoomState
+    if client.welcomed:
+      client.status = "Connected"
+    else:
+      client.status = "Checking room membership."
+    client.send(RoomMessage(kind: ListRooms))
+  of RoomList:
+    client.listings = message.rooms
+    if client.awaitingRoomState:
+      # Hello sends a membership snapshot before replying to ListRooms.
+      client.awaitingRoomState = false
+      client.welcomed = true
+      client.snapshot = RoomMessage(kind: RoomState)
+      client.clearMatch()
+      client.status = "The previous room is no longer available."
+  of RoomState:
+    let resume = client.awaitingRoomState and client.began and
+      message.room == client.snapshot.room and message.match == client.match and
+      message.phase != Lobby
+    client.snapshot = message
+    if message.phase == Lobby or message.room.len == 0 or
+        (client.awaitingRoomState and not resume):
+      client.clearMatch()
+    if client.awaitingRoomState:
+      client.awaitingRoomState = false
+      client.welcomed = true
+      client.status = "Connected"
+    if resume:
+      client.flushCommands()
       if client.lastHash.kind == ReportHash:
         client.send(client.lastHash)
       if client.finalHash.kind == FinishMatch:
         client.send(client.finalHash)
-    client.send(RoomMessage(kind: ListRooms))
-  of RoomList:
-    client.listings = message.rooms
-  of RoomState:
-    client.snapshot = message
-    if message.phase == Lobby or message.room.len == 0:
-      client.began = false
-      client.match = 0
-      client.applied = 0
-      client.serverTick = 0
-      client.sequence = 0
-      client.pending.setLen(0)
-      client.rejected.setLen(0)
-      client.packets.setLen(0)
-      client.catchupPending = false
-      client.recoveryReplyPending = false
-      client.recoveryTarget = 0
-      client.lastHash = RoomMessage()
-      client.finalHash = RoomMessage()
-      client.initialSnapshot = RoomMessage()
-      client.appliedSeats.setLen(0)
-      client.takenTick = 0
-      client.takenSeats.setLen(0)
   of BeginMatch:
     if message.hash != message.setupHash():
       reject("Initial setup hash does not match the received configuration")

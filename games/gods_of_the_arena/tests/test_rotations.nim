@@ -34,6 +34,18 @@ proc rotated(tile: PathTile): PathTile =
     x: mapTiles().int32 - 1 - tile.x,
     z: mapTiles().int32 - 1 - tile.z)
 
+proc rotated(order: HeroOrder): HeroOrder =
+  ## Rotates spatial destinations while preserving target actor identities.
+  result = order
+  if order.kind in [ActionWalkTo, ActionAttackMove]:
+    let (x, y, offset) = splitTilePoint(fixedVec2(
+      fixed(mapTiles().int32 - 1 - order.first) - order.offset.x,
+      fixed(mapTiles().int32 - 1 - order.second) - order.offset.y
+    ))
+    result.first = x
+    result.second = y
+    result.offset = offset
+
 proc rotate(hero: Hero) =
   ## Reflects all spatial state while preserving the actor's identity.
   hero.team = Team(1 - hero.team.ord)
@@ -46,6 +58,9 @@ proc rotate(hero: Hero) =
   hero.navLayer = hero.navLayer.opposite
   hero.portalDestination = hero.portalDestination.rotated
   hero.queuedCastPoint = hero.queuedCastPoint.rotated
+  hero.activeOrder = hero.activeOrder.rotated
+  for order in hero.queuedOrders.mitems:
+    order = order.rotated
   for point in hero.movePath.mitems:
     point = point.rotated
   for layer in hero.movePathLayers.mitems:

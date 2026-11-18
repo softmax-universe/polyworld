@@ -64,6 +64,8 @@ proc ground(game: Game, slot: HeroAbilitySlot, tiles = 0'i32): bool =
     mapCoordinate(hero.position.z) + tiles
   )
 
+# Successful activation includes arming an aimed ability. The assertions below
+# still require that arming spends nothing and never casts before confirmation.
 echo "Testing self casts and explicit aimed confirmation"
 block:
   let
@@ -80,7 +82,7 @@ block:
   flushPlayerCommands(game)
   doAssert hero.hp > hp
   doAssert game.world.casts[^1].targetId == hero.id
-  doAssert not activatePlayerAbility(
+  doAssert activatePlayerAbility(
     game.world, hero.id, int32(PrimaryAbility)
   )
   flushPlayerCommands(game)
@@ -103,7 +105,7 @@ for class in [VanguardKnight, Ranger, DruidWarden]:
   for slot in HeroAbilitySlot:
     if heroAbility(class, slot).abilitySpec.casting == SelfCast:
       continue
-    doAssert not activatePlayerAbility(
+    doAssert activatePlayerAbility(
       game.world, hero.id, int32(slot)
     )
     doAssert armedAbility == slot.ord
@@ -120,7 +122,7 @@ block:
     enemy = game.target(5, 90_000)
   game.step()
   hero.attackObjectId = enemy.id
-  doAssert not activatePlayerAbility(
+  doAssert activatePlayerAbility(
     game.world, hero.id, int32(PrimaryAbility)
   )
   queueCastTarget(hero.id, PrimaryAbility.ord.int32, ally.id)
@@ -210,13 +212,13 @@ block:
     enemy = game.target(5, 60_000)
   game.step()
   let mana = hero.mana
-  doAssert not activatePlayerAbility(
+  doAssert activatePlayerAbility(
     game.world, hero.id, int32(PrimaryAbility)
   )
   doAssert armedAbility == int32(PrimaryAbility)
   enemy.state = Dying
   hero.attackObjectId = enemy.id
-  doAssert not activatePlayerAbility(
+  doAssert activatePlayerAbility(
     game.world, hero.id, int32(UltimateAbility)
   )
   doAssert armedAbility == int32(UltimateAbility)
@@ -471,7 +473,7 @@ for slot in [PrimaryAbility, SecondaryAbility]:
         enemyHp = enemy.hp
         mana = hero.mana
       if aim == 0:
-        doAssert not activatePlayerAbility(
+        doAssert activatePlayerAbility(
           game.world, hero.id, slot.ord.int32
         )
         queueCastTarget(hero.id, slot.ord.int32, enemy.id)

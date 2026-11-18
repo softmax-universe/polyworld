@@ -1,17 +1,32 @@
-import polyworld/[rooms, roomclients]
+import polyworld/[rooms, roomclients, relays]
+
+proc welcomeWithRoom(client: RoomClient) =
+  ## Delivers the ordered reconnect handshake before replaying commands.
+  client.accept(RoomMessage(kind: Welcome, participant: client.participant,
+    token: "secret").encode())
+  doAssert not client.welcomed
+  for bytes in client.outgoing:
+    doAssert decode(bytes).kind in {Hello, ListRooms}
+  client.accept(client.snapshot.encode())
+  doAssert client.welcomed
 
 echo "Testing command and hash retransmission after connection loss"
 let client = RoomClient(participant: 7, match: 2, began: true, welcomed: true)
 client.snapshot = RoomMessage(
-  kind: RoomState, room: "room", phase: Playing,
+  kind: RoomState, match: 2, room: "room", phase: Playing,
   seats: @[Seat(owner: 7, name: "Human")]
 )
+doAssert not client.hasPendingCommand(0)
 doAssert client.submit(0, "opaque game command")
+doAssert client.hasPendingCommand(0)
+doAssert not client.hasPendingCommand(1)
 client.send(RoomMessage(kind: ReportHash, match: 2, tick: 24, hash: 123))
 client.send(RoomMessage(kind: FinishMatch, match: 2, tick: 25, hash: 456))
 client.lost()
+doAssert client.hasPendingCommand(0)
 client.opened()
-client.accept(RoomMessage(kind: Welcome, participant: 7, token: "secret").encode)
+client.welcomeWithRoom()
+doAssert client.hasPendingCommand(0)
 var commands, checkpoints, finals: int
 for bytes in client.outgoing:
   let message = decode(bytes)
@@ -31,9 +46,10 @@ for bytes in client.outgoing:
 doAssert commands == 1 and checkpoints == 1 and finals == 1
 # Acknowledged commands are not retransmitted; hash confirmations still are.
 client.accept(RoomMessage(kind: CommandAck, match: 2, sequence: 1).encode)
+doAssert not client.hasPendingCommand(0)
 client.lost()
 client.opened()
-client.accept(RoomMessage(kind: Welcome, participant: 7, token: "secret").encode)
+client.welcomeWithRoom()
 for bytes in client.outgoing:
   doAssert decode(bytes).kind != SubmitCommand
 let nextSeats = @[Seat(owner: 8, name: "Replacement", kind: BotSeat)]
@@ -58,6 +74,46 @@ doAssert client.snapshot.seats[0].owner == 7,
 doAssert not client.takeTick(packet)
 echo "Reconnect receipts, mandatory hashes and immutable ticks passed"
 
+echo "Testing pending commands acknowledged before their tick"
+doAssert client.submit(0, "reserved game command")
+client.lost()
+client.opened()
+client.welcomeWithRoom()
+client.accept(RoomMessage(kind: CommandAck, match: 2, sequence: 2, tick: 3).encode)
+doAssert client.hasPendingCommand(0)
+client.outgoing.setLen(0)
+client.flushCommands()
+doAssert client.outgoing.len == 0
+client.lost()
+client.opened()
+client.welcomeWithRoom()
+commands = 0
+for bytes in client.outgoing:
+  let message = decode(bytes)
+  if message.kind == SubmitCommand:
+    inc commands
+    doAssert message.sequence == 2 and message.payload == "reserved game command"
+doAssert commands == 1
+client.accept(RoomMessage(kind: TickPacket, match: 2, tick: 3,
+  seats: client.snapshot.seats,
+  commands: @[Command(participant: 7, seat: 0, sequence: 2,
+    payload: "reserved game command")]).encode)
+doAssert client.hasPendingCommand(0), "A buffered echo cannot release the seat"
+client.lost()
+client.opened()
+client.welcomeWithRoom()
+for bytes in client.outgoing:
+  doAssert decode(bytes).kind != SubmitCommand,
+    "A buffered authoritative echo needs no retransmission"
+client.accept(RoomMessage(kind: TickPacket, match: 2, tick: 2).encode)
+doAssert client.takeTick(packet) and packet.tick == 2
+client.appliedTick(2)
+doAssert client.hasPendingCommand(0)
+doAssert client.takeTick(packet) and packet.tick == 3
+doAssert client.hasPendingCommand(0), "Taking a packet only hands it to the game"
+client.appliedTick(3)
+doAssert not client.hasPendingCommand(0)
+
 client.accept(RoomMessage(
   kind: MatchStatus, match: client.match, phase: Waiting,
   flag: true, tick: client.applied, detail: "Paused"
@@ -73,13 +129,16 @@ block discardedReceipts:
   echo "Testing discarded command acknowledgement and subsequent submissions"
   let revoked = RoomClient(participant: 7, match: 2,
     began: true, welcomed: true,
-    snapshot: RoomMessage(phase: Playing,
+    snapshot: RoomMessage(kind: RoomState, match: 2, room: "revoked",
+      phase: Playing,
       seats: @[Seat(owner: 7, name: "Player")]))
   doAssert revoked.submit(0, "in flight during reassignment")
+  doAssert revoked.hasPendingCommand(0)
   let discarded = RoomMessage(kind: CommandAck,
     match: 2, sequence: 1, tick: 0, flag: true)
   revoked.accept(discarded.encode)
   revoked.accept(discarded.encode)
+  doAssert not revoked.hasPendingCommand(0)
   doAssert revoked.rejectedCommands == 1
   var rejected: RoomMessage
   doAssert revoked.takeRejected(rejected)
@@ -94,7 +153,7 @@ block discardedReceipts:
   doAssert decode(revoked.outgoing[^1]).seatKind == BotSeat
   revoked.lost()
   revoked.opened()
-  revoked.accept(RoomMessage(kind: Welcome, participant: 7).encode)
+  revoked.welcomeWithRoom()
   var resumed = 0
   for bytes in revoked.outgoing:
     let message = decode(bytes)
@@ -102,6 +161,75 @@ block discardedReceipts:
       doAssert message.sequence == 2
       inc resumed
   doAssert resumed == 1
+
+block reconnectMembership:
+  echo "Testing reconnect to retained and retired private rooms"
+  for retained in [false, true]:
+    let
+      relay = Relay()
+      identity = GameIdentity(game: "reconnect-check", gameplay: 1, protocol: 1)
+      client = RoomClient(identity: identity, name: "Controller")
+
+    proc pump(connection: int) =
+      ## Exchanges ordered wire packets until the test connection is idle.
+      for step in 0 ..< 32:
+        let
+          deliveries = move(relay.outgoing)
+          requests = move(client.outgoing)
+        if deliveries.len + requests.len == 0:
+          return
+        for delivery in deliveries:
+          if delivery.connection == connection and not delivery.close:
+            client.accept(delivery.bytes)
+        for request in requests:
+          relay.process(connection, request, 0)
+      doAssert false, "Relay did not settle"
+
+    client.opened()
+    pump(1)
+    client.send(RoomMessage(kind: CreateRoom, name: "Private room",
+      number: 2, tickRate: 24))
+    pump(1)
+    client.send(RoomMessage(kind: ClaimSeat, seat: 0, name: "Controller"))
+    pump(1)
+    let room = client.snapshot.room
+    client.send(RoomMessage(kind: StartMatch, revision: client.snapshot.revision,
+      hash: client.snapshot.setupHash()))
+    pump(1)
+    doAssert client.began and client.snapshot.phase == Playing
+    client.events.setLen(0)
+    if retained:
+      relay.receive(2, RoomMessage(kind: Hello, identity: identity,
+        name: "Watcher"), 0)
+      relay.receive(2, RoomMessage(kind: JoinRoom, room: room), 0)
+      pump(1)
+    doAssert client.submit(0, "queued during disconnect")
+    relay.disconnect(1)
+    client.lost()
+    client.opened()
+    pump(3)
+    doAssert client.welcomed and client.error.len == 0
+    doAssert client.listings.len == 0
+    if retained:
+      doAssert relay.rooms.len == 1 and client.began
+      doAssert client.snapshot.room == room and client.hasPendingCommand(0)
+      doAssert client.events.len == 0
+      relay.advance(0.05)
+      pump(3)
+      var packet: RoomMessage
+      doAssert client.takeTick(packet) and packet.commands.len == 1
+      doAssert packet.commands[0].payload == "queued during disconnect"
+      doAssert client.hasPendingCommand(0)
+      client.appliedTick(packet.tick)
+      doAssert not client.hasPendingCommand(0)
+    else:
+      doAssert relay.rooms.len == 0 and client.snapshot.room.len == 0
+      doAssert not client.began and not client.hasPendingCommand(0)
+      doAssert not client.catchingUp and client.setupSnapshot().room.len == 0
+      client.send(RoomMessage(kind: CreateRoom, name: "Next room",
+        number: 2, tickRate: 24))
+      pump(3)
+      doAssert relay.rooms.len == 1 and client.snapshot.room.len > 0
 
 block consumedEdgeDiscovery:
   echo "Testing bounded discovery at the consumed history edge"
@@ -180,7 +308,8 @@ block consumedEdgeDiscovery:
 block recoveryState:
   echo "Testing initial, reconnect and incomplete history recovery"
   let history = RoomClient(participant: 7, welcomed: true,
-    snapshot: RoomMessage(room: "history", phase: Playing))
+    snapshot: RoomMessage(kind: RoomState, match: 3, room: "history",
+      phase: Playing))
   var initial = RoomMessage(kind: BeginMatch, match: 3, room: "history",
     revision: 1, tickRate: 24, payload: "{}",
     seats: @[Seat(owner: 7, name: "Human")],
@@ -217,7 +346,7 @@ block recoveryState:
   history.lost()
   doAssert history.catchingUp
   history.opened()
-  history.accept(RoomMessage(kind: Welcome, participant: 7).encode)
+  history.welcomeWithRoom()
   doAssert history.catchingUp,
     "Reconnect must await history even before the repeated BeginMatch"
   history.accept(initial.encode)

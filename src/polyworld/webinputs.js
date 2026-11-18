@@ -10,9 +10,24 @@
   var botSpecifications = parameters.getAll("bot").filter(Boolean);
   var commandArguments = [];
   var inputs = [];
+  var bytesPerMebibyte = 1024 * 1024;
+  var maxReplayBytes = Module["polyworldMaxReplayBytes"];
+  if (maxReplayBytes === undefined) {
+    maxReplayBytes = 64 * bytesPerMebibyte;
+  } else if (!Number.isSafeInteger(maxReplayBytes) || maxReplayBytes <= 0) {
+    throw new Error("polyworldMaxReplayBytes must be a positive safe integer.");
+  }
+  var replayByteLimit = maxReplayBytes % bytesPerMebibyte === 0
+    ? (maxReplayBytes / bytesPerMebibyte) + " MiB"
+    : maxReplayBytes + " bytes";
+
+  if (replayUrls.length === 0) {
+    var fragment = new URLSearchParams((window.location.hash || "").slice(1));
+    replayUrls = fragment.getAll("replay").filter(Boolean);
+  }
 
   if (replayUrls.length > 1) {
-    throw new Error("Only one replay query parameter is allowed.");
+    throw new Error("Only one replay URL is allowed.");
   }
 
   function resolveUrl(source) {
@@ -131,6 +146,48 @@
     document.body.appendChild(output);
   }
 
+  async function readReplayBody(stream) {
+    var reader = stream.getReader();
+    var chunks = [];
+    var length = 0;
+    try {
+      for (;;) {
+        var item = await reader.read();
+        if (item.done) {
+          break;
+        }
+        length += item.value.byteLength;
+        if (length > maxReplayBytes) {
+          await reader.cancel();
+          throw new Error("Replay exceeds the " + replayByteLimit + " size limit.");
+        }
+        chunks.push(item.value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    var bytes = new Uint8Array(length);
+    var offset = 0;
+    for (var chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return bytes;
+  }
+
+  async function readReplay(response) {
+    var bytes = await readReplayBody(response.body);
+    if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
+      if (typeof DecompressionStream === "undefined") {
+        throw new Error("This browser cannot open gzip-compressed replays.");
+      }
+      return readReplayBody(new Blob([bytes]).stream().pipeThrough(
+        new DecompressionStream("gzip")
+      ));
+    }
+    return bytes;
+  }
+
   (Module["preRun"] || (Module["preRun"] = [])).push(
     function loadPolyworldWebInputs() {
       Module["FS_createPath"]("/", "web", true, true);
@@ -143,13 +200,17 @@
             if (!response.ok) {
               throw new Error(response.status + " " + response.statusText);
             }
-            return response.arrayBuffer();
+            return input.kind === "replay"
+              ? readReplay(response)
+              : response.arrayBuffer().then(function bytes(buffer) {
+                return new Uint8Array(buffer);
+              });
           })
-          .then(function installInput(buffer) {
+          .then(function installInput(bytes) {
             Module["FS_createDataFile"](
               input.directory,
               input.name,
-              new Uint8Array(buffer),
+              bytes,
               true,
               false,
               true

@@ -8,6 +8,7 @@ type
   PendingCommand = object
     message: RoomMessage
     sent: bool
+    echoedTick: uint32
   RoomClient* = ref object
     identity*: GameIdentity
     name*, token*, error*, status*: string
@@ -29,6 +30,7 @@ type
     receiptPending*: bool
     rejectedCommands*: uint64
     lastHash, finalHash: RoomMessage
+    awaitingRoomState: bool
     recoveryReplyPending: bool
     recoveryTarget: uint32
 
@@ -58,6 +60,7 @@ proc opened*(client: RoomClient) =
   ## Identifies this connection without persisting the private reconnect token.
   client.connected = true
   client.welcomed = false
+  client.awaitingRoomState = false
   client.received = 0
   client.timing = PacketTiming()
   client.receiptPending = false
@@ -70,6 +73,7 @@ proc lost*(client: RoomClient) =
   ## Retains simulation, local VMs and unacknowledged submissions in memory.
   client.connected = false
   client.welcomed = false
+  client.awaitingRoomState = false
   client.catchupPending = false
   client.recoveryReplyPending = client.began
   client.status = "Disconnected. Reconnecting with the same seats."
@@ -95,9 +99,15 @@ proc flushCommands*(client: RoomClient) =
   if not client.welcomed:
     return
   for pending in client.pending.mitems:
-    if not pending.sent:
+    if not pending.sent and pending.echoedTick == 0:
       client.send(pending.message)
       pending.sent = true
+
+proc hasPendingCommand*(client: RoomClient, seat: uint32): bool =
+  ## Reports a seat's submissions whose authoritative tick is not applied yet.
+  for pending in client.pending:
+    if pending.message.seat == seat:
+      return true
 
 proc submit*(client: RoomClient, seat: uint32, payload: string): bool =
   ## Reports queue acceptance only, never gameplay success.
@@ -116,6 +126,27 @@ proc submit*(client: RoomClient, seat: uint32, payload: string): bool =
   client.flushCommands()
   true
 
+proc clearMatch(client: RoomClient) =
+  ## Discards playback and submissions when their match cannot continue.
+  client.began = false
+  client.match = 0
+  client.applied = 0
+  client.serverTick = 0
+  client.sequence = 0
+  client.pending.setLen(0)
+  client.rejected.setLen(0)
+  client.packets.setLen(0)
+  client.events.setLen(0)
+  client.catchupPending = false
+  client.recoveryReplyPending = false
+  client.recoveryTarget = 0
+  client.lastHash = RoomMessage()
+  client.finalHash = RoomMessage()
+  client.initialSnapshot = RoomMessage()
+  client.appliedSeats.setLen(0)
+  client.takenTick = 0
+  client.takenSeats.setLen(0)
+
 proc accept*(client: RoomClient, bytes: string) =
   ## Validates relay messages and preserves packets until their exact tick runs.
   let message = decode(bytes)
@@ -131,37 +162,40 @@ proc accept*(client: RoomClient, bytes: string) =
       reject("Reconnect changed participant identity")
     client.participant = message.participant
     client.token = message.token
-    client.welcomed = true
-    client.status = "Connected"
-    client.flushCommands()
-    if client.began:
+    client.awaitingRoomState = client.snapshot.room.len > 0
+    client.welcomed = not client.awaitingRoomState
+    if client.welcomed:
+      client.status = "Connected"
+    else:
+      client.status = "Checking room membership."
+    client.send(RoomMessage(kind: ListRooms))
+  of RoomList:
+    client.listings = message.rooms
+    if client.awaitingRoomState:
+      # Hello sends a membership snapshot before replying to ListRooms.
+      client.awaitingRoomState = false
+      client.welcomed = true
+      client.snapshot = RoomMessage(kind: RoomState)
+      client.clearMatch()
+      client.status = "The previous room is no longer available."
+  of RoomState:
+    let resume = client.awaitingRoomState and client.began and
+      message.room == client.snapshot.room and message.match == client.match and
+      message.phase != Lobby
+    client.snapshot = message
+    if message.phase == Lobby or message.room.len == 0 or
+        (client.awaitingRoomState and not resume):
+      client.clearMatch()
+    if client.awaitingRoomState:
+      client.awaitingRoomState = false
+      client.welcomed = true
+      client.status = "Connected"
+    if resume:
+      client.flushCommands()
       if client.lastHash.kind == ReportHash:
         client.send(client.lastHash)
       if client.finalHash.kind == FinishMatch:
         client.send(client.finalHash)
-    client.send(RoomMessage(kind: ListRooms))
-  of RoomList:
-    client.listings = message.rooms
-  of RoomState:
-    client.snapshot = message
-    if message.phase == Lobby or message.room.len == 0:
-      client.began = false
-      client.match = 0
-      client.applied = 0
-      client.serverTick = 0
-      client.sequence = 0
-      client.pending.setLen(0)
-      client.rejected.setLen(0)
-      client.packets.setLen(0)
-      client.catchupPending = false
-      client.recoveryReplyPending = false
-      client.recoveryTarget = 0
-      client.lastHash = RoomMessage()
-      client.finalHash = RoomMessage()
-      client.initialSnapshot = RoomMessage()
-      client.appliedSeats.setLen(0)
-      client.takenTick = 0
-      client.takenSeats.setLen(0)
   of BeginMatch:
     if message.hash != message.setupHash():
       reject("Initial setup hash does not match the received configuration")
@@ -196,11 +230,6 @@ proc accept*(client: RoomClient, bytes: string) =
     if message.match != client.match or message.tick == 0:
       reject("Tick packet belongs to an unexpected match")
     client.serverTick = max(client.serverTick, message.tick)
-    for command in message.commands:
-      if command.participant == client.participant:
-        for i in countdown(client.pending.high, 0):
-          if client.pending[i].message.sequence == command.sequence:
-            client.pending.delete(i)
     if message.tick <= client.applied:
       return
     for packet in client.packets:
@@ -217,6 +246,12 @@ proc accept*(client: RoomClient, bytes: string) =
     if client.packets.len >= MaxBufferedTicks:
       reject("Client tick buffer exhausted")
     client.packets.add message
+    for command in message.commands:
+      if command.participant == client.participant:
+        for pending in client.pending.mitems:
+          if pending.message.sequence == command.sequence:
+            pending.echoedTick = message.tick
+            break
   of CommandAck:
     if message.match != client.match or message.sequence > client.sequence:
       reject("Unknown command acknowledgement")
@@ -227,7 +262,12 @@ proc accept*(client: RoomClient, bytes: string) =
             reject("Rejected submission queue exhausted")
           inc client.rejectedCommands
           client.rejected.add client.pending[i].message
-        client.pending.delete(i)
+        if message.flag or message.tick <= client.applied:
+          client.pending.delete(i)
+        else:
+          # A reconnect receipt can arrive before the reserved tick is sealed.
+          # Keep the submission pending until the game applies the echo.
+          client.pending[i].sent = true
         break
   of CaughtUp:
     if message.match != client.match:
@@ -285,6 +325,9 @@ proc appliedTick*(client: RoomClient, tick: uint32) =
   if tick != client.applied + 1:
     reject("Simulation tick did not advance exactly once")
   client.applied = tick
+  for i in countdown(client.pending.high, 0):
+    if client.pending[i].echoedTick == tick:
+      client.pending.delete(i)
   if client.takenTick == tick:
     client.appliedSeats = client.takenSeats
     client.takenTick = 0

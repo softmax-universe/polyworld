@@ -1,5 +1,5 @@
 import
-  std/[os, strutils],
+  std/[options, os, strutils],
   chroma, jsony, pixie, silky, vmath, windy,
   chrome, displays, gameuis, inputs, policies, rtscameras, sounds
 
@@ -42,8 +42,9 @@ type
     ## Optional game-owned rows; the shared menu knows no game actions.
     draw*: proc(sk: Silky, window: Window, origin: Vec2)
     capturing*: proc(): bool
-  LegacySoundPreferences = object
+  StoredSoundPreferences = object
     soundMuted: bool
+    musicVolume: Option[int]
   SoundLaunch = object
     explicit, silent, applied: bool
     volume, savedVolume: int
@@ -141,14 +142,17 @@ proc configureSoundLaunch*(silent: bool, explicit = true) =
   ## Applies explicit launch flags to Master without replacing saved levels.
   soundLaunch = SoundLaunch(explicit: explicit, silent: silent)
 
-proc readPreferences*(app: string): Preferences =
-  ## Loads native or browser settings through Windy's configuration storage.
+proc readPreferences*(app: string, defaultMusicVolume = 100): Preferences =
+  ## Loads saved settings, using the game's Music default only when absent.
   let bytes = getConfig(app, "settings.json")
-  result = Preferences()
+  result = Preferences(musicVolume: defaultMusicVolume)
   if bytes.len > 0:
     try:
       result = bytes.fromJson(Preferences)
-      if bytes.fromJson(LegacySoundPreferences).soundMuted:
+      let stored = bytes.fromJson(StoredSoundPreferences)
+      if stored.musicVolume.isNone:
+        result.musicVolume = defaultMusicVolume
+      if stored.soundMuted:
         result.mainVolume = 0
     except JsonError as error:
       raise newException(MenusError, "Cannot read settings: " & error.msg)

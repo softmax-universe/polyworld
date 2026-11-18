@@ -9,7 +9,7 @@ when not defined(headless):
   import windy
   import polyworld/[connections, menus, sounds]
   import core/[sessions, replays, bots], app, replayer, scene/post,
-    modes/duel, modes/multiplayer, frontend
+    modes/duel, modes/multiplayer, frontend, paths
 
   static:
     # Lists the compile-time (-d:) flags while this build compiles.
@@ -99,7 +99,7 @@ when not defined(headless):
       options.playerCount = replay.classes.len
       options.human = false
     let app = initApp(options)
-    initSounds()
+    initSounds(CacMusicPath)
     app.replay = replay
     app.humanSeat = humanSeat
     var

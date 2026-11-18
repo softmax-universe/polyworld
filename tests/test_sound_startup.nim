@@ -34,6 +34,52 @@ proc testSoundStartup() =
   defaults.applyPreferences(Window(nil), configureDisplay = false)
   doAssert not soundsMuted()
 
+  echo "Testing a game's Music default preserves explicitly saved levels"
+  let quietMusic = readPreferences(app, defaultMusicVolume = 25)
+  doAssert quietMusic.musicVolume == 25
+  doAssert quietMusic.mainVolume == 100 and quietMusic.fxVolume == 100
+  doAssert quietMusic.uiVolume == 100
+  doAssert readPreferences(app).musicVolume == 100
+  for bytes in ["{}", """{"name":"musicVolume","mainVolume":37}""",
+      """{"soundMuted":true,"mainVolume":37}"""]:
+    setConfig(app, "settings.json", bytes)
+    let current = readPreferences(app, defaultMusicVolume = 25)
+    doAssert current.musicVolume == 25
+    doAssert current.fxVolume == 100 and current.uiVolume == 100
+    if bytes.contains("soundMuted"):
+      doAssert current.mainVolume == 0
+    current.savePreferences(app)
+    doAssert readPreferences(app).musicVolume == 25,
+      "Saving a new profile must preserve its chosen game default"
+  for level in [0, 25, 73, 100]:
+    setConfig(app, "settings.json", "{\"musicVolume\":" & $level &
+      ",\"mainVolume\":37,\"fxVolume\":61,\"uiVolume\":79}")
+    let current = readPreferences(app, defaultMusicVolume = 25)
+    doAssert current.musicVolume == level
+    doAssert current.mainVolume == 37
+    doAssert current.fxVolume == 61 and current.uiVolume == 79
+    current.savePreferences(app)
+    doAssert readPreferences(app, defaultMusicVolume = 25).musicVolume == level
+  setConfig(app, "settings.json", "{\"musicVolume\":")
+  var malformedRejected = false
+  try:
+    discard readPreferences(app, defaultMusicVolume = 25)
+  except MenusError:
+    malformedRejected = true
+  doAssert malformedRejected,
+    "Malformed settings must retain the existing error/fallback contract"
+  removeFile(directory / "settings.json")
+  doAssert readPreferences(app, defaultMusicVolume = -5).musicVolume == 0
+  doAssert readPreferences(app, defaultMusicVolume = 105).musicVolume == 100
+  configureSoundLaunch(true)
+  var mutedFresh = readPreferences(app, defaultMusicVolume = 25)
+  doAssert mutedFresh.mainVolume == 0 and mutedFresh.musicVolume == 25
+  mutedFresh.name = "Fresh muted player"
+  mutedFresh.savePreferences(app)
+  configureSoundLaunch(false, false)
+  let restoredFresh = readPreferences(app, defaultMusicVolume = 25)
+  doAssert restoredFresh.mainVolume == 100 and restoredFresh.musicVolume == 25
+
   echo "Testing every saved slider survives launches and menu transitions"
   var saved = Preferences(
     name: "Saved player",

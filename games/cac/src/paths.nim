@@ -2,6 +2,8 @@ import
   std/os,
   polyworld/common
 
+const CacMusicPath* = DataRoot & "/music/cac/tavern-dance.ogg"
+
 when not defined(emscripten):
   # This file is in games/cac/src: the repository is three folders up.
   const SourceRepo = currentSourcePath().parentDir.parentDir.parentDir.parentDir

@@ -150,8 +150,9 @@ async function runCase(browser,mode) {
     const buffers=await page.evaluate(()=>Object.values(AL.buffers)
       .filter(buffer=>buffer.audioBuf).map(buffer=>({frames:buffer.audioBuf.length,
         rate:buffer.audioBuf.sampleRate,channels:buffer.audioBuf.numberOfChannels})));
-    record(result,'curated audio buffers decode',buffers.length===clips.length &&
-      buffers.every(buffer=>buffer.frames>0),{expected:clips.length,loaded:buffers.length});
+    const effects=buffers.filter(buffer=>buffer.channels===1);
+    record(result,'curated audio buffers decode',effects.length===clips.length &&
+      effects.every(buffer=>buffer.frames>0),{expected:clips.length,loaded:effects.length});
     record(result,'opening deal plays decoded card audio',(await events(page))
       .some(event=>event.cues.includes('CardDrawSound') && event.peak>0 && event.gain>0));
     let mark=(await events(page)).length;

@@ -70,6 +70,9 @@ for font in Rubik-Regular.ttf Rubik-Bold.ttf; do
 done
 cp -R "$art_dir/themes/main" "$art_stage/themes/"
 cp -R "$art_dir/sounds" "$art_stage/"
+mkdir -p "$art_stage/music/cac"
+cp "$art_dir/music/cac/tavern-dance.ogg" \
+  "$art_dir/music/cac/tavern-dance.json" "$art_stage/music/cac/"
 cp -R "$art_dir/ui" "$art_stage/"
 cp "$art_dir"/icons/*.png "$art_stage/icons/"
 for directory in fonts frames icons; do

@@ -103,12 +103,14 @@ unchanged. Hover for half a second for affected/excluded units, prerequisites,
 per-tier effects and cancellation rules. Selected single-unit HUD stats read live
 `unitStats` and Q16.16 `unitMoveSpeed`, including worker armor without hiding cargo.
 
-The atlas keys are `keenflight_arrows`, `tempered_edges`, `runed_plating`, and
-`windrunner_training`. **Generated artwork remains blocked on Higgsfield user
-authentication.** Until those real assets exist, the HUD uses existing `bow`,
-`attack`, `armor`, and `speed_1x` glyphs and labels the tooltip **Temporary icon**.
-No generated artwork is claimed or fabricated; real keys automatically take
-precedence when available in the atlas.
+Each category has three separate icons: `keenflight_arrows_1` through `_3`,
+`tempered_edges_1` through `_3`, `runed_plating_1` through `_3`, and
+`windrunner_training_1` through `_3`. Cards show the upcoming tier, retain that
+icon while research runs, and keep tier III after reaching the maximum. The
+shared HUD loads these PNGs from `polyworld_art/icons` and includes them in asset
+packaging automatically. If an icon is absent from an older asset set, the HUD
+falls back to `bow`, `attack`, `armor`, or `speed_1x` and labels the tooltip
+**Temporary icon**.
 
 Native checks: `test_research_presentation.nim` (content/state),
 `test_research_render.nim` (actual glyph/contrast/progress FBO), and

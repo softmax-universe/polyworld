@@ -23,6 +23,9 @@ type
     actionCam: ActionCam  ## The transport's camera button; CaC's is fixed.
     follow: bool
 
+when defined(replayViewer) and defined(emscripten):
+  {.emit: "#include <emscripten.h>".}
+
 proc newReplayer*(data: ReplayData): Replayer =
   ## Creates a viewer that automatically loops the recorded game.
   result = Replayer(data: data,
@@ -32,6 +35,16 @@ proc newReplayer*(data: ReplayData): Replayer =
       repeating = true
     ),
     actionCam: initActionCam(), attackTick: -1)
+  when defined(replayViewer) and defined(emscripten):
+    var startTick: int32
+    {.emit: """
+    `startTick` = EM_ASM_INT({
+      const t = new URLSearchParams(location.search).get('t');
+      return t !== null && /^[0-9]+$/.test(t) ? Math.min(Number(t), 2147483647) : -1;
+    });
+    """.}
+    if startTick >= 0:
+      result.transport.seekTo(startTick)
 
 proc timeScale*(replayer: Replayer): float32 =
   ## How fast the table runs: the selected speed, cards and lunges included.
@@ -172,4 +185,5 @@ proc drawTransport*(replayer: Replayer, sk: Silky, window: Window) =
 
 proc reportFrame*(replayer: Replayer) =
   ## Tells the replay page the first frame is up, or that it diverged.
-  reportReplayFrame(replayer.tick, replayer.check.mismatches)
+  if replayer.transport.targetTick < 0 or replayer.check.mismatches > 0:
+    reportReplayFrame(replayer.tick, replayer.check.mismatches)

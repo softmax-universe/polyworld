@@ -1,6 +1,6 @@
 ## Native production graphics callbacks, not source-string route assertions.
 ## Uses hidden native GL; focus is supplied to the callback harness explicitly.
-import std/[macros, importutils]
+import std/[macros, importutils, os, strutils]
 import windy/internal
 import polyworld/mailboxes
 import ../presets
@@ -16,14 +16,14 @@ proc renameDirector(node: NimNode): NimNode {.compileTime.} =
   for item in node: result.add renameDirector(item)
 
 macro productionCallback(name: static[string]): untyped =
+  ## Uses the final gameplay callback after resource-loading setup.
+  result = newStmtList()
   for node in parseStmt(staticRead("../graphics.nim")):
     if node.kind == nnkProcDef and node[0].repr == "runGraphics*":
       for child in node[^1]:
         if child.kind == nnkAsgn and child[0].repr == "window." & name and
             child[1].kind == nnkLambda:
-          return renameDirector(child)
-  # Missing rune callback is deliberately a runtime assertion in RED.
-  result = newStmtList()
+          result = renameDirector(child)
 
 macro productionRoutine(name: static[string]): untyped =
   for node in parseStmt(staticRead("../graphics.nim")):
@@ -149,6 +149,15 @@ release(KeyEscape)
 finishHumanCommunicationFrame()
 doAssert run.inboxes[1].count == 0
 block diplomacyPanel:
+  for size in [vec2(800, 600), vec2(1200, 800), vec2(1920, 1080)]:
+    let
+      layout = initGameUiLayout(size)
+      minimap = layout.panel(GameUiRegion.TopRight, PanelMinimap)
+      button = layout.diplomacyButtonPanel()
+    doAssert button.origin.y >= minimap.origin.y + minimap.size.y
+    doAssert button.origin.x >= 0 and button.origin.y >= 0
+    doAssert button.origin.x + button.size.x <= size.x
+    doAssert button.origin.y + button.size.y <= size.y
   var colors = @[rgbx(230, 100, 100, 255), rgbx(100, 100, 230, 255)]
   proc drawHud(at: Vec2, pressed: set[Button] = {}) =
     sk.uiScale = gameUiScale(window)
@@ -161,6 +170,28 @@ block diplomacyPanel:
     finishProductionUi()
     finishHumanCommunicationFrame()
     window.state.perFrame = PerFrame()
+  let
+    diplomacyButton = currentLayout(window).diplomacyButtonPanel()
+    diplomacyCenter = diplomacyButton.origin + diplomacyButton.size / 2
+  doAssert window.mouseOverUi(diplomacyCenter),
+    "Diplomacy button must block commands to the world behind it"
+  drawHud(diplomacyCenter)
+  let screenshotPath = getEnv("LVD_DIPLOMACY_FIXTURE")
+  if screenshotPath.len > 0:
+    let
+      minimap = currentLayout(window).panel(GameUiRegion.TopRight, PanelMinimap)
+      left = max(0'i32, int32((minimap.origin.x - 8) * sk.uiScale))
+      top = max(0'i32, int32((minimap.origin.y - 8) * sk.uiScale))
+      right = min(window.size.x,
+        int32((minimap.origin.x + minimap.size.x + 8) * sk.uiScale))
+      bottom = min(window.size.y,
+        int32((diplomacyButton.origin.y + diplomacyButton.size.y + 8) * sk.uiScale))
+      screenshot = newImage(right - left, bottom - top)
+    glReadPixels(left, window.size.y - bottom, right - left, bottom - top,
+      GL_RGBA, GL_UNSIGNED_BYTE,
+      screenshot.data[0].addr)
+    screenshot.flipVertical()
+    screenshot.writeFile(screenshotPath)
   # Typing the default keyboard-select alias while hovering Diplomacy cannot
   # turn a text character into a panel toggle.
   customBindingsEnabled = true
@@ -169,7 +200,7 @@ block diplomacyPanel:
   release(KeyEnter)
   press(KeyZ)
   press(KeyTab)
-  drawHud(vec2(60, 216), {KeyZ})
+  drawHud(diplomacyCenter, {KeyZ})
   doAssert humanCommunicationTyping(), "Typed select alias clicked Diplomacy"
   doAssert not director.manualPanel, "Typed Tab must not engage the stats director"
   release(KeyTab)
@@ -177,8 +208,13 @@ block diplomacyPanel:
   press(KeyEscape)
   release(KeyEscape)
   finishHumanCommunicationFrame()
-  drawHud(vec2(60, 216), {MouseLeft})
+  drawHud(diplomacyCenter, {MouseLeft})
   doAssert humanCommunicationBlocksGameplay(), "Diplomacy button must open panel"
+  drawHud(diplomacyCenter, {MouseLeft})
+  doAssert not humanCommunicationBlocksGameplay(),
+    "Diplomacy button must also close its panel"
+  drawHud(diplomacyCenter, {MouseLeft})
+  doAssert humanCommunicationBlocksGameplay(), "Diplomacy button must reopen panel"
   let layout = currentLayout(window)
   let width = min(660'f32, layout.size.x - 24)
   let rows = max(1, min(6, int((layout.size.y - 148) / 92)))
@@ -201,9 +237,9 @@ block diplomacyPanel:
   release(KeyEscape)
   finishHumanCommunicationFrame()
   run.world.diplomacy.settings.enabled = false
-  drawHud(vec2(60, 216), {MouseLeft})
+  drawHud(diplomacyCenter, {MouseLeft})
   doAssert not humanCommunicationBlocksGameplay(),
-    "Fixed team label must not open negotiation controls"
+    "Fixed team icon must not open negotiation controls"
 press(KeyEnter)
 release(KeyEnter)
 press(KeyS) # Deliberately lose its release while unfocused.

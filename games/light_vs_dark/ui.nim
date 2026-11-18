@@ -327,8 +327,8 @@ proc currentChrome(window: Window): HudChrome =
   placeChrome(currentLayout(window))
 
 proc communicationButtonPanel(window: Window): GameUiPanel =
-  let layout = currentLayout(window)
-  GameUiPanel(origin: vec2(12, 202), size: vec2(min(180'f32, layout.size.x - 24), 30))
+  ## Shares the diplomacy button's drawing and world-input bounds.
+  currentLayout(window).diplomacyButtonPanel()
 
 proc drawHumanCommunication(sk: Silky, window: Window) =
   if run == nil or run.replayMode or matchResultsVisible(): return
@@ -354,22 +354,45 @@ proc drawHumanCommunication(sk: Silky, window: Window) =
     if player < 0 or other == player: continue
     let relation = run.world.diplomacy.relation(player, other)
     if relation.offer != NoOffer and relation.sender == other: inc pending
-  if player >= 0 and run.world.diplomacy.settings.enabled and
-    button("Diplomacy" & (if pending > 0: " (" & $pending & ")" else: ""),
-      communicationButtonPanel(window)):
+  if not run.world.diplomacy.settings.enabled:
+    commState.diplomacyOpen = false
+  if player >= 0:
+    let
+      panel = communicationButtonPanel(window)
+      enabled = run.world.diplomacy.settings.enabled
+      covered = window.statsContains(sk.mousePos) or
+        hudTooltipContains(sk.mousePos) or mouseOverDebugMenu(sk.mousePos)
+      hovered = not covered and panel.contains(sk.mousePos)
+    sk.hoverSound(panel, enabled and not covered)
+    sk.drawWellImage(panel, "diplomacy",
+      if enabled: IconTint else: rgbx(110, 115, 125, 160),
+      selected = enabled and (hovered or commState.diplomacyOpen),
+      iconSize = 32)
+    if enabled and pending > 0:
+      let badge = GameUiPanel(origin: panel.origin + vec2(24, 2),
+        size: vec2(22, 20))
+      sk.drawRect(badge.origin, badge.size, rgbx(232, 196, 86, 255))
+      sk.drawLabel($pending, badge.origin, badge.size,
+        rgbx(30, 25, 16, 255), "Small", CenterAlign)
+    if hovered and not commState.diplomacyOpen:
+      let
+        hint = GameUiPanel(origin: panel.origin + vec2(-228, 6),
+          size: vec2(220, 36))
+        label =
+          if not enabled:
+            run.world.diplomacy.settings.teamLabel(player) & " / Fixed teams"
+          elif pending > 0:
+            "Diplomacy (" & $pending & " pending)"
+          else:
+            "Diplomacy"
+      sk.drawPanel(hint)
+      sk.drawLabel(label, hint.origin + vec2(8, 0), hint.size - vec2(16, 0),
+        ink, "Small", CenterAlign)
+    if enabled and hovered and window.buttonPressed[MouseLeft]:
+      playSound(ClickSound)
       commState.diplomacyOpen = not commState.diplomacyOpen
       commState.typing = false
       commState.blockedFrame = true
-  if not run.world.diplomacy.settings.enabled:
-    commState.diplomacyOpen = false
-    let
-      panel = communicationButtonPanel(window)
-      label =
-        if player >= 0:
-          run.world.diplomacy.settings.teamLabel(player) & " / Fixed teams"
-        else:
-          "Fixed teams"
-    sk.drawLabel(label, panel.origin, panel.size, muted, "Small")
   let feedWidth = min(440'f32, layout.size.x - 24)
   let feedOrigin = vec2(12, 238)
   let shown = min(5, commState.feed.len)

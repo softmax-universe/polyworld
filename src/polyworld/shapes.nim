@@ -464,9 +464,10 @@ proc addLine*(
 
 proc draw*(
     renderer: var ShapeRenderer,
-    viewProjection: Mat4
+    viewProjection: Mat4,
+    opaque = false
 ) =
-  ## Uploads and draws the shape batch with scene depth.
+  ## Draws the shape batch, writing depth for opaque surfaces.
   if renderer.vertices.len == 0:
     return
   glBindBuffer(GL_ARRAY_BUFFER, renderer.vertexBuffer)
@@ -477,10 +478,13 @@ proc draw*(
     GL_DYNAMIC_DRAW
   )
   glEnable(GL_DEPTH_TEST)
-  glDepthMask(GL_FALSE)
+  glDepthMask(if opaque: GL_TRUE else: GL_FALSE)
   glDisable(GL_CULL_FACE)
-  glEnable(GL_BLEND)
-  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+  if opaque:
+    glDisable(GL_BLEND)
+  else:
+    glEnable(GL_BLEND)
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
   glUseProgram(renderer.program)
   shapeViewProjection = viewProjection
   glUniformMatrix4fv(

@@ -1,0 +1,604 @@
+{
+  "policy_ref": "andre-von-houck-hegemosphere:v5",
+  "source": "Unmodified official base.bas",
+  "game_source_commit": "1f98d2f",
+  "replay_schema_version": 5,
+  "matches": [
+    {
+      "episode": "6b3c3998-b4a8-4be1-ad37-4f248669c442",
+      "replay_url": "https://softmax.com/unlisted/hegemosphere/episodes/6b3c3998-b4a8-4be1-ad37-4f248669c442",
+      "seed": 1565456081,
+      "ticks": 6000,
+      "outcome": "TimeoutDraw",
+      "seats": [
+        {
+          "seat": 0,
+          "name": "Andre von Houck (Andre H)",
+          "commands": {
+            "cmkPlaceBuilding": 23,
+            "cmkMoveUnits": 20,
+            "cmkBuildUnit": 1,
+            "cmkAttackUnits": 409
+          },
+          "tank_production_order_count": 1,
+          "tank_order_seconds": [
+            196.2
+          ],
+          "first_placements": [
+            {
+              "seconds": 0.2,
+              "type": "Iron Mine",
+              "location": "56:182"
+            },
+            {
+              "seconds": 4.2,
+              "type": "Oil Refinery",
+              "location": "58:60"
+            },
+            {
+              "seconds": 68.2,
+              "type": "Power Plant",
+              "location": "56:63"
+            },
+            {
+              "seconds": 128.2,
+              "type": "Iron Mine",
+              "location": "186:185"
+            },
+            {
+              "seconds": 132.2,
+              "type": "Factory",
+              "location": "56:67"
+            }
+          ],
+          "attack_only_full_queue_decisions": 0,
+          "maximum_targets_per_unit_per_decision": 15,
+          "attack_then_move_overwrites": 3,
+          "longest_full_attack_queue_streak": {
+            "decisions": 0,
+            "start_seconds": null,
+            "end_seconds": null
+          }
+        },
+        {
+          "seat": 1,
+          "name": "Andrew Brower (Andrew B)",
+          "commands": {
+            "cmkPlaceBuilding": 6,
+            "cmkSetEngagement": 2,
+            "cmkAttackUnits": 81,
+            "cmkBuildUnit": 30,
+            "cmkRefuel": 28
+          },
+          "tank_production_order_count": 30,
+          "tank_order_seconds": [
+            222.2,
+            284.2,
+            316.2,
+            348.2,
+            380.2,
+            412.2,
+            444.2,
+            476.2,
+            508.2,
+            540.2,
+            572.2,
+            604.2,
+            636.2,
+            668.2,
+            700.2,
+            732.2,
+            764.2,
+            796.2,
+            828.2,
+            860.2,
+            892.2,
+            924.2,
+            956.2,
+            988.2,
+            1020.2,
+            1052.2,
+            1084.2,
+            1116.2,
+            1148.2,
+            1180.2
+          ],
+          "first_placements": [
+            {
+              "seconds": 0.2,
+              "type": "Iron Mine",
+              "location": "200:59"
+            },
+            {
+              "seconds": 2.2,
+              "type": "Oil Refinery",
+              "location": "200:71"
+            },
+            {
+              "seconds": 62.2,
+              "type": "Power Plant",
+              "location": "204:57"
+            },
+            {
+              "seconds": 104.2,
+              "type": "Factory",
+              "location": "204:61"
+            },
+            {
+              "seconds": 220.2,
+              "type": "Factory",
+              "location": "204:65"
+            }
+          ],
+          "attack_only_full_queue_decisions": 0,
+          "maximum_targets_per_unit_per_decision": 1,
+          "attack_then_move_overwrites": 0,
+          "longest_full_attack_queue_streak": {
+            "decisions": 0,
+            "start_seconds": null,
+            "end_seconds": null
+          }
+        },
+        {
+          "seat": 2,
+          "name": "Andre von Houck (Andre H) (2)",
+          "commands": {
+            "cmkPlaceBuilding": 5,
+            "cmkMoveUnits": 24,
+            "cmkBuildUnit": 15,
+            "cmkAttackUnits": 3545
+          },
+          "tank_production_order_count": 15,
+          "tank_order_seconds": [
+            196.2,
+            256.2,
+            316.2,
+            376.2,
+            436.2,
+            496.2,
+            672.2,
+            732.2,
+            792.2,
+            852.2,
+            912.2,
+            972.2,
+            1032.2,
+            1092.2,
+            1152.2
+          ],
+          "first_placements": [
+            {
+              "seconds": 0.2,
+              "type": "Iron Mine",
+              "location": "56:182"
+            },
+            {
+              "seconds": 4.2,
+              "type": "Oil Refinery",
+              "location": "58:60"
+            },
+            {
+              "seconds": 64.2,
+              "type": "Power Plant",
+              "location": "54:188"
+            },
+            {
+              "seconds": 128.2,
+              "type": "Factory",
+              "location": "54:192"
+            },
+            {
+              "seconds": 140.2,
+              "type": "Oil Refinery",
+              "location": "56:185"
+            }
+          ],
+          "attack_only_full_queue_decisions": 29,
+          "maximum_targets_per_unit_per_decision": 26,
+          "attack_then_move_overwrites": 12,
+          "longest_full_attack_queue_streak": {
+            "decisions": 29,
+            "start_seconds": 556.2,
+            "end_seconds": 668.2
+          }
+        },
+        {
+          "seat": 3,
+          "name": "Andrew Brower B (Andrew B)",
+          "commands": {
+            "cmkPlaceBuilding": 5,
+            "cmkSetEngagement": 2,
+            "cmkAttackUnits": 46,
+            "cmkBuildUnit": 30,
+            "cmkMoveUnits": 13,
+            "cmkRefuel": 27
+          },
+          "tank_production_order_count": 30,
+          "tank_order_seconds": [
+            302.2,
+            310.2,
+            362.2,
+            370.2,
+            422.2,
+            430.2,
+            482.2,
+            490.2,
+            542.2,
+            552.2,
+            602.2,
+            616.2,
+            662.2,
+            680.2,
+            722.2,
+            744.2,
+            782.2,
+            808.2,
+            842.2,
+            872.2,
+            904.2,
+            936.2,
+            968.2,
+            1000.2,
+            1032.2,
+            1064.2,
+            1096.2,
+            1128.2,
+            1160.2,
+            1192.2
+          ],
+          "first_placements": [
+            {
+              "seconds": 0.2,
+              "type": "Iron Mine",
+              "location": "177:176"
+            },
+            {
+              "seconds": 2.2,
+              "type": "Oil Refinery",
+              "location": "186:188"
+            },
+            {
+              "seconds": 66.2,
+              "type": "Power Plant",
+              "location": "190:183"
+            },
+            {
+              "seconds": 112.2,
+              "type": "Factory",
+              "location": "186:193"
+            },
+            {
+              "seconds": 232.2,
+              "type": "Factory",
+              "location": "200:197"
+            }
+          ],
+          "attack_only_full_queue_decisions": 0,
+          "maximum_targets_per_unit_per_decision": 1,
+          "attack_then_move_overwrites": 0,
+          "longest_full_attack_queue_streak": {
+            "decisions": 0,
+            "start_seconds": null,
+            "end_seconds": null
+          }
+        }
+      ]
+    },
+    {
+      "episode": "889bd34f-de7e-416e-b81c-99fa251887e4",
+      "replay_url": "https://softmax.com/unlisted/hegemosphere/episodes/889bd34f-de7e-416e-b81c-99fa251887e4",
+      "seed": 1407102123,
+      "ticks": 6000,
+      "outcome": "TimeoutDraw",
+      "seats": [
+        {
+          "seat": 0,
+          "name": "Andre von Houck (Andre H)",
+          "commands": {
+            "cmkPlaceBuilding": 12,
+            "cmkMoveUnits": 40,
+            "cmkBuildUnit": 17,
+            "cmkAttackUnits": 4775
+          },
+          "tank_production_order_count": 17,
+          "tank_order_seconds": [
+            192.2,
+            252.2,
+            312.2,
+            372.2,
+            432.2,
+            492.2,
+            552.2,
+            612.2,
+            672.2,
+            732.2,
+            792.2,
+            852.2,
+            912.2,
+            972.2,
+            1060.2,
+            1120.2,
+            1180.2
+          ],
+          "first_placements": [
+            {
+              "seconds": 0.2,
+              "type": "Iron Mine",
+              "location": "57:60"
+            },
+            {
+              "seconds": 4.2,
+              "type": "Oil Refinery",
+              "location": "57:63"
+            },
+            {
+              "seconds": 64.2,
+              "type": "Power Plant",
+              "location": "55:55"
+            },
+            {
+              "seconds": 68.2,
+              "type": "Factory",
+              "location": "55:67"
+            },
+            {
+              "seconds": 72.2,
+              "type": "Factory",
+              "location": "55:67"
+            }
+          ],
+          "attack_only_full_queue_decisions": 10,
+          "maximum_targets_per_unit_per_decision": 16,
+          "attack_then_move_overwrites": 34,
+          "longest_full_attack_queue_streak": {
+            "decisions": 7,
+            "start_seconds": 1032.2,
+            "end_seconds": 1056.2
+          }
+        },
+        {
+          "seat": 1,
+          "name": "Andrew Brower (Andrew B)",
+          "commands": {
+            "cmkPlaceBuilding": 6,
+            "cmkSetEngagement": 2,
+            "cmkAttackUnits": 166,
+            "cmkBuildUnit": 30,
+            "cmkRefuel": 28
+          },
+          "tank_production_order_count": 30,
+          "tank_order_seconds": [
+            222.2,
+            284.2,
+            316.2,
+            348.2,
+            380.2,
+            412.2,
+            444.2,
+            476.2,
+            508.2,
+            540.2,
+            572.2,
+            604.2,
+            636.2,
+            668.2,
+            700.2,
+            732.2,
+            764.2,
+            796.2,
+            828.2,
+            860.2,
+            892.2,
+            924.2,
+            956.2,
+            988.2,
+            1020.2,
+            1052.2,
+            1084.2,
+            1116.2,
+            1148.2,
+            1180.2
+          ],
+          "first_placements": [
+            {
+              "seconds": 0.2,
+              "type": "Iron Mine",
+              "location": "186:60"
+            },
+            {
+              "seconds": 2.2,
+              "type": "Oil Refinery",
+              "location": "200:63"
+            },
+            {
+              "seconds": 62.2,
+              "type": "Power Plant",
+              "location": "192:57"
+            },
+            {
+              "seconds": 100.2,
+              "type": "Factory",
+              "location": "196:57"
+            },
+            {
+              "seconds": 220.2,
+              "type": "Factory",
+              "location": "200:57"
+            }
+          ],
+          "attack_only_full_queue_decisions": 0,
+          "maximum_targets_per_unit_per_decision": 1,
+          "attack_then_move_overwrites": 0,
+          "longest_full_attack_queue_streak": {
+            "decisions": 0,
+            "start_seconds": null,
+            "end_seconds": null
+          }
+        },
+        {
+          "seat": 2,
+          "name": "Andre von Houck (Andre H) (2)",
+          "commands": {
+            "cmkPlaceBuilding": 19,
+            "cmkMoveUnits": 80,
+            "cmkBuildUnit": 12,
+            "cmkAttackUnits": 3823
+          },
+          "tank_production_order_count": 12,
+          "tank_order_seconds": [
+            532.2,
+            592.2,
+            652.2,
+            712.2,
+            772.2,
+            832.2,
+            892.2,
+            952.2,
+            1012.2,
+            1072.2,
+            1132.2,
+            1192.2
+          ],
+          "first_placements": [
+            {
+              "seconds": 0.2,
+              "type": "Iron Mine",
+              "location": "57:60"
+            },
+            {
+              "seconds": 4.2,
+              "type": "Oil Refinery",
+              "location": "57:63"
+            },
+            {
+              "seconds": 136.2,
+              "type": "Iron Mine",
+              "location": "187:70"
+            },
+            {
+              "seconds": 140.2,
+              "type": "Oil Refinery",
+              "location": "60:189"
+            },
+            {
+              "seconds": 288.2,
+              "type": "Iron Mine",
+              "location": "187:70"
+            }
+          ],
+          "attack_only_full_queue_decisions": 0,
+          "maximum_targets_per_unit_per_decision": 16,
+          "attack_then_move_overwrites": 36,
+          "longest_full_attack_queue_streak": {
+            "decisions": 0,
+            "start_seconds": null,
+            "end_seconds": null
+          }
+        },
+        {
+          "seat": 3,
+          "name": "Andrew Brower B (Andrew B)",
+          "commands": {
+            "cmkPlaceBuilding": 5,
+            "cmkSetEngagement": 2,
+            "cmkMoveUnits": 67,
+            "cmkAttackUnits": 146,
+            "cmkBuildUnit": 30,
+            "cmkRefuel": 28
+          },
+          "tank_production_order_count": 30,
+          "tank_order_seconds": [
+            252.2,
+            286.2,
+            316.2,
+            348.2,
+            380.2,
+            412.2,
+            444.2,
+            476.2,
+            508.2,
+            540.2,
+            572.2,
+            604.2,
+            636.2,
+            668.2,
+            700.2,
+            732.2,
+            764.2,
+            796.2,
+            828.2,
+            860.2,
+            892.2,
+            924.2,
+            956.2,
+            988.2,
+            1020.2,
+            1052.2,
+            1084.2,
+            1116.2,
+            1148.2,
+            1180.2
+          ],
+          "first_placements": [
+            {
+              "seconds": 0.2,
+              "type": "Iron Mine",
+              "location": "186:185"
+            },
+            {
+              "seconds": 62.2,
+              "type": "Oil Refinery",
+              "location": "186:188"
+            },
+            {
+              "seconds": 64.2,
+              "type": "Power Plant",
+              "location": "190:183"
+            },
+            {
+              "seconds": 124.2,
+              "type": "Factory",
+              "location": "196:183"
+            },
+            {
+              "seconds": 220.2,
+              "type": "Factory",
+              "location": "198:189"
+            }
+          ],
+          "attack_only_full_queue_decisions": 0,
+          "maximum_targets_per_unit_per_decision": 1,
+          "attack_then_move_overwrites": 0,
+          "longest_full_attack_queue_streak": {
+            "decisions": 0,
+            "start_seconds": null,
+            "end_seconds": null
+          }
+        }
+      ]
+    }
+  ],
+  "recommended_order": [
+    {
+      "change": "Choose nearby buildable deposits using wrapped distance from the builder or own command center; avoid allied planned/occupied sites.",
+      "evidence": "Both own seats chose identical initial mine and refinery locations in both recorded games, despite separate bases.",
+      "measure": "First completed local mine/refinery time, first factory time, tank production order count."
+    },
+    {
+      "change": "Choose one combat intent per unit and preserve command capacity for construction/production.",
+      "evidence": "Attack commands saturate the 64-command limit; repeated target changes and subsequent move commands overwrite attack intent.",
+      "measure": "Full attack-only decisions, targets per unit per decision, production cadence."
+    },
+    {
+      "change": "After opening and queue fixes, add measured refueling and control-point objectives.",
+      "evidence": "No refueling or command-center construction commands from the base bot in either replay.",
+      "measure": "Refueling actions and completed control-center occupancy in regenerated or hosted state."
+    }
+  ],
+  "limitations": [
+    "Replay tapes contain accepted commands and state hashes, not full entity state.",
+    "Production order counts are not completed tank counts.",
+    "Two matches are diagnostic evidence, not a strength or win-rate estimate.",
+    "No changes were made to the submitted base bot during this analysis."
+  ]
+}

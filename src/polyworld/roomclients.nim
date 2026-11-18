@@ -99,6 +99,12 @@ proc flushCommands*(client: RoomClient) =
       client.send(pending.message)
       pending.sent = true
 
+proc hasPendingCommand*(client: RoomClient, seat: uint32): bool =
+  ## Reports a seat's submissions still awaiting the authoritative tick.
+  for pending in client.pending:
+    if pending.message.seat == seat:
+      return true
+
 proc submit*(client: RoomClient, seat: uint32, payload: string): bool =
   ## Reports queue acceptance only, never gameplay success.
   if not client.began or payload.len > MaxCommandBytes or
@@ -227,7 +233,12 @@ proc accept*(client: RoomClient, bytes: string) =
             reject("Rejected submission queue exhausted")
           inc client.rejectedCommands
           client.rejected.add client.pending[i].message
-        client.pending.delete(i)
+        if message.flag or message.tick <= client.applied:
+          client.pending.delete(i)
+        else:
+          # A reconnect receipt can arrive before the reserved tick is sealed.
+          # Leave the submission sent until the authoritative echo arrives.
+          client.pending[i].sent = true
         break
   of CaughtUp:
     if message.match != client.match:

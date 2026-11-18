@@ -120,16 +120,18 @@ proc lobbyButton*(
     inset = if icon.len > 0: 42.0'f else: 10.0'f
   sk.draw9Patch(patch, sk.theme.buttonPatch, at, size, tint)
   if icon.len > 0:
-    sk.lobbyIcon(icon, at + vec2(10, (height - 26) / 2), 26,
+    let iconLeft = if text.len == 0: (width - 26) / 2 else: 10.0'f
+    sk.lobbyIcon(icon, at + vec2(iconLeft, (height - 26) / 2), 26,
       if enabled and iconTint.a > 0: iconTint else: ink)
-  sk.drawLabel(
-    text,
-    at + vec2(inset, 0),
-    vec2(width - inset - 10, height),
-    ink,
-    "LobbyBody",
-    CenterAlign
-  )
+  if text.len > 0:
+    sk.drawLabel(
+      text,
+      at + vec2(inset, 0),
+      vec2(width - inset - 10, height),
+      ink,
+      "LobbyBody",
+      CenterAlign
+    )
   result = interaction == Released
   if result:
     playSound(ClickSound)

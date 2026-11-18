@@ -234,8 +234,16 @@ proc applyPacket*(session: NetworkMatch, packet: RoomMessage) =
           game.world.buildingOwner(action.entityId) != action.playerId):
             reject("LvD entity belongs to another player")
     actions.add action
+  var recordedChats = game.recorder.data.chats.len
   for chat in chats:
-    discard game.deliverChat(int(chat.player), int(chat.target), chat.text)
+    if chat.text.len > 0:
+      inc recordedChats
+  if recordedChats > MaxReplayChats:
+    reject("LvD replay chat limit exceeded")
+  for chat in chats:
+    discard game.deliverChat(
+      int(chat.player), int(chat.target), chat.text, int32(packet.tick)
+    )
   game.networkActions.add actions
   proc apply(w: World) =
     for pending in game.networkActions:

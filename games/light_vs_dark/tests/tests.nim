@@ -17,6 +17,7 @@ import
   test_maps,
   test_players,
   test_replays,
+  test_replay_chat,
   test_research,
   test_research_network,
   test_healing,

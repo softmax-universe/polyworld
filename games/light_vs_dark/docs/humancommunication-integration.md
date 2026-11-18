@@ -35,8 +35,8 @@ server deployment or commit was performed for this integration.
   successful `network.applyPacket`, including every catch-up packet. It never
   observes optimistic submissions or merely received future packets.
 - Chat uses `game.sendChat(sender, -2, text)`. Broadcast mailbox IDs are **-2**,
-  not sender IDs; attribution uses the validated applied TickPacket seat and
-  recorded config name. The observer deduplicates ticks, retains at most 100
+  not sender IDs; attribution uses the recorded player ID and config name.
+  The observer follows the authoritative transcript, retains at most 100
   lines, and never drains bot or human mailboxes. Display continues even when
   unread bot mailboxes reach their independent cap.
 - Local successful chat appears immediately; network chat appears only after
@@ -48,8 +48,13 @@ server deployment or commit was performed for this integration.
   FFA starts AtWar. Peace and alliance require recipient acceptance; the
   sender's resend cooldown remains after peace. Ending an alliance retains
   vision through its warning interval. The panel pages through all opponents.
-- No new chat wire format, sender-in-text convention, mailbox drain, speculative
-  world mutation, simulation change or replay-chat support was introduced.
+- Replay tapes store chat text, sender, recipient and authoritative delivery
+  tick, including script messages and direct messages. Public broadcasts appear
+  in playback; direct messages stay out of the public HUD. Rewinding rebuilds
+  the feed at the displayed tick without consuming bot mailboxes.
+- Playback applies recorded commands without rerunning bots. Chat-triggered
+  bot actions therefore retain the same simulation hashes. The transcript is
+  separate from gameplay commands and supports messages sent at tick zero.
 
 ## Native verification
 
@@ -92,5 +97,5 @@ of OS text event generation, browser input, final glyph coverage, network HUD
 rendering across two browser clients, or return-to-menu/second-match lifecycle.
 The parent owns full-suite/build/browser verification after this handoff. Unicode
 is transported exactly; the raster font may not cover every entered glyph.
-Chat is not exported in replay tapes. No WASM build, server change or commit was
-requested for this subtask.
+Old replay files cannot recover chat that was never recorded. The updated
+transcript uses replay format 8 and game version 49.

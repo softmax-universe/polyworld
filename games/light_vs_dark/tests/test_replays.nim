@@ -1,9 +1,9 @@
 ## Light vs Dark replay codec, playback cursor, validation, and the promise
-## that a replay carries commands rather than bot implementations.
+## that a replay carries commands and chat rather than bot implementations.
 
 import
   std/[os, strutils],
-  polyworld/tapes,
+  polyworld/[tapes, mailboxes],
   ../content,
   ../replays
 
@@ -80,6 +80,17 @@ recorder.recordAction(
   60
 )
 recorder.recordAction(MatchTicks, DarkPlayer, ActionCancel, FirstUnitId + 5)
+for chat in [
+  ReplayChat(tick: 0, playerId: 0, target: -2, text: "Ready 雪🙂"),
+  ReplayChat(tick: 1, playerId: 1, target: 0, text: "Private reply"),
+  ReplayChat(tick: FirstDecision, playerId: 0, target: 1,
+    text: "\x00\xFFscript bytes"),
+  ReplayChat(tick: FirstDecision, playerId: 1, target: -2,
+    text: "Same tick, later message"),
+  ReplayChat(tick: MatchTicks, playerId: 0, target: -2,
+    text: repeat("x", MaxChatBytes))
+]:
+  recorder.recordChat(chat)
 recorder.filled()
 
 let
@@ -100,6 +111,22 @@ doAssert decoded.actions[1].kind == ActionBuild
 doAssert decoded.actions[1].third == 24
 doAssert decoded.hashes == recorder.data.hashes
 doAssert decoded.hashes.len == int(decoded.header.setup.maximumTicks)
+doAssert decoded.chats == recorder.data.chats
+doAssert decoded.chats.len == 5
+doAssert decoded.chats[0].tick == 0
+doAssert decoded.chats[1].tick == 1
+doAssert decoded.chats[1].target == 0
+doAssert decoded.chats[2].text == "\x00\xFFscript bytes"
+doAssert decoded.chats[3].text == "Same tick, later message"
+
+echo "Testing chat before the first simulation tick"
+let opening = initReplayRecorder(setup)
+opening.recordChat(ReplayChat(
+  tick: 0, playerId: 0, target: -2, text: "Before startup"
+))
+let openingDecoded = decodeReplay(opening.data.encodeReplay())
+doAssert openingDecoded.hashes.len == 0
+doAssert openingDecoded.chats == opening.data.chats
 
 echo "Testing allocation-free exact-tick playback"
 let player = initReplayPlayer(decoded)
@@ -119,6 +146,12 @@ doAssert player.takeActionAt(FourthDecision, action)
 doAssert not player.finished
 doAssert player.takeActionAt(MatchTicks, action)
 doAssert player.finished
+player.syncCursor(FirstDecision)
+doAssert player.actionIndex == 3
+doAssert player.actionsAt(SecondDecision).len == 1
+player.syncCursor(0)
+doAssert player.actionIndex == 0
+doAssert player.takeActionAt(FirstDecision, action)
 
 echo "Testing that skipping a recorded tick is loud"
 let strict = initReplayPlayer(decoded)
@@ -144,6 +177,7 @@ saveReplay(path, recorder.data)
 let loaded = loadReplay(path)
 doAssert loaded.actions == decoded.actions
 doAssert loaded.hashes == decoded.hashes
+doAssert loaded.chats == decoded.chats
 let replayBytes = readFile(path)
 for marker in [
   "Light vs Dark", "overlord", "nearestEnemy", "wend", "dim ", "harvest("
@@ -258,6 +292,55 @@ invalid = decoded
 invalid.actions[6].entityId = 10
 invalid.rejects("cancelling a neutral gold mine")
 
+echo "Testing chat codec validation"
+
+proc rejectsChat(data: ReplayData, why: string) =
+  ## Checks encoder and decoder validation independently.
+  data.rejects(why)
+  let bytes = encodeReplayFile(
+    ReplayGame, ReplayGameVersion, data, MaxReplayBytes
+  )
+  try:
+    discard decodeReplay(bytes)
+    doAssert false, why & " should fail decoding"
+  except ReplayError:
+    discard
+
+for chat in [
+  ReplayChat(tick: 0, playerId: -1, target: -2, text: "Bad sender"),
+  ReplayChat(tick: 0, playerId: 2, target: -2, text: "Bad sender"),
+  ReplayChat(tick: 0, playerId: 0, target: -3, text: "Bad target"),
+  ReplayChat(tick: 0, playerId: 0, target: -1, text: "Bad target"),
+  ReplayChat(tick: 0, playerId: 0, target: 2, text: "Bad target"),
+  ReplayChat(tick: 0, playerId: 0, target: -2, text: ""),
+  ReplayChat(tick: 0, playerId: 0, target: -2,
+    text: repeat("x", MaxChatBytes + 1)),
+  ReplayChat(tick: MatchTicks + 1, playerId: 0, target: -2,
+    text: "After the match")
+]:
+  invalid = decoded
+  invalid.chats = @[chat]
+  invalid.rejectsChat("invalid chat routing, length, or timestamp")
+
+invalid = decoded
+invalid.chats = @[
+  ReplayChat(tick: 2, playerId: 0, target: -2, text: "Later"),
+  ReplayChat(tick: 1, playerId: 1, target: -2, text: "Earlier")
+]
+invalid.rejectsChat("chat timestamps moving backward")
+
+invalid = decoded
+invalid.actions = @[]
+invalid.hashes.setLen(1)
+invalid.chats = @[
+  ReplayChat(tick: 2, playerId: 0, target: -2, text: "Unrecorded tick")
+]
+invalid.rejectsChat("chat after the last recorded tick")
+
+invalid = decoded
+invalid.chats = newSeq[ReplayChat](MaxReplayChats + 1)
+invalid.rejectsChat("too many recorded messages")
+
 echo "Testing recorder ordering and limits"
 let ordered = initReplayRecorder(setup)
 ordered.recordAction(24, LightPlayer, ActionMove, FirstUnitId, 1, 1)
@@ -266,6 +349,39 @@ try:
   doAssert false, "recording backward in time should fail"
 except ReplayError:
   discard
+
+let orderedChat = initReplayRecorder(setup)
+orderedChat.recordChat(ReplayChat(
+  tick: 2, playerId: 0, target: -2, text: "Later"
+))
+try:
+  orderedChat.recordChat(ReplayChat(
+    tick: 1, playerId: 0, target: -2, text: "Earlier"
+  ))
+  doAssert false, "recording chat backward in time should fail"
+except ReplayError:
+  discard
+doAssert orderedChat.data.chats.len == 1
+
+try:
+  orderedChat.recordChat(ReplayChat(
+    tick: 2, playerId: 0, target: -2, text: ""
+  ))
+  doAssert false, "recording empty chat should fail"
+except ReplayError:
+  discard
+doAssert orderedChat.data.chats.len == 1
+
+let fullChat = initReplayRecorder(setup)
+fullChat.data.chats = newSeq[ReplayChat](MaxReplayChats)
+try:
+  fullChat.recordChat(ReplayChat(
+    tick: 0, playerId: 0, target: -2, text: "Over the limit"
+  ))
+  doAssert false, "recording too many messages should fail"
+except ReplayError:
+  discard
+doAssert fullChat.data.chats.len == MaxReplayChats
 
 let overfilled = initReplayRecorder(setup)
 overfilled.filled()

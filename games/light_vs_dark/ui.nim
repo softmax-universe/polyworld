@@ -184,7 +184,7 @@ proc humanCommunicationKey*(button: Button): bool =
       commState.cancelCommunication():
     result = true
   elif button == KeyEnter and run != nil and options.playerSlot > 0 and
-      not run.replayMode:
+      not run.replayMode and not run.historyPlayback:
     result = commState.chatEnter(run, options.playerSlot - 1)
   elif commState.typing:
     if button == KeyBackspace: commState.chatBackspace()
@@ -331,10 +331,20 @@ proc communicationButtonPanel(window: Window): GameUiPanel =
   currentLayout(window).diplomacyButtonPanel()
 
 proc drawHumanCommunication(sk: Silky, window: Window) =
-  if run == nil or run.replayMode or matchResultsVisible(): return
+  if run == nil:
+    return
+  commState.syncChatFeed(run)
+  if matchResultsVisible():
+    return
+  if run.replayMode or run.historyPlayback:
+    discard commState.cancelCommunication()
   let
     layout = currentLayout(window)
-    player = options.playerSlot - 1
+    player =
+      if run.replayMode or run.historyPlayback:
+        -1'i32
+      else:
+        options.playerSlot - 1
     ink = rgbx(235, 231, 214, 255)
     muted = rgbx(175, 187, 201, 255)
   proc button(label: string, panel: GameUiPanel, enabled = true): bool =
@@ -404,6 +414,8 @@ proc drawHumanCommunication(sk: Silky, window: Window) =
       feedOrigin + vec2(6, float32(row * 23)), vec2(feedWidth - 12, 23),
       (if line.serverNotice: rgbx(235,196,95,255) else: ink), "Small")
   let prompt = if commState.typing: "> " & commState.draft & "|"
+    elif run.replayMode: "Replay"
+    elif run.historyPlayback: "History"
     elif player >= 0: "Enter: chat to all players"
     else: "Spectating"
   sk.drawLabel(sk.fittedLabel(prompt, feedWidth - 12, "Small"),

@@ -1,6 +1,6 @@
 import std/unittest
 import jsony, polyworld/[rooms, roomclients, tapes, mailboxes]
-import ../[multiplayer, presets, sim, replays, content, controls]
+import ../[multiplayer, presets, sim, replays, content, controls, humancommunication]
 
 proc sparseClient(id: uint32): RoomClient =
   var config = defaultConfig(4)
@@ -54,6 +54,14 @@ suite "LvD sparse preparation":
     check a.game.networkHash() == b.game.networkHash()
     check a.game.recorder.data.actions.len == 1
     check a.game.recorder.data.actions[0].playerId == 1
+    check a.game.recorder.data.chats == b.game.recorder.data.chats
+    check a.game.recorder.data.chats[0].playerId == 1
+    var feed: HumanCommunication
+    feed.observeHumanPacket(b, packet)
+    check feed.feed.len == 1
+    check feed.feed[0].player == 1
+    check feed.feed[0].name == "Private bot"
+    check feed.feed[0].text == "hello"
 
   test "a stable-seat payload cannot impersonate another packed player":
     let session = prepareNetworkMatch(sparseClient(2), [])

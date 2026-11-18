@@ -16,6 +16,28 @@ editor or click Moss's minimap portrait to resume following him. Left-clicking
 the world selects a creature, villager, house, hall, or resource stash for
 inspection. It never gives an order.
 
+Voice connects automatically when the game starts. Click `Talk`, speak to Moss,
+then click `Finish` to send. The first recording asks macOS for Monster's
+microphone permission. Recording stops when the window loses focus and ends
+after 30 seconds at most. The microphone stays off until you click Talk.
+
+Spoken commands use the same conversation, lessons, and validated actions as
+typed commands. Moss speaks new replies with the Voice Lab realtime model and
+a low, warm, gravelly `cedar` voice. Saved conversations are not read aloud on
+startup. The voice model performs Moss's approved dialogue; the existing
+creature model still makes plans and learns lessons. `Voice off` mutes replies
+while leaving text and microphone commands available. `Retry` reconnects if
+the voice connection fails. Text chat continues to work without voice.
+
+Use `--mute` to start with spoken replies muted, or `--no-voice` to skip the
+voice connection. `OPENAI_REALTIME_MODEL` and `OPENAI_REALTIME_VOICE` override
+the Voice Lab model and creature voice. Voice uses `OPENAI_API_KEY`, falling
+back to `MONSTER_KEY_FILE` or `~/secrets/openai.key`, including one retry for
+a rejected environment key. Offline mode, hidden screenshots, and headless
+simulation do not open voice connections or microphones. On macOS the normal
+Nim command launches a local Monster app so its microphone permission belongs
+to the game.
+
 Try this sequence:
 
 1. `Walk to the village.`
@@ -155,7 +177,14 @@ nim check games/monster/monster.nim
 nim r games/monster/tests/tests.nim
 nim r -d:silkyTesting games/monster/tests/test_ui.nim
 nim r games/monster/tests/test_selection_render.nim
+nim r games/monster/tests/test_voices.nim
+nim r games/monster/tests/test_voice_launch.nim
 ```
+
+The opt-in `nim r games/monster/tests/manual_voice.nim --live` check sends
+synthetic speech through the real voice connection and game planner without
+opening a microphone or speaker. It uses a temporary save. The offline
+`nim r games/monster/tests/manual_voice_ui.nim` preview captures the voice HUD.
 
 Run one real model instruction and its resulting actions without a window:
 

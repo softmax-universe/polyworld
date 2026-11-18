@@ -1,5 +1,5 @@
 ## Native regression: execute production graphics handlers, not copied input logic.
-import std/[unittest, macros, importutils]
+import std/[unittest, macros, importutils, strutils]
 import windy/internal
 include ../graphics
 privateAccess(Window)
@@ -68,6 +68,7 @@ proc main() =
   productionRoutine("selectedRadius")
   productionRoutine("screenPosition")
   productionRoutine("pickEntity")
+  productionRoutine("pickSelectionEntity")
   productionRoutine("structureAtTile")
   productionRoutine("insideBox")
   productionRoutine("boxedUnits")
@@ -227,16 +228,129 @@ proc main() =
         check pendingBuild == FarmBuilding.ord.int32
         check selectedIds == @[worker]
 
-    test "right release still places and Escape still cancels blueprint":
+    test "right click cancels blueprint and moves with normal Shift queuing":
+      for append in [false, true]:
+        fixture()
+        let before = run.stateHash()
+        let size = BuildingTable[FarmBuilding].footprint
+        attackMoveArmed = true
+        if append: window.state.buttonDown.incl KeyLeftShift
+        inputFrame({MouseRight})
+        check pendingBuild == -1
+        check not attackMoveArmed
+        run.flushPlayerCommands()
+        check run.submissions.len == 0
+        inputFrame(released = {MouseRight})
+        run.flushPlayerCommands()
+        require run.submissions.len == 1
+        let action = run.submissions[0]
+        check action.kind == ActionMove
+        check action.entityId == worker
+        check action.first == origin[0] + size.width div 2
+        check action.second == origin[1] + size.depth div 2
+        check action.append == append
+        check selectedIds == @[worker]
+        check not selectionStarted
+        check run.stateHash() == before
+
+    test "right click on an invalid blueprint moves instead of attacking":
       fixture()
+      let size = BuildingTable[FarmBuilding].footprint
+      let destination = tile2(origin[0] + size.width div 2,
+        origin[1] + size.depth div 2)
+      discard run.world.spawnUnit(1, SoldierUnit, destination)
+      require not run.world.canPlace(FarmBuilding, origin[0], origin[1])
       inputFrame({MouseRight})
-      run.flushPlayerCommands()
-      check run.submissions.len == 0
       inputFrame(released = {MouseRight})
       run.flushPlayerCommands()
       require run.submissions.len == 1
-      check run.submissions[0].kind == ActionBuild
+      check run.submissions[0].kind == ActionMove
       check pendingBuild == -1
+
+    test "right drag cancels blueprint and retains formation orders":
+      fixture()
+      inputFrame({MouseRight})
+      check pendingBuild == -1
+      pointAt(targetMouse + vec2(100, 0))
+      inputFrame()
+      require lineGesture.dragging
+      inputFrame(released = {MouseRight})
+      run.flushPlayerCommands()
+      require run.submissions.len == 1
+      check run.submissions[0].kind == ActionMove
+
+    test "cancellation over an existing site moves instead of resuming building":
+      fixture()
+      run.world.players[0].gold = 5000
+      run.world.players[0].wood = 5000
+      let unit = run.world.units[run.world.unitIndex(worker)]
+      run.world.place(unit, tile2(origin[0], origin[1]))
+      require run.world.applyBuild(0, worker, FarmBuilding.ord.int32,
+        origin[0], origin[1])
+      require unit.state == UnitBuilding
+      inputFrame({MouseRight})
+      inputFrame(released = {MouseRight})
+      run.flushPlayerCommands()
+      require run.submissions.len == 1
+      check run.submissions[0].kind == ActionMove
+      check pendingBuild == -1
+
+    test "simultaneous buttons cancel instead of placing":
+      fixture()
+      inputFrame({MouseLeft, MouseRight})
+      inputFrame(released = {MouseLeft, MouseRight})
+      run.flushPlayerCommands()
+      require run.submissions.len == 1
+      check run.submissions[0].kind == ActionMove
+      check selectedIds == @[worker]
+
+    test "right release outside the window cannot place or order":
+      fixture()
+      inputFrame({MouseRight})
+      pointAt(vec2(-2, 400))
+      inputFrame(released = {MouseRight})
+      run.flushPlayerCommands()
+      check pendingBuild == -1
+      check run.submissions.len == 0
+
+    test "right minimap click cancels blueprint and moves without placing":
+      fixture()
+      let area = attackMinimapArea(currentLayout(window))
+      pointAt((area.origin + area.size * 0.5'f32) * sk.uiScale)
+      let tile = attackMinimapTile(currentLayout(window), sk.mousePos,
+        run.world.map.side)
+      require tile != NoTile
+      require run.world.terrainOpen(tile.x.int32, tile.y.int32)
+      inputFrame({MouseRight})
+      check pendingBuild == -1
+      inputFrame(released = {MouseRight})
+      run.flushPlayerCommands()
+      require run.submissions.len == 1
+      check run.submissions[0].kind == ActionMove
+      check run.submissions[0].first == tile.x.int32
+      check run.submissions[0].second == tile.y.int32
+
+    test "HUD right click cancels without issuing a world order":
+      fixture()
+      let area = currentLayout(window).panel(GameUiRegion.BottomRight, PanelBuild)
+      pointAt((area.origin + vec2(20)) * sk.uiScale)
+      inputFrame({MouseRight})
+      inputFrame(released = {MouseRight})
+      run.flushPlayerCommands()
+      check pendingBuild == -1
+      check run.submissions.len == 0
+
+    test "blueprint chosen during a held right button cannot place on release":
+      fixture()
+      pendingBuild = -1
+      inputFrame({MouseRight})
+      pendingBuild = FarmBuilding.ord.int32
+      inputFrame(released = {MouseRight})
+      run.flushPlayerCommands()
+      check pendingBuild == FarmBuilding.ord.int32
+      check run.submissions.len == 0
+
+    test "Escape cancels blueprint without an order":
       fixture()
       window.onButtonPress(KeyEscape)
       check pendingBuild == -1
@@ -343,13 +457,13 @@ proc main() =
       fixture()
       shortcutState.resetShortcut()
       currentShortcuts = DefaultShortcuts
-      window.onButtonPress(KeyB)
+      window.onButtonPress(KeyE)
       check pendingBuild == BarracksBuilding.ord.int32
-      shortcutState.releaseShortcut('B')
+      shortcutState.releaseShortcut('E')
       window.onButtonPress(KeyEscape)
       check pendingBuild == -1
       window.onButtonPress(KeyEnter)
-      window.onButtonPress(KeyF)
+      window.onButtonPress(KeyW)
       check pendingBuild == -1
       resetHumanCommunication()
 

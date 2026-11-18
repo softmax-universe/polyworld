@@ -16,7 +16,7 @@ const
   ReplayFormatVersion* = 7'u16
   ## This client supports only this gameplay version. Bump it when rules change.
   ## Older replays use their archived client; never add compatibility branches.
-  ReplayGameVersion* = 39'u16
+  ReplayGameVersion* = 43'u16
 
   ActionMove* = 1'u8
   ActionAttack* = 2'u8
@@ -28,7 +28,8 @@ const
   ActionAttackMove* = 8'u8
   ActionDiplomacy* = 9'u8
   ActionResearch* = 10'u8
-  ActionKindHigh* = ActionResearch
+  ActionDeposit* = 11'u8
+  ActionKindHigh* = ActionDeposit
 
   MaxReplayBytes* = 64 * 1024 * 1024
   MaxReplayActions* = 4_000_000
@@ -63,7 +64,7 @@ type
     playerId*: int32
     kind*: uint8
     append*: bool
-      ## Append to a unit FIFO; only move, attack-move, attack and harvest.
+      ## Append move, attack-move, attack, harvest, or deposit to a unit FIFO.
     offset*: FixedVec2
       ## Movement and ground aim offsets from the named tile center.
     entityId*: int32
@@ -73,6 +74,7 @@ type
       ##   Move      x, y, unused
       ##   Attack    target id, unused, unused
       ##   Harvest   mine id or tile index, tree flag, unused
+      ##   Deposit   depot id, zero, zero
       ##   Build     building kind, x, y
       ##   Train     unit kind, unused, unused
       ##   Research  research category, zero, zero (next sequential tier)
@@ -111,7 +113,7 @@ proc record*(recorder: ReplayRecorder, action: ReplayAction) =
   if recorder == nil:
     return
   if action.append and action.kind notin
-      {ActionMove, ActionAttackMove, ActionAttack, ActionHarvest}:
+      {ActionMove, ActionAttackMove, ActionAttack, ActionHarvest, ActionDeposit}:
     fail("replay action kind cannot append unit orders")
   if not action.offset.validTileOffset:
     fail("replay point offset is outside its tile")
@@ -189,7 +191,7 @@ proc validateSetup(setup: Setup) =
 proc validateAction*(action: ReplayAction, setup: Setup) =
   ## Validates one command's kind, ownership range, and payload bounds.
   if action.append and action.kind notin
-      {ActionMove, ActionAttackMove, ActionAttack, ActionHarvest}:
+      {ActionMove, ActionAttackMove, ActionAttack, ActionHarvest, ActionDeposit}:
     fail("replay action kind cannot append unit orders")
   if not action.offset.validTileOffset:
     fail("replay point offset is outside its tile")
@@ -209,6 +211,11 @@ proc validateAction*(action: ReplayAction, setup: Setup) =
         fail("replay action names a tile outside the map")
 
   case action.kind
+  of ActionDeposit:
+    if not action.entityId.isUnitId or not action.first.isPlayerBuildingId or
+        action.second != 0 or action.third != 0 or
+        action.offset != FixedVec2Zero:
+      fail("replay deposit command is invalid")
   of ActionResearch:
     if not action.entityId.isPlayerBuildingId or
         action.first notin 0'i32 .. ResearchKind.high.ord.int32 or

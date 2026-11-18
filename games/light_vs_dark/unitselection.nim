@@ -1,5 +1,18 @@
-## Read-only type selection, independent of camera position and simulation writes.
-import sim
+## Read-only unit selection, independent of camera position and simulation writes.
+import content, sim
+
+proc nextIdlePeon*(world: World, owner, after: int32): int32 =
+  ## Cycles owned idle workers by identifier without changing their orders.
+  if world == nil or owner < 0 or owner >= world.players.len: return NoEntity
+  var first = NoEntity
+  for unit in world.units:
+    if unit.owner != owner or unit.kind != PeonUnit or unit.hp <= 0 or
+        unit.state != UnitIdle or unit.hasGoal or unit.orderQueue.len > 0:
+      continue
+    if first == NoEntity or unit.id < first: first = unit.id
+    if unit.id > after and (result == NoEntity or unit.id < result):
+      result = unit.id
+  if result == NoEntity: result = first
 
 proc matchingUnitIds*(world: World, clicked, owner: int32): seq[int32] =
   ## A negative owner is the existing omniscient spectator selection scope.

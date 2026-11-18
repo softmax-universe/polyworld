@@ -72,6 +72,8 @@ type
     targetTile*: Tile2
       ## Tree being chopped, when the resource is terrain rather than an
       ## entity. Also survives the round trip.
+    harvestCenter*: Tile2
+      ## Original woodcutting assignment, retained after its tree is gone.
     goal*: Tile2
     goalOffset*: FixedVec2
     hasGoal*: bool
@@ -83,6 +85,10 @@ type
     attackMoveGoal*: Tile2
     attackMoveOffset*: FixedVec2
       ## The destination to resume after a fight, or off-map when unset.
+    autoAttacking*: bool
+      ## Automatic engagement remains active until the return trip finishes.
+    autoAttackOrigin*: FixedVec2
+      ## Exact idle position to return to after an automatic engagement.
     path*: seq[Tile2]
       ## String-pulled waypoints in walk order.
     pathIndex*: int32
@@ -757,9 +763,12 @@ proc clearOrder(unit: Unit, failed: bool) =
   unit.attackMove = false
   unit.attackMoveGoal = NoTile
   unit.attackMoveOffset = FixedVec2Zero
+  unit.autoAttacking = false
+  unit.autoAttackOrigin = FixedVec2Zero
   unit.targetId = NoEntity
   unit.sourceId = NoEntity
   unit.targetTile = NoTile
+  unit.harvestCenter = NoTile
   unit.blockedTicks = 0
   unit.animation = IdleAnimation
   unit.clearPath()
@@ -829,6 +838,13 @@ proc setGoal(w: World, index: int32, goal: Tile2,
   w.units[index].clearPath()
   w.requestPath(index)
 
+proc treeDistanceSquared(first, second: Tile2): int64 =
+  ## Ranks tree locations by physical distance without floating point.
+  let
+    dx = int64(first.x) - int64(second.x)
+    dy = int64(first.y) - int64(second.y)
+  dx * dx + dy * dy
+
 proc recoverTreeApproach(w: World, index: int32): bool =
   ## Flood only reachable ground, bounded like an ordinary path search. A
   ## geometric nearest ring tile can be on the wrong side of a wall/crowd.
@@ -839,6 +855,7 @@ proc recoverTreeApproach(w: World, index: int32): bool =
     seen = newSeq[bool](w.map.passable.len)
     head = 0
     fallbackTree, fallbackGoal = NoTile
+    bestDistance = int64.high
   seen[w.map.tileIndex(unit.tile)] = true
   while head < frontier.len and head < MaxPathExpansions:
     let tile = frontier[head]
@@ -848,19 +865,24 @@ proc recoverTreeApproach(w: World, index: int32): bool =
           w.treeWood[w.map.tileIndex(unit.targetTile)] > 0:
         w.setGoal(index, tile)
         return true
-      if fallbackTree == NoTile:
-        # Unlike the legacy depletion scan, congestion must not discover
-        # unseen resources. Keep the explicit assignment as first choice.
-        for dy in -1'i32 .. 1'i32:
-          for dx in -1'i32 .. 1'i32:
-            let x = int32(tile.x) + dx
-            let y = int32(tile.y) + dy
-            if w.explored(unit.owner, x, y) and
-                w.treeWood[w.map.tileIndex(x, y)] > 0:
-              fallbackTree = tile2(x, y)
-              fallbackGoal = tile
-              break
-          if fallbackTree != NoTile: break
+      # A blocked route may change the current tree, never the grove center.
+      # Only known reachable trees qualify as congestion fallbacks.
+      for dy in -1'i32 .. 1'i32:
+        for dx in -1'i32 .. 1'i32:
+          let
+            x = int32(tile.x) + dx
+            y = int32(tile.y) + dy
+          if not w.explored(unit.owner, x, y) or
+              w.treeWood[w.map.tileIndex(x, y)] <= 0:
+            continue
+          let
+            candidate = tile2(x, y)
+            distance = treeDistanceSquared(unit.harvestCenter, candidate)
+          if distance < bestDistance or (distance == bestDistance and
+              w.map.tileIndex(candidate) < w.map.tileIndex(fallbackTree)):
+            bestDistance = distance
+            fallbackTree = candidate
+            fallbackGoal = tile
     for dy in -1'i32 .. 1'i32:
       for dx in -1'i32 .. 1'i32:
         if dx == 0 and dy == 0: continue
@@ -899,6 +921,31 @@ proc footprintGoal(w: World, index: int32, origin: Tile2,
 
 ## Resource queries
 
+proc acceptsDeposit(w: World, unit: Unit, depotId: int32,
+    wantWood: bool): bool =
+  ## Revalidates a live owned depot and the specific cargo being delivered.
+  let index = w.buildingIndex(depotId)
+  if index < 0: return false
+  let depot = w.buildings[index]
+  if depot.owner != unit.owner or depot.hp <= 0 or
+      depot.state != BuildingComplete:
+    return false
+  let stats = BuildingTable[depot.kind]
+  if wantWood: unit.carryWood > 0 and stats.dropOffWood
+  else: unit.carryGold > 0 and stats.dropOffGold
+
+proc canDeposit*(w: World, player, unitId, depotId: int32): bool =
+  ## Checks whether an owned peon can deliver any cargo to this exact depot.
+  if w == nil or player < 0 or player >= w.players.len: return false
+  let index = w.unitIndex(unitId)
+  if index < 0: return false
+  let unit = w.units[index]
+  if unit.owner != player or unit.kind != PeonUnit or unit.hp <= 0 or
+      unit.state in {UnitDying, UnitInMine}:
+    return false
+  w.acceptsDeposit(unit, depotId, true) or
+    w.acceptsDeposit(unit, depotId, false)
+
 proc nearestDropOff*(w: World, player: int32, origin: Tile2,
     wantWood: bool): int32 =
   ## Returns the closest completed structure that accepts a resource.
@@ -906,7 +953,8 @@ proc nearestDropOff*(w: World, player: int32, origin: Tile2,
   result = NoEntity
   var best = int32.high
   for structure in w.buildings:
-    if structure.owner != player or structure.state != BuildingComplete:
+    if structure.owner != player or structure.hp <= 0 or
+        structure.state != BuildingComplete:
       continue
     let stats = BuildingTable[structure.kind]
     if (wantWood and not stats.dropOffWood) or
@@ -918,24 +966,34 @@ proc nearestDropOff*(w: World, player: int32, origin: Tile2,
       result = structure.id
 
 proc nearestTree*(w: World, origin: Tile2): int32 =
-  ## Returns the flat tile index of the closest standing tree, or -1. Rings
-  ## are scanned outward and ties inside a ring go to the lowest index, so
-  ## two peons asking from the same tile always get the same answer.
+  ## Finds the closest standing tree by distance, breaking ties by tile index.
   result = -1
-  for radius in 1'i32 ..< w.map.side:
-    for dy in -radius .. radius:
-      for dx in -radius .. radius:
-        if max(abs(dx), abs(dy)) != radius:
-          continue
-        let
-          x = int32(origin.x) + dx
-          y = int32(origin.y) + dy
-        if not w.map.inGrid(x, y):
-          continue
-        let index = w.map.tileIndex(x, y)
-        if w.treeWood[index] > 0 and (result < 0 or index < result):
-          result = index
-    if result >= 0:
+  if not w.map.inGrid(origin): return
+  var bestDistance = int64.high
+  template consider(x, y: int32) =
+    ## Examines one perimeter tile without revisiting the ring interior.
+    if w.map.inGrid(x, y):
+      let candidate = w.map.tileIndex(x, y)
+      if w.treeWood[candidate] > 0:
+        let distance = treeDistanceSquared(origin, tile2(x, y))
+        if distance < bestDistance or (distance == bestDistance and
+            candidate < result):
+          bestDistance = distance
+          result = candidate
+  for radius in 0'i32 ..< w.map.side:
+    let
+      left = int32(origin.x) - radius
+      right = int32(origin.x) + radius
+      top = int32(origin.y) - radius
+      bottom = int32(origin.y) + radius
+    for y in max(0'i32, top) .. min(w.map.side - 1, bottom):
+      if y == top or y == bottom:
+        for x in max(0'i32, left) .. min(w.map.side - 1, right):
+          consider(x, y)
+      else:
+        consider(left, y)
+        consider(right, y)
+    if result >= 0 and int64(radius + 1) * int64(radius + 1) > bestDistance:
       return
 
 ## Terrain edits
@@ -972,6 +1030,22 @@ proc tileCenter(tile: Tile2): FixedVec2 =
     fixed(int32(tile.y)) + 0.5'fx
   )
 
+proc returnFromAutoAttack(w: World, index: int32): bool =
+  ## Ends automatic combat with ordinary movement back to the saved position.
+  let unit = w.units[index]
+  if not unit.autoAttacking or unit.state notin {UnitChasing, UnitAttacking}:
+    return false
+  let
+    origin = unit.autoAttackOrigin
+    destination = tile2(whole(origin.x), whole(origin.y))
+  unit.clearOrder(false)
+  if length(unit.body.pos - origin) > 0.001'fx:
+    unit.autoAttacking = true
+    unit.autoAttackOrigin = origin
+    unit.state = UnitMoving
+    w.setGoal(index, destination, origin - tileCenter(destination))
+  true
+
 proc bindBody(tile: Tile2, facingX, facingY: int8): Body =
   ## Builds a body standing on the centre of a tile.
   result.pos = tileCenter(tile)
@@ -1004,16 +1078,63 @@ proc place*(w: World, unit: Unit, at: Tile2) =
   if w.map.inGrid(at) and unit.state != UnitInMine and unit.state != UnitDying:
     w.occupancy[w.map.tileIndex(at)] = unit.id
 
-proc releaseConstructionOccupant(w: World, unit: Unit): bool =
+proc overlapsFootprint(unit: Unit, structure: Building): bool =
+  ## Includes the body radius when testing a structure's solid rectangle.
+  let
+    lowX = fixed(structure.origin.x.int32)
+    lowY = fixed(structure.origin.y.int32)
+    highX = lowX + fixed(structure.footprint.width)
+    highY = lowY + fixed(structure.footprint.depth)
+  unit.body.pos.x + unit.body.radius >= lowX and
+    unit.body.pos.x - unit.body.radius < highX and
+    unit.body.pos.y + unit.body.radius >= lowY and
+    unit.body.pos.y - unit.body.radius < highY
+
+proc bodyGroundOpen(w: World, unit: Unit, point: FixedVec2,
+    allowed: openArray[int32] = []): bool =
+  ## Allows only named initial overlaps during a corrective sweep.
+  for y in whole(point.y - unit.body.radius) .. whole(point.y + unit.body.radius):
+    for x in whole(point.x - unit.body.radius) .. whole(point.x + unit.body.radius):
+      if not w.terrainOpen(x, y): return false
+      let blocker = w.blocker[w.map.tileIndex(x, y)]
+      if blocker != 0 and blocker notin allowed: return false
+  true
+
+proc overlappingBuildings(w: World, unit: Unit): seq[int32] =
+  ## Looks up only cells touched by the body instead of scanning all buildings.
+  for y in whole(unit.body.pos.y - unit.body.radius) ..
+      whole(unit.body.pos.y + unit.body.radius):
+    for x in whole(unit.body.pos.x - unit.body.radius) ..
+        whole(unit.body.pos.x + unit.body.radius):
+      if not w.map.inGrid(x, y): continue
+      let
+        id = w.blocker[w.map.tileIndex(x, y)]
+        index = w.buildingIndex(id)
+      if index >= 0 and w.buildings[index].state != BuildingDying and
+          id notin result:
+        result.add id
+
+proc workingConstructionOccupant(w: World, unit: Unit): bool =
+  ## Only the active assigned builder may deliberately remain inside a site.
+  let index = w.buildingIndex(unit.constructionSiteId)
+  index >= 0 and w.buildings[index].state == BuildingUnderConstruction and
+    w.buildings[index].builderId == unit.id and unit.hp > 0 and
+    unit.owner == w.buildings[index].owner and unit.kind == PeonUnit and
+    unit.state == UnitBuilding and unit.targetId == unit.constructionSiteId and
+    covers(w.buildings[index].origin, w.buildings[index].footprint,
+      unit.tile.x.int32, unit.tile.y.int32)
+
+proc releaseConstructionOccupant(w: World, unit: Unit,
+    siteId = NoEntity): bool =
   ## Like exiting a mine, release only onto free legal ground. A full ring
   ## waits rather than clipping terrain, a structure, or another body.
-  let index = w.buildingIndex(unit.constructionSiteId)
+  let index = w.buildingIndex(
+    if siteId != NoEntity: siteId else: unit.constructionSiteId)
   if index < 0 or unit.state in {UnitDying, UnitInMine}:
     unit.constructionSiteId = NoEntity
     return true
   let site = w.buildings[index]
-  if site.state == BuildingDying or not covers(site.origin, site.footprint,
-      unit.tile.x.int32, unit.tile.y.int32):
+  if site.state == BuildingDying or not unit.overlapsFootprint(site):
     unit.constructionSiteId = NoEntity
     return true
   for y in site.origin.y.int32 - 1 .. site.origin.y.int32 + site.footprint.depth:
@@ -1021,6 +1142,7 @@ proc releaseConstructionOccupant(w: World, unit: Unit): bool =
       if not adjacentToFootprint(site.origin, site.footprint, x, y) or
           not w.tileFree(x, y): continue
       let at = tile2(x, y)
+      if not w.bodyGroundOpen(unit, tileCenter(at)): continue
       var free = true
       for other in w.units:
         if other.id != unit.id and other.state notin {UnitDying, UnitInMine} and
@@ -1034,6 +1156,90 @@ proc releaseConstructionOccupant(w: World, unit: Unit): bool =
         unit.clearPath()
         return true
   false
+
+proc recoverySegmentOpen(w: World, unit: Unit, finish: FixedVec2,
+    overlaps: openArray[int32]): bool =
+  ## Escapes initial structures without crossing unrelated static or enemy bodies.
+  if not w.bodyGroundOpen(unit, finish): return false
+  for other in w.units:
+    if other.id == unit.id or other.hp <= 0 or
+        other.state in {UnitDying, UnitInMine}: continue
+    let clearance = int64(int32(unit.body.radius + other.body.radius))
+    if lengthSquared(finish - other.body.pos) < clearance * clearance:
+      return false
+  let
+    start = unit.body.pos
+    steps = max(1, whole(length(finish - start) * 16) + 1)
+  for step in 1 .. steps:
+    let point = start + (finish - start) * (fixed(step) / fixed(steps))
+    if not w.bodyGroundOpen(unit, point, overlaps): return false
+    for other in w.units:
+      if other.owner == unit.owner or other.hp <= 0 or
+          other.state in {UnitDying, UnitInMine}: continue
+      let clearance = int64(int32(unit.body.radius + other.body.radius))
+      if lengthSquared(point - other.body.pos) < clearance * clearance:
+        return false
+  true
+
+proc recoverBuildingOverlaps(w: World) =
+  ## Restores legal body clearance before a blocked start can lose its order.
+  var moved = false
+  for i, unit in w.units:
+    if unit.hp <= 0 or unit.state in {UnitDying, UnitInMine} or
+        w.workingConstructionOccupant(unit): continue
+    let overlaps = w.overlappingBuildings(unit)
+    if overlaps.len == 0: continue
+    let before = unit.body.pos
+    if unit.constructionSiteId != NoEntity:
+      if not w.releaseConstructionOccupant(unit): continue
+    if unit.body.pos == before:
+      var
+        best = int64.high
+        destination = before
+      proc consider(point: FixedVec2) =
+        ## Keeps the closest valid candidate with deterministic tie order.
+        let distance = lengthSquared(point - before)
+        if distance < best and w.recoverySegmentOpen(unit, point, overlaps):
+          best = distance
+          destination = point
+      for id in overlaps:
+        let
+          site = w.buildings[w.buildingIndex(id)]
+          left = fixed(site.origin.x.int32) - unit.body.radius - Fixed(1)
+          top = fixed(site.origin.y.int32) - unit.body.radius - Fixed(1)
+          right = fixed(site.origin.x.int32 + site.footprint.width) +
+            unit.body.radius + Fixed(1)
+          bottom = fixed(site.origin.y.int32 + site.footprint.depth) +
+            unit.body.radius + Fixed(1)
+        consider(fixedVec2(left, before.y))
+        consider(fixedVec2(right, before.y))
+        consider(fixedVec2(before.x, top))
+        consider(fixedVec2(before.x, bottom))
+        for tile in footprintPerimeter(site.origin, site.footprint):
+          if not w.tileOpen(tile): continue
+          let inset = unit.body.radius + Fixed(1)
+          consider(fixedVec2(
+            clamp(before.x, fixed(tile.x.int32) + inset,
+              fixed(tile.x.int32 + 1) - inset),
+            clamp(before.y, fixed(tile.y.int32) + inset,
+              fixed(tile.y.int32 + 1) - inset)))
+      if best == int64.high: continue
+      unit.body.pos = destination
+      unit.applyBody()
+    if unit.body.pos == before: continue
+    moved = true
+    unit.clearPath()
+    unit.blockedEndpointValid = false
+    unit.blockedTicks = 0
+    unit.repathCooldown = 0
+    if unit.hasGoal: w.requestPath(i.int32)
+  if moved:
+    for cell in w.occupancy.mitems: cell = 0
+    for unit in w.units:
+      if unit.state in {UnitDying, UnitInMine} or not w.map.inGrid(unit.tile):
+        continue
+      let cell = w.map.tileIndex(unit.tile)
+      if w.occupancy[cell] == 0: w.occupancy[cell] = unit.id
 
 ## Spawning
 
@@ -1068,6 +1274,7 @@ proc spawnUnit*(w: World, owner: int32, kind: UnitKind,
     targetId: NoEntity,
     sourceId: NoEntity,
     targetTile: NoTile,
+    harvestCenter: NoTile,
     goal: tile,
     attackMoveGoal: NoTile,
     pathGoal: NoTile,
@@ -1312,7 +1519,8 @@ proc arrivedAt(unit: Unit, tile: Tile2): bool =
   ## Keeps fractional destinations precise while allowing broad path turns.
   let radius =
     if unit.hasGoal and tile == unit.goal:
-      if unit.goalOffset != FixedVec2Zero: 0.001'fx
+      if unit.goalOffset != FixedVec2Zero or
+          (unit.autoAttacking and unit.state == UnitMoving): 0.001'fx
       else: 0.1'fx
     else:
       PathArrive
@@ -1371,7 +1579,7 @@ proc steerUnit(w: World, index: int32, toward: FixedVec2) =
   if unit.body.pos == before:
     inc unit.blockedTicks
     if unit.blockedTicks >= AbandonAfterTicks:
-      unit.clearOrder(true)
+      if not w.returnFromAutoAttack(index): unit.clearOrder(true)
   else:
     unit.blockedTicks = 0
     unit.animation = RunAnimation
@@ -1578,6 +1786,9 @@ proc servePathQueue(w: World) {.measure.} =
         not w.releaseConstructionOccupant(w.units[index]):
       w.pathQueue.add request
       break
+    if w.overlappingBuildings(w.units[index]).len > 0:
+      w.pathQueue.add request
+      continue
     let retained = w.retainedBlockedEndpoint(w.units[index])
     let routeGoal = if retained: w.units[index].blockedEndpoint else: w.units[index].goal
     let complete = w.findPath(
@@ -1613,8 +1824,9 @@ proc servePathQueue(w: World) {.measure.} =
         ## Genuinely nowhere to go. An empty path with `complete` set just
         ## means the unit is already standing on its goal, which is success.
         let hold = w.units[index].holdPosition
-        w.units[index].clearOrder(true)
-        w.units[index].holdPosition = hold
+        if not w.returnFromAutoAttack(index):
+          w.units[index].clearOrder(true)
+          w.units[index].holdPosition = hold
       else:
         w.units[index].repathCooldown =
           if w.tileOpen(w.units[index].goal.x, w.units[index].goal.y):
@@ -1637,6 +1849,7 @@ proc beginMineTrip(w: World, index, mineId: int32) =
   w.units[index].targetId = mineId
   w.units[index].sourceId = mineId
   w.units[index].targetTile = NoTile
+  w.units[index].harvestCenter = NoTile
 
 proc beginTreeTrip(w: World, index, treeIndex: int32) =
   ## Sends a peon to a standing tree.
@@ -1657,15 +1870,16 @@ proc beginTreeTrip(w: World, index, treeIndex: int32) =
   elif not w.recoverTreeApproach(index):
     w.units[index].clearOrder(true)
 
-proc beginDropOff(w: World, index: int32, wantWood: bool) =
-  ## Sends a loaded peon to the nearest structure that accepts its cargo,
-  ## keeping hold of which mine or tree it should return to afterwards.
+proc beginDropOff(w: World, index: int32, wantWood: bool,
+    depotId = NoEntity) =
+  ## Delivers to a chosen or nearest depot, preserving the harvest assignment.
   let
     owner = w.units[index].owner
     keepTile = w.units[index].targetTile
     keepSource = w.units[index].sourceId
-    target = w.nearestDropOff(owner, w.units[index].tile, wantWood)
-  if target == NoEntity:
+    target = if depotId != NoEntity: depotId
+      else: w.nearestDropOff(owner, w.units[index].tile, wantWood)
+  if not w.acceptsDeposit(w.units[index], target, wantWood):
     w.units[index].clearOrder(true)
     return
   let structure = w.buildingIndex(target)
@@ -1678,17 +1892,12 @@ proc beginDropOff(w: World, index: int32, wantWood: bool) =
   w.units[index].sourceId = keepSource
 
 proc resumeTreeWork(w: World, index: int32) =
-  ## Returns a peon to its tree, or the nearest standing tree in that grove.
+  ## Returns to the current tree or expands around the original assignment.
   let tile = w.units[index].targetTile
   if w.map.inGrid(tile) and w.treeWood[w.map.tileIndex(tile)] > 0:
     w.beginTreeTrip(index, w.map.tileIndex(tile))
     return
-  let fromTile =
-    if w.map.inGrid(tile):
-      tile
-    else:
-      w.units[index].tile
-  let next = w.nearestTree(fromTile)
+  let next = w.nearestTree(w.units[index].harvestCenter)
   if next >= 0:
     w.beginTreeTrip(index, next)
     return
@@ -1763,9 +1972,18 @@ proc resumeHarvest(w: World, index: int32) =
   w.resumeTreeWork(index)
 
 proc handleDeposit(w: World, index: int32) =
-  ## Credits a delivered load and sends the peon straight back out. Peons
-  ## repeat their round trip until told otherwise, as they do in the game
-  ## this borrows from.
+  ## Credits accepted cargo at a live depot, then resumes assigned work.
+  let
+    unit = w.units[index]
+    wantWood = unit.state == UnitDepositWood
+  if not w.acceptsDeposit(unit, unit.targetId, wantWood):
+    w.beginDropOff(index, wantWood)
+    return
+  let depot = w.buildings[w.buildingIndex(unit.targetId)]
+  if not adjacentToFootprint(depot.origin, depot.footprint,
+      int32(unit.tile.x), int32(unit.tile.y)):
+    w.beginDropOff(index, wantWood, depot.id)
+    return
   if w.units[index].stateTicks > 0:
     dec w.units[index].stateTicks
     return
@@ -1773,7 +1991,7 @@ proc handleDeposit(w: World, index: int32) =
   w.trace("unit " & $w.units[index].id & " deposits " &
     $w.units[index].carryGold & " gold and " & $w.units[index].carryWood &
     " wood")
-  if w.units[index].carryGold > 0:
+  if not wantWood:
     w.players[owner].gold += w.units[index].carryGold
     w.players[owner].goldGathered += w.units[index].carryGold
     w.units[index].carryGold = 0
@@ -1781,11 +1999,18 @@ proc handleDeposit(w: World, index: int32) =
     w.players[owner].wood += w.units[index].carryWood
     w.players[owner].woodGathered += w.units[index].carryWood
     w.units[index].carryWood = 0
-  if w.units[index].orderQueue.len > 0:
+  if unit.carryGold > 0 or unit.carryWood > 0:
+    let remainingWood = unit.carryWood > 0
+    let target = if w.acceptsDeposit(unit, depot.id, remainingWood): depot.id
+      else: NoEntity
+    w.beginDropOff(index, remainingWood, target)
+  elif unit.orderQueue.len > 0:
     # Finish a harvest cycle at its deposit, never strand a miner or lose cargo.
     w.units[index].clearOrder(false)
-  else:
+  elif unit.sourceId != NoEntity or w.map.inGrid(unit.targetTile):
     w.resumeHarvest(index)
+  else:
+    unit.clearOrder(false)
 
 proc handleMineArrival(w: World, index: int32) =
   ## Puts a peon inside a mine when there is room, or leaves it queuing.
@@ -1825,10 +2050,13 @@ proc autoAcquire(w: World, index: int32) =
   ## Unassigned soldiers defend themselves; workers and direct moves stay put.
   if w.units[index].kind == PeonUnit or w.units[index].holdPosition:
     return
-  discard w.tryAcquire(index, defend = true)
+  if w.tryAcquire(index, defend = true):
+    w.units[index].autoAttacking = true
+    w.units[index].autoAttackOrigin = w.units[index].body.pos
 
 proc finishCombat(w: World, index: int32, failed: bool) =
-  ## Resumes an attack-move destination after a fight, or returns to idle.
+  ## Returns an idle defender home or resumes its explicit attack-move order.
+  if w.returnFromAutoAttack(index): return
   let
     dest = w.units[index].attackMoveGoal
     radius =
@@ -1903,6 +2131,18 @@ proc handleCombat(w: World, index: int32) =
   let
     stats = unitOf(w.units[index].owner, w.units[index].kind)
     distance = w.rangeToTarget(w.units[index], target)
+  if w.units[index].autoAttacking:
+    let
+      origin = w.units[index].autoAttackOrigin
+      home = tile2(whole(origin.x), whole(origin.y))
+      distanceFromHome =
+        if target.isBuildingId:
+          w.footprintDistance(home, w.buildings[w.buildingIndex(target)])
+        else:
+          tileDistance(home, w.entityTile(target))
+    if distanceFromHome > stats.sightTiles:
+      w.finishCombat(index, false)
+      return
   if distance <= stats.rangeTiles:
     w.units[index].state = UnitAttacking
     w.units[index].hasGoal = false
@@ -1928,10 +2168,15 @@ proc handleCombat(w: World, index: int32) =
       not w.map.inGrid(w.units[index].pathGoal) or
       tileDistance(targetTile, w.units[index].pathGoal) > 4:
     if target.isBuildingId:
-      let structure = w.buildingIndex(target)
-      if not w.footprintGoal(index, w.buildings[structure].origin,
-          w.buildings[structure].footprint):
+      let
+        structure = w.buildingIndex(target)
+        approach = w.approachTile(w.buildings[structure].origin,
+          w.buildings[structure].footprint, w.units[index].tile,
+          w.units[index].id)
+      if not w.map.inGrid(approach):
+        w.finishCombat(index, true)
         return
+      w.setGoal(index, approach)
       w.units[index].state = UnitChasing
       w.units[index].targetId = target
     else:
@@ -1979,15 +2224,12 @@ proc advanceUnit(w: World, index: int32) =
   ## Runs one unit for one tick.
   let unit = w.units[index]
   if unit.constructionSiteId != NoEntity:
-    let site = w.buildingIndex(unit.constructionSiteId)
-    let working = site >= 0 and
-      w.buildings[site].state == BuildingUnderConstruction and
-      w.buildings[site].builderId == unit.id and unit.hp > 0 and
-      unit.owner == w.buildings[site].owner and unit.kind == PeonUnit and
-      unit.state == UnitBuilding and unit.targetId == unit.constructionSiteId and
-      covers(w.buildings[site].origin, w.buildings[site].footprint,
-        unit.tile.x.int32, unit.tile.y.int32)
-    if not working and not w.releaseConstructionOccupant(unit): return
+    if not w.workingConstructionOccupant(unit) and
+        not w.releaseConstructionOccupant(unit): return
+  if unit.state notin {UnitDying, UnitInMine} and
+      not w.workingConstructionOccupant(unit) and
+      w.overlappingBuildings(unit).len > 0:
+    return
   if w.units[index].state == UnitDying:
     inc w.units[index].animationTicks
     dec w.units[index].deathTicks
@@ -2051,26 +2293,27 @@ proc advanceUnit(w: World, index: int32) =
       w.handleMineArrival(index)
       return
   of UnitToTree:
+    let treeIndex = w.map.tileIndex(w.units[index].targetTile)
+    if w.treeWood[treeIndex] <= 0:
+      w.resumeTreeWork(index)
+      return
     if tileDistance(tile, w.units[index].targetTile) <= 1:
-      let treeIndex = w.map.tileIndex(w.units[index].targetTile)
-      if w.treeWood[treeIndex] <= 0:
-        w.units[index].clearOrder(true)
-      else:
-        w.units[index].state = UnitChopping
-        w.units[index].stateTicks = ChopTicks
-        w.units[index].hasGoal = false
-        w.units[index].clearPath()
+      w.units[index].state = UnitChopping
+      w.units[index].stateTicks = ChopTicks
+      w.units[index].hasGoal = false
+      w.units[index].clearPath()
       return
   of UnitToDropGold, UnitToDropWood:
+    let wantWood = w.units[index].state == UnitToDropWood
     let structure = w.buildingIndex(w.units[index].targetId)
-    if structure < 0:
+    if not w.acceptsDeposit(w.units[index], w.units[index].targetId, wantWood):
       ## The depot went down mid-trip; look for another one.
-      w.beginDropOff(index, w.units[index].carryWood > 0)
+      w.beginDropOff(index, wantWood)
       return
     if adjacentToFootprint(w.buildings[structure].origin,
         w.buildings[structure].footprint, int32(tile.x), int32(tile.y)):
       w.units[index].state =
-        if w.units[index].carryWood > 0: UnitDepositWood else: UnitDepositGold
+        if wantWood: UnitDepositWood else: UnitDepositGold
       w.units[index].stateTicks = DepositTicks
       w.units[index].hasGoal = false
       w.units[index].clearPath()
@@ -2123,7 +2366,8 @@ proc advanceBuilding(w: World, index: int32) =
         not constructionInRange(w.buildings[index], w.units[builderIndex]):
       return
     if w.buildings[index].buildTicks <= 1 and
-        not w.releaseConstructionOccupant(w.units[builderIndex]): return
+        not w.releaseConstructionOccupant(w.units[builderIndex],
+          w.buildings[index].id): return
     dec w.buildings[index].buildTicks
     let
       stats = BuildingTable[w.buildings[index].kind]
@@ -2460,21 +2704,49 @@ proc applyHarvest*(w: World, player, unitId, target, isTree: int32,
     if carrying:
       w.units[index].sourceId = target
       w.units[index].targetTile = NoTile
+      w.units[index].harvestCenter = NoTile
       w.beginDropOff(index, w.units[index].carryWood > 0)
     else:
       w.units[index].clearOrder(false)
       w.beginMineTrip(index, target)
   else:
+    let center = tile2(target mod w.map.side, target div w.map.side)
     if carrying:
       w.units[index].sourceId = NoEntity
-      w.units[index].targetTile =
-        tile2(target mod w.map.side, target div w.map.side)
+      w.units[index].targetTile = center
+      w.units[index].harvestCenter = center
       w.beginDropOff(index, w.units[index].carryWood > 0)
     else:
       w.units[index].clearOrder(false)
+      w.units[index].harvestCenter = center
       w.beginTreeTrip(index, target)
   ## The unit may still fail to reach it, which shows up as `orderFailed`
   ## rather than as a refusal, because the command itself was accepted.
+  true
+
+proc applyDeposit*(w: World, player, unitId, depotId: int32,
+    append = false): bool =
+  ## Sends a loaded peon to a chosen depot without changing its resource job.
+  if not w.canDeposit(player, unitId, depotId): return false
+  let
+    index = w.unitIndex(unitId)
+    unit = w.units[index]
+  if append and (unit.state != UnitIdle or unit.orderQueue.len > 0):
+    if unit.orderQueue.len >= MaxUnitOrders: return false
+    unit.orderQueue.add UnitOrder(kind: ActionDeposit, first: depotId)
+    return true
+  let
+    source = unit.sourceId
+    tree = unit.targetTile
+    center = unit.harvestCenter
+    wantWood = w.acceptsDeposit(unit, depotId, true)
+  unit.orderQueue.setLen(0)
+  unit.orderFailed = false
+  unit.clearOrder(false)
+  unit.sourceId = source
+  unit.targetTile = tree
+  unit.harvestCenter = center
+  w.beginDropOff(index, wantWood, depotId)
   true
 
 proc startNextOrder(w: World, index: int32) =
@@ -2498,6 +2770,8 @@ proc startNextOrder(w: World, index: int32) =
       discard w.applyAttack(unit.owner, unit.id, order.first)
     of ActionHarvest:
       discard w.applyHarvest(unit.owner, unit.id, order.first, order.second)
+    of ActionDeposit:
+      discard w.applyDeposit(unit.owner, unit.id, order.first)
     else: discard
     unit.orderQueue = remaining
 
@@ -2703,6 +2977,11 @@ proc applyReplayAction*(w: World, action: ReplayAction): bool {.discardable.} =
   of ActionHarvest:
     w.applyHarvest(player, action.entityId, action.first,
       action.second, action.append)
+  of ActionDeposit:
+    if action.offset != FixedVec2Zero or action.second != 0 or
+        action.third != 0:
+      return false
+    w.applyDeposit(player, action.entityId, action.first, action.append)
   of ActionBuild:
     w.applyBuild(player, action.entityId, action.first,
       action.second, action.third)
@@ -2810,6 +3089,18 @@ proc applyHarvest*(
   if result:
     game.metrics.command(int(player), game.world.tick)
     game.record(ActionHarvest, player, unitId, target, isTree, append = append)
+
+proc applyDeposit*(
+    game: Game, player, unitId, depotId: int32, append = false
+): bool =
+  ## Records or submits a return-cargo order through the authoritative path.
+  if game.networked:
+    return game.queueNetworkAction(ActionDeposit, player, unitId, depotId,
+      append = append)
+  result = game.world.applyDeposit(player, unitId, depotId, append)
+  if result:
+    game.metrics.command(int(player), game.world.tick)
+    game.record(ActionDeposit, player, unitId, depotId, append = append)
 
 proc applyBuild*(
     game: Game, player, peonId, kindValue, x, y: int32
@@ -2963,6 +3254,7 @@ proc hashWorld(w: World): uint64 =
     hash.addHashy(unit.constructionSiteId)
     hash.addHashy(unit.sourceId)
     hash.mixTile(unit.targetTile)
+    hash.mixTile(unit.harvestCenter)
     hash.addHashy(int32(unit.body.pos.x))
     hash.addHashy(int32(unit.body.pos.y))
     hash.addHashy(int32(unit.body.facing))
@@ -2975,6 +3267,9 @@ proc hashWorld(w: World): uint64 =
     hash.mixTile(unit.attackMoveGoal)
     hash.addHashy(int32(unit.attackMoveOffset.x))
     hash.addHashy(int32(unit.attackMoveOffset.y))
+    hash.addHashy(unit.autoAttacking)
+    hash.addHashy(int32(unit.autoAttackOrigin.x))
+    hash.addHashy(int32(unit.autoAttackOrigin.y))
     hash.addHashy(unit.orderQueue.len)
     for order in unit.orderQueue:
       hash.addHashy(order.kind)
@@ -3141,6 +3436,9 @@ proc tickWorld*(w: World, decide: proc(w: World) {.closure.}) {.measure.} =
   if w.tick mod DecisionTicks == 0 and decide != nil:
     profileBlock "decisions":
       decide(w)
+
+  profileBlock "buildingClearance":
+    w.recoverBuildingOverlaps()
 
   profileBlock "searchPath":
     w.servePathQueue()

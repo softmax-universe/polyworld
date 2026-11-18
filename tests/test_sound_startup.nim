@@ -29,56 +29,42 @@ proc testSoundStartup() =
   echo "Testing a fresh launch uses audible default sliders"
   configureSoundLaunch(false, false)
   let defaults = readPreferences(app)
-  doAssert defaults.mainVolume == 100 and defaults.musicVolume == 100
+  doAssert defaults.mainVolume == 100 and defaults.musicVolume == 25
   doAssert defaults.fxVolume == 100 and defaults.uiVolume == 100
   defaults.applyPreferences(Window(nil), configureDisplay = false)
   doAssert not soundsMuted()
 
-  echo "Testing a game's Music default preserves explicitly saved levels"
-  let quietMusic = readPreferences(app, defaultMusicVolume = 25)
-  doAssert quietMusic.musicVolume == 25
-  doAssert quietMusic.mainVolume == 100 and quietMusic.fxVolume == 100
-  doAssert quietMusic.uiVolume == 100
-  doAssert readPreferences(app).musicVolume == 100
-  for bytes in ["{}", """{"name":"musicVolume","mainVolume":37}""",
-      """{"soundMuted":true,"mainVolume":37}"""]:
-    setConfig(app, "settings.json", bytes)
-    let current = readPreferences(app, defaultMusicVolume = 25)
-    doAssert current.musicVolume == 25
-    doAssert current.fxVolume == 100 and current.uiVolume == 100
-    if bytes.contains("soundMuted"):
-      doAssert current.mainVolume == 0
-    current.savePreferences(app)
-    doAssert readPreferences(app).musicVolume == 25,
-      "Saving a new profile must preserve its chosen game default"
-  for level in [0, 25, 73, 100]:
-    setConfig(app, "settings.json", "{\"musicVolume\":" & $level &
-      ",\"mainVolume\":37,\"fxVolume\":61,\"uiVolume\":79}")
-    let current = readPreferences(app, defaultMusicVolume = 25)
-    doAssert current.musicVolume == level
-    doAssert current.mainVolume == 37
-    doAssert current.fxVolume == 61 and current.uiVolume == 79
-    current.savePreferences(app)
-    doAssert readPreferences(app, defaultMusicVolume = 25).musicVolume == level
+  echo "Testing missing Music uses 25% without replacing saved channels"
+  setConfig(app, "settings.json",
+    """{"mainVolume":37,"fxVolume":61,"uiVolume":79}""")
+  let missingMusic = readPreferences(app)
+  doAssert missingMusic.musicVolume == 25
+  doAssert missingMusic.mainVolume == 37
+  doAssert missingMusic.fxVolume == 61 and missingMusic.uiVolume == 79
+
+  echo "Testing explicitly saved Music values keep their exact levels"
+  for music in [0, 25, 73, 100]:
+    var preferences = missingMusic
+    preferences.musicVolume = music
+    preferences.savePreferences(app)
+    doAssert readPreferences(app).musicVolume == music
+
+  echo "Testing legacy mute preserves and saves the missing Music default"
+  setConfig(app, "settings.json", """{"soundMuted":true,"mainVolume":37}""")
+  let legacyDefault = readPreferences(app)
+  doAssert legacyDefault.mainVolume == 0 and legacyDefault.musicVolume == 25
+  legacyDefault.savePreferences(app)
+  doAssert readPreferences(app).musicVolume == 25
+
+  echo "Testing malformed settings retain the error and fallback contract"
   setConfig(app, "settings.json", "{\"musicVolume\":")
   var malformedRejected = false
   try:
-    discard readPreferences(app, defaultMusicVolume = 25)
+    discard readPreferences(app)
   except MenusError:
     malformedRejected = true
-  doAssert malformedRejected,
-    "Malformed settings must retain the existing error/fallback contract"
-  removeFile(directory / "settings.json")
-  doAssert readPreferences(app, defaultMusicVolume = -5).musicVolume == 0
-  doAssert readPreferences(app, defaultMusicVolume = 105).musicVolume == 100
-  configureSoundLaunch(true)
-  var mutedFresh = readPreferences(app, defaultMusicVolume = 25)
-  doAssert mutedFresh.mainVolume == 0 and mutedFresh.musicVolume == 25
-  mutedFresh.name = "Fresh muted player"
-  mutedFresh.savePreferences(app)
-  configureSoundLaunch(false, false)
-  let restoredFresh = readPreferences(app, defaultMusicVolume = 25)
-  doAssert restoredFresh.mainVolume == 100 and restoredFresh.musicVolume == 25
+  doAssert malformedRejected
+  doAssert Preferences().musicVolume == 25
 
   echo "Testing every saved slider survives launches and menu transitions"
   var saved = Preferences(
@@ -185,11 +171,12 @@ proc testSoundStartup() =
   removeFile(directory / "settings.json")
   configureSoundLaunch(true)
   launched = readPreferences(app)
-  doAssert launched.mainVolume == 0
+  doAssert launched.mainVolume == 0 and launched.musicVolume == 25
   launched.name = "New player"
   launched.savePreferences(app)
   configureSoundLaunch(false, false)
   doAssert readPreferences(app).mainVolume == 100
+  doAssert readPreferences(app).musicVolume == 25
   echo "PASS saved sliders, Master mute, legacy migration and launch overrides"
 
 testSoundStartup()

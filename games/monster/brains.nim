@@ -416,11 +416,12 @@ proc fileKey(path: string): string {.raises: [MonsterError].} =
   if result.len == 0:
     raise newException(MonsterError, "Monster key file is empty: " & path)
 
-proc openaiKey(): string {.raises: [MonsterError].} =
+proc openaiKey*(preferFile = false): string {.raises: [MonsterError].} =
   ## Uses the environment first, then reads the configured local key file.
-  result = getEnv("OPENAI_API_KEY").strip()
-  if result.len > 0:
-    return
+  if not preferFile:
+    result = getEnv("OPENAI_API_KEY").strip()
+    if result.len > 0:
+      return
   let
     configured = getEnv("MONSTER_KEY_FILE").strip()
     path = keyFilePath()

@@ -1,5 +1,5 @@
 import
-  std/[options, os, strutils],
+  std/[os, strutils],
   chroma, jsony, pixie, silky, vmath, windy,
   chrome, displays, gameuis, inputs, policies, rtscameras, sounds
 
@@ -23,7 +23,7 @@ type
     edgeScrolling*: EdgeScrollMode = FullscreenEdgeScroll
     bindings*: InputBindings = DefaultBindings
     mainVolume*: int = 100
-    musicVolume*: int = 100
+    musicVolume*: int = 25
     fxVolume*: int = 100
     uiVolume*: int = 100
     uiScaleMode*: UiScaleMode
@@ -42,9 +42,9 @@ type
     ## Optional game-owned rows; the shared menu knows no game actions.
     draw*: proc(sk: Silky, window: Window, origin: Vec2)
     capturing*: proc(): bool
-  StoredSoundPreferences = object
+    validateBinding*: proc(action: InputAction, key: Button): string
+  LegacySoundPreferences = object
     soundMuted: bool
-    musicVolume: Option[int]
   SoundLaunch = object
     explicit, silent, applied: bool
     volume, savedVolume: int
@@ -64,6 +64,7 @@ var
   settingsTab: SettingsTab
   captureAction: InputAction
   captureSlot: int
+  bindingError: string
   soundLaunch: SoundLaunch
 
 when defined(emscripten):
@@ -142,17 +143,14 @@ proc configureSoundLaunch*(silent: bool, explicit = true) =
   ## Applies explicit launch flags to Master without replacing saved levels.
   soundLaunch = SoundLaunch(explicit: explicit, silent: silent)
 
-proc readPreferences*(app: string, defaultMusicVolume = 100): Preferences =
-  ## Loads saved settings, using the game's Music default only when absent.
+proc readPreferences*(app: string): Preferences =
+  ## Loads native or browser settings through Windy's configuration storage.
   let bytes = getConfig(app, "settings.json")
-  result = Preferences(musicVolume: defaultMusicVolume)
+  result = Preferences()
   if bytes.len > 0:
     try:
       result = bytes.fromJson(Preferences)
-      let stored = bytes.fromJson(StoredSoundPreferences)
-      if stored.musicVolume.isNone:
-        result.musicVolume = defaultMusicVolume
-      if stored.soundMuted:
+      if bytes.fromJson(LegacySoundPreferences).soundMuted:
         result.mainVolume = 0
     except JsonError as error:
       raise newException(MenusError, "Cannot read settings: " & error.msg)
@@ -417,15 +415,17 @@ proc bindingsPanel(
         continue
       if window.buttonPressed[key]:
         if key != KeyEscape:
-          preferences.bindings.bindInput(
-            captureAction,
-            captureSlot,
-            if key == KeyBackspace: ButtonUnknown else: key
-          )
+          let binding = if key == KeyBackspace: ButtonUnknown else: key
+          bindingError =
+            if extension.validateBinding == nil: ""
+            else: extension.validateBinding(captureAction, binding)
+          if bindingError.len == 0:
+            preferences.bindings.bindInput(captureAction, captureSlot, binding)
         bindingCapture = false
         break
   sk.drawLabel(
     if capturing: "Press a key or mouse button. Esc cancels; Backspace clears."
+    elif bindingError.len > 0: bindingError
     else: "Click a binding to change it. Conflicting bindings are cleared.",
     origin + vec2(0, 49), vec2(720, 34), sk.theme.defaultTextColor
   )
@@ -445,6 +445,7 @@ proc bindingsPanel(
           else:
             preferences.bindings[action][slot].bindingLabel
         soundButton label, not capturing:
+          bindingError = ""
           captureAction = action
           captureSlot = slot
           bindingCapture = true
@@ -453,6 +454,7 @@ proc bindingsPanel(
   sk.at = origin + vec2(500, height - 32)
   soundButton "Reset bindings", not capturing:
     preferences.resetBindings(controls)
+    bindingError = ""
 
 proc percentageSlider(
   sk: Silky,

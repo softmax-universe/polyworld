@@ -121,6 +121,95 @@ block scaledInput:
 
 echo "Monster scaled layout and click tests passed."
 
+proc clickLabel(
+  harness: var TestHarness,
+  chat: var ChatUi,
+  label: string
+): string =
+  ## Clicks a visible voice control at its scaled framebuffer position.
+  let node = harness.findByText(label)
+  doAssert node != nil, label
+  harness.window.movePointer(vec2(node.rect.x + node.rect.w / 2,
+    node.rect.y + node.rect.h / 2) * chat.scale)
+  harness.window.pressButton(MouseLeft)
+  result = frame(harness, chat)
+  harness.window.releaseButton(MouseLeft)
+  harness.window.resetInputState()
+
+block voiceControls:
+  for size in [ivec2(640, 480), ivec2(1280, 800), ivec2(2560, 1600)]:
+    var
+      harness = newTestHarness(SilkyAtlas(), size.x, size.y)
+      chat = initChatUi()
+    chat.scale = chatScale(size.vec2)
+    chat.restoreInput("Bring berries to Willow")
+    discard frame(harness, chat)
+    doAssert harness.findByText("Talk") == nil,
+      "Offline and hidden captures retain their original conversation layout."
+
+    chat.voiceEnabled = true
+    chat.voiceConnecting = true
+    discard frame(harness, chat)
+    doAssert harness.findByText("Connecting voice...") != nil
+    doAssert harness.findByText("Retry") == nil
+    doAssert clickLabel(harness, chat, "Talk") == ""
+    doAssert not chat.voiceToggleRequested,
+      "A connecting session cannot start recording."
+
+    chat.voiceConnecting = false
+    chat.voiceConnected = true
+    discard frame(harness, chat, pending = true)
+    let boxes = chatLayout(size.vec2 / chat.scale)
+    for label in ["Talk", "Voice on", "Ready"]:
+      let
+        node = harness.findByText(label)
+        panel = GameUiPanel(origin: vec2(node.rect.x, node.rect.y),
+          size: vec2(node.rect.w, node.rect.h))
+      doAssert panel.inside(size.vec2 / chat.scale)
+      doAssert boxes.history.contains(panel.origin)
+      doAssert boxes.history.contains(panel.origin + panel.size - vec2(0.01'f))
+      doAssert not panel.overlaps(boxes.input)
+      doAssert not panel.overlaps(boxes.send)
+    doAssert clickLabel(harness, chat, "Talk") == ""
+    doAssert chat.voiceToggleRequested
+    doAssert chat.input == "Bring berries to Willow" and chat.typing,
+      "Voice controls preserve the existing keyboard draft and focus."
+    doAssert chat.mouseOverUi(harness.window),
+      "A microphone click cannot select an entity or pan the world."
+    chat.voiceToggleRequested = false
+    chat.voiceListening = true
+    discard frame(harness, chat)
+    doAssert harness.findByText("Listening...") != nil
+    discard clickLabel(harness, chat, "Finish")
+    doAssert chat.voiceToggleRequested
+    chat.voiceToggleRequested = false
+    chat.voiceListening = false
+    chat.voiceSpeaking = true
+    discard frame(harness, chat)
+    doAssert harness.findByText("Moss is speaking...") != nil
+    discard clickLabel(harness, chat, "Voice on")
+    doAssert chat.voiceMuteRequested
+    chat.voiceMuteRequested = false
+    chat.voiceMuted = true
+    discard frame(harness, chat)
+    doAssert harness.findByText("Voice off") != nil
+
+    chat.voiceSpeaking = false
+    chat.voiceConnected = false
+    discard frame(harness, chat)
+    doAssert harness.findByText("Voice disconnected") != nil
+    discard clickLabel(harness, chat, "Retry")
+    doAssert chat.voiceReconnectRequested
+    doAssert chat.input == "Bring berries to Willow"
+    chat.voiceReconnectRequested = false
+    discard clickLabel(harness, chat, "Talk")
+    doAssert not chat.voiceToggleRequested
+    chat.voiceStatus = "Waiting for transcription"
+    discard frame(harness, chat)
+    doAssert harness.findByText("Waiting for transcription") != nil
+
+echo "Monster voice controls, scaled clicks, and draft preservation passed."
+
 block panelLayout:
   let image = readImage(currentSourcePath().parentDir.parentDir /
     "assets" / "hud" / "woodland-frame.png")

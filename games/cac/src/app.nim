@@ -16,7 +16,6 @@ when PostPanelControls:
 const
   WindowTitle = "Cards and Casters"
   AppName* = "Polyworld CaC"
-  DefaultMusicVolume = 25
   CameraNear* = 0.1'f32
   CameraFar* = 100.0'f32
   ClassChoiceTarget* = HeroSelectCameraTarget
@@ -195,11 +194,10 @@ proc initApp*(sessionOptions: SessionOptions): App =
     battlefieldPlayers: sessionOptions.playerCount,
     battlefieldRing: sessionOptions.playerCount > PlayerCount)
   try:
-    result.preferences = readPreferences(AppName,
-      defaultMusicVolume = DefaultMusicVolume)
+    result.preferences = readPreferences(AppName)
   except MenusError, IOError, OSError:
     result.preferenceError = getCurrentExceptionMsg()
-    result.preferences = Preferences(musicVolume: DefaultMusicVolume)
+    result.preferences = Preferences()
   result.preferences.applyPreferences(window,
     configureDisplay = not defined(takeScreenshot))
 

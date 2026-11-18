@@ -89,11 +89,19 @@ var image = newImage(width,height)
 glReadPixels(0,0,width.GLsizei,height.GLsizei,GL_RGBA,GL_UNSIGNED_BYTE,image.data[0].addr)
 image.flipVertical()
 image.writeFile(getEnv("GOTA_SHOP_FIXTURE",getTempDir()/"gota-shop.png"))
-let sale = sellPanel.center
+let heading = sellPanel.origin + vec2(sellPanel.size.x / 2, 24)
+frame(heading,{MouseLeft},{},{MouseLeft})
+frame(heading,{}, {MouseLeft})
+doAssert sellSlot == 2 and takePlayerCommands().len == 0,
+  "The context title must not sell the item"
+let sale = sellPanel.sellButtonPanel.center
 frame(sale,{MouseLeft},{},{MouseLeft})
+doAssert takePlayerCommands().len == 0
 frame(sale,{}, {MouseLeft})
 let sold = takePlayerCommands()
 doAssert sold.len == 1 and sold[0].kind == ActionSellItem and sold[0].slot == 2
+frame(sale,{}, {MouseLeft})
+doAssert takePlayerCommands().len == 0
 frame(panels[2].center,{MouseLeft},{},{MouseLeft})
 frame(panels[0].center,{}, {},{MouseLeft})
 frame(panels[0].center,{}, {MouseLeft})

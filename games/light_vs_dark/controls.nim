@@ -12,6 +12,7 @@ type
     CommandAttackMove
     CommandAttack
     CommandHarvest
+    CommandDeposit
     CommandBuild
     CommandTrain
     CommandResearch
@@ -103,6 +104,11 @@ proc queueBuild*(player, peonId, kindValue, x, y: int32) =
     second: x,
     third: y
   )
+
+proc queueDeposit*(player, peonId, depotId: int32, append = false) =
+  ## Queues delivery of carried resources to one specific owned depot.
+  pending.add PlayerCommand(kind: CommandDeposit, player: player,
+    entityId: peonId, first: depotId, append: append)
 
 proc queueTrain*(player, buildingId, kindValue: int32) =
   ## Queues one unit from a building.
@@ -238,6 +244,9 @@ proc applyCommand(game: Game, command: PlayerCommand): bool =
       command.first,
       command.second, command.append
     )
+  of CommandDeposit:
+    game.applyDeposit(command.player, command.entityId, command.first,
+      append = command.append)
   of CommandBuild:
     game.applyBuild(
       command.player,

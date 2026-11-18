@@ -105,6 +105,27 @@ proc drawClickMarks*(
       life
     )
 
+proc drawLoopingClickMarks*(
+    system: ClickMarkSystem,
+    viewProjection: Mat4,
+    origins: openArray[Vec3],
+    visible: proc(origin: Vec3, radius: float32): bool {.closure.} = nil
+) =
+  ## Loops current destinations without storing or capping transient clicks.
+  let
+    life = fxLife(system.time, system.settings.duration, true)
+    radius = system.settings.radius *
+      max(system.settings.expandStart, system.settings.expandEnd)
+  for origin in origins:
+    if visible != nil and not visible(origin, radius): continue
+    system.renderer.drawFxMesh(
+      system.settings,
+      viewProjection,
+      translate(origin) * fxModel(system.settings.axis),
+      system.time,
+      life
+    )
+
 proc closeClickMarks*(system: var ClickMarkSystem) =
   ## Releases click-mark GPU resources.
   closeFxRenderer(system.renderer)

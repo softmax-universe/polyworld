@@ -57,6 +57,13 @@ proc minimapPanels*(panel: GameUiPanel): MinimapPanels =
   for i in countdown(result.views.high, 0):
     result.views[i] = buttons.take(vec2(32), 11)
 
+proc diplomacyButtonPanel*(layout: GameUiLayout): GameUiPanel =
+  ## Anchors the diplomacy shortcut just below the minimap's right edge.
+  let minimap = layout.panel(GameUiRegion.TopRight, PanelMinimap)
+  result.size = vec2(48)
+  result.origin = minimap.origin + vec2(minimap.size.x - result.size.x,
+    minimap.size.y + 8)
+
 proc selectionPanels*(panel: GameUiPanel, workerCargo = false): SelectionPanels =
   ## Separates the main selection column from the three-by-three unit grid.
   var columns = panel.stack(LeftToRight, vec2(14))

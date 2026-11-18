@@ -67,25 +67,30 @@ when not defined(headless):
     profile.defaults[OrderInput] = [MouseRight, KeyD]
     profile.defaults[PanInput] = [MouseMiddle, ButtonUnknown]
     profile.defaults[CameraInput] = [KeyC, ButtonUnknown]
-    profile.defaults[StopInput] = [KeyS, KeyX]
-    for action in [SelectInput, OrderInput, PanInput, CameraInput, PauseInput,
-      MenuInput, DebugInput, FullscreenInput, PanLeftInput, PanRightInput,
-      PanUpInput, PanDownInput, ShiftInput, ControlInput, ShadingInput,
-      TraceInput, ZoomInInput, ZoomOutInput]:
+    profile.defaults[StopInput] = [KeyS, ButtonUnknown]
+    profile.defaults[ShadingInput] = [KeyF5, ButtonUnknown]
+    for action in LvdInputActions:
+      if action in {AttackMoveInput, StopInput}: continue
       profile.actions.add ControlBinding(action: action, label: $action)
     profile.actions.add ControlBinding(action: AttackMoveInput, label: "Attack move / click destination")
-    profile.actions.add ControlBinding(action: StopInput, label: "Stop selected / cancel construction")
+    profile.actions.add ControlBinding(action: StopInput, label: "Stop selected")
     profile
 
   proc migrateLvdBindings*(bindings: var InputBindings) =
-    ## Upgrade only exact legacy defaults, preserving custom bindings.
-    if bindings[StopInput] == [KeyX, ButtonUnknown]:
+    ## Upgrade legacy defaults and free X for permanent cancellation.
+    if bindings[StopInput] in [[KeyX, ButtonUnknown], [KeyS, KeyX]]:
       bindings[StopInput] = LvdControlProfile.defaults[StopInput]
+    if bindings[ShadingInput] == [KeyT, ButtonUnknown]:
+      bindings[ShadingInput] = LvdControlProfile.defaults[ShadingInput]
     if bindings[PanInput] == [MouseMiddle, KeyS]:
       bindings[PanInput] = LvdControlProfile.defaults[PanInput]
     if bindings[SelectInput] == [MouseLeft, KeyA] and
         bindings[AttackMoveInput] == [KeyA, ButtonUnknown]:
       bindings[SelectInput][1] = ButtonUnknown
+    for action in InputAction:
+      for slot in 0 .. 1:
+        if bindings[action][slot] == KeyX:
+          bindings[action][slot] = ButtonUnknown
 
   proc readLvdPreferences*(): Preferences =
     loadLvdShortcuts()
@@ -94,6 +99,8 @@ when not defined(headless):
       result.bindings = LvdControlProfile.defaults
     else:
       result.bindings.migrateLvdBindings()
+    shortcutSettingsError.add currentShortcuts.reconcileShortcutInputs(
+      result.bindings)
 
 
   proc lvdSettingsPanel*(sk: Silky, window: Window,

@@ -22,7 +22,7 @@ import
   replays,
   ui,
   controls, homes, lobbies, multiplayer, attackorders, layouts, linemoves,
-  networkpresentation, shortcutsettings, unitselection, orderfeedback,
+  networkpresentation, shortcutsettings, unitselection, orderfeedback, ordermarkers,
   constructionpresentation, targetfeedback, rendervisibility,
   harvestpresentation, woodcuttingpresentation, battlesounds
 
@@ -40,6 +40,8 @@ const
     ## Batches nearby harvest and construction changes into one scene update.
   SelectionDragPixels = 10.0'f32
     ## Pointer travel that turns a click into a box select.
+  SelectionReach = 2.0'f
+    ## World-tile distance for selecting beside a unit or building.
 
 type
   GraphicsHooks* = object
@@ -106,18 +108,32 @@ var
   shortcutState: ShortcutState
   shortcutHeldButtons, shortcutFrameButtons: set[Button]
   attackHeldButtons: set[Button]
+  attackPressedButtons: set[Button]
+  attackSelection: seq[int32]
   attackHoldConsumed = false
+  attackLeftStarted = false
+  rightOrderFromBuild = false
 
 ## Presentation helpers
 
 proc cancelAttackModifier() =
+  ## Clears targeting without allowing held keys to rearm on repeat.
   attackMoveArmed = false
   attackHeldButtons = {}
   attackHoldConsumed = false
+  attackSelection.setLen(0)
+
+proc checkAttackSelection() =
+  ## Keeps attack targeting bound to the selection that armed it.
+  if attackMoveArmed and
+      (selectedIds != attackSelection or pendingBuild >= 0):
+    cancelAttackModifier()
 
 proc pressAttackModifier(button: Button) =
+  ## Captures the selection for a fresh attack key press.
   if attackHeldButtons == {}: attackHoldConsumed = false
   attackHeldButtons.incl button
+  attackSelection = selectedIds
 
 proc consumeAttackModifier() =
   ## A tap is one-shot; an active hold can issue multiple accepted orders.
@@ -125,6 +141,8 @@ proc consumeAttackModifier() =
   attackMoveArmed = attackHeldButtons != {}
 
 proc releaseAttackModifier(button: Button) =
+  ## Ends held targeting while preserving an unused tap.
+  attackPressedButtons.excl button
   attackHeldButtons.excl button
   if attackHeldButtons == {} and attackHoldConsumed:
     attackMoveArmed = false
@@ -137,6 +155,8 @@ proc cancelGameplayGestures() =
   panning = false
   minimapPanning = false
   rightOrderStarted = false
+  rightOrderFromBuild = false
+  attackLeftStarted = false
   lineGesture.cancelLine()
   cancelAttackModifier()
 
@@ -405,6 +425,7 @@ proc runGraphics*(network: NetworkMatch = nil,
   shortcutState.resetShortcut()
   shortcutHeldButtons = {}
   shortcutFrameButtons = {}
+  attackPressedButtons = {}
   endShortcutEditing()
   hudNetwork = network
   resetHudTooltips()
@@ -751,6 +772,7 @@ proc runGraphics*(network: NetworkMatch = nil,
 
   proc selectEntity(id: int32, additive = false) =
     ## Selects or toggles one entity. Spectator mode follows the selection.
+    defer: checkAttackSelection()
     if not selectionTarget(id).found:
       return
     playSound(SelectSound)
@@ -777,6 +799,7 @@ proc runGraphics*(network: NetworkMatch = nil,
 
   proc clearSelection() =
     ## Clears the selection and leaves the camera free-floating.
+    defer: checkAttackSelection()
     let hadSelection =
       selectedIds.len > 0 or
       primaryId != NoEntity or
@@ -789,6 +812,7 @@ proc runGraphics*(network: NetworkMatch = nil,
 
   proc selectAllUnits() =
     ## Selects all living mobile units for group following.
+    defer: checkAttackSelection()
     selectedIds.setLen(0)
     let owner =
       if options.playerSlot > 0 and not run.replayMode:
@@ -810,6 +834,7 @@ proc runGraphics*(network: NetworkMatch = nil,
 
   proc pruneSelection() =
     ## Removes entities that have died or left the selectable world.
+    defer: checkAttackSelection()
     var i = selectedIds.high
     while i >= 0:
       if not selectionTarget(selectedIds[i]).found:
@@ -927,6 +952,45 @@ proc runGraphics*(network: NetworkMatch = nil,
             0.6'f32
           )
 
+  proc pickSelectionEntity(viewProjection: Mat4): int32 =
+    ## Keeps direct hits, then finds the closest visible entity within two tiles.
+    result = pickEntity(viewProjection)
+    if result != NoEntity:
+      if run.world.hasUnit(result):
+        if run.world.units[run.world.unitIndex(result)].hp > 0: return
+      elif run.world.hasBuilding(result):
+        if run.world.buildings[run.world.buildingIndex(result)].hp > 0: return
+      result = NoEntity
+    let ground = pickGroundPoint(window.mousePos.vec2, window.size.vec2,
+      viewProjection, cameraTarget.y)
+    var bestDistance = SelectionReach * SelectionReach
+    template consider(id: int32, candidateX, candidateZ: float32) =
+      block:
+        let
+          dx = candidateX - ground.x
+          dz = candidateZ - ground.z
+          distance = dx * dx + dz * dz
+        if distance <= bestDistance and
+            (result == NoEntity or distance < bestDistance or id < result):
+          bestDistance = distance
+          result = id
+    for unit in run.world.units:
+      if unit.hp <= 0 or unit.state in {UnitDying, UnitInMine} or
+          not shownUnit(unit):
+        continue
+      let position = renderPoint(unit)
+      consider(unit.id, position.x, position.z)
+    for structure in run.world.buildings:
+      if structure.hp <= 0 or structure.state == BuildingDying or
+          not shownBuilding(structure):
+        continue
+      let
+        left = structure.origin.x.float32 - mapHalf()
+        top = structure.origin.y.float32 - mapHalf()
+        x = clamp(ground.x, left, left + structure.footprint.width.float32)
+        z = clamp(ground.z, top, top + structure.footprint.depth.float32)
+      consider(structure.id, x, z)
+
   proc structureAtTile(x, y: int32): int32 =
     ## Standing structure whose footprint contains this tile.
     result = NoEntity
@@ -983,6 +1047,7 @@ proc runGraphics*(network: NetworkMatch = nil,
 
   proc selectBox(ids: seq[int32], additive: bool) =
     ## Replaces or extends the selection with boxed units.
+    defer: checkAttackSelection()
     if ids.len == 0:
       if not additive:
         clearSelection()
@@ -1043,6 +1108,7 @@ proc runGraphics*(network: NetworkMatch = nil,
       shortcutState.resetShortcut()
       shortcutHeldButtons = {}
       shortcutFrameButtons = {}
+      attackPressedButtons = {}
       cancelHumanCommunicationInput()
       window.runeInputEnabled = false
     if not focused or matchMenu != HiddenMatchMenu or bindingCapture or
@@ -1050,18 +1116,26 @@ proc runGraphics*(network: NetworkMatch = nil,
       cancelGameplayGestures()
       return
     pruneSelection()
-    updateMinimapCamera(
-      window, sk.mousePos, cameraTarget, minimapPanning, followSelection
-    )
+    if window.mousePressed(MouseLeft):
+      attackLeftStarted = playerMode() and attackMoveArmed and pendingBuild < 0
+    elif not window.mouseDown(MouseLeft) and not window.mouseReleased(MouseLeft):
+      attackLeftStarted = false
+    if attackLeftStarted:
+      selectionStarted = false
+      minimapPanning = false
+    else:
+      updateMinimapCamera(
+        window, sk.mousePos, cameraTarget, minimapPanning, followSelection
+      )
     if minimapPanning:
       actionCam.takeManual()
     let overUi = mouseOverUi(window, sk.mousePos)
     if window.buttonPressed[KeyA] and
         window.actionDown(ControlInput):
-      attackMoveArmed = false
+      cancelAttackModifier()
       selectAllUnits()
     elif window.mousePressed(MouseLeft) and not overUi and
-        pendingBuild < 0:
+        pendingBuild < 0 and not attackLeftStarted:
       selectionPressPosition = window.mousePos.vec2
       selectionStarted = true
       selectionAdditive =
@@ -1146,6 +1220,9 @@ proc runGraphics*(network: NetworkMatch = nil,
   proc updateWorldSelection(viewProjection: Mat4) =
     ## Windy raises DoubleClick on the second left press, not its release.
     if refreshPendingBuild(): return
+    if attackLeftStarted:
+      selectionStarted = false
+      return
     if window.buttonPressed[DoubleClick]:
       # Consume the second release even when a modal/HUD/command owns input.
       selectionStarted = false
@@ -1157,7 +1234,7 @@ proc runGraphics*(network: NetworkMatch = nil,
         if playerMode(): options.playerSlot - 1
         elif viewMode > 0: viewMode - 1
         else: -1'i32
-      let clicked = pickEntity(viewProjection)
+      let clicked = pickSelectionEntity(viewProjection)
       var ids = run.world.matchingUnitIds(clicked, owner)
       if clicked.isBuildingId and run.world.hasBuilding(clicked):
         let source = run.world.buildings[run.world.buildingIndex(clicked)]
@@ -1188,7 +1265,7 @@ proc runGraphics*(network: NetworkMatch = nil,
       )
     elif not overUi:
       if not (playerMode() and pendingBuild >= 0):
-        let picked = pickEntity(viewProjection)
+        let picked = pickSelectionEntity(viewProjection)
         if picked != NoEntity:
           selectEntity(picked, selectionAdditive)
         elif not selectionAdditive:
@@ -1223,6 +1300,23 @@ proc runGraphics*(network: NetworkMatch = nil,
     let xz = tileCentreXZ(tile2(x, y))
     vec3(xz.x, surfaceHeight(xz.x, xz.y), xz.y)
 
+  proc drawSelectedOrderMarkers(viewProjection: Mat4) =
+    ## Rebuilds looping destinations from the selected units' current orders.
+    let owner =
+      if playerMode(): options.playerSlot - 1
+      elif viewMode > 0: viewMode - 1
+      else: -1'i32
+    var moves, attacks: seq[Vec3]
+    for marker in run.world.selectedOrderMarkers(selectedIds, owner):
+      let
+        x = toFloat32(marker.position.x) - mapHalf()
+        z = toFloat32(marker.position.y) - mapHalf()
+        point = vec3(x, surfaceHeight(x, z), z)
+      if marker.attack: attacks.add point
+      else: moves.add point
+    clickMarks.drawLoopingClickMarks(viewProjection, moves)
+    attackClickMarks.drawLoopingClickMarks(viewProjection, attacks)
+
   proc issueSelectedMove(player, x, y: int32, append = false): bool =
     ## Moves every selected owned unit, or rallies a selected building.
     if not run.world.map.inGrid(x, y) or not run.world.terrainOpen(x, y):
@@ -1249,22 +1343,33 @@ proc runGraphics*(network: NetworkMatch = nil,
               break
 
   proc updatePlayerOrder(viewProjection: Mat4, focused = window.focused) =
-    ## Armed right-click targets an enemy or attack-moves combat-capable units.
+    ## Armed clicks attack; otherwise left places and right moves.
     if refreshPendingBuild(): return
-    if not playerMode() or hudTooltipContains(sk.mousePos):
+    checkAttackSelection()
+    if not playerMode():
       lineGesture.cancelLine()
       rightOrderStarted = false
       return
     let
       rightOrder = window.mouseReleased(MouseRight)
-      buildClick = pendingBuild >= 0 and window.mousePressed(MouseLeft)
-      attackClick = pendingBuild < 0 and attackMoveArmed and rightOrder
       player = options.playerSlot - 1
       inside = window.mousePos.x >= 0 and window.mousePos.y >= 0 and
         window.mousePos.x < window.size.x and window.mousePos.y < window.size.y
       overUi = mouseOverUi(window, sk.mousePos)
       onMinimap = attackMinimapTile(currentLayout(window), sk.mousePos,
         run.world.map.side) != NoTile and not window.buttonDown[KeyTab]
+    if window.mousePressed(MouseRight):
+      rightOrderFromBuild = pendingBuild >= 0 and inside
+      if rightOrderFromBuild:
+        pendingBuild = -1
+        cancelAttackModifier()
+        selectionStarted = false
+        minimapPanning = false
+    if hudTooltipContains(sk.mousePos):
+      lineGesture.cancelLine()
+      rightOrderStarted = false
+      rightOrderFromBuild = false
+      return
     if window.mousePressed(MouseRight):
       rightOrderStarted = inside and (not overUi or onMinimap)
       if rightOrderStarted and not overUi and not onMinimap and pendingBuild < 0:
@@ -1273,6 +1378,17 @@ proc runGraphics*(network: NetworkMatch = nil,
         lineGesture.beginLine(run.world, player, selectedIds,
           linePoint(ground.x + mapHalf(), ground.z + mapHalf()),
           linePoint(window.mousePos.x, window.mousePos.y), attackMoveArmed)
+    let
+      buildClick = pendingBuild >= 0 and window.mousePressed(MouseLeft)
+      leftAttack = attackLeftStarted and window.mousePressed(MouseLeft)
+      attackClick = pendingBuild < 0 and attackMoveArmed and
+        (rightOrder or leftAttack)
+      moveOnly = rightOrderFromBuild
+    if rightOrder: rightOrderFromBuild = false
+    if leftAttack:
+      lineGesture.cancelLine()
+      rightOrderStarted = false
+      if not inside or not focused: return
     if lineGesture.active:
       if not inside or not focused or pendingBuild >= 0:
         lineGesture.cancelLine()
@@ -1316,6 +1432,7 @@ proc runGraphics*(network: NetworkMatch = nil,
       if not rightOrderStarted or not inside: return
       rightOrderStarted = false
     if pendingBuild >= 0:
+      if not buildClick: return
       # Placement owns this press and its release, including invalid sites.
       # HUD chooses a blueprint after this pass; only a fresh world press places it.
       selectionStarted = false
@@ -1390,7 +1507,7 @@ proc runGraphics*(network: NetworkMatch = nil,
           under
         else:
           picked
-    if target != NoEntity:
+    if not moveOnly and target != NoEntity:
       if run.world.hasBuilding(target):
         let structure = run.world.buildings[run.world.buildingIndex(target)]
         if structure.owner == player and structure.state == BuildingUnderConstruction:
@@ -1402,6 +1519,13 @@ proc runGraphics*(network: NetworkMatch = nil,
               playSound(MoveOrderSound)
               clickMarks.emitClickMark(buildingCentre(structure))
               return
+          return
+        if structure.owner == player and run.world.queueFeedbackDeposit(
+            player, selectedIds, target, append = window.actionDown(ShiftInput)):
+          targetFlash.flashTarget(HarvestEntityFlash, target, player)
+          playSound(MoveOrderSound)
+          clickMarks.emitClickMark(buildingCentre(structure))
+          attackMoveArmed = false
           return
         if structure.kind == GoldMineBuilding:
           if run.world.queueFeedbackHarvest(player, selectedIds, target, tree = false,
@@ -1428,7 +1552,7 @@ proc runGraphics*(network: NetworkMatch = nil,
           attackClickMarks.emitClickMark(renderPoint(run.world.units[run.world.unitIndex(target)]))
         attackMoveArmed = false
         return
-    if tree >= 0:
+    if not moveOnly and tree >= 0:
       if run.world.queueFeedbackHarvest(player, selectedIds, tree, tree = true,
           append = window.actionDown(ShiftInput)):
         targetFlash.flashTarget(HarvestTreeFlash, tree, player)
@@ -2134,6 +2258,7 @@ proc runGraphics*(network: NetworkMatch = nil,
         harvestBars.draw(viewProjection, barCameraRight, barCameraUp)
         clickMarks.drawClickMarks(viewProjection)
         attackClickMarks.drawClickMarks(viewProjection)
+        drawSelectedOrderMarkers(viewProjection)
         if lineGesture.active and lineGesture.dragging:
           worldShapes.clear()
           let color = orderFeedbackColor(lineGesture.attackMove)
@@ -2211,13 +2336,14 @@ proc runGraphics*(network: NetworkMatch = nil,
             teamColors,
             if connection != nil: connection.stats else: nil
           )
+          checkAttackSelection()
           if attackMoveArmed:
             if pendingBuild >= 0:
               attackMoveArmed = false
             else:
               let at = vec2(max(12.0'f, window.size.x.float32 / sk.uiScale / 2 - 220), 78)
               sk.drawRect(at, vec2(440, 40), rgbx(40, 8, 8, 225))
-              sk.menuLabel("ATTACK: click or right-drag / Shift queues / Esc cancels", at + vec2(8, 4), 424)
+              sk.menuLabel("ATTACK: click or right-drag / Shift queues / X cancels", at + vec2(8, 4), 424)
           drawSelectionBox(
             sk,
             window,
@@ -2312,6 +2438,7 @@ proc runGraphics*(network: NetworkMatch = nil,
 
   window.onButtonPress = proc(button: Button) =
     window.captureCursorConfinement(button)
+    checkAttackSelection()
     if bindingCapture: return
     if matchMenu == HiddenMatchMenu and humanCommunicationKey(button):
       shortcutState.resetShortcut()
@@ -2323,31 +2450,71 @@ proc runGraphics*(network: NetworkMatch = nil,
     if matchMenu == HiddenMatchMenu and humanCommunicationBlocksGameplay():
       cancelGameplayGestures()
       return
+    if button == KeyX:
+      # Text fields own their letters; everywhere else X stays Cancel.
+      if matchMenu != HiddenMatchMenu and window.runeInputEnabled: return
+      let matched = shortcutState.pressShortcut(DefaultShortcuts, 'X',
+        epochTime(), actions = {CancelSiteShortcut})
+      shortcutHeldButtons.incl button
+      shortcutFrameButtons.incl button
+      if matched.action < 0: return
+      if matchMenu != HiddenMatchMenu:
+        matchMenu = if matchMenu == MatchSettings: PauseMenu else: HiddenMatchMenu
+        cancelGameplayGestures()
+        return
+      let targeting = pendingBuild >= 0 or attackMoveArmed or
+        lineGesture.active or rightOrderStarted or selectionStarted
+      cancelGameplayGestures()
+      pendingBuild = -1
+      if not targeting and playerMode():
+        let player = options.playerSlot - 1
+        var cancelled = false
+        for id in selectedIds:
+          if run.world.unitOwner(id) == player or
+              run.world.buildingOwner(id) == player:
+            queueCancel(player, id)
+            cancelled = true
+        if cancelled: playSound(CancelSound)
+      return
     if matchMenu == HiddenMatchMenu and hooks.key != nil:
       if hooks.key(button, actionCam):
         return
-    # Combat owns its configured attack key whenever eligible units are selected,
-    # even when the selected producer union offers Archer on A.
+    # Combat owns its configured attack key whenever units are selected.
     if matchMenu == HiddenMatchMenu and playerMode() and
         AttackMoveInput.matches(button) and not window.scaleModifier and
         not window.actionDown(ControlInput) and
-        not window.buttonDown[KeyLeftAlt] and not window.buttonDown[KeyRightAlt] and
-        run.world.armSelectedAttackMove(options.playerSlot - 1, selectedIds):
-      pressAttackModifier(button)
-      shortcutState.cancelShortcut()
-      selectionStarted = false
-      minimapPanning = false
-      return
+        not window.buttonDown[KeyLeftAlt] and not window.buttonDown[KeyRightAlt]:
+      if button in attackPressedButtons: return
+      attackPressedButtons.incl button
+      if run.world.armSelectedAttackMove(options.playerSlot - 1, selectedIds):
+        pressAttackModifier(button)
+        shortcutState.cancelShortcut()
+        selectionStarted = false
+        minimapPanning = false
+        return
     let key = shortcutKey(button)
     if key != '\0':
       let matched = shortcutState.pressShortcut(currentShortcuts, key, epochTime(),
         gameplay = matchMenu == HiddenMatchMenu and playerMode(),
         modified = window.scaleModifier or window.actionDown(ControlInput) or
           window.buttonDown[KeyLeftAlt] or window.buttonDown[KeyRightAlt],
-        actions = run.world.contextualActions(options.playerSlot - 1, selectedIds))
+        actions = run.world.contextualActions(options.playerSlot - 1, selectedIds) +
+          {IdlePeonShortcut})
       if matched.consumed:
         shortcutHeldButtons.incl button
         shortcutFrameButtons.incl button
+        if matched.action == IdlePeonShortcut.ord:
+          let id = run.world.nextIdlePeon(options.playerSlot - 1, primaryId)
+          if id != NoEntity:
+            cancelGameplayGestures()
+            pendingBuild = -1
+            selectedIds = @[id]
+            primaryId = id
+            followSelection = false
+            actionCam.takeManual()
+            cameraTarget = renderPoint(run.world.units[run.world.unitIndex(id)])
+            playSound(SelectSound)
+          return
         if matched.action >= 0 and performAudibleShortcut(run.world,
             options.playerSlot - 1, selectedIds, ShortcutAction(matched.action)):
           selectionStarted = false
@@ -2383,18 +2550,13 @@ proc runGraphics*(network: NetworkMatch = nil,
       return
     if AttackMoveInput.matches(button) and not window.actionDown(ControlInput) and
         not window.scaleModifier:
-      if playerMode() and run.world.armSelectedAttackMove(options.playerSlot - 1, selectedIds):
-        pressAttackModifier(button)
-        selectionStarted = false
-        minimapPanning = false
       return
     if PauseInput.matches(button):
       if network == nil: transport.togglePlay()
     elif CameraInput.matches(button): actionCam.toggle(followSelection)
     elif ShadingInput.matches(button): scene.toggleShading()
     elif StopInput.matches(button):
-      lineGesture.cancelLine()
-      rightOrderStarted = false
+      cancelGameplayGestures()
       if playerMode():
         let player = options.playerSlot - 1
         for id in selectedIds:
@@ -2404,7 +2566,7 @@ proc runGraphics*(network: NetworkMatch = nil,
             playSound(CancelSound)
         pendingBuild = -1
         attackMoveArmed = false
-    elif button == KeyE: showTiles = not showTiles
+    elif button == KeyF6: showTiles = not showTiles
     elif button == KeyV and not playerMode():
       viewMode = (viewMode + 1) mod int32(run.world.players.len + 1)
 
@@ -2427,6 +2589,7 @@ proc runGraphics*(network: NetworkMatch = nil,
       shortcutState.resetShortcut()
       shortcutHeldButtons = {}
       shortcutFrameButtons = {}
+      attackPressedButtons = {}
       cancelGameplayGestures()
       window.runeInputEnabled = false
 

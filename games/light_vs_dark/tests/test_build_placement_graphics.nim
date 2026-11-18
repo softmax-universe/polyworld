@@ -80,6 +80,15 @@ proc main() =
   productionRoutine("clickTilePoint")
   productionRoutine("issueSelectedMove")
   productionRoutine("updatePlayerOrder")
+  var
+    ghostTint: Vec4
+    ghostOrigin: Tile2
+  proc drawBuildingGhost(kind: BuildingKind, owner: int32, origin: Tile2,
+      viewProjection: Mat4, tint: Vec4) =
+    ## Captures production preview output without loading building models.
+    ghostTint = tint
+    ghostOrigin = origin
+  productionRoutine("drawBuildGhost")
   productionRoutine("buttonHandler")
   let viewProjection = perspective(45'f32, 1.6, 0.1, 1000) *
     lookAt(vec3(0, 22, 18), vec3(0), vec3(0, 1, 0))
@@ -136,6 +145,60 @@ proc main() =
     productionOrderPass()
 
   suite "LvD production building placement input":
+    test "town hall mine buffer is red and blocks plain and queued placement":
+      for append in [false, true]:
+        fixture()
+        pendingBuild = TownHallBuilding.ord.int32
+        let
+          half = run.world.map.side div 2
+          size = BuildingTable[TownHallBuilding].footprint
+          mineSize = BuildingTable[GoldMineBuilding].footprint
+        var found = false
+        for y in half - 6 .. half + 6:
+          for x in half - 6 .. half + 6:
+            if not run.world.canPlace(TownHallBuilding, x, y): continue
+            pointAt(screenPosition(clickTilePoint(x + size.width div 2,
+              y + size.depth div 2), viewProjection))
+            if mouseOverUi(window, sk.mousePos) or
+                buildGhostOrigin(viewProjection) != (x, y):
+              continue
+            origin = (x, y)
+            found = true
+            break
+          if found: break
+        require found
+        run.world.buildings.add Building(id: FirstMineId, owner: -1,
+          kind: GoldMineBuilding, state: BuildingComplete,
+          origin: tile2(origin[0] - mineSize.width - 4, origin[1]),
+          footprint: mineSize, hp: 2000, maxHp: 2000, goldLeft: MainMineGold)
+        run.world.buildingSlot[0] = 0
+        if append: window.state.buttonDown.incl KeyLeftShift
+        let before = run.stateHash()
+        drawBuildGhost(viewProjection)
+        check ghostOrigin == tile2(origin[0], origin[1])
+        check ghostTint == vec4(0.95, 0.28, 0.22, 0.42)
+        inputFrame({MouseLeft})
+        inputFrame(released = {MouseLeft})
+        run.flushPlayerCommands()
+        check run.submissions.len == 0
+        check pendingBuild == TownHallBuilding.ord.int32
+        check selectedIds == @[worker]
+        check run.stateHash() == before
+
+        # Moving the mine one tile away leaves five full tiles between bases.
+        dec run.world.buildings[0].origin.x
+        let outside = run.stateHash()
+        drawBuildGhost(viewProjection)
+        check ghostTint == vec4(0.55, 0.95, 0.65, 0.42)
+        inputFrame({MouseLeft})
+        inputFrame(released = {MouseLeft})
+        run.flushPlayerCommands()
+        require run.submissions.len == 1
+        check run.submissions[0].kind == ActionBuild
+        check run.submissions[0].first == TownHallBuilding.ord.int32
+        check run.submissions[0].append == append
+        check run.stateHash() == outside
+
     test "left world press queues one build and release never changes selection":
       fixture()
       let before = run.stateHash()

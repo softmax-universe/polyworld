@@ -2534,9 +2534,24 @@ proc applyResearch*(w: World, player, buildingId, kindValue: int32): bool =
   w.buildings[index].researchTotal = cost.ticks
   true
 
+proc mineClearance(w: World, kind: BuildingKind, x, y: int32): bool =
+  ## Keeps town halls outside the five-tile buffer around mine footprints.
+  if kind != TownHallBuilding: return true
+  let size = BuildingTable[kind].footprint
+  for mine in w.buildings:
+    if mine.kind != GoldMineBuilding or mine.hp <= 0 or
+        mine.state == BuildingDying:
+      continue
+    if int64(x) < int64(mine.origin.x) + mine.footprint.width + TownHallMineGap and
+        int64(x) + size.width + TownHallMineGap > mine.origin.x.int64 and
+        int64(y) < int64(mine.origin.y) + mine.footprint.depth + TownHallMineGap and
+        int64(y) + size.depth + TownHallMineGap > mine.origin.y.int64:
+      return false
+  true
+
 proc canPlace*(w: World, kind: BuildingKind, x, y: int32): bool =
-  ## Returns whether a footprint would fit: on the map, on open terrain, and
-  ## clear of trees, other structures, and every unit.
+  ## Checks terrain, occupancy, and town hall clearance from gold mines.
+  if not w.mineClearance(kind, x, y): return false
   let size = BuildingTable[kind].footprint
   for tileY in y ..< y + size.depth:
     for tileX in x ..< x + size.width:
@@ -2549,6 +2564,7 @@ proc canPlace*(w: World, player: int32, kind: BuildingKind, x, y: int32,
   ## Preview and authoritative placement share this narrow occupancy exception.
   ## Omitting the builder retains strict placement; never ignore another unit.
   if builderId == NoEntity: return w.canPlace(kind, x, y)
+  if not w.mineClearance(kind, x, y): return false
   let index = w.unitIndex(builderId)
   if index < 0: return false
   let builder = w.units[index]
@@ -2632,7 +2648,8 @@ proc canQueueBuild*(w: World, player, peonId, kindValue, x, y: int32): bool =
     builder = if w.units[index].state == UnitInMine: NoEntity else: peonId
   if not w.map.inGrid(x, y) or
       not w.map.inGrid(x + size.width - 1, y + size.depth - 1) or
-      not w.techMet(player, BuildingTable[kind].requires):
+      not w.techMet(player, BuildingTable[kind].requires) or
+      not w.mineClearance(kind, x, y):
     return false
   var resumesSite = false
   for structure in w.buildings:
@@ -2832,7 +2849,9 @@ proc queuedBuildWaits(w: World, unit: Unit, order: UnitOrder): bool =
     y = order.third
   if not w.map.inGrid(x, y) or
       not w.map.inGrid(x + stats.footprint.width - 1,
-        y + stats.footprint.depth - 1) or not w.techMet(unit.owner, stats.requires):
+        y + stats.footprint.depth - 1) or
+      not w.techMet(unit.owner, stats.requires) or
+      not w.mineClearance(kind, x, y):
     return false
   for structure in w.buildings:
     if structure.owner == unit.owner and structure.kind == kind and
@@ -2899,7 +2918,8 @@ proc applyBuild*(w: World, player, peonId, kindValue, x, y: int32,
   if not w.map.inGrid(x, y) or not w.map.inGrid(x + stats.footprint.width - 1,
       y + stats.footprint.depth - 1):
     return false
-  if not w.techMet(player, stats.requires):
+  if not w.techMet(player, stats.requires) or
+      not w.mineClearance(kind, x, y):
     return false
 
   ## An existing site of the same kind and place is adopted rather than paid

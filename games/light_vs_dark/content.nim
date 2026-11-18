@@ -367,6 +367,8 @@ const
   MineTicks* = 60'i32
     ## Ticks a peon spends hidden inside a gold mine.
   MinersPerMine* = 4'i32
+  TownHallMineGap* = 5'i32
+    ## Clear tiles required between a new town hall and a gold mine footprint.
   WoodPerTrip* = 25'i32
     ## Smaller loads keep nearby forests from funding an army with one worker.
   ChopTicks* = 80'i32
@@ -479,7 +481,8 @@ proc contentHash*(): uint64 =
       hash.addHashy(required in stats.requires)
   for value in [
     StartingGold, StartingWood, StartingPeons, GoldPerTrip, MineTicks,
-    MinersPerMine, WoodPerTrip, ChopTicks, int32(WoodPerTree), DepositTicks,
+    MinersPerMine, TownHallMineGap, WoodPerTrip, ChopTicks, int32(WoodPerTree),
+    DepositTicks,
     MainMineGold, ExpansionMineGold, FoodCapMax, UnitsPerPlayer, DeathTicks,
     RubbleTicks, OrthogonalCost, DiagonalCost, ShoveAfterTicks,
     SwapAfterTicks, RepathAfterTicks, AbandonAfterTicks,

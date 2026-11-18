@@ -29,8 +29,8 @@ when not defined(headless):
       "Options (--key value or --key=value):\n" &
       "  --menu           Open the main menu (default without match flags)\n" &
       "  --direct         Launch a match without the menus\n" &
-      "  --server URL     Open multiplayer using a Polyworld relay\n" &
-      "  --room CODE      Join a room on the selected relay\n" &
+      "  --server URL     Set the relay used after choosing Multiplayer\n" &
+      "  --room CODE      Join this room after choosing Multiplayer\n" &
       "  --players N      Player count (2). 2 plays a duel; 3 to 7 play a\n" &
       "                   multiplayer match: the last player alive wins.\n" &
       "  --seed INTEGER   Set the battle seed\n" &

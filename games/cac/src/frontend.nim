@@ -27,6 +27,7 @@ type
     localPolicies, networkPolicies: seq[LocalPolicy]
     humanSeat: int
     roomName, roomNameDefault: string
+    pendingInvite: string
     publicRoom: bool
 
 var frontendState: FrontendState
@@ -212,18 +213,12 @@ proc runFrontend*(app: App, connection: var Connection,
     let inviteServer = inviteParameter("server")
     if inviteServer.len > 0:
       preferences.server = inviteServer
-      connectRequested = true
     if app.options.serverAddress.len > 0:
       preferences.server = app.options.serverAddress
-      connectRequested = true
     if app.options.roomCode.len > 0:
       invite = app.options.roomCode
-    if invite.len > 0:
-      joinRequested = true
-      connectRequested = true
-      autoClaim = true
-    if connectRequested:
-      page = MultiplayerMenu
+    # Links configure multiplayer, but entering it remains a menu action.
+    frontendState.pendingInvite = invite
   if returnToLobby and activeConnection != nil:
     let client = activeConnection.client
     if client.snapshot.participant == client.participant and
@@ -291,6 +286,7 @@ proc runFrontend*(app: App, connection: var Connection,
         client.snapshot.room.len == 0:
           client.send(RoomMessage(kind: JoinRoom, room: invite))
           joinRequested = false
+          frontendState.pendingInvite = ""
       if client.snapshot.room.len == 0 and page == LobbyMenu:
         page = MultiplayerMenu
         prepared = nil
@@ -359,7 +355,7 @@ proc runFrontend*(app: App, connection: var Connection,
             client.send(RoomMessage(kind: AbortMatch,
               match: event.match, detail: error))
       if client.error.len > 0:
-        error = client.error
+        error = client.error.lobbyError()
       if client.error.len > 0 or (configPending and not client.connected):
         if configPending and pendingResize and client.error.len > 0:
           let
@@ -450,6 +446,10 @@ proc runFrontend*(app: App, connection: var Connection,
           page = MultiplayerMenu
           connectRequested = preferences.server.strip().len > 0 and
             (activeConnection == nil or not activeConnection.client.connected)
+          if frontendState.pendingInvite.len > 0:
+            invite = frontendState.pendingInvite
+            joinRequested = true
+            autoClaim = true
           lobbyUi = LobbyUi()
         of OpenSettings: page = SettingsMenu
         of ExitGame:

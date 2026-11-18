@@ -108,14 +108,15 @@ async function text(page,x,y,value) {
 }
 async function shot(peer,name) {
   await peer.page.bringToFront(); await peer.page.waitForTimeout(200);
-  await peer.page.screenshot({path:path.join(out,peer.role+'-'+name+'.png'),timeout:20000});
+  if (process.env.CAC_QA_SCREENSHOTS!=='0')
+    await peer.page.screenshot({path:path.join(out,peer.role+'-'+name+'.png'),timeout:20000});
 }
 async function status(peer) { return await peer.page.locator('#game-status').textContent(); }
 
 async function openPeer(browser,role) {
   const context=await browser.newContext({viewport,deviceScaleFactor:1});
   const page=await context.newPage();
-  const peer={role,context,page,messages:[],console:[]};
+  const peer={role,context,page,messages:[],console:[],websockets:0};
   peers.push(peer); report.peers.push({role,messages:peer.messages,console:peer.console});
   page.on('console',message=>{
     peer.console.push({type:message.type(),text:message.text()});
@@ -126,6 +127,7 @@ async function openPeer(browser,role) {
     console.error(role+': '+error);
   });
   page.on('websocket',socket=>{
+    peer.websockets++;
     for (const [event,direction] of [['framesent','out'],['framereceived','in']]) {
       socket.on(event,({payload})=>{
         try { peer.messages.push({at:Date.now(),direction,...decode(payload)}); }
@@ -133,11 +135,35 @@ async function openPeer(browser,role) {
       });
     }
   });
-  await page.goto(url,{waitUntil:'load',timeout:120000});
+  const launchUrl=new URL(url);
+  launchUrl.searchParams.set('server',server);
+  await page.goto(launchUrl.href,{waitUntil:'load',timeout:120000});
   await page.waitForFunction(()=>window.Module && document.querySelector('#loading')?.hidden,
     null,{timeout:120000});
+  await wait(role+' starts on the main menu with a server URL',async()=>
+    (await status(peer)).includes('/ HomeMenu'));
+  assert.equal(peer.messages.length,0,
+    'A server URL must not connect before choosing Multiplayer');
   await shot(peer,'home');
   return peer;
+}
+
+async function reloadFromLink(peer,room='') {
+  // Saved valid names must not allow URL parameters to bypass the main menu.
+  const launchUrl=new URL(url);
+  launchUrl.searchParams.set('server',server);
+  if(room) launchUrl.searchParams.set('room',room);
+  const before=peer.websockets;
+  await peer.page.goto(launchUrl.href,{waitUntil:'load',timeout:120000});
+  await peer.page.waitForFunction(()=>window.Module && document.querySelector('#loading')?.hidden,
+    null,{timeout:120000});
+  await wait(peer.role+' saved-name link opens HomeMenu',async()=>
+    (await status(peer)).includes('/ HomeMenu'));
+  await sleep(1200);
+  assert.equal(peer.websockets,before,'Saved-name links must not open any WebSocket');
+  const saved=await peer.page.evaluate(()=>JSON.parse(localStorage.getItem('Polyworld CaC:settings.json')));
+  assert.equal(saved.name,'QA '+peer.role);
+  step(peer.role+': '+(room?'server and room invite':'server-only link')+' stays at HomeMenu with saved valid name and no connection');
 }
 
 async function multiplayer(peer) {
@@ -175,7 +201,7 @@ async function localBattle(peer) {
     (await status(peer)).includes('Ready for your action.'),40000);
   assert.match(await status(peer),/2 players/);
   assert.match(await status(peer),/Tower Arena\./);
-  assert.match(await status(peer),/Active QA host/);
+  assert.ok((await status(peer)).includes('Active QA '+peer.role));
   await shot(peer,'single-player-battle');
   await peer.page.keyboard.press('Enter',{delay:140});
   await wait('local End Turn advanced battle',async()=>
@@ -271,20 +297,22 @@ async function main() {
       return;
     }
     await configureSettings(host);
+    await reloadFromLink(host);
     if (process.env.CAC_QA_SKIP_LOCAL!=='1') await localBattle(host);
     await multiplayer(host);
     const guest=await openPeer(browser,'guest');
     await configureSettings(guest);
-    await multiplayer(guest);
-    assert.notEqual(last(host,'Welcome').participant,last(guest,'Welcome').participant);
     await click(host.page,1349,472);
     await shot(host,'create-private');
     await click(host.page,1232,570);
     await wait('private room created',()=>last(host,'RoomState')?.room);
     assert.equal(last(host,'CreateRoom','out').public,false);
     const room=last(host,'RoomState').room; report.room=room;
-    await text(guest.page,1232,738,room);
-    await click(guest.page,1232,832);
+    await reloadFromLink(guest,room);
+    await localBattle(guest);
+    assert.equal(guest.websockets,0,'Local play must preserve invite without connecting');
+    await multiplayer(guest);
+    assert.notEqual(last(host,'Welcome').participant,last(guest,'Welcome').participant);
     await wait('guest joined',()=>last(guest,'RoomState')?.room===room);
     step('Distinct clients created and joined a private Polyworld room');
     assert.equal(last(host,'RoomState').seats.length,2);

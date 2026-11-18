@@ -43,6 +43,15 @@ proc cacIdentity*(): GameIdentity =
   GameIdentity(game: ReplayGame, gameplay: ReplayGameVersion.uint32,
     protocol: CacNetworkProtocol)
 
+proc lobbyError*(detail: string): string =
+  ## Explain readiness gates from relays that predate CaC host-start support.
+  case detail
+  of "Controllers must automatically prepare the current roster revision",
+      "Every controlling client must load the setup and be ready":
+    "This server needs the Cards and Casters update. Contact the server host."
+  else:
+    detail
+
 proc networkHash*(game: GameState): uint64 =
   ## Reuse the canonical replay hash, excluding presentation event queues.
   game.stateHash()

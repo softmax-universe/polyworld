@@ -367,10 +367,11 @@ const
   MineTicks* = 60'i32
     ## Ticks a peon spends hidden inside a gold mine.
   MinersPerMine* = 4'i32
-  WoodPerTrip* = 100'i32
+  WoodPerTrip* = 25'i32
+    ## Smaller loads keep nearby forests from funding an army with one worker.
   ChopTicks* = 80'i32
   WoodPerTree* = 400'i16
-    ## Four trips, after which the tile is removed from the map.
+    ## Total wood per tile; a full tree lasts sixteen worker loads.
   DepositTicks* = 5'i32
   MainMineGold* = 45_000'i32
   ExpansionMineGold* = 25_000'i32

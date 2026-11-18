@@ -535,14 +535,20 @@ block woodFlowsAndTreesFall:
   doAssert w.applyHarvest(LightPlayer, peon, treeIndex, 1),
     "a peon would not chop a tree"
 
-  let edits = w.terrainEdits.len
-  w.run(TickRate * 100)
+  let
+    edits = w.terrainEdits.len
+    trips = (int32(WoodPerTree) + WoodPerTrip - 1) div WoodPerTrip
+  for tick in 0 ..< TickRate * 25 * trips:
+    w.tickWorld(noDecisions)
+    doAssert w.units[w.unitIndex(peon)].carryWood <= WoodPerTrip,
+      "a woodcutter exceeded its carrying capacity"
+    if w.players[LightPlayer].woodGathered >= int32(WoodPerTree): break
   doAssert w.players[LightPlayer].wood > StartingWood,
-    "one hundred seconds of chopping produced no wood"
+    "chopping and returning to the hall produced no wood"
   let gained = w.players[LightPlayer].wood - StartingWood
   doAssert gained mod WoodPerTrip == 0, "wood arrived in a partial load"
   doAssert w.treeWood[treeIndex] == 0,
-    "a tree survived four full trips"
+    "a tree survived after its full wood supply was gathered"
   doAssert w.terrainEdits.len >= edits + 1,
     "felling a tree did not log a terrain edit"
   var felledAssigned = false

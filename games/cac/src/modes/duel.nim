@@ -1,4 +1,4 @@
-## The duel: two players across the courtyard. A client of the core that
+## The duel: two players across Tower Arena. A client of the core that
 ## presents its match with the shared app, table and HUD.
 import std/[math, options, os, random, strformat, times]
 when defined(takeScreenshot):
@@ -8,7 +8,7 @@ import opengl, pixie, silky, vmath, windy
 import ../core/sim, ../core/sessions, ../core/bots, ../core/eventtext
 import ../app, ../bench, ../ui/hud, ../scene/table, ../play,
   ../scene/cardrenderer, ../vfx/vfxrenderer, ../scene/post,
-  ../scene/courtyard, ../scene/placement,
+  ../scene/courtyard, ../scene/towerarena,
   ../ui/tuning, ../ui/matchmenu, ../ui/controls, ../replayer, ../audios
 import polyworld/[characters, chrome, menus, sounds, viewers]
 when defined(emscripten):
@@ -18,40 +18,19 @@ else:
 when PostPanelControls:
   import ../ui/postpanel
 
-const
-  BoardWidth = 18.0'f32
-  BoardDepth = 11.0'f32
-  DuelCamera = Placement(lateral: 0.00, height: 12.05, distance: 13.08,
-    pitch: 0.7659, yaw: 0.0000) # pitch 43.9 deg, yaw 0.0 deg
-  DuelPlayerHand = Placement(lateral: 0.00, height: 1.25, distance: 5.86,
-    pitch: 0.0000, yaw: 0.0000) # pitch 0.0 deg, yaw 0.0 deg
-  DuelOpponentHand = Placement(lateral: 0.00, height: 1.52, distance: 3.60,
-    pitch: 0.0000, yaw: 0.0000) # pitch 0.0 deg, yaw 0.0 deg
-  DuelSpell = Placement(lateral: 0.00, height: 1.60, distance: 0.35,
-    pitch: 0.0000, # 0.0 deg down, yaw 0.0 deg
-    yaw: 0.0000)
-    ## Where a played spell floats: above the board, just past its
-    ## caster's creature line.
-  HandCardRoll = -0.0684'f32 # About 4 degrees.
-
 type
   AppPhase = enum
     ChooseClasses
     PlayGame
 
-var activeCameraPlayer: proc(): int = proc(): int = 0
-  ## The player the camera sits behind, read live: bots and turn changes
-  ## flip it mid-frame, and a cached value would build poses facing the
-  ## old camera (a drawn card flew in upside down).
-
 when defined(cacLayoutTuning):
   # Build with -d:cacLayoutTuning to tune the layout live: Z/X pick what to
   # move, WASD/QE move it, T/G pitch it, F/H yaw it, Enter prints it.
   var
-    duelCamera = DuelCamera
-    duelPlayerHand = DuelPlayerHand
-    duelOpponentHand = DuelOpponentHand
-    duelSpell = DuelSpell
+    duelCamera = DefaultTowerArenaView.camera
+    duelPlayerHand = DefaultTowerArenaView.nearHand
+    duelOpponentHand = DefaultTowerArenaView.farHand
+    duelSpell = DefaultTowerArenaView.spell
     tuner = LayoutTuner()
   proc duelTuningTargets(): seq[TuningTarget] =
     @[tuningTarget("player's hand", duelPlayerHand),
@@ -60,99 +39,16 @@ when defined(cacLayoutTuning):
       tuningTarget("played spell", duelSpell)]
 else:
   const
-    duelCamera = DuelCamera
-    duelPlayerHand = DuelPlayerHand
-    duelOpponentHand = DuelOpponentHand
-    duelSpell = DuelSpell
+    duelCamera = DefaultTowerArenaView.camera
+    duelPlayerHand = DefaultTowerArenaView.nearHand
+    duelOpponentHand = DefaultTowerArenaView.farHand
+    duelSpell = DefaultTowerArenaView.spell
 
-proc seatSide(playerIndex: int): float32 =
-  if playerIndex == 0: 1.0'f32 else: -1.0'f32
-
-proc cardYaw(playerIndex: int): float32 =
-  if activeCameraPlayer() == 0: 0.0'f32 else: PI.float32
-
-proc avatarPosition(playerIndex: int): Vec3 =
-  vec3(
-    if playerIndex == 0: -7.0'f32 else: 7.0'f32,
-    0.02'f32,
-    playerIndex.seatSide() * 1.65'f32
-  )
-
-proc handPoses(
-    playerIndex,
-    count: int,
-    cameraSide: float32
-): seq[CardPose] =
-  let
-    side = playerIndex.seatSide()
-    hand = (
-      if side == cameraSide: duelPlayerHand else: duelOpponentHand
-    ).mirrored(side)
-    camera = duelCamera.mirrored(cameraSide)
-    # The near and far hands need different pitches to face the same camera.
-    pitch = arctan2(
-      camera.distance - hand.distance,
-      camera.height - hand.height
-    ) + hand.pitch
-  fanPoses(count, vec3(hand.lateral, hand.height, hand.distance), pitch,
-    cameraSide, playerIndex.cardYaw() + cameraSide * hand.yaw, HandCardRoll)
-
-proc ownerYaw(playerIndex: int): float32 =
-  ## A card on a player's side reads the right way up from their seat.
-  if playerIndex == 0: 0.0'f32 else: PI.float32
-
-proc boardPoses(playerIndex, count: int): seq[CardPose] =
-  ## Each player's minions face their owner.
-  if count <= 0:
-    return
-  let
-    spacing =
-      if count == 1:
-        0.0'f32
-      else:
-        min(1.75'f32, 9.0'f32 / (count - 1).float32)
-    start = -spacing * (count - 1).float32 * 0.5'f32
-    z = playerIndex.seatSide() * 1.25'f32
-    # A crowded row overlaps: each card lies a little over the one before.
-    lift = if spacing < CardWidth: RowOverlapLift else: 0'f32
-  result.setLen(count)
-  for i in 0 ..< count:
-    result[i] = CardPose(
-      position: vec3(start + spacing * i.float32, CardPlaneY + lift * i.float32,
-        z),
-      yaw: playerIndex.ownerYaw()
-    )
-
-proc spellPose(playerIndex: int): CardPose =
-  ## A played spell floats over its caster's half, facing its owner.
-  let
-    side = playerIndex.seatSide()
-    spell = duelSpell.mirrored(side)
-  CardPose(
-    position: vec3(spell.lateral, spell.height, spell.distance),
-    yaw: playerIndex.ownerYaw() + side * duelSpell.yaw,
-    pitch: duelSpell.pitch
-  )
-
-proc deckPose(playerIndex: int): CardPose =
-  CardPose(
-    position: vec3(
-      -7.25,
-      PileCardY,
-      playerIndex.seatSide() * 3.7'f32
-    ),
-    yaw: playerIndex.cardYaw()
-  )
-
-proc discardPose(playerIndex: int): CardPose =
-  CardPose(
-    position: vec3(
-      7.25,
-      PileCardY,
-      playerIndex.seatSide() * 3.7'f32
-    ),
-    yaw: playerIndex.cardYaw()
-  )
+proc duelView(): TowerArenaView =
+  ## Shares the current tuning with every pose on the two-player table.
+  TowerArenaView(camera: duelCamera, nearHand: duelPlayerHand,
+    farHand: duelOpponentHand, spell: duelSpell,
+    handRoll: DefaultTowerArenaView.handRoll)
 
 proc drawCardReadingView(
     sk: Silky,
@@ -186,7 +82,7 @@ proc drawCardReadingView(
 proc runDuel*(app: App) =
   ## Presents a duel using public replay names when they are available.
   bindApp(app)
-  app.setBattlefield(2, ringMode = false)
+  app.setBattlefield(2)
   let names = if app.replay != nil: app.replay.playerNames() else: @[]
   var
     phase = ChooseClasses
@@ -229,26 +125,7 @@ proc runDuel*(app: App) =
     if sessionOptions.human or phase == ChooseClasses: 0
     else: game.currentPlayer
 
-  activeCameraPlayer = cameraPlayer
-
-  proc handVisible(owner: int): bool =
-    owner == cameraPlayer()
-
-  let duelLayout = TableLayout(
-    handPoses: proc(player, count: int): seq[CardPose] =
-      handPoses(player, count, cameraPlayer().seatSide()),
-    boardPoses: boardPoses,
-    deckPose: deckPose,
-    discardPose: discardPose,
-    spellPose: spellPose,
-    heroPosition: avatarPosition,
-    handVisible: handVisible,
-    overBoard: proc(point: Vec3): bool =
-      abs(point.x) <= BoardWidth * 0.5'f32 and
-        abs(point.z) <= BoardDepth * 0.5'f32,
-    heroLungePoint: proc(fromPose: CardPose, hero: Vec3): Vec3 =
-      # Toward the middle of the hero's side, clear of the other cards.
-      vec3(fromPose.position.x * 0.3, CardPlaneY + 0.3, hero.z * 0.7))
+  var duelLayout = towerTable(duelView, cameraPlayer)
 
   proc humanTurn(): bool =
     sessionOptions.human and botVms[game.currentPlayer] == nil
@@ -381,10 +258,10 @@ proc runDuel*(app: App) =
         play.pendingTargeting = true
         if creatureTargetDemo:
           let
-            sourcePose = handPoses(0, 1, 1.0'f32)[0]
+            sourcePose = duelLayout.handPoses(0, 1)[0]
             minionId = game.playMinion(0)
             destinationPose =
-              boardPoses(0, game.players[0].board.len)[^1]
+              duelLayout.boardPoses(0, game.players[0].board.len)[^1]
           play.animations.add newCardAnimation(
             play.pendingCard,
             game.players[0].heroClass,
@@ -401,14 +278,14 @@ proc runDuel*(app: App) =
       elif getEnv("CAC_DEMO_DISCARD_ANIMATION") == "1":
         let
           card = game.players[0].hand[0]
-          sourcePose = handPoses(0, 1, 1.0'f32)[0]
+          sourcePose = duelLayout.handPoses(0, 1)[0]
         if game.playCard(0, heroChoice(1)):
           play.animations.add newCardAnimation(
             card,
             game.players[0].heroClass,
             sourcePose,
             stackTopPose(
-              discardPose(0),
+              duelLayout.discardPose(0),
               game.players[0].discardPile.len
             ),
             suppressDiscardOwner = 0
@@ -737,10 +614,12 @@ proc runDuel*(app: App) =
       tuner.tune(window, dt, duelTuningTargets())
       if window.buttonPressed[KeyEnter]:
         echo &"""
-  DuelCamera = {duelCamera.literal()}
-  DuelPlayerHand = {duelPlayerHand.literal()}
-  DuelOpponentHand = {duelOpponentHand.literal()}
-  DuelSpell = {duelSpell.literal()}"""
+  DefaultTowerArenaView = TowerArenaView(
+    camera: {duelCamera.literal()},
+    nearHand: {duelPlayerHand.literal()},
+    farHand: {duelOpponentHand.literal()},
+    spell: {duelSpell.literal()},
+    handRoll: {DefaultTowerArenaView.handRoll})"""
     animationTime += dt
     play.animations.advanceAnimations(dt)
     play.discardFlights.advanceAnimations(dt)
@@ -771,7 +650,7 @@ proc runDuel*(app: App) =
       aspect = window.size.x.float32 / max(window.size.y.float32, 1)
       currentSide =
         if phase == PlayGame:
-          cameraPlayer().seatSide()
+          cameraPlayer().towerSide()
         else:
           1.0'f32
       cameraEye =
@@ -965,14 +844,15 @@ proc runDuel*(app: App) =
             attackChoices, attackHoverTarget)
         glStencilFunc(GL_ALWAYS, (playerIndex + 1).GLint, 0xff)
         if look.targetable:
-          vfx.addTargetRing(avatarPosition(playerIndex) + vec3(0, 0.04, 0),
+          vfx.addTargetRing(
+            duelLayout.heroPosition(playerIndex) + vec3(0, 0.04, 0),
             cameraEye, 0.95, if look.hovered: 1.1'f32 else: 0.28'f32)
         let pose = heroClip(playerIndex, player.heroClass,
           play.deathClock(game, playerIndex, animationTime), animationTime)
         drawCharacter(
           scene,
           models[playerIndex][player.heroClass],
-          avatarPosition(playerIndex),
+          duelLayout.heroPosition(playerIndex),
           if playerIndex == 0: PI.float32 else: 0,
           pose.clip,
           pose.time,
@@ -1170,4 +1050,4 @@ proc runDuel*(app: App) =
     stopSounds()
     window.onFrame = nil
     window.onButtonPress = nil
-    activeCameraPlayer = nil
+    duelLayout = TableLayout()

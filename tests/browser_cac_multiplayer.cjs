@@ -174,6 +174,7 @@ async function localBattle(peer) {
   await wait('local human battle ready',async()=>
     (await status(peer)).includes('Ready for your action.'),40000);
   assert.match(await status(peer),/2 players/);
+  assert.match(await status(peer),/Tower Arena\./);
   assert.match(await status(peer),/Active QA host/);
   await shot(peer,'single-player-battle');
   await peer.page.keyboard.press('Enter',{delay:140});
@@ -190,16 +191,78 @@ async function localBattle(peer) {
   step('Single-player setup launched, accepted End Turn and returned to the main menu');
 }
 
+async function confirmAction(peer, command) {
+  const seat=peers.indexOf(peer);
+  assert.equal(command.seat,seat);
+  assert.equal(command.player,seat);
+  for (const receiver of peers) {
+    await wait(receiver.role+' confirmed '+peer.role+' action '+command.sequence,()=>
+      receiver.messages.some(message=>message.direction==='in' &&
+        message.kind==='TickPacket' && message.commands.some(receipt=>
+          receipt.participant===last(peer,'Welcome').participant &&
+          receipt.sequence===command.sequence && receipt.payload===command.payload)));
+  }
+  const receipt=peer.messages.find(message=>message.direction==='in' &&
+    message.kind==='TickPacket' && message.commands.some(candidate=>
+      candidate.sequence===command.sequence && candidate.seat===seat));
+  report.peers[seat].actionTick=receipt.tick;
+}
+
+async function playTowerCards(host, guest) {
+  // The compact table's near hand spans the bottom center from either seat.
+  // Try visible cards through normal clicks, and target the opposite hero when
+  // needed. Later turns give expensive starting hands enough energy to play.
+  const played=new Set();
+  for (let turn=0;turn<6 && played.size<2;turn++) {
+    const peer=(await status(host)).includes('Active QA host.') ? host : guest;
+    await peer.page.bringToFront();
+    await wait(peer.role+' card input ready',async()=>
+      (await status(peer)).includes('Ready for your action.'),30000);
+    if (!played.has(peer.role)) {
+      const before=peer.messages.length;
+      const cardCommand=()=>peer.messages.slice(before).find(message=>
+        message.direction==='out' && message.kind==='SubmitCommand' &&
+        message.category===0 && message.action===1);
+      for (const x of [1000,900,800,700,600,500,400]) {
+        await click(peer.page,x,745);
+        if (!cardCommand()) await click(peer.page,1250,330);
+        if (cardCommand()) break;
+        await peer.page.mouse.click(1100,760,{button:'right',delay:120});
+      }
+      if (cardCommand()) {
+        await confirmAction(peer,cardCommand());
+        played.add(peer.role);
+        await sleep(1200);
+        await shot(peer,'tower-card-play');
+        step(peer.role+': Tower Arena card click confirmed by both clients');
+      }
+    }
+    await peer.page.mouse.click(1100,760,{button:'right',delay:120});
+    await wait(peer.role+' ready after card play',async()=>
+      (await status(peer)).includes('Ready for your action.'),30000);
+    const before=peer.messages.length;
+    await peer.page.keyboard.press('Enter',{delay:140});
+    await wait(peer.role+' next turn submission',()=>peer.messages.slice(before).some(message=>
+      message.direction==='out' && message.kind==='SubmitCommand' && message.action===3));
+    await confirmAction(peer,last(peer,'SubmitCommand','out'));
+    const nextName='QA '+(peer===host?'guest':'host');
+    for (const receiver of peers) await wait(receiver.role+' next card turn',async()=>
+      (await status(receiver)).includes('Active '+nextName));
+  }
+  assert.deepEqual([...played].sort(),['guest','host'],
+    'Both mirrored Tower Arena seats must accept a real card click');
+}
+
 async function main() {
   const browser=await chromium.launch({channel:'chromium',headless:process.env.CAC_QA_HEADLESS!=='0',
     executablePath:process.env.CAC_QA_CHROMIUM || undefined,args:[
-    '--disable-background-timer-throttling','--disable-backgrounding-occluded-windows',
+    '--mute-audio','--disable-background-timer-throttling','--disable-backgrounding-occluded-windows',
     '--disable-renderer-backgrounding','--enable-unsafe-swiftshader']});
   const watchdog=setTimeout(()=>{
     report.error='Global acceptance deadline'; process.exitCode=1;
     fs.writeFileSync(path.join(out,'report.json'),JSON.stringify(report,null,2));
     browser.close();
-  },420000);
+  },600000);
   try {
     const host=await openPeer(browser,'host');
     if (process.env.CAC_QA_INSPECT==='1') {
@@ -247,7 +310,10 @@ async function main() {
     await click(host.page,1357,914);
     for (const peer of peers) await wait(peer.role+' BeginMatch',()=>last(peer,'BeginMatch'));
     await sleep(3000);
-    for (const peer of peers) await shot(peer,'started');
+    for (const peer of peers) {
+      assert.match(await status(peer),/Tower Arena\./);
+      await shot(peer,'started');
+    }
     step('Host started both human seats with nobody ready');
     const first=(await status(host)).includes('Active QA host.') ? host : guest;
     const order=[first,first===host?guest:host];
@@ -278,6 +344,7 @@ async function main() {
       await sleep(1700); await shot(peer,'after-end-turn');
       step(peer.role+': End Turn acknowledged identically by both clients');
     }
+    await playTowerCards(host,guest);
     const finalTick=Math.max(...report.peers.map(peer=>peer.actionTick));
     await wait('matching post-action hash',()=>host.messages.some(hostHash=>
       hostHash.direction==='out' && hostHash.kind==='ReportHash' && hostHash.tick>finalTick &&
@@ -333,12 +400,51 @@ async function main() {
       guest.messages.some(guestHash=>guestHash.direction==='out' && guestHash.kind==='ReportHash' &&
         guestHash.match===hostHash.match && guestHash.tick===hostHash.tick && guestHash.hash===hostHash.hash)),30000);
     for (const peer of peers) {
+      assert.match(await status(peer),/Tower Arena\./);
       await shot(peer,'rematch');
       assert.deepEqual(peer.console.filter(entry=>['decode','pageerror'].includes(entry.type)),[]);
       assert.ok(!peer.messages.some(message=>message.kind==='RoomState'&&message.phase===4),
         'No desynchronization during return and rematch');
     }
     step('Ready toggled on and off cosmetically; host started a synchronized rematch with guest unready');
+    await host.page.keyboard.press('Escape',{delay:120});
+    await click(host.page,551,571);
+    for (const peer of peers) await wait(peer.role+' returned for ring setup',async()=>
+      (await status(peer)).includes('/ LobbyMenu'));
+    const towerMatch=last(host,'BeginMatch').match;
+    await click(host.page,1438,368);
+    await wait('third seat published',()=>last(host,'RoomState').seats.length===3);
+    await click(host.page,225,790);
+    await wait('third seat filled with a bot',()=>last(host,'RoomState').seats.every(seat=>seat.owner!==0));
+    await click(host.page,1357,914);
+    for (const peer of peers) {
+      await wait(peer.role+' three-player match',()=>last(peer,'BeginMatch')?.match>towerMatch);
+      await wait(peer.role+' Ring Arena rendered',async()=>
+        /3 players.*Ring Arena\./.test(await status(peer)),30000);
+      await shot(peer,'ring-three-player');
+    }
+    step('Three-player rematch switches both clients back to Ring Arena');
+    await host.page.keyboard.press('Escape',{delay:120});
+    await click(host.page,551,571);
+    for (const peer of peers) await wait(peer.role+' returned from Ring Arena',async()=>
+      (await status(peer)).includes('/ LobbyMenu'));
+    const ringMatch=last(host,'BeginMatch').match;
+    await click(host.page,1220,368);
+    await wait('two seats restored',()=>last(host,'RoomState').seats.length===2);
+    await click(host.page,1357,914);
+    for (const peer of peers) {
+      await wait(peer.role+' restored two-player match',()=>last(peer,'BeginMatch')?.match>ringMatch);
+      await wait(peer.role+' Tower Arena restored',async()=>
+        /2 players.*Tower Arena\./.test(await status(peer)),30000);
+      await sleep(2500);
+      await peer.page.mouse.move(757,200);
+      await shot(peer,'tower-restored');
+      assert.deepEqual(peer.console.filter(entry=>['error','decode','pageerror'].includes(entry.type)),[]);
+      assert.ok(!peer.messages.some(message=>message.kind==='Failure' ||
+        (message.kind==='RoomState'&&message.phase===4)),
+        'No protocol failures or desynchronization while changing arenas');
+    }
+    step('Returning from three to two seats restores Tower Arena on both clients');
     report.passed=true;
     step('PASS: real human inputs and later authoritative hashes agree');
   } catch (error) {

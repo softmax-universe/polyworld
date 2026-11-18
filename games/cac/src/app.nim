@@ -6,7 +6,7 @@ import chroma, opengl, pixie, silky, vmath, windy
 import core/sim, core/sessions, ui/cardfaces, scene/cardrenderer,
   vfx/vfxrenderer, scene/post, scene/table, scene/courtyard, scene/heroes,
   ui/hud, ui/heroselect, ui/frontendassets, scene/heroselectstage, paths,
-  replayer, net/multiplayer, scene/ring
+  replayer, net/multiplayer
 import polyworld/[assets, characters, chargen, connections,
   menus, viewers]
 
@@ -38,7 +38,6 @@ type
     playerNames*: seq[string]
     returnToMenu*: bool
     battlefieldPlayers: int
-    battlefieldRing: bool
     captureFramebuffer*: GLuint
     captureTexture, captureDepth: GLuint
     captureSize: IVec2
@@ -191,8 +190,7 @@ proc initApp*(sessionOptions: SessionOptions): App =
     solid: solid, cards: cardSurfaces, vfx: vfx, post: post,
     courtyard: courtyard, selectionStage: selectionStage, scene: scene, models: models,
     idleClips: idleClips, deathClips: deathClips,
-    battlefieldPlayers: sessionOptions.playerCount,
-    battlefieldRing: sessionOptions.playerCount > PlayerCount)
+    battlefieldPlayers: sessionOptions.playerCount)
   try:
     result.preferences = readPreferences(AppName)
   except MenusError, IOError, OSError:
@@ -201,24 +199,15 @@ proc initApp*(sessionOptions: SessionOptions): App =
   result.preferences.applyPreferences(window,
     configureDisplay = not defined(takeScreenshot))
 
-proc setBattlefield*(app: App, playerCount: int, ringMode = true) =
-  ## Switches arena geometry without retaining the previous GPU resources.
-  if app.battlefieldPlayers == playerCount and
-      app.battlefieldRing == ringMode:
+proc setBattlefield*(app: App, playerCount: int) =
+  ## Uses Tower Arena for two players and the ring for larger matches.
+  if app.battlefieldPlayers == playerCount:
     return
-  var replacement: CourtyardRenderer
-  if ringMode:
-    let layout = buildMultiplayerLayout(playerCount)
-    replacement = initCourtyardRenderer(
-      buildMultiplayerCourtyardMesh(layout), playerCount, layout.outerRadius,
-      layout.lampRadius, layout.lampHalfAngle)
-  else:
-    replacement = initCourtyardRenderer(playerCount)
+  var replacement = initCourtyardRenderer(playerCount)
   replacement.material = app.courtyard.material
   app.courtyard.dispose()
   app.courtyard = replacement
   app.battlefieldPlayers = playerCount
-  app.battlefieldRing = ringMode
 
 proc closeCapture*(app: App) =
   ## Releases the hidden capture target while the window context is alive.

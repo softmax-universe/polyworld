@@ -1,4 +1,4 @@
-## Local and network matches share the ring presentation for two to seven seats.
+## Local and network matches share Tower Arena or the multiplayer ring.
 import std/math
 import ../core/sim, ../core/bots, ../core/eventtext, ../scene/ring
 export ring
@@ -127,7 +127,7 @@ when not defined(headless):
   import opengl, silky, vmath, windy
   import ../app, ../bench, ../ui/hud, ../scene/table, ../play,
     ../scene/cardrenderer,
-    ../vfx/vfxrenderer, ../scene/post, ../scene/courtyard,
+    ../vfx/vfxrenderer, ../scene/post, ../scene/courtyard, ../scene/towerarena,
     ../scene/heroes, ../ui/tuning, ../ui/matchmenu, ../ui/controls, ../audios,
     ../net/multiplayer as networkplay
   import polyworld/[characters, chrome, connections, menus,
@@ -227,8 +227,8 @@ when not defined(headless):
         length(vec2(point.x, point.z)) <= layout.outerRadius)
 
   proc runMultiplayer*(app: App) =
-    ## Presents a local, replay, or confirmed network match around the ring.
-    ## Each human faces their own balcony; spectators follow the active seat.
+    ## Presents two players in Tower Arena and larger matches on the ring.
+    ## Each human faces their own seat; spectators follow the active seat.
     bindApp(app)
     let
       online = app.network != nil
@@ -236,11 +236,12 @@ when not defined(headless):
         if online: app.network.game.playerCount
         elif app.configuredSeats.len > 0: app.configuredSeats.len
         else: sessionOptions.playerCount
+      towerArena = playerCount == 2
       layout = buildMultiplayerLayout(playerCount)
       names = if app.replay != nil: app.replay.playerNames()
         elif online: app.network.playerNames
         else: app.playerNames
-    app.setBattlefield(playerCount, ringMode = true)
+    app.setBattlefield(playerCount)
     var
       previewTime = 0.0'f32
       hudTime = 0.0'f
@@ -365,11 +366,19 @@ when not defined(headless):
       # and every other balcony's is an opponent's. Enter prints a row.
       var
         tuner = LayoutTuner()
+        towerView = DefaultTowerArenaView
         previewView = layout.multiplayerView(
           window.size.x.float32 / max(window.size.y.float32, 1))
-      tuner.announce([tuningTarget("player's hand", previewView.nearHand),
-        tuningTarget("opponent's hand", previewView.farHand),
-        tuningTarget("camera", previewView.camera)])
+      if towerArena:
+        tuner.announce([tuningTarget("player's hand", towerView.nearHand),
+          tuningTarget("opponent's hand", towerView.farHand),
+          tuningTarget("camera", towerView.camera)])
+      else:
+        tuner.announce([tuningTarget("player's hand", previewView.nearHand),
+          tuningTarget("opponent's hand", previewView.farHand),
+          tuningTarget("camera", previewView.camera)])
+    else:
+      let towerView = DefaultTowerArenaView
     window.onButtonPress = proc(button: Button) =
       ## Keep the shared UI size shortcuts available during a battle.
       discard window.scaleKey(button, app.preferences, sk.uiScale, AppName)
@@ -409,11 +418,17 @@ when not defined(headless):
       play.activeVfx.advance(previewDt)
       let aspect = window.size.x.float32 / max(window.size.y.float32, 1)
       when defined(cacLayoutTuning):
-        tuner.tune(window, previewDt,
-          [tuningTarget("player's hand", previewView.nearHand),
-           tuningTarget("opponent's hand", previewView.farHand),
-           tuningTarget("camera", previewView.camera)])
-        if window.buttonPressed[KeyEnter]:
+        if towerArena:
+          tuner.tune(window, previewDt,
+            [tuningTarget("player's hand", towerView.nearHand),
+             tuningTarget("opponent's hand", towerView.farHand),
+             tuningTarget("camera", towerView.camera)])
+        else:
+          tuner.tune(window, previewDt,
+            [tuningTarget("player's hand", previewView.nearHand),
+             tuningTarget("opponent's hand", previewView.farHand),
+             tuningTarget("camera", previewView.camera)])
+        if not towerArena and window.buttonPressed[KeyEnter]:
           echo previewView.tunedRow(layout.playerCount)
       else:
         let previewView = layout.multiplayerView(aspect)
@@ -427,8 +442,17 @@ when not defined(headless):
       sk.mousePos = window.mousePos.vec2 / max(sk.uiScale, 0.01'f32)
       when PostPanelControls:
         uiCapturesMouse = mouseOverPostPanel(sk.mousePos)
-      let table = seatTable(layout, previewView, match.viewedSeat,
-        match.humanSeat, hideHands = online and match.humanSeat < 0)
+      var table: TableLayout
+      if towerArena:
+        table = towerTable(proc(): TowerArenaView = towerView,
+          proc(): int = match.viewedSeat)
+        table.handVisible = proc(player: int): bool =
+          (not online or match.humanSeat >= 0) and player == match.viewedSeat
+        table.drawVisible = proc(player: int): bool =
+          player == match.humanSeat
+      else:
+        table = seatTable(layout, previewView, match.viewedSeat,
+          match.humanSeat, hideHands = online and match.humanSeat < 0)
       networkTable = table
       if online:
         app.connection.pump()
@@ -581,12 +605,16 @@ when not defined(headless):
                 creatureChoice(3, footsoldier))
           else: discard
       let
-        camera = previewView.camera
+        cameraSide = if towerArena and not choosingClasses:
+          towerSide(match.viewedSeat) else: 1.0'f
+        camera = if towerArena: towerView.camera else: previewView.camera
         eye =
           if choosingClasses: classChoiceEye(aspect)
+          elif towerArena: camera.seatEye(cameraSide)
           else: camera.eye
         target =
           if choosingClasses: classChoiceTarget
+          elif towerArena: camera.seatTarget(cameraSide)
           else: camera.lookPoint
         view = lookAt(eye, target, vec3(0, 1, 0))
         farPlane = max(CameraFar, length(eye) * 3)
@@ -598,7 +626,7 @@ when not defined(headless):
           else: none(HeroClass)
         # The balconies, their cards and heroes render through the stage
         # turn; the center island and the sky stay put.
-        stageYaw = if choosingClasses: 0'f32 else: orbit.yaw
+        stageYaw = if choosingClasses or towerArena: 0'f else: orbit.yaw
         stage = stageRotation(stageYaw)
         stageView = view * stage
         stageVp = projection * stageView
@@ -733,7 +761,7 @@ when not defined(headless):
         selectionStage.draw(vp, eye, environmentTime, 1)
         selectionStage.drawSky(vp, eye, environmentTime, brightness = 0.22)
       else:
-        courtyard.draw(vp, eye, environmentTime, 1, stageYaw = stageYaw)
+        courtyard.draw(vp, eye, environmentTime, cameraSide, stageYaw = stageYaw)
         courtyard.drawSky(vp, eye, environmentTime)
         benchStart(CardsBuild)
         addTableCards(solid, cardSurfaces, vfx, sk, play, match.game, table,
@@ -748,7 +776,7 @@ when not defined(headless):
         cardSurfaces.draw(sk, stageVp)
         benchStop(CardsDraw)
       beginCharacters(scene, window, stageView, projection, stageEye)
-      scene.lightLikeCourtyard(1)
+      scene.lightLikeCourtyard(cameraSide)
       if choosingClasses:
         drawClassHeroes(classHover, previewTime, eye)
       else:
@@ -778,7 +806,7 @@ when not defined(headless):
           selectionStage.draw(vp, eye, environmentTime, 1,
             normalsOnly = true, normalView = view)
         else:
-          courtyard.draw(vp, eye, environmentTime, 1,
+          courtyard.draw(vp, eye, environmentTime, cameraSide,
             normalsOnly = true, normalView = view, stageYaw = stageYaw)
         post.endMaterialNormals()
       post.applyOcclusion(projection)
@@ -786,6 +814,8 @@ when not defined(headless):
         if match.humanSeat >= 0: finishRect(window).origin.y - 18
         elif app.replay != nil: hudSize(window).y - ReplayBarHeight - 18
         else: hudSize(window).y - 18
+      let readingRect = if towerArena: cardReadingRect(window)
+        else: cardReadingColumnRect(window, panelsBottom)
       if not choosingClasses:
         for seat in 0 ..< match.seats.len:
           vfx.drawCharacterFlash(seat + 1,
@@ -795,7 +825,7 @@ when not defined(headless):
           hoveredTarget, stageEye, hudTime)
         vfx.addEffects(play.activeVfx, stageEye)
         vfx.draw(stageVp)
-        if not menu.visible and not inspected.found:
+        if not towerArena and not menu.visible and not inspected.found:
           # The current player's panel glows like a hovered card. The
           # panels and their glow hide while the inspector is open.
           vfx.clear()
@@ -822,23 +852,28 @@ when not defined(headless):
           if picked.isSome:
             startMatch(some(precon(picked.get)))
         else:
-          # The inspector takes the panels' place while it is open.
-          if inspected.found:
-            discard sk.drawCardReading(
-              cardReadingColumnRect(window, panelsBottom), inspected.card,
-              inspected.power, inspected.toughness, inspected.rules,
-              inspected.extraCost)
-          else:
+          if towerArena:
+            for seat in 0 .. 1:
+              sk.drawPlayerPanel(window, match.game, seat,
+                match.humanSeat >= 0, hudTime, names)
+          elif not inspected.found:
             sk.drawPlayerPanelColumn(window, match.seats, match.current,
               match.humanSeat, panelsBottom, hudTime, names)
-          # The turn header and prompts center on the space left of the
-          # panels.
+          if inspected.found:
+            discard sk.drawCardReading(
+              readingRect, inspected.card,
+              inspected.power, inspected.toughness, inspected.rules,
+              inspected.extraCost)
           let
             columnX = playerPanelColumnX(window)
-            centerX = columnX * 0.5'f32
+            centerX = if towerArena: hudSize(window).x * 0.5'f
+              else: columnX * 0.5'f
+            statusWidth = if towerArena:
+              hudSize(window).x - (PlayerPanelWidth + 52) * 2
+              else: columnX - 104
           sk.drawTurnHeader(
             centerX,
-            min(920'f32, columnX - 104),
+            min(920'f, statusWidth),
             match.turnNumber,
             match.turnLabel(names),
             match.humanTurn,
@@ -862,7 +897,7 @@ when not defined(headless):
             sk.drawPileTooltip(window, hoveredPile(window, stageVp, match.game,
               play, table, viewer = match.viewedSeat, hoverIndex = hoverIndex,
               hoveredBoard = hoveredBoard, attackChoices = attackChoices),
-              stageVp, avoid = cardReadingColumnRect(window, panelsBottom),
+              stageVp, avoid = readingRect,
               avoiding = inspected.found)
           if not play.attackActive:
             sk.drawMatchResult(window, play, match.game, match.humanSeat,
@@ -893,6 +928,7 @@ when not defined(headless):
       when defined(emscripten):
         # The same summary as the duel's, one line per seat.
         var summary = &"Multiplayer match: {layout.playerCount} players. " &
+          (if towerArena: "Tower Arena. " else: "Ring Arena. ") &
           (if app.replay != nil: "Replay. "
            elif (if choosingClasses: sessionOptions.human
                  else: match.humanSeat >= 0): "Human player. "
@@ -952,3 +988,4 @@ when not defined(headless):
       play.submitAction = nil
       if online:
         app.network.onAction = nil
+      networkTable = TableLayout()

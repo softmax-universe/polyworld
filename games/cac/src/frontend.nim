@@ -754,7 +754,8 @@ proc runFrontend*(app: App, connection: var Connection,
             elif online and matchName.len > 96: "Room name is too long."
             else: "Two to seven players. Empty slots sit out.",
             options + vec2(0, 382), width, tint = LobbyMuted)
-          sk.lobbyLabel("Pick a slot to play or choose a bot policy.",
+          sk.lobbyLabel(if occupied <= 2: "Map: Tower Arena"
+            else: "Map: Ring Arena",
             options + vec2(0, 422), width, tint = LobbyMuted)
           sk.lobbyLabel(if online: "Ready is optional. The host can start anytime."
             else: "Clear your human slot to watch the bots.",

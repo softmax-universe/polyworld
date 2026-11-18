@@ -26,10 +26,10 @@ type
     scroll*: float32
     focusRequested*: bool
     minimapPanning*: bool
-    voiceEnabled*, voiceConnected*, voiceConnecting*: bool
-    voiceListening*, voiceSpeaking*, voiceMuted*: bool
+    voiceEnabled*, voiceHasKey*, conversationMode*: bool
+    voiceConnected*, voiceConnecting*, voiceListening*, voiceSpeaking*: bool
     voiceStatus*, voiceError*: string
-    voiceToggleRequested*, voiceMuteRequested*, voiceReconnectRequested*: bool
+    textModeRequested*, conversationModeRequested*: bool
     cursor: int
     selected: bool
     inputScroll: float32
@@ -414,13 +414,18 @@ proc voiceButton(
   window: Window,
   panel: GameUiPanel,
   text: string,
-  enabled = true
+  enabled = true,
+  selected = false
 ): bool =
   ## Reserves an exact voice-control hit area without overlapping the input.
   let over = panel.contains(window.mousePos.vec2 / sk.uiScale)
   sk.plate(panel,
-    if over and enabled: rgbx(110, 91, 51, 130)
+    if selected: rgbx(110, 91, 51, 180)
+    elif over and enabled: rgbx(110, 91, 51, 130)
     else: rgbx(0, 0, 0, 150))
+  if selected:
+    sk.drawRect(panel.origin + vec2(0, panel.size.y - 2),
+      vec2(panel.size.x, 2), rgbx(225, 184, 79, 255))
   sk.drawLabel(text, panel.origin, panel.size, Ink, "Hud", CenterAlign)
   enabled and over and window.buttonPressed[MouseLeft]
 
@@ -430,36 +435,31 @@ proc drawVoice(
   ui: var ChatUi,
   history: var GameUiPanel
 ) =
-  ## Places voice controls beneath the transcript while keeping its draft intact.
+  ## Switches conversation modes while preserving the typed draft and focus.
   if not ui.voiceEnabled:
     return
   let
     height = min(30'f, history.size.y)
     origin = history.origin + vec2(0, history.size.y - height)
-    talk = GameUiPanel(origin: origin, size: vec2(66, height))
-    mute = GameUiPanel(origin: origin + vec2(72, 0), size: vec2(88, height))
+    text = GameUiPanel(origin: origin, size: vec2(66, height))
+    conversation = GameUiPanel(origin: origin + vec2(72, 0),
+      size: vec2(132, height))
   history.size.y = max(0'f, history.size.y - height - 6)
-  if sk.voiceButton(window, talk,
-    if ui.voiceListening: "Finish" else: "Talk",
-    ui.voiceConnected or ui.voiceListening):
-      ui.voiceToggleRequested = true
-  if sk.voiceButton(window, mute,
-    if ui.voiceMuted: "Voice off" else: "Voice on"):
-      ui.voiceMuteRequested = true
-  var statusX = 168'f
-  if not ui.voiceConnected and not ui.voiceConnecting:
-    let retry = GameUiPanel(origin: origin + vec2(statusX, 0),
-      size: vec2(58, height))
-    if sk.voiceButton(window, retry, "Retry"):
-      ui.voiceReconnectRequested = true
-    statusX += 66
+  if sk.voiceButton(window, text, "Text", selected = not ui.conversationMode):
+    ui.textModeRequested = true
+  if sk.voiceButton(window, conversation, "Conversation",
+    enabled = ui.voiceHasKey and not ui.voiceConnecting,
+    selected = ui.conversationMode):
+      ui.conversationModeRequested = true
+  let statusX = 212'f
   let status =
-    if ui.voiceStatus.len > 0: ui.voiceStatus
-    elif ui.voiceConnecting: "Connecting voice..."
-    elif ui.voiceListening: "Listening..."
+    if not ui.voiceHasKey: "Conversation requires an OpenAI key"
+    elif ui.voiceStatus.len > 0: ui.voiceStatus
+    elif ui.voiceConnecting: "Connecting conversation..."
     elif ui.voiceSpeaking: "Moss is speaking..."
-    elif ui.voiceConnected: "Ready"
-    else: "Voice disconnected"
+    elif ui.voiceListening: "Listening..."
+    elif ui.conversationMode: "Starting conversation..."
+    else: "Text mode"
   sk.drawLabel(status, origin + vec2(statusX, 0),
     vec2(max(0'f, history.size.x - statusX), height), Ink)
 

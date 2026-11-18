@@ -13,7 +13,7 @@ import
   bassy, fixxy,
   polyworld/[bodies, hashes, metrics, noises, pathing, profiles, rngs, tapes,
     visions, mailboxes],
-  content, events, motions, targets,
+  chats, content, events, motions, targets,
   maps,
   replays
 
@@ -32,6 +32,7 @@ const
   heroDeathClip* = 2
   heroAttackClips* = [3, 4]
   SpawnPortalAnchor = -1'i32
+  MaxHeroOrders* = 32
 
 var
   lanePathPoints*: array[3, seq[PathPoint]]
@@ -124,6 +125,11 @@ type
     navLayer*: int32
     controls*: array[ControlEffect, ControlTimer]
 
+  HeroOrder* = object
+    kind*: uint8
+    first*, second*: int32
+    offset*: FixedVec2
+
   Hero* = ref object
     id*: int32
     team*: Team
@@ -164,6 +170,9 @@ type
     navLayer*: int32
     attackObjectId*: int32
     attackMoving*: bool
+    hasOrder*: bool
+    activeOrder*: HeroOrder
+    queuedOrders*: seq[HeroOrder]
     movePath*: seq[WorldPoint]
     movePathLayers*: seq[int32]
     movePathIndex*: int
@@ -266,6 +275,17 @@ type
     leaves*: bool
     origin*, position*: WorldPoint
 
+  RewardEffect* = object
+    ## Presents one recipient's actual reward at the defeated unit's position.
+    heroId*, victimId*: int32
+    position*: WorldPoint
+    gold*, xp*: int
+
+  DenyEffect* = object
+    ## Records one hero's lethal basic hit against an allied lane creep.
+    heroId*, victimId*: int32
+    position*: WorldPoint
+
   TowerShot* = object
     sourceId*, targetId*, damage*: int32
     team*: Team
@@ -300,6 +320,8 @@ type
     casts*: seq[SpellCast]
     itemUses*: seq[ItemUse]
     attackEffects*: seq[AttackEffect]
+    rewardEffects*: seq[RewardEffect]
+    denyEffects*: seq[DenyEffect]
     towerShots*: seq[TowerShot]
     stats*: CombatStats
     ## One match. A ref so `a = b` aliases and a second world is `clone()`.
@@ -365,6 +387,7 @@ type
     recorder*: ReplayRecorder
     replayData*: ReplayData
     replayPlayer*: ReplayPlayer
+    chatView*: ReplayChatView
     hashCheck*: ReplayHashCheck
     historyPlayback*: bool
     replayMode*: bool
@@ -650,6 +673,8 @@ proc clone*(w: World): World =
   result.visionCache = default(array[2, ref VisionCache])
   result.stats = w.stats.clone()
   result.heroes = cloneHeroes(w.heroes)
+  result.rewardEffects = @[]
+  result.denyEffects = @[]
   when defined(replayEvents):
     result.events = @[]
 
@@ -659,6 +684,8 @@ proc restore*(w: World, snapshot: World) =
   w.visionCache = default(array[2, ref VisionCache])
   w.stats = snapshot.stats.clone()
   w.heroes = cloneHeroes(snapshot.heroes)
+  w.rewardEffects = @[]
+  w.denyEffects = @[]
   when defined(replayEvents):
     w.events = @[]
     w.eventTick = w.tick
@@ -1386,11 +1413,29 @@ proc heroMoveSpeed*(hero: Hero): int32 =
   heroMovePerTick(hero.class, hero.level) +
     hero.heroItemBonus().movePerTick
 
+proc addRewardEffect(
+    world: World, heroId, victimId: int32,
+    position: WorldPoint, xp, gold: int
+) =
+  ## Combines split XP and gold grants into one per-victim presentation record.
+  if xp <= 0 and gold <= 0:
+    return
+  for effect in world.rewardEffects.mitems:
+    if effect.heroId == heroId and effect.victimId == victimId:
+      effect.xp += xp
+      effect.gold += gold
+      return
+  world.rewardEffects.add RewardEffect(
+    heroId: heroId, victimId: victimId, position: position, xp: xp, gold: gold
+  )
+
 proc gainRewards(
     world: World, hero: Hero, xp, gold: int, victim: int32,
+    position: WorldPoint,
     cause = KillReward
 ) =
   ## Grants rewards and links them to their lethal event.
+  world.addRewardEffect(hero.id, victim, position, xp, gold)
   when defined(replayEvents):
     let related = world.deathEvent(victim)
     world.valueEvent(XpGained, victim, hero.id, cause, 0,
@@ -1467,11 +1512,11 @@ proc gainCreepRewards(world: World, creep: Footman, source: int32) =
         cause = KillReward
       let xp = hero.creepXpRemainder div CreepXpScale
       hero.creepXpRemainder = hero.creepXpRemainder mod CreepXpScale
-      world.gainRewards(hero, xp, 0, creep.id, cause)
+      world.gainRewards(hero, xp, 0, creep.id, creep.position, cause)
   let killer = world.heroIndex(source)
   if killer >= 0 and (creep.camp > 0 or world.heroes[killer].team != creep.team):
     world.gainRewards(
-      world.heroes[killer], 0, goldReward, creep.id
+      world.heroes[killer], 0, goldReward, creep.id, creep.position
     )
     world.stats.add(killer, GoldMetric, goldReward)
 
@@ -2718,6 +2763,11 @@ proc stopHeroPath(hero: Hero) =
   hero.movePathLayers.setLen(0)
   hero.movePathIndex = 0
 
+proc clearHeroOrders(hero: Hero) =
+  ## Cancels the explicit order and its bounded sequence of follow-up commands.
+  hero.hasOrder = false
+  hero.queuedOrders.setLen(0)
+
 proc followHeroPath(hero: Hero): bool =
   ## Advances a hero along its current server-generated path.
   if hero.controls[RootControl].ends > navigationWorld.tick:
@@ -2725,7 +2775,7 @@ proc followHeroPath(hero: Hero): bool =
   if hero.hasMoveTarget and hero.moveRevision != navigationWorld.navigationRevision:
     if not hero.setHeroDestination(
         hero.moveTileX, hero.moveTileY, hero.position.y, hero.moveOffset):
-      hero.movePath.setLen(0)
+      hero.stopHeroPath()
       return false
   while hero.movePathIndex < hero.movePath.len:
     let waypoint = hero.movePath[hero.movePathIndex]
@@ -2956,6 +3006,10 @@ proc applyWalkTo*(world: World, heroId, mapX, mapY: int32,
   if accepted:
     world.heroes[index].hasQueuedCast = false
     world.heroes[index].castPoseUntil = 0
+    world.heroes[index].queuedOrders.setLen(0)
+    world.heroes[index].hasOrder = true
+    world.heroes[index].activeOrder = HeroOrder(
+      kind: ActionWalkTo, first: mapX, second: mapY, offset: offset)
   world.finishAction(
     heroId,
     ActionWalkTo,
@@ -3009,6 +3063,10 @@ proc applyAttackMove*(world: World, heroId, mapX, mapY: int32,
   if accepted:
     world.heroes[index].hasQueuedCast = false
     world.heroes[index].castPoseUntil = 0
+    world.heroes[index].queuedOrders.setLen(0)
+    world.heroes[index].hasOrder = true
+    world.heroes[index].activeOrder = HeroOrder(
+      kind: ActionAttackMove, first: mapX, second: mapY, offset: offset)
   world.finishAction(
     heroId,
     ActionAttackMove,
@@ -3018,6 +3076,18 @@ proc applyAttackMove*(world: World, heroId, mapX, mapY: int32,
     (if accepted: NoActionError else: ActionNoRoute),
     offset
   )
+
+proc canDeny*(world: World, hero: Hero, targetId: int32): bool =
+  ## Allows an explicit basic attack on an allied lane creep below half HP.
+  if hero == nil or targetId == 0:
+    return false
+  let index = world.footmanIndex(targetId)
+  if index < 0:
+    return false
+  let creep {.cursor.} = world.footmen[index]
+  creep.camp == 0 and creep.team == hero.team and
+    creep.hp > 0 and creep.state != Dying and
+    creep.hp.int64 * 2 < creep.unitMaxHp.int64
 
 proc isEnemyTarget(world: World, hero: Hero, targetId: int32): bool =
   ## Returns whether `targetId` is a living enemy the hero can chase.
@@ -3040,6 +3110,10 @@ proc isEnemyTarget(world: World, hero: Hero, targetId: int32): bool =
       return fort.team != hero.team and fort.hp > 0
   false
 
+proc isAttackTarget*(world: World, hero: Hero, targetId: int32): bool =
+  ## Accepts hostile targets or a deliberately selected, eligible deny.
+  world.isEnemyTarget(hero, targetId) or world.canDeny(hero, targetId)
+
 proc applyAttackTarget*(world: World, heroId, targetId: int32): bool =
   ## Applies one hero attack command after validating its target.
   if world.phase == Drafting:
@@ -3061,6 +3135,8 @@ proc applyAttackTarget*(world: World, heroId, targetId: int32): bool =
   if error != NoActionError:
     return world.finishAction(heroId, ActionAttackTarget, 0, targetId, 0, error)
   if targetId == 0:
+    world.heroes[index].queuedOrders.setLen(0)
+    world.heroes[index].hasOrder = false
     world.heroes[index].hasQueuedCast = false
     world.heroes[index].castPoseUntil = 0
     world.heroes[index].attackObjectId = 0
@@ -3073,7 +3149,7 @@ proc applyAttackTarget*(world: World, heroId, targetId: int32): bool =
       0,
       NoActionError
     )
-  if not world.isEnemyTarget(world.heroes[index], targetId):
+  if not world.isAttackTarget(world.heroes[index], targetId):
     return world.finishAction(
       heroId,
       ActionAttackTarget,
@@ -3088,7 +3164,107 @@ proc applyAttackTarget*(world: World, heroId, targetId: int32): bool =
   if world.heroes[index].attackObjectId != targetId:
     world.heroes[index].hasMoveTarget = false
   world.heroes[index].attackObjectId = targetId
+  world.heroes[index].queuedOrders.setLen(0)
+  world.heroes[index].hasOrder = true
+  world.heroes[index].activeOrder = HeroOrder(
+    kind: ActionAttackTarget, first: targetId)
   world.finishAction(heroId, ActionAttackTarget, 0, targetId, 0, NoActionError)
+
+proc executeHeroOrder(world: World, hero: Hero, order: HeroOrder): bool =
+  ## Starts a queued order on the next-tick hero without recording another input.
+  hero.lastActionError = world.heroActionError(
+    hero, movement = order.kind != ActionAttackTarget)
+  if hero.lastActionError != NoActionError:
+    return false
+  if order.kind == ActionAttackTarget:
+    if not world.isAttackTarget(hero, order.first):
+      hero.lastActionError = ActionTargetUnavailable
+      return false
+    hero.stopHeroPath()
+    hero.attackObjectId = order.first
+    hero.attackMoving = false
+  else:
+    if not hero.setHeroDestination(order.first.int, order.second.int,
+        hero.position.y, order.offset):
+      hero.lastActionError = ActionNoRoute
+      return false
+    hero.attackObjectId = 0
+    hero.attackMoving = order.kind == ActionAttackMove
+  hero.targetFootmanId = 0
+  hero.targetHeroId = 0
+  hero.targetBuildingId = 0
+  hero.attackingFort = false
+  hero.hasQueuedCast = false
+  hero.castPoseUntil = 0
+  hero.hasOrder = true
+  hero.activeOrder = order
+  true
+
+proc appendHeroOrder(world: World, heroId: int32, kind: uint8,
+    order: HeroOrder): bool =
+  ## Appends an explicit order, or starts it immediately when no order is active.
+  let hero = world.heroById(heroId)
+  var error = NoActionError
+  if world.phase == Drafting:
+    error = ActionDrafting
+  elif world.gameOver:
+    error = ActionMatchEnded
+  elif hero.id == 0 or hero.hp <= 0 or hero.state == Dying:
+    error = ActionNotAlive
+  elif not order.offset.validTileOffset:
+    error = ActionInvalidPoint
+  elif order.kind == ActionAttackTarget and
+      not world.isAttackTarget(hero, order.first):
+    error = ActionTargetUnavailable
+  elif order.kind != ActionAttackTarget and
+      (order.first < 0 or order.first >= mapTiles().int32 or
+      order.second < 0 or order.second >= mapTiles().int32):
+    error = ActionInvalidPoint
+  if error != NoActionError:
+    return world.finishAction(heroId, kind, 0, order.first, order.second,
+      error, order.offset)
+  if hero.queuedOrders.len >= MaxHeroOrders:
+    return false
+  if not hero.hasOrder and hero.queuedOrders.len == 0 and
+      not hero.hasQueuedCast and hero.castPoseUntil <= world.tick and
+      hero.portalEnds == 0 and
+      hero.controls[StunControl].ends <= world.tick and
+      hero.controls[RootControl].ends <= world.tick:
+    navigationWorld = world
+    discard world.executeHeroOrder(hero, order)
+    return world.finishAction(heroId, kind, 0, order.first, order.second,
+      hero.lastActionError, order.offset)
+  hero.queuedOrders.add order
+  world.finishAction(heroId, kind, 0, order.first, order.second,
+    NoActionError, order.offset)
+
+proc applyQueuedWalkTo*(world: World, heroId, mapX, mapY: int32,
+    offset = FixedVec2Zero): bool =
+  ## Appends movement after the hero's current and previously queued orders.
+  world.appendHeroOrder(heroId, ActionQueueWalkTo, HeroOrder(
+    kind: ActionWalkTo, first: mapX, second: mapY, offset: offset))
+
+proc applyQueuedAttackMove*(world: World, heroId, mapX, mapY: int32,
+    offset = FixedVec2Zero): bool =
+  ## Appends an attack-move destination without interrupting the current order.
+  world.appendHeroOrder(heroId, ActionQueueAttackMove, HeroOrder(
+    kind: ActionAttackMove, first: mapX, second: mapY, offset: offset))
+
+proc applyQueuedAttackTarget*(world: World, heroId, targetId: int32): bool =
+  ## Appends one explicit enemy attack or eligible allied creep deny.
+  world.appendHeroOrder(heroId, ActionQueueAttackTarget, HeroOrder(
+    kind: ActionAttackTarget, first: targetId))
+
+proc advanceHeroOrders(world: World, hero: Hero) =
+  ## Skips expired targets and starts the next order after the current one ends.
+  if hero.hasOrder or hero.hasQueuedCast or hero.castPoseUntil > world.tick or
+      hero.portalEnds > 0 or hero.controls[RootControl].ends > world.tick:
+    return
+  while hero.queuedOrders.len > 0:
+    let order = hero.queuedOrders[0]
+    hero.queuedOrders.delete(0)
+    if world.executeHeroOrder(hero, order):
+      return
 
 proc purchaseError(world: World, heroId, itemId: int32): ActionError =
   ## Returns the first failing purchase check without allocating a string.
@@ -3985,6 +4161,7 @@ proc respawn(world: World, hero: Hero) =
   hero.attackObjectId = 0
   hero.attackMoving = false
   hero.hasMoveTarget = false
+  hero.clearHeroOrders()
   hero.movePath.setLen(0)
   hero.movePathIndex = 0
   hero.swingTicks = -1
@@ -4055,6 +4232,13 @@ proc preparationTicksLeft*(world: World): int32 {.raises: [].} =
   ## Public countdown API; draft picks and non-draft fixtures report zero.
   if world.drafting and world.phase == Playing:
     result = max(PreparationTicks - world.preparationTicks, 0)
+
+proc visibleReplayChat*(game: Game, viewerTeam = -1): seq[HumanChatMessage] =
+  ## Reads the recorded transcript at the current live or replay playhead.
+  if game.recorder != nil:
+    game.chatView.chatAt(game.recorder.data, uint32(game.world.tick), viewerTeam)
+  else:
+    game.chatView.chatAt(game.replayData, uint32(game.world.tick), viewerTeam)
 
 proc finished*(game: Game): bool =
   ## Ends a battle on victory or after its full configured battle duration.
@@ -4259,7 +4443,10 @@ proc rewardDeath(world: World, target, source: int32) =
     victim = world.heroIndex(target)
     xp = if victim >= 0: HeroXpReward else: TowerXpReward
     gold = if victim >= 0: HeroGoldReward else: TowerGoldReward
-  world.gainRewards(world.heroes[killer], xp, gold, target)
+    position =
+      if victim >= 0: world.heroes[victim].position
+      else: world.buildings[world.buildingIndex(target)].position
+  world.gainRewards(world.heroes[killer], xp, gold, target, position)
   world.stats.add(killer, GoldMetric, gold)
 
 proc hitTarget(
@@ -4293,6 +4480,13 @@ proc hitTarget(
     let creep = world.footmanIndex(target)
     if creep >= 0:
       if world.footmen[creep].hp > 0 and not world.returning(world.footmen[creep]):
+        let
+          attacker = world.heroIndex(source)
+          deny = attacker >= 0 and world.footmen[creep].camp == 0 and
+            world.footmen[creep].team == world.heroes[attacker].team
+        if deny and (cause != BasicAttack or
+            not world.canDeny(world.heroes[attacker], target)):
+          return
         let camp {.cursor.} = world.footmen[creep].camp
         if camp > 0:
           if world.camps[camp - 1].state == RestingCamp:
@@ -4305,6 +4499,12 @@ proc hitTarget(
           world.camps[camp - 1].targetId = source
           world.camps[camp - 1].lastSeenTick = world.tick
         world.applyDamage(world.footmen[creep], damage, source, cause, detail)
+        if deny and world.footmen[creep].hp <= 0:
+          world.denyEffects.add DenyEffect(
+            heroId: source,
+            victimId: target,
+            position: world.footmen[creep].position
+          )
         if cause == AbilityEffect:
           let spec = BaseAbilitySpecs[Ability(detail)]
           world.applyControl(target, spec.control, spec.controlTicks,
@@ -4394,6 +4594,7 @@ proc die(world: World, hero: Hero) =
   hero.attackObjectId = 0
   hero.attackMoving = false
   hero.hasMoveTarget = false
+  hero.clearHeroOrders()
 
 proc resolveCombat(world: World) =
   ## Resolves hits, then deaths, then rewards without cancelling collected hits.
@@ -4431,7 +4632,7 @@ proc resolveCombat(world: World) =
     if hero.hp <= 0 and hero.state != Dying:
       world.die(hero)
     elif hero.attackObjectId != 0 and
-      not world.isEnemyTarget(hero, hero.attackObjectId):
+      not world.isAttackTarget(hero, hero.attackObjectId):
         hero.attackObjectId = 0
         hero.targetFootmanId = 0
         hero.targetHeroId = 0
@@ -4745,6 +4946,7 @@ proc applyUseItemAt*(
       heroId, ActionUseItemAt, slotId, mapX, mapY, error, offset
     )
   world.consumeItem(hero, slotId.int)
+  hero.clearHeroOrders()
   hero.hasQueuedCast = false
   hero.castPoseUntil = 0
   hero.stopHeroPath()
@@ -5129,6 +5331,8 @@ proc requestCast(
   ## Casts immediately or retains one valid spell order while approaching.
   result = world.castAbility(hero, slot, targetId, aim)
   if result != ActionOutOfRange:
+    if result == NoActionError:
+      hero.clearHeroOrders()
     return
   let movementError = world.heroActionError(hero, movement = true)
   if movementError != NoActionError:
@@ -5141,6 +5345,7 @@ proc requestCast(
     point = target.position
   if not world.pathToCast(hero, point):
     return ActionNoRoute
+  hero.clearHeroOrders()
   hero.hasQueuedCast = true
   hero.queuedCastSlot = slot
   hero.queuedCastTarget = targetId
@@ -5284,6 +5489,7 @@ proc applyStop*(world: World, heroId: int32): bool =
   if hero.id == 0 or hero.hp <= 0 or hero.state == Dying:
     return world.finishAction(heroId, ActionStop, 0, 0, 0, ActionNotAlive)
   hero.stopHeroPath()
+  hero.clearHeroOrders()
   hero.hasQueuedCast = false
   hero.castPoseUntil = 0
   hero.attackObjectId = 0
@@ -5306,6 +5512,14 @@ proc applyReplayAction*(world: World, action: ReplayAction): bool {.discardable.
     applyStop(world, action.heroId)
   of ActionWalkTo:
     applyWalkTo(world, action.heroId, action.first, action.second, action.offset)
+  of ActionQueueWalkTo:
+    applyQueuedWalkTo(
+      world, action.heroId, action.first, action.second, action.offset)
+  of ActionQueueAttackMove:
+    applyQueuedAttackMove(
+      world, action.heroId, action.first, action.second, action.offset)
+  of ActionQueueAttackTarget:
+    applyQueuedAttackTarget(world, action.heroId, action.first)
   of ActionAttackMove:
     applyAttackMove(
       world, action.heroId, action.first, action.second, action.offset
@@ -5493,6 +5707,18 @@ proc updateHero(world: World, hero: Hero) =
     world.regenHeroMana(hero, world.tick)
     return
 
+  if hero.hasOrder and hero.activeOrder.kind == ActionAttackTarget:
+    var target: WorldObject
+    if not world.isAttackTarget(hero, hero.activeOrder.first) or
+        not world.spellTarget(hero.activeOrder.first, target) or
+        not visible(world, hero.team, target.position):
+      hero.hasOrder = false
+      hero.attackObjectId = 0
+      hero.stopHeroPath()
+  elif hero.hasOrder and not hero.hasMoveTarget and hero.attackObjectId == 0:
+    hero.hasOrder = false
+  world.advanceHeroOrders(hero)
+
   hero.targetFootmanId = 0
   hero.targetHeroId = 0
   hero.targetBuildingId = 0
@@ -5506,7 +5732,7 @@ proc updateHero(world: World, hero: Hero) =
     targetFootman = footmanIndex(world, hero.attackObjectId)
     if targetFootman >= 0:
       let footman {.cursor.} = world.footmen[targetFootman]
-      if not world.hostile(footman, hero.team, engageResting = true) or
+      if not world.isAttackTarget(hero, footman.id) or
           not visible(world, hero.team, footman.position):
         targetFootman = -1
     if targetFootman < 0:
@@ -5537,6 +5763,14 @@ proc updateHero(world: World, hero: Hero) =
       hero.attackObjectId = 0
       if not hero.attackMoving:
         hero.stopHeroPath()
+  if hero.hasOrder and hero.activeOrder.kind == ActionAttackMove and
+      hero.attackObjectId == 0:
+    let order = hero.activeOrder
+    if not hero.setHeroDestination(order.first.int, order.second.int,
+        hero.position.y, order.offset):
+      hero.stopHeroPath()
+      hero.hasOrder = false
+      hero.attackMoving = false
   if hero.attackObjectId == 0:
     let radius = world.acquireRadius(hero)
     if radius > 0:
@@ -5575,7 +5809,7 @@ proc updateHero(world: World, hero: Hero) =
 
   world.regenHeroMana(hero, world.tick)
 
-  if not world.isEnemyTarget(hero, hero.attackObjectId):
+  if not world.isAttackTarget(hero, hero.attackObjectId):
     if hero.attackObjectId != 0 and not hero.attackMoving:
       hero.stopHeroPath()
     targetFootman = -1
@@ -5630,6 +5864,10 @@ proc updateHero(world: World, hero: Hero) =
         discard hero.followHeroPath()
       else:
         hero.stopHeroPath()
+        if hero.hasOrder and hero.activeOrder.kind == ActionAttackTarget:
+          hero.hasOrder = false
+          hero.attackObjectId = 0
+          world.advanceHeroOrders(hero)
     else:
       snapFacing(hero.body, hero.facing, offset)
       if hero.swingTicks < 0:
@@ -5658,6 +5896,10 @@ proc updateHero(world: World, hero: Hero) =
     return
 
   let moving = hero.followHeroPath()
+  if not moving and not hero.hasMoveTarget:
+    hero.hasOrder = false
+    hero.attackMoving = false
+    world.advanceHeroOrders(hero)
   hero.state = Marching
   hero.swingTicks = -1
   hero.animClip = if moving: heroRunClip else: heroIdleClip
@@ -5857,6 +6099,20 @@ proc stateHash*(game: Game): uint64 =
     hash.addHashy(hero.navLayer)
     hash.addHashy(hero.attackObjectId)
     hash.addHashy(hero.attackMoving)
+    hash.addHashy(hero.hasOrder)
+    if hero.hasOrder:
+      hash.addHashy(hero.activeOrder.kind)
+      hash.addHashy(hero.activeOrder.first)
+      hash.addHashy(hero.activeOrder.second)
+      hash.addHashy(int32(hero.activeOrder.offset.x))
+      hash.addHashy(int32(hero.activeOrder.offset.y))
+    hash.addHashy(hero.queuedOrders.len)
+    for order in hero.queuedOrders:
+      hash.addHashy(order.kind)
+      hash.addHashy(order.first)
+      hash.addHashy(order.second)
+      hash.addHashy(int32(order.offset.x))
+      hash.addHashy(int32(order.offset.y))
     hash.addHashy(hero.movePath.len)
     for waypoint in hero.movePath:
       hash.addHashy(waypoint)
@@ -6004,6 +6260,8 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
   let world = game.world
   world.itemUses.setLen(0)
   world.attackEffects.setLen(0)
+  world.rewardEffects.setLen(0)
+  world.denyEffects.setLen(0)
   when defined(replayEvents):
     world.events.setLen(0)
     world.eventTick = world.tick + 1
@@ -6188,7 +6446,9 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
     for hero in world.heroes:
       let enemyGod = world.forts[1 - hero.team.ord]
       if enemyGod.hp <= 0:
-        world.gainRewards(hero, GodXpReward, 0, enemyGod.id, GodDestroyed)
+        world.gainRewards(
+          hero, GodXpReward, 0, enemyGod.id, enemyGod.center, GodDestroyed
+        )
       if hero.state == Dying:
         continue
       hero.animClip =

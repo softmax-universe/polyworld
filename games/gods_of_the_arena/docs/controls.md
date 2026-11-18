@@ -20,7 +20,7 @@ saved locally with Save and Back.
 | Follow own hero while held; release for free camera | Space |
 | Pause watch / replay playback | Space |
 | Cancel targeting / close shop / game menu | Escape |
-| Debug menu | F1 |
+| Debug menu | F2 |
 | Fullscreen | F11 |
 | Pan camera | Arrow keys |
 | Zoom | Mouse wheel, = and - |
@@ -28,8 +28,18 @@ saved locally with Save and Back.
 | Select-all modifier | Left or right Control, with Attack move |
 | Toggle shading | T |
 | Show occluded characters | O |
-| Performance trace | F2 |
-| Water debug panel (developer build) | F4 |
+| Performance trace | F1 |
+
+F2 groups Graphics, Networking, Post-processing, and Water controls in one
+debug window. Post-processing adjusts ambient occlusion radius, intensity,
+bias, edge sharpness, character shading, and shadow tint for the current
+match. Reset tuning restores the arena defaults. Graphics includes the
+character shading and occluded-character silhouette switches.
+
+Settings → Display has an Ambient occlusion switch, enabled by default.
+Its saved value also controls the Enabled switch under Post-processing.
+The old default F1/F2 debug shortcuts migrate automatically; custom
+bindings remain unchanged.
 
 Z, X, and C perform mouse actions at the pointer's current position. Hold X
 and move the pointer to drag the camera. Hold A for repeated attack moves;

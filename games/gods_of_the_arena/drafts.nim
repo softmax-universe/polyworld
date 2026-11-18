@@ -28,6 +28,7 @@ proc teamColor(team: Team): ColorRGBX =
 proc drawDraft*(sk: Silky, window: Window, size: Vec2, playing: bool) =
   ## Presents portrait choices and locks in the active human player's hero.
   let
+    pointerBlocked = mouseOverDebugMenu(sk.mousePos)
     scale = draftScale(size)
     draftSize = size / scale
     mousePos = sk.mousePos
@@ -96,7 +97,7 @@ proc drawDraft*(sk: Silky, window: Window, size: Vec2, playing: bool) =
     let
       card = layout.heroes[i]
       available = world.heroAvailable(class.ord.int32)
-      hovered = sk.hovered(card)
+      hovered = not pointerBlocked and sk.hovered(card)
       selected = class.ord == selectedClass
       fill =
         if not available: rgbx(25, 30, 36, 255)
@@ -110,7 +111,7 @@ proc drawDraft*(sk: Silky, window: Window, size: Vec2, playing: bool) =
         origin: card.origin + vec2(4, card.size.y - 32),
         size: vec2(card.size.x - 8, 28)
       )
-    sk.hoverSound(card, canPick and available)
+    sk.hoverSound(card, canPick and available and not pointerBlocked)
     if selected:
       sk.drawSprite(WhiteTileKey, card.origin - vec2(3),
         card.size + vec2(6), Gold, radius = 9)
@@ -153,7 +154,7 @@ proc drawDraft*(sk: Silky, window: Window, size: Vec2, playing: bool) =
       if selectedClass >= 0: HeroClass(selectedClass).heroSpec.role
       else: "A random available hero is picked when time runs out."
     button = layout.confirm
-  sk.hoverSound(button, enabled)
+  sk.hoverSound(button, enabled and not pointerBlocked)
   sk.drawLabel(title, layout.selection.origin, layout.selection.size,
     White, "Bold")
   sk.drawLabel(detail, layout.role.origin, layout.role.size, Muted, "Small")
@@ -167,7 +168,8 @@ proc drawDraft*(sk: Silky, window: Window, size: Vec2, playing: bool) =
   sk.drawLabel(if canPick: "LOCK IN HERO" else: "WAITING FOR PICK",
     button.origin, button.size,
     if enabled: rgbx(22, 24, 28, 255) else: Muted, "Bold", CenterAlign)
-  if enabled and sk.hovered(button) and window.mousePressed(MouseLeft):
-    queueDraft(activeId, selectedClass)
-    playSound(ReadySound)
-    selectedClass = -1
+  if enabled and not pointerBlocked and sk.hovered(button) and
+    window.mousePressed(MouseLeft):
+      queueDraft(activeId, selectedClass)
+      playSound(ReadySound)
+      selectedClass = -1

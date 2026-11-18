@@ -103,6 +103,9 @@ while watched.game.world.tick < p.targetTick: stream.advance()
 let hash = watched.game.stateHash
 let actions = watched.game.recorder.data.actions
 let hashes = watched.game.recorder.data.hashes
+let chatEvents = watched.game.recorder.data.events
+doAssert chatEvents.len == 1 and chatEvents[0].text == "Buffered mailbox"
+doAssert chatEvents == controller.game.recorder.data.events
 doAssert watched.game.history.frames.len == controller.game.history.frames.len,
   "First spectator traversal must sample every metrics interval"
 doAssert watched.game.history.frames[^1].tick == 744
@@ -130,6 +133,8 @@ doAssert watched.game.stateHash == hash
 doAssert hash == controller.game.stateHash
 doAssert watched.game.recorder.data.actions == actions
 doAssert watched.game.recorder.data.hashes == hashes
+doAssert watched.game.recorder.data.events == chatEvents,
+  "Spectator rewinds must not duplicate chat in the exported recording"
 doAssert watched.game.history == history, "Seeks must not append/rewrite metrics history"
 for slot, row in rows:
   doAssert watched.game.metrics.read(slot, 744) == row,

@@ -25,7 +25,10 @@ type
     nativeDuplex: pointer
     inputDevice, outputDevice: string
 
-when defined(macosx):
+when defined(emscripten):
+  var browserOutputUsers: int
+
+when defined(macosx) and not defined(emscripten):
   import devices
 
   {.compile: currentSourcePath().parentDir / "permissions.m".}
@@ -80,7 +83,7 @@ when defined(macosx):
 
 proc microphonePermission*(): string =
   ## Returns microphone authorization or missing metadata without recording.
-  when defined(macosx):
+  when defined(macosx) and not defined(emscripten):
     case voiceMicrophonePermission()
     of -1:
       "unconfigured"
@@ -99,7 +102,7 @@ proc newVoiceAudio*(closeDevice = true, duplex = false,
   VoiceAudio(closeDevice: closeDevice, duplex: duplex,
     inputDevice: inputDevice, outputDevice: outputDevice)
 
-when defined(macosx):
+when defined(macosx) and not defined(emscripten):
   proc prepareNative(audio: VoiceAudio) =
     ## Lazily creates the native queues with immutable per-app route choices.
     if audio.nativeDuplex == nil:
@@ -111,7 +114,7 @@ when defined(macosx):
 
 proc captureDiagnostics*(audio: VoiceAudio): string =
   ## Reports local capture counters and peaks without saving or sending audio.
-  when defined(macosx):
+  when defined(macosx) and not defined(emscripten):
     if audio.nativeDuplex != nil:
       return $voiceAudioCaptureDiagnostics(audio.nativeDuplex)
   "Microphone has not started."
@@ -145,8 +148,28 @@ proc updateInputLevel(audio: VoiceAudio, pcm: string) =
   audio.levelUpdated = now
 
 proc capturing*(audio: VoiceAudio): bool =
-  ## Reports whether microphone samples are currently being recorded.
+  ## Reports whether capture is requested, including browser permission waits.
   audio.captureStarted
+
+proc capturePending*(audio: VoiceAudio): bool =
+  ## Reports browser permission or audio setup pending after a capture request.
+  when defined(emscripten):
+    if audio.microphone != nil and audio.captureStarted:
+      try:
+        return not audio.microphone.ready
+      except SlappyError as error:
+        raise newException(VoiceAudioError, error.msg)
+  false
+
+proc captureStopping*(audio: VoiceAudio): bool =
+  ## Reports whether a stopped browser input still has audio-thread frames.
+  when defined(emscripten):
+    if audio.microphone != nil:
+      try:
+        return audio.microphone.stopping
+      except SlappyError as error:
+        raise newException(VoiceAudioError, error.msg)
+  false
 
 proc startCapture*(audio: VoiceAudio) =
   ## Opens microphone capture only after the user requests listening.
@@ -154,7 +177,7 @@ proc startCapture*(audio: VoiceAudio) =
     raise newException(VoiceAudioError, "Audio has been closed.")
   if audio.captureStarted:
     return
-  when defined(macosx):
+  when defined(macosx) and not defined(emscripten):
     case microphonePermission()
     of "unconfigured":
       raise newException(VoiceAudioError,
@@ -180,6 +203,7 @@ proc startCapture*(audio: VoiceAudio) =
     try:
       if audio.microphone == nil:
         audio.microphone = newMicrophone(
+          deviceName = audio.inputDevice,
           frequency = VoiceSampleRate,
           channels = 1,
           bits = 16,
@@ -194,18 +218,43 @@ proc startCapture*(audio: VoiceAudio) =
 
 proc stopCapture*(audio: VoiceAudio) =
   ## Stops microphone recording and clears its displayed level.
-  when defined(macosx):
+  when defined(macosx) and not defined(emscripten):
     if audio.nativeDuplex != nil:
       voiceDuplexStop(audio.nativeDuplex)
       voiceDuplexFlush(audio.nativeDuplex)
   if audio.microphone != nil and audio.captureStarted:
-    audio.microphone.stop()
+    try:
+      audio.microphone.stop()
+    except SlappyError as error:
+      when defined(emscripten):
+        # Polling reports asynchronous failures; stopping must still clean up.
+        audio.microphone.close()
+        audio.microphone = nil
+      else:
+        audio.captureStarted = false
+        audio.level = 0
+        raise newException(VoiceAudioError, error.msg)
   audio.captureStarted = false
   audio.level = 0
 
+proc releaseCapture*(audio: VoiceAudio) =
+  ## Cancels browser capture and permission waits, releasing the input device.
+  when defined(emscripten):
+    if audio.microphone != nil:
+      try:
+        audio.microphone.close()
+      except SlappyError as error:
+        raise newException(VoiceAudioError, error.msg)
+      finally:
+        audio.microphone = nil
+        audio.captureStarted = false
+        audio.level = 0
+  else:
+    audio.stopCapture()
+
 proc readCapture*(audio: VoiceAudio): string =
   ## Drains available microphone samples as PCM16 mono at 24 kHz.
-  when defined(macosx):
+  when defined(macosx) and not defined(emscripten):
     if audio.nativeDuplex != nil:
       audio.checkDuplex()
       let count = voiceDuplexAvailable(audio.nativeDuplex)
@@ -219,20 +268,46 @@ proc readCapture*(audio: VoiceAudio): string =
       return
   if audio.microphone == nil:
     return
-  let bytes = audio.microphone.readAll()
-  if bytes.len > 0:
-    result = newString(bytes.len)
-    copyMem(addr result[0], unsafeAddr bytes[0], bytes.len)
-  audio.updateInputLevel(result)
+  try:
+    let bytes = audio.microphone.readAll()
+    if bytes.len > 0:
+      result = newString(bytes.len)
+      copyMem(addr result[0], unsafeAddr bytes[0], bytes.len)
+    audio.updateInputLevel(result)
+  except SlappyError as error:
+    raise newException(VoiceAudioError, error.msg)
 
 proc checkPlayback(message: string) =
   ## Converts OpenAL failures at the experiment boundary into audio errors.
   if alGetError() != AL_NO_ERROR:
     raise newException(VoiceAudioError, message)
 
+proc prepareOutput*(audio: VoiceAudio) =
+  ## Opens speech output from a user gesture without activating the microphone.
+  if audio.closed:
+    raise newException(VoiceAudioError, "Audio has been closed.")
+  when not defined(macosx) or defined(emscripten):
+    try:
+      if not audio.initialized:
+        slappyInit()
+        audio.initialized = true
+        when defined(emscripten):
+          inc browserOutputUsers
+      if audio.speaker == nil:
+        discard alGetError()
+        audio.speaker = newStreamingSource(
+          frequency = VoiceSampleRate,
+          channels = 1,
+          bits = 16
+        )
+        checkPlayback("Could not create the speech output stream.")
+    except SlappyError as error:
+      raise newException(VoiceAudioError,
+        "Could not open speech output: " & error.msg)
+
 proc pollPlayback*(audio: VoiceAudio) =
   ## Reclaims completed streaming buffers and advances bounded bookkeeping.
-  when defined(macosx):
+  when defined(macosx) and not defined(emscripten):
     if audio.nativeDuplex != nil:
       audio.checkDuplex()
       return
@@ -256,7 +331,7 @@ proc pollPlayback*(audio: VoiceAudio) =
 proc playbackMilliseconds*(audio: VoiceAudio): int =
   ## Estimates played audio from completed chunks and the active play clock.
   audio.pollPlayback()
-  when defined(macosx):
+  when defined(macosx) and not defined(emscripten):
     if audio.nativeDuplex != nil:
       return voiceDuplexMilliseconds(audio.nativeDuplex).int
   var consumed = audio.completedBytes
@@ -270,7 +345,7 @@ proc playbackMilliseconds*(audio: VoiceAudio): int =
 proc outputActive*(audio: VoiceAudio): bool =
   ## Reports whether any streamed speech remains queued for playback.
   audio.pollPlayback()
-  when defined(macosx):
+  when defined(macosx) and not defined(emscripten):
     if audio.nativeDuplex != nil:
       return voiceDuplexQueued(audio.nativeDuplex) > 0
   audio.queuedBytes > 0
@@ -283,7 +358,7 @@ proc queuePcm*(audio: VoiceAudio, pcm: string) =
     return
   if pcm.len mod 2 != 0:
     raise newException(VoiceAudioError, "PCM16 audio has an incomplete sample.")
-  when defined(macosx):
+  when defined(macosx) and not defined(emscripten):
     if audio.duplex and not audio.captureStarted:
       raise newException(VoiceAudioError,
         "Start Conversation before playing its voice.")
@@ -295,21 +370,7 @@ proc queuePcm*(audio: VoiceAudio, pcm: string) =
       audio.checkDuplex()
     return
   else:
-    try:
-      if not audio.initialized:
-        slappyInit()
-        audio.initialized = true
-      if audio.speaker == nil:
-        discard alGetError()
-        audio.speaker = newStreamingSource(
-          frequency = VoiceSampleRate,
-          channels = 1,
-          bits = 16
-        )
-        checkPlayback("Could not create the speech output stream.")
-    except SlappyError as error:
-      raise newException(VoiceAudioError,
-        "Could not open speech output: " & error.msg)
+    audio.prepareOutput()
     audio.pollPlayback()
     if pcm.len > MaxPlaybackBytes - audio.queuedBytes or
       audio.chunkBytes.len >= MaxPlaybackChunks:
@@ -329,7 +390,7 @@ proc queuePcm*(audio: VoiceAudio, pcm: string) =
 
 proc stopPlayback*(audio: VoiceAudio) =
   ## Interrupts speech, discards pending buffers, and resets the turn clock.
-  when defined(macosx):
+  when defined(macosx) and not defined(emscripten):
     if audio.nativeDuplex != nil:
       voiceDuplexFlush(audio.nativeDuplex)
   if audio.speaker != nil:
@@ -344,8 +405,11 @@ proc close*(audio: VoiceAudio) =
   ## Releases microphone, streaming buffers, and the experiment audio context.
   if audio.closed:
     return
-  audio.stopCapture()
-  when defined(macosx):
+  when defined(emscripten):
+    audio.releaseCapture()
+  else:
+    audio.stopCapture()
+  when defined(macosx) and not defined(emscripten):
     if audio.nativeDuplex != nil:
       voiceDuplexClose(audio.nativeDuplex)
       audio.nativeDuplex = nil
@@ -361,8 +425,13 @@ proc close*(audio: VoiceAudio) =
     audio.speaker = nil
   if audio.initialized:
     try:
-      if audio.closeDevice:
-        slappyClose()
+      when defined(emscripten):
+        dec browserOutputUsers
+        if browserOutputUsers == 0 and audio.closeDevice:
+          slappyClose()
+      else:
+        if audio.closeDevice:
+          slappyClose()
     except SlappyError as error:
       message = error.msg
     audio.initialized = false

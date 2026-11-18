@@ -1,12 +1,15 @@
 import polyworld/rooms
 import ../relaynotice
 
-let current = GameIdentity(game: "gods_of_the_arena", gameplay: 80, protocol: 4)
+let current = GameIdentity(game: "gods_of_the_arena",
+  gameplay: NoticeGameplay, protocol: NoticeProtocol)
 let seats = @[Seat(owner: 1)]
 for identity in [GameIdentity(game: "galcon", gameplay: 80, protocol: 4),
     GameIdentity(game: "gods_of_the_arena", gameplay: 78, protocol: 4),
     GameIdentity(game: "gods_of_the_arena", gameplay: 79, protocol: 4),
-    GameIdentity(game: "gods_of_the_arena", gameplay: 80, protocol: 3)]:
+    GameIdentity(game: "gods_of_the_arena", gameplay: 80, protocol: 4),
+    GameIdentity(game: "gods_of_the_arena", gameplay: NoticeGameplay,
+      protocol: NoticeProtocol - 1)]:
   var state = initRelayNotice(identity, "not JSON", 1, seats)
   doAssert not identity.supportsRelayNotice()
   doAssert not state.advanceNotice(10000, [])
@@ -23,4 +26,4 @@ doAssert noticePayload().len == 8
 for command in [Command(participant: 0, seat: 0, sequence: 1, payload: noticePayload()),
     Command(participant: 1, seat: ServerNoticeSeat, sequence: 1, payload: noticePayload())]:
   doAssert not command.validNotice()
-echo "PASS policy exact gameplay80/protocol4 opt-in, legacy/other adapters untouched, invalid startup schedule rejected"
+echo "PASS current gameplay/protocol opt-in, legacy/other adapters untouched, invalid startup schedule rejected"

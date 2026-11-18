@@ -20,6 +20,7 @@ type
     resolution*: WindowResolution
     fps*: int = 60
     interpolation*: bool = true
+    ambientOcclusion*: bool = true
     edgeScrolling*: EdgeScrollMode = FullscreenEdgeScroll
     bindings*: InputBindings = DefaultBindings
     mainVolume*: int = 100
@@ -488,7 +489,8 @@ proc settingsPanel*(
     sk: Silky, window: Window, preferences: var Preferences,
     app: string, origin: Vec2, title = "Settings", height = 440.0'f,
     controls = DefaultControlProfile,
-    extension = ControlExtension()
+    extension = ControlExtension(),
+    supportsAmbientOcclusion = false
 ): bool =
   ## Edits preferences with the existing Silky theme and widgets.
   when defined(emscripten):
@@ -610,6 +612,9 @@ proc settingsPanel*(
         sk.popLayout()
     sk.at = origin + vec2(0, 160)
     checkBox "Visual interpolation", preferences.interpolation
+    if supportsAmbientOcclusion:
+      sk.at = origin + vec2(360, 160)
+      checkBox "Ambient occlusion", preferences.ambientOcclusion
     sk.drawLabel("FPS limit", origin + vec2(0, 204), vec2(210, 36),
       sk.theme.defaultTextColor)
     for i, fps in [30, 60, 120, 0]:

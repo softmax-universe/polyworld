@@ -1,7 +1,7 @@
 ## Actual binary RoomClients + authoritative Relay, with sparse human seats.
 import std/strutils
 import jsony
-import polyworld/[rooms, roomclients, relays, mailboxes]
+import polyworld/[rooms, roomclients, relays, mailboxes, tapes]
 import ../[chats, bots, multiplayer, replays, sim]
 
 block twoHumans:
@@ -54,6 +54,10 @@ block twoHumans:
   exchange()
   doAssert sessions[0].sendHumanChat("你好 🙂 <b>A</b>")
   doAssert sessions[1].sendHumanChat("reply :)")
+  doAssert sessions[0].game.submitAction(ReplayAction(
+    heroId: sessions[0].game.world.heroes[0].id,
+    kind: ActionWalkTo, first: 50, second: 50))
+  sessions[0].flushSubmissions()
   doAssert not sessions[2].sendHumanChat("cannot speak as a bot")
   doAssert not sessions[0].sendHumanChat("   ")
   doAssert not sessions[0].sendHumanChat(repeat("🙂", 257))
@@ -86,9 +90,42 @@ block twoHumans:
   doAssert sessions[0].game.stateHash() == sessions[1].game.stateHash()
   doAssert sessions[1].game.inboxes[1].count == 1
   doAssert sessions[1].game.inboxes[1].messages[0] == "policy preserved"
-  # Chat never contaminates the action-only replay or deterministic world.
-  doAssert sessions[0].game.recorder.data.actions.len == 0
+  # Chat has its own complete tape without changing gameplay command counts.
+  doAssert sessions[0].game.recorder.data.actions.len == 1
   doAssert sessions[0].game.recorder.data.hashes == sessions[1].game.recorder.data.hashes
+  let recorded = sessions[0].game.recorder.data
+  doAssert recorded.events.len == 4
+  doAssert recorded.events[0].kind == HumanReplayChat
+  doAssert recorded.events[0].text == "你好 🙂 <b>A</b>"
+  doAssert recorded.events[1].text == "reply :)"
+  doAssert recorded.events[2].kind == PolicyReplayChat
+  doAssert recorded.events[2].text == "policy preserved"
+  doAssert recorded.events[2].target == 1
+  doAssert recorded.events[3].target == -1
+  for session in sessions:
+    doAssert session.game.recorder.data.events == recorded.events
+  let
+    tape = decodeReplay(encodeReplay(recorded))
+    replay = newGame(sessions[0].game.map, tape.config.spawnIntervalTicks,
+      0, true, tape)
+    initial = replay.world.clone()
+  replay.replayPlayer = initReplayPlayer(tape)
+  replay.historyPlayback = true
+  doAssert replay.visibleReplayChat().len == 0
+  for tick in 1 .. tape.hashes.len:
+    replay.tickWorld(nil)
+    doAssert replay.stateHash() == tape.hashes[tick - 1]
+  doAssert replay.hashCheck.mismatches == 0
+  doAssert replay.visibleReplayChat() == sessions[2].visibleHumanChat()
+  doAssert replay.visibleReplayChat(1).len == 2
+  replay.world.restore(initial)
+  replay.replayPlayer.syncCursor(0)
+  doAssert replay.visibleReplayChat().len == 0,
+    "Rewinding must hide future text even after the transcript is cached"
+  for tick in 1 .. tape.hashes.len:
+    replay.tickWorld(nil)
+  doAssert replay.visibleReplayChat().len == 3
+  doAssert replay.hashCheck.mismatches == 0
   for text in ["\xFF", "hello\nworld", repeat("🙂", 257), "   "]:
     var rejected = false
     try:

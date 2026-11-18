@@ -1,7 +1,10 @@
 import
   std/[json, monotimes, os, strutils, times],
   pixie, silky, vmath,
-  audios, devices, launches, realtimes, views
+  audios, devices, realtimes, views
+
+when not defined(emscripten):
+  import launches
 
 const
   ExperimentDir = currentSourcePath().parentDir
@@ -22,9 +25,19 @@ type
     options: Options
     captureStarted, replyStarted: MonoTime
     waitingForAudio, playbackSuppressed: bool
+    pendingCaptureCommit: bool
     conversationRequested, permissionPending, acceptResponses: bool
+    conversationReady: bool
     frameCount: int
     finished: bool
+
+when defined(emscripten):
+  var
+    browserApp: App
+    browserState: string
+  proc browserSleep(milliseconds: cuint) {.importc: "emscripten_sleep",
+    header: "<emscripten.h>".}
+    ## Yields browser work between rendered frames.
 
 proc optionsFromArgs(): Options =
   ## Parses experiment arguments before opening a window or audio device.
@@ -48,31 +61,47 @@ proc optionsFromArgs(): Options =
 
 proc fontPath(): string =
   ## Finds the bundled font in either a packaged app or this experiment.
-  for directory in [
-    getAppDir() / "../Resources/assets",
-    getAppDir() / "assets",
-    ExperimentDir / "assets"
-  ]:
-    let path = directory / "IBMPlexSans-Regular.ttf"
-    if fileExists(path):
-      return path
-  raise newException(IOError, "Voice Lab could not find its bundled font.")
+  when defined(emscripten):
+    return "/voice-assets/IBMPlexSans-Regular.ttf"
+  else:
+    for directory in [
+      getAppDir() / "../Resources/assets",
+      getAppDir() / "assets",
+      ExperimentDir / "assets"
+    ]:
+      let path = directory / "IBMPlexSans-Regular.ttf"
+      if fileExists(path):
+        return path
+    raise newException(IOError, "Voice Lab could not find its bundled font.")
 
 proc stopListening(app: App, commit = false) =
   ## Stops recording and either submits or discards the unfinished turn.
-  if not app.audio.capturing():
+  when defined(emscripten):
+    if not app.audio.capturing() and not app.pendingCaptureCommit:
+      return
+    app.audio.stopCapture()
+    if commit and app.client.state == Connected and not app.client.handsFree:
+      app.pendingCaptureCommit = true
+      app.client.status = "Finishing the recorded turn..."
+    else:
+      app.pendingCaptureCommit = false
+      app.audio.releaseCapture()
+      app.client.clearAudio()
     return
-  app.audio.stopCapture()
-  if commit and app.client.state == Connected:
-    app.client.sendAudio(app.audio.readCapture())
-    if not app.client.handsFree:
-      app.replyStarted = getMonoTime()
-      app.waitingForAudio = true
-      app.client.commitAudio()
+  when not defined(emscripten):
+    if not app.audio.capturing():
+      return
+    app.audio.stopCapture()
+    if commit and app.client.state == Connected:
+      app.client.sendAudio(app.audio.readCapture())
+      if not app.client.handsFree:
+        app.replyStarted = getMonoTime()
+        app.waitingForAudio = true
+        app.client.commitAudio()
+      else:
+        app.client.clearAudio()
     else:
       app.client.clearAudio()
-  else:
-    app.client.clearAudio()
 
 proc interrupt(app: App) =
   ## Stops audible speech and tells the server how much was actually heard.
@@ -88,11 +117,16 @@ proc interrupt(app: App) =
 proc stopConversation(app: App) =
   ## Disables continuous capture and returns playback to the manual device.
   app.conversationRequested = false
+  app.conversationReady = false
   app.permissionPending = false
   app.acceptResponses = false
   app.playbackSuppressed = true
   app.waitingForAudio = false
-  app.audio.stopCapture()
+  when defined(emscripten):
+    app.pendingCaptureCommit = false
+    app.audio.releaseCapture()
+  else:
+    app.audio.stopCapture()
   app.audio.stopPlayback()
   app.audio = app.manualAudio
   app.client.discardTranscripts()
@@ -116,10 +150,16 @@ proc beginConversation(app: App, apiKey = "") =
   app.client.failure = ""
   app.audio = app.conversationAudio
   app.conversationRequested = true
+  app.conversationReady = false
   app.permissionPending = false
   app.client.autoRespond = true
   app.client.semanticVad = true
   app.client.setHandsFree(true)
+  when defined(emscripten):
+    app.audio.prepareOutput()
+    app.audio.startCapture()
+    app.permissionPending = app.audio.capturePending()
+    app.acceptResponses = not app.permissionPending
   # Restart an incomplete handshake so its initial settings include VAD.
   if app.client.state != Connected:
     app.client.connect(apiKey)
@@ -148,6 +188,9 @@ proc beginListening(app: App) =
     app.conversationRequested:
       return
   app.view.error = ""
+  when defined(emscripten):
+    app.stopListening()
+    app.audio.prepareOutput()
   app.interrupt()
   app.client.clearAudio()
   app.audio.startCapture()
@@ -165,6 +208,8 @@ proc resetSession(app: App, reconnect = false) =
   app.view.error = ""
   app.view.latencyMs = 0
   if reconnect:
+    when defined(emscripten):
+      app.audio.prepareOutput()
     app.client.connect()
 
 proc copyTranscript(app: App) =
@@ -228,21 +273,27 @@ proc applyDevices(app: App, save = false) =
   )
   app.audio = app.manualAudio
   app.view.error = ""
-  if save:
-    let path = deviceSettingsPath()
-    createDir(path.parentDir)
-    writeFile(path, $(%*{"input": input, "output": output}))
+  when not defined(emscripten):
+    if save:
+      let path = deviceSettingsPath()
+      createDir(path.parentDir)
+      writeFile(path, $(%*{"input": input, "output": output}))
 
 proc loadDevices(app: App) =
   ## Restores explicit choices while leaving all audio devices closed.
-  var input, output: string
-  let path = deviceSettingsPath()
-  if fileExists(path):
-    let settings = parseJson(readFile(path))
-    input = settings{"input"}.getStr()
-    output = settings{"output"}.getStr()
-  app.refreshDevices(input, output)
-  app.applyDevices()
+  when defined(emscripten):
+    app.refreshDevices()
+    app.applyDevices()
+    return
+  when not defined(emscripten):
+    var input, output: string
+    let path = deviceSettingsPath()
+    if fileExists(path):
+      let settings = parseJson(readFile(path))
+      input = settings{"input"}.getStr()
+      output = settings{"output"}.getStr()
+    app.refreshDevices(input, output)
+    app.applyDevices()
 
 proc handle(app: App, action: UiAction) =
   ## Maps a UI action to one explicit audio or conversation operation.
@@ -279,8 +330,9 @@ proc handle(app: App, action: UiAction) =
       app.playbackSuppressed = true
       app.audio.stopPlayback()
   of SubmitAction:
-    if app.conversationRequested and not app.audio.capturing():
-      return
+    if app.conversationRequested and
+      (not app.audio.capturing() or app.permissionPending):
+        return
     if app.view.draft.strip().len > 4000:
       raise newException(VoiceError, "Please keep messages under 4000 characters.")
     if not app.conversationRequested:
@@ -320,6 +372,25 @@ proc handle(app: App, action: UiAction) =
 proc tick(app: App) =
   ## Polls networking and audio while keeping all callbacks on the UI thread.
   app.client.poll()
+  when defined(emscripten):
+    if app.pendingCaptureCommit:
+      if app.client.state == Connected:
+        app.client.sendAudio(app.audio.readCapture())
+        if not app.audio.captureStopping():
+          app.audio.releaseCapture()
+          app.pendingCaptureCommit = false
+          app.replyStarted = getMonoTime()
+          app.waitingForAudio = true
+          app.client.commitAudio()
+      else:
+        app.pendingCaptureCommit = false
+        app.audio.releaseCapture()
+    app.permissionPending = app.audio.capturePending()
+    if app.conversationRequested and not app.conversationReady and
+      not app.permissionPending and app.audio.capturing() and
+      app.client.state == Connected:
+        app.conversationReady = true
+        app.acceptResponses = true
   if app.conversationRequested:
     if app.client.state in {Disconnected, Failed}:
       app.stopConversation()
@@ -330,7 +401,11 @@ proc tick(app: App) =
   if not app.acceptResponses and app.client.responseActive:
     app.client.interrupt(0)
   if app.client.state != Connected:
-    app.stopListening()
+    when defined(emscripten):
+      if not (app.conversationRequested and app.client.state == Connecting):
+        app.stopListening()
+    else:
+      app.stopListening()
     if app.client.state in [Disconnected, Failed]:
       app.audio.stopPlayback()
   if app.audio.capturing():
@@ -352,6 +427,9 @@ proc syncView(app: App) =
   app.view.connected = app.client.state == Connected
   app.view.connecting = app.client.state == Connecting
   app.view.listening = app.audio.capturing()
+  when defined(emscripten):
+    app.view.listening = app.view.listening and not app.permissionPending and
+      app.client.state == Connected
   app.view.speaking = app.audio.outputActive()
   app.view.responding = app.client.responseActive
   app.view.level = app.audio.inputLevel()
@@ -363,8 +441,11 @@ proc syncView(app: App) =
   if app.conversationRequested:
     app.view.status =
       if app.permissionPending:
-        "Allow Voice Lab microphone access in macOS. " &
-          "Listening starts after approval."
+        when defined(emscripten):
+          "Allow microphone access in your browser. Listening starts after approval."
+        else:
+          "Allow Voice Lab microphone access in macOS. " &
+            "Listening starts after approval."
       elif app.client.state == Connecting:
         "Connecting for conversation. Press Stop conversation to cancel."
       else:
@@ -419,7 +500,7 @@ proc drawFrame(app: App) =
   app.window.swapBuffers()
 
 proc run(options: Options) =
-  ## Creates the native window without opening a connection or microphone.
+  ## Creates Voice Lab without opening a connection or microphone.
   let
     builder = buildAtlas(fontPath())
     window = newWindow("Polyworld - Voice Lab", ivec2(1060, 780))
@@ -441,6 +522,8 @@ proc run(options: Options) =
       demo: options.demo
     )
   )
+  when defined(emscripten):
+    browserApp = app
   try:
     app.loadDevices()
   except CatchableError as error:
@@ -492,6 +575,8 @@ proc run(options: Options) =
   try:
     while not window.closeRequested and not app.finished:
       pollEvents()
+      when defined(emscripten):
+        browserSleep(8)
   finally:
     window.onFrame = nil
     app.client.onAudio = nil
@@ -514,9 +599,54 @@ proc main() =
     echo "Credentials: OPENAI_API_KEY or ~/secrets/openai.key"
     echo "Model: OPENAI_REALTIME_MODEL (default " & DefaultModel & ")"
     return
-  if not launchApplication():
+  when defined(emscripten):
     run(options)
-    finishApplication()
+  else:
+    if not launchApplication():
+      run(options)
+      finishApplication()
+
+when defined(emscripten):
+  proc voiceBrowserAction(action: cint) {.exportc, cdecl.} =
+    ## Dispatches accessible browser controls inside their user gesture.
+    if browserApp == nil or action < ord(low(UiAction)) or
+      action > ord(high(UiAction)):
+        return
+    try:
+      browserApp.handle(UiAction(action))
+    except CatchableError as error:
+      browserApp.reportError(error.msg)
+
+  proc voiceBrowserText(message: cstring) {.exportc, cdecl.} =
+    ## Submits the browser text field through the same conversation controls.
+    if browserApp == nil:
+      return
+    browserApp.view.draft = $message
+    voiceBrowserAction(cint(ord(SubmitAction)))
+
+  proc voiceBrowserState(): cstring {.exportc, cdecl.} =
+    ## Mirrors the canvas conversation into accessible browser controls.
+    if browserApp == nil:
+      return "{}"
+    let app = browserApp
+    var lines = newJArray()
+    for item in app.client.transcripts:
+      lines.add(%*{"user": item.role == User, "text": item.text})
+    browserState = $(%*{
+      "status": app.view.status,
+      "error": app.view.error,
+      "connected": app.client.state == Connected,
+      "connecting": app.client.state == Connecting,
+      "conversationRequested": app.conversationRequested,
+      "listening": app.view.listening,
+      "permissionPending": app.permissionPending,
+      "speaking": app.audio.outputActive(),
+      "responding": app.client.responseActive,
+      "model": app.client.model,
+      "latencyMs": app.view.latencyMs,
+      "lines": lines
+    })
+    browserState.cstring
 
 when not defined(voiceLabTesting):
   main()

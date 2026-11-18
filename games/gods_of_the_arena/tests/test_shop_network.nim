@@ -137,7 +137,7 @@ block authoritativeShop:
       doAssert decoded.action == action
   var rejected = false
   try:
-    discard decodeSubmission(GameSubmission(action: ReplayAction(kind: ActionSwapItems + 1)).encodeSubmission())
+    discard decodeSubmission(GameSubmission(action: ReplayAction(kind: 255)).encodeSubmission())
   except RoomsError: rejected = true
   doAssert rejected
   echo "Shop relay/replay parity passed: 2 clients, 14 actions, signed bounds, repeated seek"

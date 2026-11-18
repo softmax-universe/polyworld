@@ -51,6 +51,10 @@ type
     CustomUiScale = "Custom"
   SparkStyle* = enum
     Linear, Stepped
+  DebugTab* = object
+    ## Game-owned tuning controls drawn inside the shared debug window.
+    label*: string
+    draw*: proc(sk: Silky, window: Window)
   SparkSample* = object
     tick*: int32
     value*: int64
@@ -61,7 +65,7 @@ var
   uiScaleReference* = 1.0'f
   hudScratch*: string
   debugMenuOpen* = false
-  debugNetwork = false
+  debugTab* = 0
   interpolateVisuals* = true
   showPaths* = false
   showTiles* = false
@@ -894,7 +898,7 @@ proc fpsChart(sk: Silky, window: Window) =
       tint rgbx(190, 190, 190, 180)
 
 proc mouseOverDebugMenu*(mouse: Vec2): bool =
-  ## Returns whether the pointer is over the F1 debug window.
+  ## Returns whether the pointer is over the shared debug window.
   if not debugMenuOpen or DebugWindowTitle notin subWindowStates:
     return false
   let state = subWindowStates[DebugWindowTitle]
@@ -994,12 +998,20 @@ proc networkPanel(sk: Silky, window: Window, stats: NetworkStats) =
 proc drawDebugMenu*(
     sk: Silky, window: Window,
     creepWaypoints: ptr bool = nil, waypointStatus = "",
-    network: NetworkStats = nil
+    network: NetworkStats = nil,
+    extraTabs: openArray[DebugTab] = [],
+    graphicsExtension: proc(sk: Silky, window: Window) = nil
 ) =
-  ## Draws the shared F1 debug window when it is open.
+  ## Draws graphics, network and optional game-owned debugging controls.
   noteFps()
   if not debugMenuOpen:
     return
+  when defined(gotaDebugInputProbe):
+    if sk.buttonPressed[MouseLeft] or sk.buttonReleased[MouseLeft]:
+      echo "DEBUG_INPUT mouse=", sk.mousePos, " pressed=",
+        sk.buttonPressed[MouseLeft], " released=", sk.buttonReleased[MouseLeft],
+        " down=", sk.buttonDown[MouseLeft], " tab=", debugTab
+  debugTab = clamp(debugTab, 0, extraTabs.len + 1)
   sk.beginDsl()
   try:
     subWindow(
@@ -1008,14 +1020,25 @@ proc drawDebugMenu*(
       DebugWindowOrigin,
       vec2(500, min(860.0'f, window.size.y.float32 / sk.uiScale - 64))
     ):
-      group "debugTabs":
-        box 440, 32
-        layout LeftToRight
-        itemSpacing 20
-        radioButton "Rendering", debugNetwork, false
-        radioButton "Network", debugNetwork, true
-      if debugNetwork:
+      for row in 0 ..< (extraTabs.len + 3) div 2:
+        group "debugTabs" & $row:
+          box 440, 32
+          layout LeftToRight
+          itemSpacing 20
+          for index in row * 2 .. min(row * 2 + 1, extraTabs.len + 1):
+            let label =
+              if index == 0: "Graphics"
+              elif index == 1: "Networking"
+              else: extraTabs[index - 2].label
+            radioButton label, debugTab, index
+            when defined(gotaDebugInputProbe):
+              if sk.buttonReleased[MouseLeft]:
+                echo "DEBUG_TAB index=", index, " selected=", debugTab
+      if debugTab == 1:
         sk.networkPanel(window, network)
+      elif debugTab >= 2:
+        if extraTabs[debugTab - 2].draw != nil:
+          extraTabs[debugTab - 2].draw(sk, window)
       else:
         group "fpsRow":
           box(
@@ -1081,6 +1104,8 @@ proc drawDebugMenu*(
           checkBox "Creep waypoints", creepWaypoints[]
           text "creepWaypointStatus":
             characters waypointStatus
+        if graphicsExtension != nil:
+          graphicsExtension(sk, window)
   finally:
     sk.endDsl()
 

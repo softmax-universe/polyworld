@@ -188,7 +188,10 @@ block:
   world.villagers[0].sleepiness = 95
   world.villagers[0].cargo[StoneResource] = 2
   let food = world.sources[berries].amount
-  world.advance(6)
+  for second in 0 ..< 6:
+    world.advance(1)
+    if world.villagers[0].hunger < 80:
+      break
   doAssert world.villagers[0].hunger < 80,
     "A full carrier must be able to find and eat wild food."
   doAssert world.sources[berries].amount == food - 1

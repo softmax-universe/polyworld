@@ -137,7 +137,9 @@ proc drawShop*(sk: Silky, window: Window, world: World, hero: Hero,
   if hero == nil or world == nil:
     resetShopUi()
     return
-  let owned = shopOwned(world, hero)
+  let
+    owned = shopOwned(world, hero)
+    pointerBlocked = mouseOverDebugMenu(sk.mousePos)
   if sessionWorld != world or sessionHero != hero.id or sessionSize != size:
     resetShopUi()
     sessionWorld = world
@@ -169,7 +171,7 @@ proc drawShop*(sk: Silky, window: Window, world: World, hero: Hero,
     close = heading.takeColumn(140, 16)
     wallet = heading.takeColumn(180, 16)
     title = heading.takeRest()
-  sk.drawTab(close, hovered = sk.hovered(close))
+  sk.drawTab(close, hovered = not pointerBlocked and sk.hovered(close))
   sk.drawLabel("CLOSE  Esc", close.origin, close.size, White, "Bold",
     CenterAlign)
   let
@@ -181,9 +183,10 @@ proc drawShop*(sk: Silky, window: Window, world: World, hero: Hero,
   for i, panel in layout.cards:
     if panel.contains(sk.mousePos): target = CatalogTarget + i
   if close.contains(sk.mousePos): target = CloseTarget
-  if sellSlot < 0 and gestures.draggingShopSlot() < 0:
-    updateShopTooltip(hero, size, sk.mousePos,
-      getMonoTime().ticks.float64 / 1_000_000_000.0)
+  if not pointerBlocked and sellSlot < 0 and
+    gestures.draggingShopSlot() < 0:
+      updateShopTooltip(hero, size, sk.mousePos,
+        getMonoTime().ticks.float64 / 1_000_000_000.0)
   else:
     shopTooltip.clearTooltip()
   if shopTooltip.tooltipContains(sk.mousePos): target = -1
@@ -194,7 +197,8 @@ proc drawShop*(sk: Silky, window: Window, world: World, hero: Hero,
           world.sellReason(hero.id, sellSlot.int32).len == 0:
         SellTarget
       else: -1
-    if (window.buttonPressed[MouseLeft] or window.buttonPressed[MouseRight]) and
+    if not pointerBlocked and
+        (window.buttonPressed[MouseLeft] or window.buttonPressed[MouseRight]) and
         not sellPanel.contains(sk.mousePos):
       sellSlot = -1
       gestures.resetShopGesture()
@@ -208,7 +212,7 @@ proc drawShop*(sk: Silky, window: Window, world: World, hero: Hero,
     rightPressed: window.buttonPressed[MouseRight],
     rightReleased: window.buttonReleased[MouseRight],
     rightDown: window.buttonDown[MouseRight]), occupied,
-    owned and not (hadPopup and sellSlot < 0))
+    owned and not pointerBlocked and not (hadPopup and sellSlot < 0))
   sk.mouseConsumed = true
   case gesture.kind
   of ShopContextGesture:
@@ -271,7 +275,8 @@ proc drawShop*(sk: Silky, window: Window, world: World, hero: Hero,
       card = layout.cards[index]
       enabled = world.purchaseReason(hero.id, item.ord.int32).len == 0 and
         waitingItem == NoItem
-    sk.drawTab(card, hovered = card.contains(sk.mousePos) and enabled)
+    sk.drawTab(card, hovered = not pointerBlocked and
+      card.contains(sk.mousePos) and enabled)
     let icon = GameUiPanel(origin: card.origin + vec2(4, 0), size: vec2(72))
     sk.drawWellImage(icon, itemIconKey(item), iconSize = 72)
     sk.drawSprite("gold", card.origin + vec2(10, 76), vec2(16))
@@ -307,7 +312,7 @@ proc drawShop*(sk: Silky, window: Window, world: World, hero: Hero,
     let
       reason = world.sellReason(hero.id, sellSlot.int32)
       button = sellPanel.sellButtonPanel
-      hovered = button.contains(sk.mousePos)
+      hovered = not pointerBlocked and button.contains(sk.mousePos)
       patch =
         if reason.len > 0: "button.disabled.9patch"
         elif hovered and window.buttonDown[MouseLeft]: "button.down.9patch"

@@ -10,12 +10,14 @@ type
     BuildingDeathSound, ReadySound, VictorySound, DefeatSound,
     DaybreakSound, NightfallSound, HoverSound,
     ChopSound, MineSound, DeliverWoodSound, DeliverGoldSound,
-    BuildPlaceSound, BuildStartSound
+    BuildPlaceSound, BuildStartSound, LastHitGoldSound, ExperienceSound,
+    DenySound
   SoundClip* = object
     cue*: SoundCue
     path*: string
 
 const
+  RewardSoundCooldown* = 0.2
   SoundClips*: seq[SoundClip] = @[
     SoundClip(cue: ClickSound,
       path: "sounds/artisticdude-rpg/wood-small.ogg"),
@@ -104,7 +106,13 @@ const
     SoundClip(cue: BuildPlaceSound,
       path: "sounds/rubberduck-metal-wood/wood_hit_02.ogg"),
     SoundClip(cue: BuildStartSound,
-      path: "sounds/rubberduck-metal-wood/wood-hammer-start.ogg")
+      path: "sounds/rubberduck-metal-wood/wood-hammer-start.ogg"),
+    SoundClip(cue: LastHitGoldSound,
+      path: "sounds/vehicle-accessories/coins-shake-01.ogg"),
+    SoundClip(cue: ExperienceSound,
+      path: "sounds/vehicle-tinysized/chimes-wood-rattle.ogg"),
+    SoundClip(cue: DenySound,
+      path: "sounds/kenney-rpg/metalLatch.ogg")
   ]
   SoundNotices*: seq[string] = @[
     "sounds/artisticdude-rpg/CC0-1.0.txt",

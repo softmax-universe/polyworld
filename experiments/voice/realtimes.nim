@@ -1,7 +1,11 @@
 import
-  std/[asyncdispatch, base64, deques, httpclient, json, os, sha1,
-    strutils, sysrand, times, uri],
-  jsony, ws
+  std/[base64, deques, json, strutils, times],
+  jsony
+
+when defined(emscripten):
+  import browsertransport
+else:
+  import std/[asyncdispatch, httpclient, os, sha1, sysrand, uri], ws
 
 const
   DefaultModel* = "gpt-realtime-2.1-mini"
@@ -40,8 +44,11 @@ type
     onTranscript*: proc(text: string)
     onTranscriptError*: proc(message: string)
     onAudioStart*, onSpeechStart*, onSpeechStop*, onInputCommit*: proc()
-    socket: WebSocket
-    http: AsyncHttpClient
+    when defined(emscripten):
+      browserHandle: cint
+    else:
+      socket: WebSocket
+      http: AsyncHttpClient
     outgoing: Deque[string]
     queuedBytes, inputBytes, generation: int
     writing: bool
@@ -61,20 +68,25 @@ type
 proc stopTransport(client: VoiceClient) =
   ## Invalidates pending work before detaching and closing its transport.
   inc client.generation
-  let
-    socket = client.socket
-    http = client.http
-  client.socket = nil
-  client.http = nil
+  when defined(emscripten):
+    let handle = client.browserHandle
+    client.browserHandle = 0
+    browserVoiceClose(handle)
+  else:
+    let
+      socket = client.socket
+      http = client.http
+    client.socket = nil
+    client.http = nil
+    if socket != nil:
+      socket.hangup()
+    if http != nil:
+      http.close()
   client.credential = ""
   client.outgoing.clear()
   client.queuedBytes = 0
   client.writing = false
   client.pendingResponses.clear()
-  if socket != nil:
-    socket.hangup()
-  if http != nil:
-    http.close()
 
 proc fail(client: VoiceClient, message: string) =
   ## Stops the session while preserving the original user-facing error.
@@ -84,31 +96,35 @@ proc fail(client: VoiceClient, message: string) =
   client.failure = message
   client.responseActive = false
 
-proc key(override: string): string =
-  ## Reads the same credential sources as the existing Polyworld OpenAI code.
-  result = override.strip()
-  if result.len == 0:
-    result = getEnv("OPENAI_API_KEY").strip()
-  if result.len == 0:
-    let path = getHomeDir() / "secrets" / "openai.key"
-    if fileExists(path):
-      result = readFile(path).strip()
-  if result.len == 0:
-    raise newException(VoiceError,
-      "Set OPENAI_API_KEY or add ~/secrets/openai.key, then reconnect.")
-  if '\r' in result or '\n' in result:
-    raise newException(VoiceError, "The OpenAI key contains a newline.")
+when not defined(emscripten):
+  proc key(override: string): string =
+    ## Reads the same credential sources as the existing Polyworld OpenAI code.
+    result = override.strip()
+    if result.len == 0:
+      result = getEnv("OPENAI_API_KEY").strip()
+    if result.len == 0:
+      let path = getHomeDir() / "secrets" / "openai.key"
+      if fileExists(path):
+        result = readFile(path).strip()
+    if result.len == 0:
+      raise newException(VoiceError,
+        "Set OPENAI_API_KEY or add ~/secrets/openai.key, then reconnect.")
+    if '\r' in result or '\n' in result:
+      raise newException(VoiceError, "The OpenAI key contains a newline.")
 
 proc newVoiceClient*(testMode = false): VoiceClient =
   ## Creates a disconnected client without reading credentials or networking.
-  VoiceClient(
-    model: getEnv("OPENAI_REALTIME_MODEL", DefaultModel),
-    voice: getEnv("OPENAI_REALTIME_VOICE", DefaultVoice),
+  result = VoiceClient(
+    model: DefaultModel,
+    voice: DefaultVoice,
     instructions: Instructions,
     autoRespond: true,
     status: "Connect to start a conversation.",
     testMode: testMode
   )
+  when not defined(emscripten):
+    result.model = getEnv("OPENAI_REALTIME_MODEL", DefaultModel)
+    result.voice = getEnv("OPENAI_REALTIME_VOICE", DefaultVoice)
 
 proc sessionEvent*(client: VoiceClient): JsonNode =
   ## Builds the current GA Realtime session configuration.
@@ -144,26 +160,27 @@ proc sessionEvent*(client: VoiceClient): JsonNode =
     }
   }
 
-proc flush(client: VoiceClient, generation: int) {.async.} =
-  ## Serializes queued writes so audio and turn events cannot overtake each other.
-  let socket = client.socket
-  try:
-    while generation == client.generation and client.outgoing.len > 0:
-      if socket == nil or socket.readyState != Open:
-        raise newException(VoiceError, "Connection closed while sending.")
-      let message = client.outgoing.popFirst()
-      client.queuedBytes -= message.len
-      await socket.send(message)
-      if generation != client.generation:
-        return
-      if socket.readyState != Open:
-        raise newException(VoiceError, "Connection closed while sending.")
-  except CatchableError:
-    if generation == client.generation:
-      client.fail("Connection lost while sending. Reconnect to try again.")
-  finally:
-    if generation == client.generation:
-      client.writing = false
+when not defined(emscripten):
+  proc flush(client: VoiceClient, generation: int) {.async.} =
+    ## Serializes queued writes so audio and turn events cannot overtake each other.
+    let socket = client.socket
+    try:
+      while generation == client.generation and client.outgoing.len > 0:
+        if socket == nil or socket.readyState != Open:
+          raise newException(VoiceError, "Connection closed while sending.")
+        let message = client.outgoing.popFirst()
+        client.queuedBytes -= message.len
+        await socket.send(message)
+        if generation != client.generation:
+          return
+        if socket.readyState != Open:
+          raise newException(VoiceError, "Connection closed while sending.")
+    except CatchableError:
+      if generation == client.generation:
+        client.fail("Connection lost while sending. Reconnect to try again.")
+    finally:
+      if generation == client.generation:
+        client.writing = false
 
 proc emit(client: VoiceClient, event: JsonNode) =
   ## Queues one event within a bounded transport buffer.
@@ -171,16 +188,22 @@ proc emit(client: VoiceClient, event: JsonNode) =
   if client.testMode:
     client.testEvents.add(message)
     return
-  if client.socket == nil or client.socket.readyState != Open:
-    return
-  if client.queuedBytes + message.len > MaxQueuedBytes:
-    client.fail("Network cannot keep up with audio. Reconnect to try again.")
-    return
-  client.outgoing.addLast(message)
-  client.queuedBytes += message.len
-  if not client.writing:
-    client.writing = true
-    asyncCheck client.flush(client.generation)
+  when defined(emscripten):
+    if not browserVoiceReady(client.browserHandle):
+      return
+    if not browserVoiceSend(client.browserHandle, message.cstring):
+      client.fail("Network cannot keep up with voice. Reconnect to continue.")
+  else:
+    if client.socket == nil or client.socket.readyState != Open:
+      return
+    if client.queuedBytes + message.len > MaxQueuedBytes:
+      client.fail("Network cannot keep up with audio. Reconnect to try again.")
+      return
+    client.outgoing.addLast(message)
+    client.queuedBytes += message.len
+    if not client.writing:
+      client.writing = true
+      asyncCheck client.flush(client.generation)
 
 proc entry(client: VoiceClient, id: string, role: TranscriptRole): int =
   ## Finds or creates a transcript entry with bounded conversation history.
@@ -207,12 +230,14 @@ proc safeDetail(client: VoiceClient, text: string, limit = 360): string =
     cleaned = cleaned.replace(client.credential, "[redacted]")
   var index = 0
   while index < cleaned.len:
-    if cleaned.continuesWith("sk-", index):
-      result.add("[redacted]")
-      index += 3
-      while index < cleaned.len and
-        cleaned[index] in {'a' .. 'z', 'A' .. 'Z', '0' .. '9', '-', '_', '*'}:
-          inc index
+    if cleaned.continuesWith("sk-", index) or
+      cleaned.continuesWith("ek_", index) or
+      cleaned.continuesWith("ek-", index):
+        result.add("[redacted]")
+        index += 3
+        while index < cleaned.len and
+          cleaned[index] in {'a' .. 'z', 'A' .. 'Z', '0' .. '9', '-', '_', '*'}:
+            inc index
     else:
       result.add(cleaned[index])
       inc index
@@ -464,89 +489,116 @@ proc disconnect*(client: VoiceClient) =
   client.suppressedResponse = ""
   client.pendingResponses.clear()
 
-proc run(
-  client: VoiceClient, generation: int, apiKey: string,
-  endpoint = "https://api.openai.com/v1/realtime"
-) {.async.} =
-  ## Opens an authenticated upgrade using the existing Windy ws dependency.
-  var http: AsyncHttpClient
-  try:
-    http = newAsyncHttpClient()
-    client.http = http
-    client.credential = apiKey
-    let
-      randomBytes = urandom(16)
-      socketKey = base64.encode(randomBytes)
-    http.headers = newHttpHeaders({
-      "Authorization": "Bearer " & apiKey,
-      "Connection": "Upgrade",
-      "Upgrade": "websocket",
-      "Sec-WebSocket-Version": "13",
-      "Sec-WebSocket-Key": socketKey
-    })
-    let request = http.get(
-      endpoint & "?model=" & encodeUrl(client.model)
-    )
-    if not await request.withTimeout(20000):
-      raise newException(VoiceError, "Connection timed out.")
-    let response = request.read()
-    if generation != client.generation:
-      http.close()
-      return
-    if response.code.int != 101:
-      var message = "OpenAI connection returned HTTP " & $response.code.int
-      let body = response.body()
-      if await body.withTimeout(2000):
-        try:
-          let error = body.read().fromJson(JsonNode){"error"}
-          message = client.apiError(error, message)
-        except CatchableError:
-          discard
-      if generation == client.generation:
-        client.fail(message)
-      return
-    let expected = base64.encode(ws.decodeBase16($secureHash(
-      socketKey & "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-    )))
-    if response.headers.getOrDefault("Sec-WebSocket-Accept") != expected:
-      raise newException(VoiceError, "Invalid WebSocket upgrade.")
-    let socket = WebSocket(
-      tcpSocket: http.getSocket(), masked: true, readyState: Open
-    )
-    client.socket = socket
-    while generation == client.generation and
-      client.state in {Connecting, Connected} and socket.readyState == Open:
-        let message = await socket.receiveStrPacket()
-        if generation == client.generation and message.len > 0:
-          client.receiveEvent(message)
-    if generation == client.generation and
-      client.state in {Connecting, Connected}:
-        client.fail("Voice connection closed. Reconnect to try again.")
-  except CatchableError:
-    if generation == client.generation and client.state != Failed:
-      client.fail("Voice connection lost. Reconnect to try again.")
-  finally:
-    if http != nil:
-      http.close()
+when not defined(emscripten):
+  proc run(
+    client: VoiceClient, generation: int, apiKey: string,
+    endpoint = "https://api.openai.com/v1/realtime"
+  ) {.async.} =
+    ## Opens an authenticated upgrade using the existing Windy ws dependency.
+    var http: AsyncHttpClient
+    try:
+      http = newAsyncHttpClient()
+      client.http = http
+      client.credential = apiKey
+      let
+        randomBytes = urandom(16)
+        socketKey = base64.encode(randomBytes)
+      http.headers = newHttpHeaders({
+        "Authorization": "Bearer " & apiKey,
+        "Connection": "Upgrade",
+        "Upgrade": "websocket",
+        "Sec-WebSocket-Version": "13",
+        "Sec-WebSocket-Key": socketKey
+      })
+      let request = http.get(
+        endpoint & "?model=" & encodeUrl(client.model)
+      )
+      if not await request.withTimeout(20000):
+        raise newException(VoiceError, "Connection timed out.")
+      let response = request.read()
+      if generation != client.generation:
+        http.close()
+        return
+      if response.code.int != 101:
+        var message = "OpenAI connection returned HTTP " & $response.code.int
+        let body = response.body()
+        if await body.withTimeout(2000):
+          try:
+            let error = body.read().fromJson(JsonNode){"error"}
+            message = client.apiError(error, message)
+          except CatchableError:
+            discard
+        if generation == client.generation:
+          client.fail(message)
+        return
+      let expected = base64.encode(ws.decodeBase16($secureHash(
+        socketKey & "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+      )))
+      if response.headers.getOrDefault("Sec-WebSocket-Accept") != expected:
+        raise newException(VoiceError, "Invalid WebSocket upgrade.")
+      let socket = WebSocket(
+        tcpSocket: http.getSocket(), masked: true, readyState: Open
+      )
+      client.socket = socket
+      while generation == client.generation and
+        client.state in {Connecting, Connected} and socket.readyState == Open:
+          let message = await socket.receiveStrPacket()
+          if generation == client.generation and message.len > 0:
+            client.receiveEvent(message)
+      if generation == client.generation and
+        client.state in {Connecting, Connected}:
+          client.fail("Voice connection closed. Reconnect to try again.")
+    except CatchableError:
+      if generation == client.generation and client.state != Failed:
+        client.fail("Voice connection lost. Reconnect to try again.")
+    finally:
+      if http != nil:
+        http.close()
 
 proc connect*(client: VoiceClient, apiKey = "") =
   ## Starts a fresh conversation without blocking window event processing.
   client.disconnect()
   client.transcripts.setLen(0)
   try:
-    let resolvedKey = key(apiKey)
     client.state = Connecting
     client.status = "Connecting to OpenAI..."
     client.connectedAt = epochTime()
-    if not client.testMode:
-      asyncCheck client.run(client.generation, resolvedKey)
+    when defined(emscripten):
+      if not client.testMode:
+        client.browserHandle = browserVoiceOpen(
+          client.model.cstring, client.voice.cstring, apiKey.cstring
+        )
+    else:
+      let resolvedKey = key(apiKey)
+      if not client.testMode:
+        asyncCheck client.run(client.generation, resolvedKey)
   except CatchableError as error:
     client.fail(error.msg)
 
 proc poll*(client: VoiceClient) =
-  ## Advances this experiment's async transport without blocking the UI.
-  if hasPendingOperations():
-    asyncdispatch.poll(0)
+  ## Advances transport in bounded steps without blocking the UI.
+  when defined(emscripten):
+    let generation = client.generation
+    try:
+      for i in 0 ..< 64:
+        if client.browserHandle == 0 or client.generation != generation:
+          break
+        let message = browserVoiceNext(client.browserHandle)
+        if message.len == 0:
+          break
+        client.receiveEvent(message)
+      if client.browserHandle != 0 and client.generation == generation:
+        let message = browserVoiceError(client.browserHandle)
+        if message.len > 0:
+          let detail =
+            if client.failure.len > 0: client.failure & " " & message
+            else: message
+          client.fail(detail)
+    except CatchableError as error:
+      client.fail("Invalid voice event: " & client.safeDetail(error.msg))
+  else:
+    if hasPendingOperations():
+      asyncdispatch.poll(0)
   if client.state == Connecting and epochTime() - client.connectedAt > 25:
     client.disconnect()
     client.fail("Voice connection timed out. Reconnect to try again.")

@@ -248,6 +248,7 @@ proc statsContains(window: Window, mouse: Vec2): bool =
 proc hudClicked(window: Window, sk: Silky, panel: GameUiPanel): bool =
   ## Keeps covered HUD controls from receiving an overlay click.
   not window.statsContains(sk.mousePos) and
+    not mouseOverDebugMenu(sk.mousePos) and
     not hudTooltip.tooltipContains(sk.mousePos) and
     (localHudHeroId() == 0 or window.buttonPressed[MouseLeft]) and
     chrome.clicked(window, sk, panel)
@@ -1057,9 +1058,35 @@ proc drawUi*(
     focusPlayerHero: var bool,
     attackMoveArmed: var bool,
     attackMoveHeld: bool,
-    networkStats: NetworkStats = nil
+    networkStats: NetworkStats = nil,
+    extraTabs: openArray[DebugTab] = [],
+    graphicsExtension: proc(sk: Silky, window: Window) = nil
 ) {.measure.} =
   ## Draws every Silky HUD panel for the current frame.
+  let creep = footmanById(run.world, primaryId)
+  hudScratch.setLen(0)
+  if creep.id == 0:
+    hudScratch.add "Select a pikeman to inspect its waypoints."
+  else:
+    hudScratch.addHudInt(creep.waypointIndex)
+    hudScratch.add '/'
+    hudScratch.addHudInt(creep.creepWaypointCount())
+    hudScratch.add " cleared - "
+    case creep.state
+    of Fighting:
+      hudScratch.add "Chasing / fighting"
+    of Dying:
+      hudScratch.add "Dying"
+    else:
+      hudScratch.add "Marching"
+  # Register debugging first so changing HUD contents cannot shift its hit IDs.
+  # The popup layer keeps these controls above the later world HUD draws.
+  sk.pushLayer(PopupsLayer)
+  try:
+    sk.drawDebugMenu(window, addr showCreepWaypoints, hudScratch,
+      networkStats, extraTabs, graphicsExtension)
+  finally:
+    sk.popLayer()
   if run.world.phase == Drafting:
     hudTooltip.clearTooltip()
     sk.drawDraft(window, currentLayout(window).size, transport.playing)
@@ -1735,23 +1762,6 @@ proc drawUi*(
       followSelection,
       addr statsState.toggled
     )
-  let creep = footmanById(run.world, primaryId)
-  hudScratch.setLen(0)
-  if creep.id == 0:
-    hudScratch.add "Select a pikeman to inspect its waypoints."
-  else:
-    hudScratch.addHudInt(creep.waypointIndex)
-    hudScratch.add '/'
-    hudScratch.addHudInt(creep.creepWaypointCount())
-    hudScratch.add " cleared - "
-    case creep.state
-    of Fighting:
-      hudScratch.add "Chasing / fighting"
-    of Dying:
-      hudScratch.add "Dying"
-    else:
-      hudScratch.add "Marching"
-  sk.drawDebugMenu(window, addr showCreepWaypoints, hudScratch, networkStats)
   statsState.syncDirector(actionCam, statsTable, window.tabHeld)
   if shopOpen or window.statsContains(sk.mousePos) or
       mouseOverDebugMenu(sk.mousePos):

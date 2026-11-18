@@ -56,6 +56,25 @@ block:
   doAssert distant.gain == 0
   doAssert spatialSoundMix(vec3(0), vec3(0), 0).gain == 0
 
+echo "Testing local rewards share one gate and survive busy combat"
+block:
+  var gate: SoundGate
+  for cue in [SwordSound, ImpactSound, BowSound, MagicSound,
+      FireSound, HealSound]:
+    doAssert gate.acceptSound(cue, 1.0)
+  doAssert gate.acceptSound(LastHitGoldSound, 1.01)
+  doAssert not gate.acceptSound(ExperienceSound, 1.02)
+  doAssert not gate.acceptSound(LastHitGoldSound, 1.05)
+  doAssert gate.acceptSound(ExperienceSound, 1.22)
+  doAssert not gate.acceptSound(LastHitGoldSound, 1.23)
+  doAssert gate.acceptSound(LastHitGoldSound, 1.43)
+  doAssert not gate.acceptSound(DenySound, 1.44)
+  doAssert gate.acceptSound(DenySound, 1.64)
+  doAssert not gate.acceptSound(LastHitGoldSound, 1.65)
+  doAssert not gate.acceptSound(ExperienceSound, 1.66)
+  doAssert gate.acceptSound(ExperienceSound, 0),
+    "A restarted presentation clock must not strand the reward gate"
+
 echo "Testing cue routing"
 for cue in [ClickSound, SelectSound, MoveOrderSound, AttackOrderSound,
     PurchaseSound, ErrorSound, ReadySound, VictorySound, DefeatSound,
@@ -64,5 +83,6 @@ for cue in [ClickSound, SelectSound, MoveOrderSound, AttackOrderSound,
 for cue in [SwordSound, ImpactSound, BowSound, MagicSound, FireSound,
     HealSound, HumanDeathSound, CreatureDeathSound, BuildingDeathSound,
     ChopSound, MineSound, DeliverWoodSound, DeliverGoldSound,
-    BuildPlaceSound, BuildStartSound]:
+    BuildPlaceSound, BuildStartSound, LastHitGoldSound, ExperienceSound,
+    DenySound]:
   doAssert not cue.isInterfaceSound

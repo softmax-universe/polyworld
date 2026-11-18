@@ -10,9 +10,11 @@ import ../[content, game, sim, cameras, minimaporders, pointers]
 include ../controls
 privateAccess(Window)
 
+var playedSounds: seq[SoundCue]
+
 proc playSound(cue: SoundCue) =
-  ## Keeps extracted gameplay handlers silent without opening an audio device.
-  discard
+  ## Records feedback without opening an audio device.
+  playedSounds.add cue
 
 macro production(names: varargs[untyped]): untyped =
   let tree = parseStmt(readFile(currentSourcePath().parentDir.parentDir / "graphics.nim"))
@@ -50,8 +52,11 @@ proc main() =
     selectionAdditive = false
     selectionPressPosition = vec2(0)
     attackMoveArmed = false
+    heldRightMove = false
+    nextRightMoveTick = 0'i32
     pickedId = 0'i32
     overUi = false
+    groundHit = true
     sk = (mousePos: vec2(0),)
 
   type SelectionTarget = object
@@ -63,14 +68,26 @@ proc main() =
   proc selectedTargetCount(): int = selectedIds.len
   proc playerMode(): bool = options.playerSlot > 0 and not run.replayMode
   proc playerHeroId(): int32 = run.world.heroes[options.playerSlot - 1].id
-  proc objectTeam(id: int32): int32 = (if id == playerHeroId(): 1 else: 2)
+  proc objectTeam(id: int32): int32 =
+    ## Keeps one allied creep distinct from the fixture's enemy mesh hits.
+    if id in [playerHeroId(), 303'i32]: 1 else: 2
   proc mouseOverUi(window: Window, mouse: Vec2, id: int32): bool = overUi
   proc pickEntity(vp: Mat4): int32 = pickedId
-  proc pickActionTarget(vp: Mat4, healing = false): int32 = pickedId
-  proc issueGroundOrder(vp: Mat4, attackMove: bool) =
-    if attackMove: queueAttackMove(playerHeroId(), 4, 5)
-    else: queueWalkTo(playerHeroId(), 4, 5)
-  production(selectEntity, clearSelection, holdingAttackMove, updateWorldSelection)
+  proc pickActionTarget(vp: Mat4, healing = false,
+      denying = false): int32 = pickedId
+  type Pick = object
+    hit: bool
+    layer, x, z: int
+  let layers = [(originX: 7, originZ: 11)]
+  proc mouseRay(mouse, size: Vec2, vp: Mat4): (Vec3, Vec3) =
+    ## Gives each screen point a deterministic ground ray for order tests.
+    (vec3(mouse.x, 0, mouse.y), vec3(0, -1, 0))
+  proc pickWalkableTile(origin, direction: Vec3): Pick =
+    ## Maps screen coordinates to distinct tiles without a renderer.
+    Pick(hit: groundHit, x: int(origin.x) div 10, z: int(origin.z) div 10)
+  proc mapOrigin(): int = 3
+  production(issueGroundOrder, selectEntity, clearSelection,
+    holdingAttackMove, updateWorldSelection)
 
   run = Game(world: World(phase: Playing))
   run.world.heroes.add Hero(id: 101, hp: 100)
@@ -101,7 +118,52 @@ proc main() =
   doAssert pending.len == 1 and pending[0].kind == CommandAttackMove
   doAssert primaryId == 202, "armed ground orders must preserve inspection"
   pending.setLen(0)
+  window.state.buttonDown = {KeyLeftShift}
+  attackMoveArmed = true
+  selectionStarted = true
+  updateWorldSelection(mat4())
+  doAssert pending.len == 1 and pending[0].kind == CommandQueueAttackMove,
+    "Shift A-click must append an attack-move"
+  pending.setLen(0)
   pickedId = 202
+  attackMoveArmed = true
+  selectionStarted = true
+  updateWorldSelection(mat4())
+  doAssert pending.len == 1 and pending[0].kind == CommandQueueAttack,
+    "Shift A-click on an enemy must append an attack"
+  pending.setLen(0)
+  window.state.buttonDown = {}
+  pickedId = 202
+
+  # Denies require an explicit attack gesture and never change inspection.
+  block denyClicks:
+    run.world.footmen = @[Footman(id: 303, team: run.world.heroes[0].team)]
+    run.world.footmen[0].hp = run.world.footmen[0].unitMaxHp div 2 - 1
+    pickedId = 303
+    attackMoveArmed = true
+    selectionStarted = true
+    updateWorldSelection(mat4())
+    doAssert pending.len == 1 and pending[0].kind == CommandAttack
+    doAssert pending[0].heroId == 101 and pending[0].first == 303
+    doAssert primaryId == 202, "A-deny must preserve the inspected unit"
+    pending.setLen(0)
+    attackMoveArmed = false
+    selectionStarted = true
+    updateWorldSelection(mat4())
+    doAssert pending.len == 0 and primaryId == 303,
+      "Ordinary allied left-click must remain inspection"
+    primaryId = 202
+    run.world.footmen[0].hp = run.world.footmen[0].unitMaxHp div 2
+    attackMoveArmed = true
+    selectionStarted = true
+    updateWorldSelection(mat4())
+    doAssert pending.len == 1 and pending[0].kind == CommandAttackMove,
+      "Exactly half health must not queue a friendly attack"
+    pending.setLen(0)
+    dec run.world.footmen[0].hp
+    attackMoveArmed = false
+    pickedId = 202
+    echo "PASS A-targeting denies below-half creeps without changing inspection"
 
   # Production right-click dispatch must retain inspection and use own hero.
   block rightOrder:
@@ -117,22 +179,31 @@ proc main() =
     var clickMarks, attackMarks: Markers
     proc emitClickMark(marks: var Markers, point: Vec3) = inc marks.count
     proc surfaceHeight(x, z: float32): float32 = 0
-    proc mouseRay(mouse, size: Vec2, vp: Mat4): (Vec3, Vec3) = (vec3(0), vec3(0))
-    type Pick = object
-      hit: bool
-      layer, x, z: int
-    let layers = [(originX: 0, originZ: 0)]
     proc pickTile(origin, direction: Vec3): Pick = Pick(hit: false)
-    proc pickWalkableTile(origin, direction: Vec3): Pick = Pick(hit: false)
-    proc mapOrigin(): int = 0
     var chat = (blocksGameplay: false,)
-    production(updatePlayerOrder)
+    production(updatePlayerOrder, updateHeldMovement)
     window.state.perFrame = PerFrame(buttonPressed: {MouseRight})
     updatePlayerOrder(mat4(), true)
     doAssert pending.len == 1 and pending[0].kind == CommandAttack
     doAssert pending[0].heroId == 101 and pending[0].first == 202
     doAssert primaryId == 202, "issuing an order must retain enemy inspection"
+    doAssert not heldRightMove, "Enemy attacks must not start held movement"
     pending.setLen(0)
+    pickedId = 303
+    attackMoveArmed = true
+    updatePlayerOrder(mat4(), true)
+    doAssert pending.len == 1 and pending[0].kind == CommandAttack and
+      pending[0].first == 303,
+      "A plus right-click may explicitly deny an allied creep"
+    doAssert not heldRightMove
+    pending.setLen(0)
+    attackMoveArmed = false
+    updatePlayerOrder(mat4(), true)
+    doAssert pending.len == 1 and pending[0].kind == CommandWalk,
+      "Ordinary right-click must not accidentally deny an allied creep"
+    pending.setLen(0)
+    heldRightMove = false
+    pickedId = 202
     # Polling routes must enforce modal ownership, not depend on their caller.
     chat.blocksGameplay = true
     updatePlayerOrder(mat4(), true)
@@ -148,13 +219,156 @@ proc main() =
     doAssert pending.len == 1 and pending[0].kind == CommandAttackMove
     doAssert attackMarks.count == 1 and clickMarks.count == 0
     doAssert primaryId == 202
+    doAssert not heldRightMove
     pending.setLen(0)
     attackMoveArmed = false
     updatePlayerOrder(mat4(), true)
     doAssert pending.len == 1 and pending[0].kind == CommandWalk
     doAssert attackMarks.count == 1 and clickMarks.count == 1
+    doAssert not heldRightMove, "Minimap orders must remain single clicks"
     pending.setLen(0)
     echo "PASS production right-click ownhero, retained inspection, A-move red / move green minimap routes"
+
+    for shift in [KeyLeftShift, KeyRightShift]:
+      window.state.buttonDown = {MouseRight, shift}
+      for minimap in [false, true]:
+        minimapHit = minimap
+        pickedId = 0
+        attackMoveArmed = false
+        updatePlayerOrder(mat4(), true)
+        doAssert pending.len == 1 and pending[0].kind == CommandQueueWalk,
+          "Either Shift key must append world and minimap walks"
+        doAssert not heldRightMove,
+          "Shift-click must add one waypoint without starting held steering"
+        pending.setLen(0)
+        window.state.perFrame = PerFrame()
+        run.world.tick += TickRate
+        updateHeldMovement(mat4(), true)
+        doAssert pending.len == 0, "Holding Shift-click must not add repeats"
+        window.state.perFrame = PerFrame(buttonPressed: {MouseRight})
+        attackMoveArmed = true
+        updatePlayerOrder(mat4(), true)
+        doAssert pending.len == 1 and
+          pending[0].kind == CommandQueueAttackMove
+        pending.setLen(0)
+      minimapHit = false
+      pickedId = 202
+      attackMoveArmed = false
+      updatePlayerOrder(mat4(), true)
+      doAssert pending.len == 1 and pending[0].kind == CommandQueueAttack
+      pending.setLen(0)
+    window.state.buttonDown = {}
+    echo "PASS Shift appends world, minimap and attack orders without repeats"
+
+    minimapHit = false
+    pickedId = 0
+    window.state.mousePos = ivec2(40, 50)
+    window.state.buttonDown = {MouseRight}
+    playedSounds.setLen(0)
+    updatePlayerOrder(mat4(), true)
+    doAssert heldRightMove and nextRightMoveTick > run.world.tick
+    doAssert pending.len == 1 and pending[0].kind == CommandWalk
+    doAssert pending[0].first == 8 and pending[0].second == 13,
+      "Ground orders must retain the layer and map origin conversion"
+    doAssert playedSounds == @[MoveOrderSound]
+    pending.setLen(0)
+    window.state.perFrame = PerFrame()
+    window.state.mousePos = ivec2(90, 30)
+    run.world.tick = nextRightMoveTick - 1
+    updateHeldMovement(mat4(), true)
+    doAssert pending.len == 0, "Held movement must wait for its repeat tick"
+    inc run.world.tick
+    updateHeldMovement(mat4(), true)
+    doAssert pending.len == 1 and pending[0].kind == CommandWalk
+    doAssert pending[0].first == 13 and pending[0].second == 11,
+      "A held order must use the current pointer destination"
+    doAssert playedSounds == @[MoveOrderSound],
+      "Held movement must not repeat the order sound"
+    pending.setLen(0)
+    updateHeldMovement(mat4(), true)
+    doAssert pending.len == 0, "Render frames must not flood the command queue"
+    let hero = run.world.heroes[0]
+    hero.hasMoveTarget = true
+    hero.moveTileX = 13
+    hero.moveTileY = 11
+    run.world.tick = nextRightMoveTick
+    updateHeldMovement(mat4(), true)
+    doAssert pending.len == 0, "An unchanged active destination needs no order"
+    hero.hasMoveTarget = false
+    window.state.buttonDown = {}
+    updateHeldMovement(mat4(), true)
+    doAssert not heldRightMove and pending.len == 0
+    window.state.buttonDown = {MouseRight}
+    run.world.tick += TickRate
+    updateHeldMovement(mat4(), true)
+    doAssert pending.len == 0,
+      "A held button cannot restart movement without a fresh world press"
+
+    for gate in 0 .. 14:
+      window.state.buttonDown = {MouseRight}
+      window.state.perFrame = PerFrame(buttonPressed: {MouseRight})
+      updatePlayerOrder(mat4(), true)
+      doAssert heldRightMove and pending.len == 1
+      pending.setLen(0)
+      window.state.perFrame = PerFrame(
+        buttonPressed: if gate == 13: {MouseLeft} else: {})
+      run.world.tick = nextRightMoveTick
+      if gate == 14:
+        window.state.buttonDown.incl KeyLeftShift
+      chat.blocksGameplay = gate == 0
+      matchMenu = if gate == 1: 1 else: HiddenMatchMenu
+      shopOpen = gate == 2
+      run.world.phase = if gate == 3: Drafting else: Playing
+      run.world.gameOver = gate == 4
+      bindingCapture = gate == 5
+      armedAbility = if gate == 6: 0 else: -1
+      armedItem = if gate == 7: 0 else: -1
+      attackMoveArmed = gate == 8
+      hero.hp = if gate == 9: 0 else: 100
+      hero.state = if gate == 10: Dying else: Marching
+      options.playerSlot = if gate == 11: 0 else: 1
+      updateHeldMovement(mat4(), gate != 12)
+      doAssert not heldRightMove and pending.len == 0,
+        "A modal, focus loss or unavailable hero must cancel held movement"
+      chat.blocksGameplay = false
+      matchMenu = HiddenMatchMenu
+      shopOpen = false
+      run.world.phase = Playing
+      run.world.gameOver = false
+      bindingCapture = false
+      armedAbility = -1
+      armedItem = -1
+      attackMoveArmed = false
+      hero.hp = 100
+      hero.state = Marching
+      options.playerSlot = 1
+      window.state.buttonDown = {MouseRight}
+      window.state.perFrame = PerFrame()
+      updateHeldMovement(mat4(), true)
+      doAssert pending.len == 0,
+        "Removing the cancellation gate must still require a fresh press"
+
+    for source in 0 .. 3:
+      window.state.perFrame = PerFrame(buttonPressed: {MouseRight})
+      overUi = source == 0
+      groundHit = source != 1
+      pickedId = if source == 2: 202 else: 0
+      minimapHit = source == 3
+      updatePlayerOrder(mat4(), true)
+      doAssert not heldRightMove,
+        "UI, missed ground, enemy and minimap presses must not start a hold"
+      pending.setLen(0)
+      overUi = false
+      groundHit = true
+      pickedId = 0
+      minimapHit = false
+      window.state.perFrame = PerFrame()
+      run.world.tick += TickRate
+      updateHeldMovement(mat4(), true)
+      doAssert pending.len == 0,
+        "Dragging into the world must not start a hold from another input owner"
+    window.state.buttonDown = {}
+    echo "PASS held ground steering, throttling, quiet repeats and cancellation gates"
   block cameraHold:
     var
       cameraTarget = vec3(40, 0, 40)
@@ -307,16 +521,24 @@ proc main() =
       preferences: int
       showOccludedCharacters = false
       scene = 0
+      debugToggles = 0
+      chromeCalls = 0
     const
       HiddenMatchMenu = 0
       PauseMenu = 1
       MatchSettings = 2
+      MatchResults = 3
     proc canHumanChat(network: TestNetwork): bool = true
     proc scaleKey(window: Window, button: Button, preferences: var int,
         scale: float32, name: string): bool = false
     proc syncChatInput(window: Window, chat: ChatEditor) = discard
     proc clearHudTooltip() = discard
-    proc handleChromeKey(button: Button): bool = false
+    proc handleChromeKey(button: Button): bool =
+      ## Records debug toggles through the production callback's modal gates.
+      inc chromeCalls
+      if button == KeyF2:
+        inc debugToggles
+        return true
     proc setFullscreen(window: Window, value: bool) = discard
     proc isFullscreen(window: Window): bool = false
     proc toggleShading(scene: int) = discard
@@ -340,27 +562,47 @@ proc main() =
       "A click over the match menu must still reach confinement"
     matchMenu = HiddenMatchMenu
     shopOpen = true
+    window.onButtonPress(KeyF2)
+    doAssert debugToggles == 1 and shopOpen,
+      "F2 must open debugging while the shop remains open"
     armedAbility = 1
+    heldRightMove = true
     window.onButtonPress(KeyEscape)
     doAssert not shopOpen and matchMenu == HiddenMatchMenu,
       "Escape must close the shop before opening the match menu"
+    doAssert not heldRightMove, "Closing the shop must retire held movement"
     doAssert shopResets == 1 and armedAbility == -1,
       "shop close must retire shop interaction and targeting"
+    heldRightMove = true
     window.onButtonPress(KeyEscape)
     doAssert matchMenu == PauseMenu, "a second Escape may open the match menu"
+    doAssert not heldRightMove, "Opening the menu must retire held movement"
     matchMenu = HiddenMatchMenu
+    let callsBeforeSpace = chromeCalls
     window.onButtonPress(KeySpace)
     doAssert transport.playing, "human Space must not pause local playback"
+    doAssert chromeCalls == callsBeforeSpace,
+      "Human Space must remain reserved before configurable debug shortcuts"
     run.replayMode = true
     window.onButtonPress(KeySpace)
     doAssert not transport.playing, "replay Space must retain playback pause"
     run.replayMode = false
+    heldRightMove = true
     window.onButtonPress(KeyA)
     doAssert attackMoveArmed, "A must arm attack-move, not become a mouse click"
+    doAssert not heldRightMove, "Attack-move must retire ordinary held movement"
     doAssert not window.mousePressed(MouseLeft)
     doAssert not window.mouseDown(MouseMiddle), "S must not be a camera-drag alias"
     attackMoveArmed = false
-    discard chat.handleChatButton(KeyEnter, true)
+    heldRightMove = true
+    window.onButtonPress(KeyS)
+    doAssert not heldRightMove and pending.len == 1
+    doAssert pending[0].kind == CommandStop,
+      "Stop must cancel held movement and queue exactly one stop"
+    pending.setLen(0)
+    heldRightMove = true
+    window.onButtonPress(KeyEnter)
+    doAssert not heldRightMove, "Opening chat must retire held movement"
     window.onButtonPress(KeyA)
     doAssert not attackMoveArmed, "chat must own gameplay shortcut callbacks"
     discard chat.handleChatButton(KeyEscape, true)
@@ -373,12 +615,29 @@ proc main() =
     doAssert not transport.playing, "Space must not pause/resume drafts"
     run.world.phase = Playing
     echo "PASS production callbacks: confinement click, human Space, replay pause, A-move, chat/menu/draft"
+    matchMenu = MatchResults
+    chat = ChatEditor()
+    clearPlayerCommands()
+    playedSounds.setLen(0)
+    for button in [KeyEscape, KeyEnter, KeyQ, KeyW, KeyE, KeyR,
+        KeyA, KeyS, KeyB, KeyF, KeyG, KeySpace, MouseLeft, MouseRight]:
+      window.onButtonPress(button)
+      doAssert matchMenu == MatchResults and not chat.typing
+      doAssert pending.len == 0 and not shopOpen and not attackMoveArmed
+      doAssert armedAbility == -1 and armedItem == -1
+      doAssert not transport.playing,
+        "Result-screen keys must not resume playback or dismiss the result"
+    doAssert playedSounds.len == 0
+    echo "PASS results own Escape, chat, gameplay shortcuts and mouse callbacks"
   block abilityReadiness:
     var matchMenu = 0
     const HiddenMatchMenu = 0
     production(updatePlayerSpells)
     let hero = run.world.heroes[0]
     hero.mana = 10000
+    hero.level = HeroMaxLevel
+    hero.abilityLevels = [1'i32, 1, 1, 1]
+    overUi = true
     for heroClass in HeroClass:
       hero.class = heroClass
       for slot in HeroAbilitySlot:
@@ -393,10 +652,21 @@ proc main() =
         # The actual polled keyboard route shares the HUD activation helper.
         let key = [KeyQ, KeyW, KeyE, KeyR][slot.ord]
         window.state.perFrame = PerFrame(buttonPressed: {key})
+        heldRightMove = true
         updatePlayerSpells()
-        doAssert armedAbility == -1 and pending.len == 0
+        doAssert armedAbility == -1 and pending.len == 0 and not heldRightMove
         hero.cooldowns[slot] = 0
-        discard activatePlayerAbility(run.world, hero.id, slot.ord.int32)
+        doAssert hero.abilityLevelError(slot) == NoActionError,
+          "The learning overlay must be available during this input test"
+        let points = hero.abilityPoints
+        doAssert activatePlayerAbility(run.world, hero.id, slot.ord.int32),
+          "A ready ability must report successful activation"
+        pending.setLen(0)
+        armedAbility = -1
+        playedSounds.setLen(0)
+        updatePlayerSpells()
+        doAssert playedSounds == @[SelectSound],
+          "Ability keys must succeed while upgrade overlays are available"
         if heroAbility(hero.class, slot).abilitySpec.casting == SelfCast:
           doAssert pending.len == 1 and pending[0].kind == CommandCastTarget
           doAssert pending[0].heroId == hero.id and pending[0].first == hero.id
@@ -405,7 +675,18 @@ proc main() =
             "ready aimed abilities must still arm normally"
         pending.setLen(0)
         armedAbility = -1
-    echo "PASS every class/slot cooldown blocks HUD helper and production spell keys; ready casts preserved"
+        doAssert hero.abilityPoints == points and hero.abilityLevels[slot] == 1,
+          "Plain ability keys must not spend upgrade points"
+        window.state.buttonDown = {KeyLeftShift}
+        updatePlayerSpells()
+        doAssert pending.len == 1 and pending[0].kind == CommandLevelAbility
+        doAssert pending[0].heroId == hero.id and pending[0].slot == slot.ord
+        doAssert armedAbility == -1,
+          "Shift plus an ability key must still request an upgrade"
+        pending.setLen(0)
+        window.state.buttonDown = {}
+    overUi = false
+    echo "PASS every class/slot cooldown, upgrade-overlay activation and explicit learning keys"
   window.close()
 
 main()

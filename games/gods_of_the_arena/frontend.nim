@@ -3,17 +3,10 @@ import
   bumpy, chroma, jsony, silky, vmath, windy,
   polyworld/[displays, chrome, connections, menus, roomclients, rooms, policies,
     sounds, viewers],
-  content, controls, game, graphics, homes, lobbies, multiplayer, playernames, pointers, presets, replays
+  content, controls, game, graphics, homes, lobbies, multiplayer, playernames,
+  pointers, presets, replays, settings
 
 const AppName = "Polyworld GotA"
-
-proc readGotaPreferences(): Preferences =
-  ## Shared presentation normalization must not turn an invalid saved identity
-  ## into a different, eligible name by truncating it before GotA's prompt gate.
-  result = readPreferences(AppName)
-  let bytes = getConfig(AppName, "settings.json")
-  if bytes.len > 0:
-    result.name = bytes.fromJson(Preferences).name
 
 proc bundledBot(name, file: string): LocalPolicy =
   ## Loads a bundled bot from the native checkout or the web data bundle.
@@ -690,7 +683,8 @@ proc runFrontend*() =
           let height = max(440.0'f,
             window.size.y.float32 / sk.uiScale - origin.y - 50)
           if sk.settingsPanel(
-            window, preferences, AppName, origin, "", height
+            window, preferences, AppName, origin, "", height,
+            controls = GotaControlProfile, supportsAmbientOcclusion = true
           ):
             page = HomeMenu
       except CatchableError as problem:

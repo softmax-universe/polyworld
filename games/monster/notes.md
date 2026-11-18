@@ -16,21 +16,29 @@ editor or click Moss's minimap portrait to resume following him. Left-clicking
 the world selects a creature, villager, house, hall, or resource stash for
 inspection. It never gives an order.
 
-Voice connects automatically when the game starts. Click `Talk`, speak to Moss,
-then click `Finish` to send. The first recording asks macOS for Monster's
-microphone permission. Recording stops when the window loses focus and ends
-after 30 seconds at most. The microphone stays off until you click Talk.
+The chat has two modes: `Text` and `Conversation`. It starts in Text with no
+microphone or voice connection. Conversation requires an OpenAI API key.
+Select it once, allow microphone access, and speak naturally. Semantic turn
+detection decides when you have finished speaking; there is no Talk/Finish
+button or recording time limit. You can interrupt Moss while he speaks.
+Text mode stops the microphone, voice output, and voice connection. Leaving
+the game window pauses listening; returning resumes the selected Conversation
+mode. The typed editor remains available in both modes.
 
 Spoken commands use the same conversation, lessons, and validated actions as
 typed commands. Moss speaks new replies with the Voice Lab realtime model and
 a low, warm, gravelly `cedar` voice. Saved conversations are not read aloud on
 startup. The voice model performs Moss's approved dialogue; the existing
-creature model still makes plans and learns lessons. `Voice off` mutes replies
-while leaving text and microphone commands available. `Retry` reconnects if
-the voice connection fails. Text chat continues to work without voice.
+creature model still makes plans and learns lessons. Complete spoken turns
+keep their order while Moss is thinking; a spoken stop cancels queued orders.
+Connection or microphone failures return to Text. Select Conversation again
+to reconnect. On macOS, the microphone and speaker share Apple's voice
+processing audio engine for echo cancellation during simultaneous playback
+and capture. Other platforms currently use the existing Slappy audio path.
 
-Use `--mute` to start with spoken replies muted, or `--no-voice` to skip the
-voice connection. `OPENAI_REALTIME_MODEL` and `OPENAI_REALTIME_VOICE` override
+Use `--unmute` to start directly in Conversation, `--mute` for Text, or
+`--no-voice` to disable Conversation. `OPENAI_REALTIME_MODEL` and
+`OPENAI_REALTIME_VOICE` override
 the Voice Lab model and creature voice. Voice uses `OPENAI_API_KEY`, falling
 back to `MONSTER_KEY_FILE` or `~/secrets/openai.key`, including one retry for
 a rejected environment key. Offline mode, hidden screenshots, and headless
@@ -63,13 +71,34 @@ controls only Moss.
 
 Willow's six villagers share three homes: Ada and Ben at Miller's hut, Clara
 and Dara at Weaver's hut, and Eli and Finn at Mason's hut. They walk to supplies, bring
-them home, eat, refuel their hearths, and repair damage. They rest when their
-needs are met. Their names and the valley's location names remain visible
+them home, eat, refuel their hearths, and repair damage. Residents share slow
+harvesting, fishing, woodcutting, and mining jobs, carrying two supplies per
+trip. They take short breaks, tend crops, sweep outside their homes, stroll
+around the village, and stop to chat with free neighbors. Eating, sleeping,
+and fleeing danger take priority. Their names and location names remain visible
 in the world. Select a villager to see health, hunger, sleepiness, and carried
-items in the utility panel. A fuller hunger or sleepiness meter means a
-stronger need. Eating consumes real food and lowers hunger; sleeping gradually
+items in the utility panel, along with their current activity. A fuller hunger
+or sleepiness meter means a stronger need. Eating consumes real food and lowers
+hunger; sleeping gradually
 lowers sleepiness. Residents whose homes are destroyed sleep at their intact
 village hall, or outdoors if both buildings are gone.
+
+The economy targets two meals per resident per five-minute day. Each meal
+uses one food and relieves 45 hunger; hunger rises by 90 per day. Residents
+eat before bed when needed. Each home aims to keep four food, and each hall
+keeps 14 food, 10 firewood, and six stone. These are pooled food and fuel
+targets, so nearby grain can replace a distant berry trip and oak can replace
+pine. Residents account for supplies already being carried home and prioritize
+food when communal supplies run low. Extra gifts remain available in storage.
+
+Gathering two supplies takes six seconds for berries, eight for grain, ten
+for fish or pine, and twelve for oak or stone, plus walking and delivery.
+Walking speed stays unchanged. Each farm regrows one grain every 30 seconds;
+berries, fish, and pine regrow one unit every 60 seconds, and oak every 90.
+Across the valley that allows up to 50 food per day against about 36 meals,
+leaving room for interruptions and Moss's help without endless stockpiling.
+Regrowth stops at each source's capacity; destroyed sources never regrow and
+stone remains finite.
 
 The valley shares GotA's five-minute day and changing light, starting at
 08:00. Night runs from 18:00 to 06:00. Villagers prefer going home to sleep
@@ -85,7 +114,10 @@ The north and south fords provide walking routes across the stream.
 Villages compete for the same berry patches, fishing banks, fallen wood, and
 finite stone deposits. A gatherer who reaches a pile first leaves less for
 the next visitor. Once their households are supplied, residents gather
-reserves for their own hall. They use their own village's grain fields and
+varied reserves for their own hall. Workers account for supplies already being
+gathered or carried, and try another job when a source is unavailable. Stocked
+halls let people spend more time on maintenance and village life instead of
+gathering indefinitely. They use their own village's grain fields and
 stores. Select a village hall to inspect its current food, wood, and stone.
 
 You can help any village through Moss. Try `Bring stone from the shared
@@ -180,6 +212,18 @@ nim r games/monster/tests/test_selection_render.nim
 nim r games/monster/tests/test_voices.nim
 nim r games/monster/tests/test_voice_launch.nim
 ```
+
+Measure production, meals, reserves, hunger, warmth, and work/leisure time
+without rendering, external services, or modifying a save:
+
+```sh
+nim r games/monster/tests/bench_economy.nim 12 42,7,123
+nim r games/monster/tests/bench_economy.nim 60 42
+nim r games/monster/tests/bench_economy.nim 12 42,7,123 empty-food
+```
+
+The last scenario removes all initial food but keeps sources intact, testing
+recovery from a shortage rather than relying on the starting stockpile.
 
 The opt-in `nim r games/monster/tests/manual_voice.nim --live` check sends
 synthetic speech through the real voice connection and game planner without

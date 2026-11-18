@@ -22,6 +22,9 @@ type
     CommandStop
     CommandSell
     CommandSwap
+    CommandQueueWalk
+    CommandQueueAttackMove
+    CommandQueueAttack
 
   PlayerCommand = object
     kind: PlayerCommandKind
@@ -51,28 +54,28 @@ proc queueDraft*(heroId, classId: int32) =
     kind: CommandDraft, heroId: heroId, first: classId
   )
 
-proc queueWalkTo*(heroId, mapX, mapY: int32) =
-  ## Queues one walk command for the human hero.
+proc queueWalkTo*(heroId, mapX, mapY: int32, append = false) =
+  ## Submits a walk, optionally after the hero's current orders.
   pending.add PlayerCommand(
-    kind: CommandWalk,
+    kind: (if append: CommandQueueWalk else: CommandWalk),
     heroId: heroId,
     first: mapX,
     second: mapY
   )
 
-proc queueAttackMove*(heroId, mapX, mapY: int32) =
-  ## Queues one attack-move command for the human hero.
+proc queueAttackMove*(heroId, mapX, mapY: int32, append = false) =
+  ## Submits an attack-move, optionally after the hero's current orders.
   pending.add PlayerCommand(
-    kind: CommandAttackMove,
+    kind: (if append: CommandQueueAttackMove else: CommandAttackMove),
     heroId: heroId,
     first: mapX,
     second: mapY
   )
 
-proc queueAttackTarget*(heroId, targetId: int32) =
-  ## Queues one attack command for the human hero.
+proc queueAttackTarget*(heroId, targetId: int32, append = false) =
+  ## Submits an attack, optionally after the hero's current orders.
   pending.add PlayerCommand(
-    kind: CommandAttack,
+    kind: (if append: CommandQueueAttack else: CommandAttack),
     heroId: heroId,
     first: targetId
   )
@@ -193,6 +196,7 @@ proc activatePlayerAbility*(
     queueCastTarget(heroId, slotId, heroId)
     return true
   armedAbility = slotId
+  true
 
 proc action(command: PlayerCommand, tick: int32): ReplayAction =
   ## Converts a human intent to the same payload used by bot commands.
@@ -200,7 +204,8 @@ proc action(command: PlayerCommand, tick: int32): ReplayAction =
     ActionDraft, ActionWalkTo, ActionAttackTarget, ActionAttackMove,
     ActionBuyItem, ActionUseItem, ActionUseItemAt, ActionCastTarget,
     ActionCastPoint, ActionLevelAbility, ActionBuyback, ActionStop, ActionSellItem,
-    ActionSwapItems
+    ActionSwapItems, ActionQueueWalkTo, ActionQueueAttackMove,
+    ActionQueueAttackTarget
   ]
   ReplayAction(
     tick: uint32(tick), heroId: command.heroId, kind: Kinds[command.kind],

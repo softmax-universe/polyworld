@@ -39,10 +39,17 @@ for session in [first, second]:
   doAssert session.humanChat[0].tick == 2 * TickRate.uint32
   doAssert session.humanChat[0].system and session.humanChat[0].sender.len == 0
   doAssert session.client.outgoing.len == 0, "No forged outgoing command"
+  let tape = decodeReplay(encodeReplay(session.game.recorder.data))
+  doAssert tape.events.len == 1
+  doAssert tape.events[0].kind == SystemReplayChat
+  doAssert tape.events[0].text == ThreeMinuteNotice
+  doAssert tape.events[0].tick == 2 * TickRate.uint32
 # Seek back across threshold with the independently retained chat/cursor.
 first.game.world.restore(beforeCrossing)
 first.applyPacket(packetAt(2 * TickRate.uint32), localPlayback = true)
 doAssert first.humanChat.len == 1
+doAssert first.game.recorder.data.events.len == 1,
+  "Cached packet playback must not record a second notice"
 let reconnect = fixture()
 for tick in 1'u32 .. 3'u32 * TickRate.uint32:
   reconnect.applyPacket(packetAt(tick), localPlayback = true)

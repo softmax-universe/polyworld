@@ -12,6 +12,15 @@ const
   MaxLessons* = 64
   CarryLimit* = 6
   VillagerCarryLimit* = 2
+  VillageWorkReserves* = [4, 6, 4, 6, 4, 6]
+    ## Sizes pooled food and fuel reserves plus the finite stone reserve.
+  HouseholdFoodReserve* = 4
+  VillagerHungerRate* = 0.3'f
+  MealRelief* = 45'f
+  MealHunger* = 50'f
+  BedtimeHunger* = 35'f
+  GatherSeconds* = [6'f, 8'f, 10'f, 10'f, 12'f, 12'f]
+  RegrowthSeconds* = [60'f, 30'f, 60'f, 60'f, 90'f, 0'f]
   AttackDamage* = 35'f
   AttackRange* = 1.5'f
   AttackWindup* = 0.8'f
@@ -107,7 +116,8 @@ type
     integrity*, fuel*: float32
   VillagerTask* = enum
     IdleTask, GatherTask, WithdrawTask, DeliverTask, EatTask,
-    RefuelTask, RepairTask, FleeTask, SleepTask
+    RefuelTask, RepairTask, FleeTask, SleepTask, ChoreTask, WanderTask,
+    ChatTask
   Villager* = object
     id*, name*: string
     home*: int

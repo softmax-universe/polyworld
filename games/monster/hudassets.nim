@@ -1,5 +1,5 @@
 import
-  std/os,
+  std/[os, strutils],
   chroma, pixie, silky, vmath,
   polyworld/gameuis,
   polyworld/common as artpaths,
@@ -219,16 +219,33 @@ proc drawUtility(
   boxes: ChatLayout,
   meters: openArray[UtilityMeter],
   stock: Inventory,
-  emptyText: string,
+  emptyText, activity: string,
   frame: FrameState
 ) =
-  ## Stacks meters and full-size items in one independently scrollable viewport.
+  ## Stacks an activity, meters, and items in one scrollable viewport.
   let
     panel = boxes.utility
     padding = 6'f * boxes.artScale
     meterStep = 62'f * boxes.artScale
     rowStep = 124'f * boxes.artScale
     iconSize = 110'f * boxes.artScale
+    activityWidth = panel.size.x - padding * 2 - 12
+    lineHeight = max(16'f, sk.getTextSize("Small", "Ag").y)
+  var
+    line: string
+    lines = 0
+  for word in strutils.splitWhitespace(activity):
+    let candidate = if line.len == 0: word else: line & " " & word
+    if line.len > 0 and sk.getTextSize("Small", candidate).x > activityWidth:
+      inc lines
+      line = word
+    else:
+      line = candidate
+  if line.len > 0:
+    inc lines
+  let activityHeight = if lines > 0:
+      lines.float32 * lineHeight + padding * 2
+    else: 0'f
   var count = 0
   for amount in stock:
     if amount > 0:
@@ -237,7 +254,8 @@ proc drawUtility(
     rows = (count + 2) div 3
     inventoryHeight = if rows == 0: 24'f
       else: (rows - 1).float32 * rowStep + iconSize
-    total = padding * 2 + meters.len.float32 * meterStep + inventoryHeight
+    total = padding * 2 + activityHeight +
+      meters.len.float32 * meterStep + inventoryHeight
     scrollWidth = if total > panel.size.y: 12'f else: 0'f
     contentWidth = panel.size.x - padding * 2 - scrollWidth
     content = GameUiPanel(origin: panel.origin,
@@ -248,6 +266,16 @@ proc drawUtility(
     vec2(panel.size.x, total), vec2(1))
   var origin = panel.origin + vec2(padding, padding - frame.scrollPos.y)
   sk.pushClipRect(rect(content.origin, content.size))
+  if lines > 0:
+    when defined(silkyTesting):
+      sk.beginWidget("activity", text = activity,
+        rect = rect(origin, vec2(activityWidth, activityHeight)))
+    discard sk.drawText("Small", activity, origin, White,
+      maxWidth = activityWidth, maxHeight = activityHeight,
+      wordWrap = true)
+    when defined(silkyTesting):
+      sk.endWidget()
+    origin.y += activityHeight
   for meter in meters:
     sk.drawMeter(GameUiPanel(origin: origin,
       size: vec2(contentWidth, 54'f * boxes.artScale)),
@@ -282,6 +310,7 @@ proc drawSelectionStats*(
     subtitle = "Carrying " & $world.creature.cargo.total() & "/6"
     stock = world.creature.cargo
     emptyText = "Empty hands"
+    activity = ""
     meters: seq[UtilityMeter]
   case selected.kind
   of VillagerSelection:
@@ -295,6 +324,7 @@ proc drawSelectionStats*(
       else: "Dead"
     stock = person.cargo
     if person.health > 0:
+      activity = person.activity
       meters.add UtilityMeter(title: "Hunger", value: person.hunger,
         tint: rgbx(237, 167, 62, 255))
       meters.add UtilityMeter(title: "Sleepiness", value: person.sleepiness,
@@ -349,4 +379,4 @@ proc drawSelectionStats*(
   sk.drawLabel(primary, boxes.primaryLabel, "Small")
   sk.drawFill(boxes.primaryMeter, value, maximum, rgbx(109, 198, 46, 255))
   sk.drawLabel(subtitle, boxes.carrying, "Small")
-  sk.drawUtility(window, boxes, meters, stock, emptyText, frame)
+  sk.drawUtility(window, boxes, meters, stock, emptyText, activity, frame)

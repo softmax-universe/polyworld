@@ -154,7 +154,7 @@ block:
   for person in world.villagers.mitems:
     person.position = world.sources[source].position
   let before = world.units(StoneResource)
-  world.run(8)
+  world.run(GatherSeconds[StoneResource.ord].int + 2)
   doAssert world.sources[source].amount == 0
   doAssert world.units(StoneResource) == before,
     "Two villages must divide the actual stone, never duplicate it."

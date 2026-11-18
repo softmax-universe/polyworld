@@ -144,23 +144,48 @@ block voiceControls:
     chat.scale = chatScale(size.vec2)
     chat.restoreInput("Bring berries to Willow")
     discard frame(harness, chat)
-    doAssert harness.findByText("Talk") == nil,
+    doAssert harness.findByText("Conversation") == nil,
       "Offline and hidden captures retain their original conversation layout."
 
     chat.voiceEnabled = true
+    discard frame(harness, chat)
+    doAssert harness.findByText("Text") != nil
+    doAssert harness.findByText("Conversation") != nil
+    doAssert harness.findByText("Conversation requires an OpenAI key") != nil
+    discard clickLabel(harness, chat, "Conversation")
+    doAssert not chat.conversationModeRequested,
+      "A missing OpenAI key leaves text mode available without recording."
+    for oldControl in ["Talk", "Finish", "Voice on", "Voice off", "Retry"]:
+      doAssert harness.findByText(oldControl) == nil
+
+    chat.voiceHasKey = true
+    discard frame(harness, chat)
+    doAssert harness.findByText("Text mode") != nil
+    doAssert clickLabel(harness, chat, "Conversation") == ""
+    doAssert chat.conversationModeRequested
+    doAssert chat.input == "Bring berries to Willow" and chat.typing,
+      "Mode controls preserve the keyboard draft and focus."
+    doAssert chat.mouseOverUi(harness.window),
+      "A mode click cannot select an entity or pan the world."
+    chat.conversationModeRequested = false
+    chat.conversationMode = true
     chat.voiceConnecting = true
     discard frame(harness, chat)
-    doAssert harness.findByText("Connecting voice...") != nil
-    doAssert harness.findByText("Retry") == nil
-    doAssert clickLabel(harness, chat, "Talk") == ""
-    doAssert not chat.voiceToggleRequested,
-      "A connecting session cannot start recording."
+    doAssert harness.findByText("Connecting conversation...") != nil
+    discard clickLabel(harness, chat, "Conversation")
+    doAssert not chat.conversationModeRequested,
+      "Clicking a connecting conversation cannot create duplicate sessions."
+    discard clickLabel(harness, chat, "Text")
+    doAssert chat.textModeRequested,
+      "Text mode remains available while a connection is pending."
+    chat.textModeRequested = false
 
     chat.voiceConnecting = false
     chat.voiceConnected = true
+    chat.voiceListening = true
     discard frame(harness, chat, pending = true)
     let boxes = chatLayout(size.vec2 / chat.scale)
-    for label in ["Talk", "Voice on", "Ready"]:
+    for label in ["Text", "Conversation", "Listening..."]:
       let
         node = harness.findByText(label)
         panel = GameUiPanel(origin: vec2(node.rect.x, node.rect.y),
@@ -170,45 +195,28 @@ block voiceControls:
       doAssert boxes.history.contains(panel.origin + panel.size - vec2(0.01'f))
       doAssert not panel.overlaps(boxes.input)
       doAssert not panel.overlaps(boxes.send)
-    doAssert clickLabel(harness, chat, "Talk") == ""
-    doAssert chat.voiceToggleRequested
-    doAssert chat.input == "Bring berries to Willow" and chat.typing,
-      "Voice controls preserve the existing keyboard draft and focus."
-    doAssert chat.mouseOverUi(harness.window),
-      "A microphone click cannot select an entity or pan the world."
-    chat.voiceToggleRequested = false
-    chat.voiceListening = true
-    discard frame(harness, chat)
-    doAssert harness.findByText("Listening...") != nil
-    discard clickLabel(harness, chat, "Finish")
-    doAssert chat.voiceToggleRequested
-    chat.voiceToggleRequested = false
-    chat.voiceListening = false
     chat.voiceSpeaking = true
     discard frame(harness, chat)
-    doAssert harness.findByText("Moss is speaking...") != nil
-    discard clickLabel(harness, chat, "Voice on")
-    doAssert chat.voiceMuteRequested
-    chat.voiceMuteRequested = false
-    chat.voiceMuted = true
-    discard frame(harness, chat)
-    doAssert harness.findByText("Voice off") != nil
-
+    doAssert harness.findByText("Moss is speaking...") != nil,
+      "Playback status remains visible while the microphone stays open."
+    discard clickLabel(harness, chat, "Text")
+    doAssert chat.textModeRequested
+    chat.textModeRequested = false
+    chat.conversationMode = false
+    chat.voiceListening = false
     chat.voiceSpeaking = false
     chat.voiceConnected = false
+    chat.voiceError = "Conversation connection failed. Choose Conversation to retry."
     discard frame(harness, chat)
-    doAssert harness.findByText("Voice disconnected") != nil
-    discard clickLabel(harness, chat, "Retry")
-    doAssert chat.voiceReconnectRequested
+    discard clickLabel(harness, chat, "Conversation")
+    doAssert chat.conversationModeRequested,
+      "The mode control retries failed conversations without a third mode."
     doAssert chat.input == "Bring berries to Willow"
-    chat.voiceReconnectRequested = false
-    discard clickLabel(harness, chat, "Talk")
-    doAssert not chat.voiceToggleRequested
     chat.voiceStatus = "Waiting for transcription"
     discard frame(harness, chat)
     doAssert harness.findByText("Waiting for transcription") != nil
 
-echo "Monster voice controls, scaled clicks, and draft preservation passed."
+echo "Monster conversation modes, scaled clicks, and draft preservation passed."
 
 block panelLayout:
   let image = readImage(currentSourcePath().parentDir.parentDir /
@@ -341,16 +349,28 @@ block inspection:
   world.villagers[person].sleepiness = 84
   world.villagers[person].cargo = default(Inventory)
   world.villagers[person].cargo[FishResource] = 2
+  world.villagers[person].activity = "Fishing at the river"
   doAssert chat.select(world, world.selectionById("ada"))
   discard frame(harness, chat, world = world)
   for label in ["Ada", "Health 65%", "Hunger 73%", "Sleepiness 84%",
       "Wary / 2 carried", "Fear 35%", "Trust 0%"]:
     doAssert harness.findByText(label) != nil, label
+  let activity = harness.findByText("Fishing at the river")
+  doAssert activity.hasTextIn("Fishing at the river", boxes.utility),
+    "The selected villager's activity belongs in the utility panel."
+  doAssert harness.findByText("Hunger 73%").rect.y >=
+    activity.rect.y + activity.rect.h,
+    "Needs and cargo follow the current activity without overlapping it."
   harness.window.movePointer(boxes.utility.origin + vec2(20))
   harness.window.scrollDelta.y = 2000'f / ScrollSpeed.float32
   discard frame(harness, chat, world = world)
   doAssert harness.findByText(FishResource.resourceName()).hasTextIn("2",
     boxes.stats)
+  doAssert harness.findByText("Fishing at the river").rect.y <
+    boxes.utility.origin.y,
+    "Activity scrolls with the needs and carried items."
+  doAssert harness.findByText("Health 65%").hasTextIn("Health 65%",
+    boxes.primaryLabel), "Health stays fixed while activity scrolls."
   doAssert harness.findByText("Energy 100%") == nil
   doAssert chat.input == "Bring fish to Ada" and chat.typing
   doAssert world.actions.len == 0 and not world.active,
@@ -373,6 +393,8 @@ block inspection:
   world.villagers[person].health = 0
   discard frame(harness, chat, world = world)
   doAssert harness.findByText("Health 0%") != nil
+  doAssert harness.findByText("Fishing at the river") == nil,
+    "A dead villager cannot still display a working activity."
   doAssert harness.findByText(FishResource.resourceName()).hasTextIn("2",
     boxes.stats), "A dead resident's remaining cargo stays inspectable."
 

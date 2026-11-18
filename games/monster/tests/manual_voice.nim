@@ -14,7 +14,7 @@ proc run() =
   let
     directory = createTempDir("monster-live-voice-", "")
     brain = newBrain(directory / "conversation.json")
-    voice = newMonsterVoice()
+    voice = newMonsterVoice(deviceFree = true)
     started = getMonoTime()
   defer:
     voice.close()
@@ -32,11 +32,12 @@ proc run() =
       overflowed = true
     else:
       pcm.add(data)
+  let deliverTranscript = voice.client.onTranscript
   voice.client.onTranscript = proc(text: string) =
-    ## Routes the completed synthetic recording into the normal game queue.
+    ## Observes automatic transcription while retaining controller behavior.
     transcript = text
     transcribed = true
-    voice.pendingText = text
+    deliverTranscript(text)
 
   proc checkTime() =
     ## Enforces one global deadline across every external-service phase.
@@ -52,13 +53,16 @@ proc run() =
       voice.client.status
 
   echo "Connecting Monster voice without opening a microphone or speaker"
-  voice.connect()
+  voice.setMode(ConversationMode)
   while voice.client.state == Connecting:
     voice.poll()
     checkTime()
     sleep(5)
   checkVoice()
   doAssert voice.client.state == Connected, voice.client.status
+  voice.poll()
+  doAssert voice.listening()
+  doAssert voice.client.handsFree and voice.client.semanticVad
   echo "Connected voice model: ", voice.client.model,
     "; voice: ", voice.client.voice
 
@@ -73,9 +77,16 @@ proc run() =
   let commandPcm = pcm
   pcm.setLen(0)
 
-  echo "Transcribing synthesized audio into a creature instruction"
-  voice.client.sendAudio(commandPcm)
-  voice.client.commitAudio()
+  echo "Detecting a spoken turn automatically without a manual commit"
+  let input = commandPcm & newString(24000 * 2 * 3)
+  var offset = 0
+  while offset < input.len:
+    let ending = min(input.len, offset + 4800)
+    voice.client.sendAudio(input[offset ..< ending])
+    offset = ending
+    voice.poll()
+    checkVoice()
+    sleep(100)
   while not transcribed:
     voice.poll()
     checkVoice()
@@ -120,7 +131,11 @@ proc run() =
   doAssert length(world.creature.position - world.villages[0].position) < 1.5
   echo "Moss physically arrived at Willow village"
   echo "Creature reply PCM bytes: ", pcm.len
-  echo "Live voice -> transcript -> game action -> spoken reply passed"
+  doAssert voice.listening(), "Conversation must keep listening during output."
+  voice.setMode(TextMode)
+  doAssert not voice.listening()
+  doAssert voice.client.state == Disconnected
+  echo "Live hands-free conversation -> game action -> spoken reply passed"
 
 if "--live" in commandLineParams():
   run()

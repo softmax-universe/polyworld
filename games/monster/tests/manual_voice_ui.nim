@@ -29,7 +29,7 @@ proc preview() =
     atlasPath = directory / "hud.png"
     outputPath =
       if paramCount() > 0: absolutePath(paramStr(1))
-      else: RepositoryRoot / "output" / "monster-voice.png"
+      else: RepositoryRoot / "output" / "monster-conversation.png"
   defer:
     removeDir(directory)
   let builder = newHudAtlas(4096)
@@ -59,8 +59,11 @@ proc preview() =
   var chat = initChatUi()
   chat.scale = chatScale(window.size.vec2)
   chat.voiceEnabled = true
+  chat.voiceHasKey = true
+  chat.conversationMode = true
   chat.voiceConnected = true
-  chat.voiceStatus = "Ready to talk"
+  chat.voiceListening = true
+  chat.voiceStatus = "Listening..."
   for frame in 0 ..< 3:
     scene.drawScene(window, world, cameraTarget, 34'f, 0, chat.selection)
     sk.uiScale = chat.scale

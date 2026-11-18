@@ -1,10 +1,10 @@
-## Gods of the Arena action-only replay format and playback cursor.
+## Gods of the Arena actions, chat transcript, and playback cursor.
 
 import
   std/os,
   fixxy,
-  polyworld/[bodies, tapes, metrics],
-  content, presets
+  polyworld/[bodies, tapes, metrics, mailboxes],
+  chats, content, presets
 
 export presets
 
@@ -12,10 +12,10 @@ export fixxy
 
 const
   ReplayGame* = "gods_of_the_arena"
-  ReplayFormatVersion* = 6'u16
+  ReplayFormatVersion* = 7'u16
   ## This client supports only this gameplay version. Bump it when rules change.
   ## Older replays use their archived client; never add compatibility branches.
-  ReplayGameVersion* = 80'u16
+  ReplayGameVersion* = 83'u16
   ActionWalkTo* = 1'u8
   ActionAttackTarget* = 2'u8
   ActionBuyItem* = 3'u8
@@ -30,10 +30,17 @@ const
   ActionStop* = 19'u8
   ActionSellItem* = 20'u8
   ActionSwapItems* = 21'u8
+  ActionQueueWalkTo* = 22'u8
+  ActionQueueAttackMove* = 23'u8
+  ActionQueueAttackTarget* = 24'u8
   MaxReplayBytes* = 64 * 1024 * 1024
   MaxReplayActions* = 10_000_000
   MaxReplayHashes* = 100_000_000
   MaxReplayHeroes* = 256
+  MaxReplayChats* = 1_000_000
+  HumanReplayChat* = 1'u8
+  PolicyReplayChat* = 2'u8
+  SystemReplayChat* = 3'u8
 
 type
   ReplayHero* = object
@@ -65,10 +72,26 @@ type
     first*: int32
     second*: int32
 
+  ReplayChat* = object
+    tick*: uint32
+    kind*: uint8
+    sender*: int32
+      ## Stable hero ID; system notices have no sender.
+    target*: int32
+      ## -2 is all, -1 is team, nonnegative is a policy mailbox index.
+    text*: string
+
   ReplayHeader* = TapeHeader[Setup]
-  ReplayData* = ActionTape[Setup, ReplayAction, ReplayMetrics, GotaConfig]
-  ReplayRecorder* = TapeRecorder[Setup, ReplayAction, ReplayMetrics, GotaConfig]
-  ReplayPlayer* = TapePlayer[Setup, ReplayAction, ReplayMetrics, GotaConfig]
+  ReplayData* = ActionTape[Setup, ReplayAction, ReplayMetrics,
+    GotaConfig, ReplayChat]
+  ReplayRecorder* = TapeRecorder[Setup, ReplayAction, ReplayMetrics,
+    GotaConfig, ReplayChat]
+  ReplayPlayer* = TapePlayer[Setup, ReplayAction, ReplayMetrics,
+    GotaConfig, ReplayChat]
+  ReplayChatView* = object
+    processed: int
+    viewerTeam: int
+    history: seq[HumanChatMessage]
 
 proc fail(message: string) {.noreturn.} =
   ## Raises one Gods of the Arena replay error.
@@ -99,6 +122,75 @@ proc initReplayRecorder*(
   ## Creates an in-memory recorder owning the complete replay data.
   ReplayRecorder(data: initReplayData(setup, preset))
 
+proc validateChat(setup: Setup, message: ReplayChat) =
+  ## Checks chat metadata without treating private policy text as UI text.
+  if message.text.len == 0 or message.text.len > MaxChatBytes:
+    fail("replay chat text has an invalid length")
+  case message.kind
+  of SystemReplayChat:
+    if message.sender != 0 or message.target != -2 or
+        not message.text.validHumanChat:
+      fail("replay system chat is invalid")
+  of HumanReplayChat, PolicyReplayChat:
+    var knownSender = false
+    for hero in setup.heroes:
+      if hero.id == message.sender:
+        knownSender = true
+        break
+    if not knownSender:
+      fail("replay chat references an unknown sender")
+    if message.target < -2 or message.target >= setup.heroes.len.int32:
+      fail("replay chat references an unknown recipient")
+    if message.kind == HumanReplayChat and
+        (message.target notin [-2'i32, -1'i32] or
+        not message.text.validHumanChat):
+      fail("replay human chat is invalid")
+  else:
+    fail("replay chat kind is invalid")
+
+proc recordChat*(recorder: ReplayRecorder, message: ReplayChat) =
+  ## Retains the full transcript independently of bounded on-screen history.
+  if recorder == nil:
+    return
+  recorder.data.header.setup.validateChat(message)
+  recorder.data.events.appendAction(message, MaxReplayChats)
+
+proc chatAt*(view: var ReplayChatView, data: ReplayData, tick: uint32,
+    viewerTeam = -1): seq[HumanChatMessage] =
+  ## Shows human chat and notices up to the playhead, including after a seek.
+  if view.processed > data.events.len or view.viewerTeam != viewerTeam:
+    view = ReplayChatView(viewerTeam: viewerTeam)
+  while view.processed < data.events.len:
+    let
+      ordinal = view.processed
+      event = data.events[ordinal]
+    inc view.processed
+    if event.kind == PolicyReplayChat:
+      continue
+    var message = HumanChatMessage(
+      tick: event.tick, ordinal: ordinal, text: event.text,
+      system: event.kind == SystemReplayChat,
+      team: event.target == -1)
+    if not message.system:
+      for i, hero in data.header.setup.heroes:
+        if hero.id == event.sender:
+          message.sender = data.config.players[i].name
+          message.senderTeam = hero.team.int
+          break
+    if not message.team or viewerTeam < 0 or
+        viewerTeam == message.senderTeam:
+      view.history.add message
+  var
+    first = 0
+    last = view.history.len
+  while first < last:
+    let middle = (first + last) div 2
+    if view.history[middle].tick <= tick:
+      first = middle + 1
+    else:
+      last = middle
+  view.history[max(0, first - MaxHumanChatMessages) ..< first]
+
 proc record*(recorder: ReplayRecorder, action: ReplayAction) =
   ## Appends one bot action in deterministic tick order.
   if recorder == nil:
@@ -117,7 +209,10 @@ proc record*(recorder: ReplayRecorder, action: ReplayAction) =
       action.kind != ActionBuyback and
       action.kind != ActionDraft and
       action.kind != ActionStop and action.kind != ActionSellItem and
-        action.kind != ActionSwapItems:
+        action.kind != ActionSwapItems and
+        action.kind != ActionQueueWalkTo and
+        action.kind != ActionQueueAttackMove and
+        action.kind != ActionQueueAttackTarget:
     fail("replay action kind is invalid")
   recorder.data.actions.appendAction(action, MaxReplayActions)
 
@@ -297,6 +392,8 @@ proc validate*(data: ReplayData) =
     fail("replay setup duration exceeds the hash limit")
   if setup.heroes.len == 0 or setup.heroes.len > MaxReplayHeroes:
     fail("replay setup has an invalid hero count")
+  if setup.heroes.len > data.config.players.len:
+    fail("replay setup has no player metadata for some heroes")
   if data.config.draftMode != setup.draftMode:
     fail("replay configuration has a different draft mode")
   if setup.drafting and setup.draftMode == UniqueDraft and
@@ -304,6 +401,8 @@ proc validate*(data: ReplayData) =
       fail("replay draft has more players than available heroes")
   if data.actions.len > MaxReplayActions:
     fail("replay action limit exceeded")
+  if data.events.len > MaxReplayChats:
+    fail("replay chat limit exceeded")
   if data.hashes.len > MaxReplayHashes:
     fail("replay hash limit exceeded")
   if data.hashes.len.uint64 > totalTicks:
@@ -342,7 +441,10 @@ proc validate*(data: ReplayData) =
         action.kind != ActionBuyback and
         action.kind != ActionDraft and
         action.kind != ActionStop and action.kind != ActionSellItem and
-        action.kind != ActionSwapItems:
+        action.kind != ActionSwapItems and
+        action.kind != ActionQueueWalkTo and
+        action.kind != ActionQueueAttackMove and
+        action.kind != ActionQueueAttackTarget:
       fail("replay action kind is invalid")
     var knownHero = false
     for hero in setup.heroes:
@@ -352,6 +454,15 @@ proc validate*(data: ReplayData) =
     if not knownHero:
       fail("replay action references an unknown hero")
     lastTick = action.tick
+  lastTick = 0
+  for i, message in data.events:
+    setup.validateChat(message)
+    if message.tick > uint32(data.hashes.len) or
+        message.tick.uint64 > totalTicks:
+      fail("replay chat exceeds the recorded duration")
+    if i > 0 and message.tick < lastTick:
+      fail("replay chat moves backward in time")
+    lastTick = message.tick
   try:
     data.metrics.validate(
       data.config.players.len,

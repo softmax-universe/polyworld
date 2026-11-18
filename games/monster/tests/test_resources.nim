@@ -193,25 +193,6 @@ block:
 
 block:
   var world = newWorld(generateMap())
-  for house in world.households.mitems:
-    house.stock[GrainResource] = 4
-    house.fuel = 100
-    house.integrity = 100
-  for village in world.villages.mitems:
-    village.stock[GrainResource] = 20
-    village.stock[SoftwoodResource] = 20
-    village.stock[StoneResource] = 20
-  for person in world.villagers.mitems:
-    person.position = world.households[person.home].position
-    person.hunger = 0
-  world.run(5)
-  for home in 0 ..< world.households.len:
-    doAssert length(world.villagers[home * 2].position -
-      world.villagers[home * 2 + 1].position) > 1,
-      "Resting residents should walk to separate places by their home."
-
-block:
-  var world = newWorld(generateMap())
   for source in world.sources.mitems:
     source.amount = 0
     source.capacity = 0

@@ -5,7 +5,8 @@ import
   bumpy, chroma, opengl, pixie, silky, vmath,
   assets, brushes, content, groves, landscapes, sim, game, maps, replays, ui, walls,
   aiming, cameras, controls, faces, lighting, spelleffects, multiplayer, homes, lobbies, cursors, pointers,
-  minimaporders, spectator, chats, chatinput, chatui, shops, audios,
+  minimaporders, spectator, chats, chatinput, chatui, shops, audios, matchresults,
+  rewardtexts, ordermarkers, posteffects, settings,
   polyworld/actioncam, polyworld/assets, polyworld/characters,
   polyworld/clickmarks, polyworld/fxshapes, polyworld/weapontrails,
   polyworld/chargen, polyworld/common, polyworld/pathing,
@@ -13,7 +14,7 @@ import
   polyworld/particles, polyworld/particleshaders, polyworld/player,
   polyworld/profiles, polyworld/sounds,
   polyworld/quadterrain,
-  polyworld/shadows,
+  polyworld/shadows, polyworld/screenocclusions,
   polyworld/terrainsurfaces, polyworld/waters,
   polyworld/[displays, chrome, inputs, rtscameras, selectionoutlines, shapes, viewers,
     visions, worldbars, worldtexts, connections, roomclients, rooms, menus, networks]
@@ -37,68 +38,113 @@ const GotaLakeWater = block:
 
 var lakeWater = GotaLakeWater ## the look of the arena's lakes
 
-when defined(waterPanel):
-  type ColorPicker = object
-    ## A picker's hue, saturation and value, kept so hue survives greys and black.
-    hsv: ColorHSV
-    shown: Vec3 ## the colour it last showed, to notice outside changes (Reset)
-    dragging: int ## 0 none, 1 the saturation/value square, 2 the hue bar
+type ColorPicker = object
+  ## A picker's hue, saturation and value, kept so hue survives greys and black.
+  hsv: ColorHSV
+  shown: Vec3 ## the colour it last showed, to notice outside changes (Reset)
+  dragging: int ## 0 none, 1 the saturation/value square, 2 the hue bar
 
-  var
-    showWaterPanel = true ## the lake water window; F4 toggles it
-    waterColorPicker, foamColorPicker: ColorPicker
+var
+  waterColorPicker, foamColorPicker: ColorPicker
 
-  proc colorPicker(sk: Silky, window: Window, picker: var ColorPicker, rgb: var Vec3,
-      id: string) =
-    ## A saturation (across) by value (down) square, a hue bar and a swatch, then red,
-    ## green and blue sliders; click or drag on the square or the bar, or drag a slider,
-    ## to change `rgb`. `id` keeps this picker's sliders apart from another's.
-    const
-      Square = 150'f32
-      Bar = 18'f32
-      Gap = 8'f32
-      Cells = 15
-    if rgb != picker.shown:
-      picker.hsv = color(rgb.x, rgb.y, rgb.z, 1).asHsv
-    let
-      origin = sk.placedAt(vec2(Square + Gap + Bar + Gap + Bar, Square))
-      squareRect = rect(origin, vec2(Square, Square))
-      barRect = rect(origin + vec2(Square + Gap, 0), vec2(Bar, Square))
-      mouse = sk.mousePos
-    if sk.buttonPressed[MouseLeft]:
-      if mouse.overlaps(squareRect): picker.dragging = 1
-      elif mouse.overlaps(barRect): picker.dragging = 2
-    if not sk.buttonDown[MouseLeft]:
-      picker.dragging = 0
-    if picker.dragging == 1:
-      picker.hsv.s = clamp((mouse.x - squareRect.x) / Square, 0, 1) * 100
-      picker.hsv.v = (1 - clamp((mouse.y - squareRect.y) / Square, 0, 1)) * 100
-    elif picker.dragging == 2:
-      picker.hsv.h = clamp((mouse.y - barRect.y) / Square, 0, 1) * 359.9
-    let picked = picker.hsv.color
-    rgb = vec3(picked.r, picked.g, picked.b)
-    picker.shown = rgb
-    let cell = Square / Cells.float32
-    for y in 0 ..< Cells:
-      for x in 0 ..< Cells:
-        let shade = hsv(picker.hsv.h, (x.float32 + 0.5) / Cells.float32 * 100,
-          (1 - (y.float32 + 0.5) / Cells.float32) * 100).color.asRgbx
-        sk.drawRect(origin + vec2(x.float32 * cell, y.float32 * cell),
-          vec2(cell + 0.5, cell + 0.5), shade)
-      let hue = hsv((y.float32 + 0.5) / Cells.float32 * 360, 100, 100).color.asRgbx
-      sk.drawRect(barRect.xy + vec2(0, y.float32 * cell), vec2(Bar, cell + 0.5), hue)
-    let
-      marker = origin + vec2(picker.hsv.s / 100 * Square, (1 - picker.hsv.v / 100) * Square)
-      hueY = barRect.y + picker.hsv.h / 360 * Square
-    sk.drawRect(marker - vec2(4, 4), vec2(8, 8), rgbx(255, 255, 255, 255))
-    sk.drawRect(marker - vec2(2, 2), vec2(4, 4), picked.asRgbx)
-    sk.drawRect(vec2(barRect.x - 2, hueY - 2), vec2(Bar + 4, 4), rgbx(255, 255, 255, 255))
-    sk.drawRect(barRect.xy + vec2(Bar + Gap, 0), vec2(Bar, Square), picked.asRgbx)
-    sk.advance(vec2(Square + Gap + Bar + Gap + Bar, Square))
-    # The sliders edit rgb directly; the next frame reads the change back into hsv.
-    for (channel, name) in [(0, "Red"), (1, "Green"), (2, "Blue")]:
-      text(name & " " & formatFloat(rgb[channel], ffDecimal, 2))
-      scrubber(id & name, rgb[channel], 0'f32, 1'f32)
+proc colorPicker(sk: Silky, window: Window, picker: var ColorPicker, rgb: var Vec3,
+    id: string) =
+  ## A saturation (across) by value (down) square, a hue bar and a swatch, then red,
+  ## green and blue sliders; click or drag on the square or the bar, or drag a slider,
+  ## to change `rgb`. `id` keeps this picker's sliders apart from another's.
+  const
+    Square = 150'f32
+    Bar = 18'f32
+    Gap = 8'f32
+    Cells = 15
+  if rgb != picker.shown:
+    picker.hsv = color(rgb.x, rgb.y, rgb.z, 1).asHsv
+  let
+    origin = sk.placedAt(vec2(Square + Gap + Bar + Gap + Bar, Square))
+    squareRect = rect(origin, vec2(Square, Square))
+    barRect = rect(origin + vec2(Square + Gap, 0), vec2(Bar, Square))
+    mouse = sk.mousePos
+  if sk.buttonPressed[MouseLeft]:
+    if mouse.overlaps(squareRect): picker.dragging = 1
+    elif mouse.overlaps(barRect): picker.dragging = 2
+  if not sk.buttonDown[MouseLeft]:
+    picker.dragging = 0
+  if picker.dragging == 1:
+    picker.hsv.s = clamp((mouse.x - squareRect.x) / Square, 0, 1) * 100
+    picker.hsv.v = (1 - clamp((mouse.y - squareRect.y) / Square, 0, 1)) * 100
+  elif picker.dragging == 2:
+    picker.hsv.h = clamp((mouse.y - barRect.y) / Square, 0, 1) * 359.9
+  let picked = picker.hsv.color
+  rgb = vec3(picked.r, picked.g, picked.b)
+  picker.shown = rgb
+  let cell = Square / Cells.float32
+  for y in 0 ..< Cells:
+    for x in 0 ..< Cells:
+      let shade = hsv(picker.hsv.h, (x.float32 + 0.5) / Cells.float32 * 100,
+        (1 - (y.float32 + 0.5) / Cells.float32) * 100).color.asRgbx
+      sk.drawRect(origin + vec2(x.float32 * cell, y.float32 * cell),
+        vec2(cell + 0.5, cell + 0.5), shade)
+    let hue = hsv((y.float32 + 0.5) / Cells.float32 * 360, 100, 100).color.asRgbx
+    sk.drawRect(barRect.xy + vec2(0, y.float32 * cell), vec2(Bar, cell + 0.5), hue)
+  let
+    marker = origin + vec2(picker.hsv.s / 100 * Square, (1 - picker.hsv.v / 100) * Square)
+    hueY = barRect.y + picker.hsv.h / 360 * Square
+  sk.drawRect(marker - vec2(4, 4), vec2(8, 8), rgbx(255, 255, 255, 255))
+  sk.drawRect(marker - vec2(2, 2), vec2(4, 4), picked.asRgbx)
+  sk.drawRect(vec2(barRect.x - 2, hueY - 2), vec2(Bar + 4, 4), rgbx(255, 255, 255, 255))
+  sk.drawRect(barRect.xy + vec2(Bar + Gap, 0), vec2(Bar, Square), picked.asRgbx)
+  sk.advance(vec2(Square + Gap + Bar + Gap + Bar, Square))
+  # The sliders edit rgb directly; the next frame reads the change back into hsv.
+  for (channel, name) in [(0, "Red"), (1, "Green"), (2, "Blue")]:
+    text(name & " " & formatFloat(rgb[channel], ffDecimal, 2))
+    scrubber(id & name, rgb[channel], 0'f32, 1'f32)
+
+proc drawWaterTuning(sk: Silky, window: Window) =
+  ## Edits the arena lakes inside the shared debug menu.
+  template slider(id, caption: string, value: var float32,
+      low, high: float32) =
+    text(caption & " " & formatFloat(value, ffDecimal, 2))
+    scrubber(id, value, low, high)
+  template water: untyped = lakeWater
+  button("Reset"):
+    lakeWater = GotaLakeWater
+  h1text("Water")
+  text("Colour")
+  colorPicker(sk, window, waterColorPicker, water.color, "lakeColor")
+  slider("lakeColorStrength", "Colour strength", water.colorStrength, 0, 1)
+  slider("lakeLift", "Lift", water.lift, -2, 2)
+  h1text("Reflection")
+  slider("lakeReflectiveness", "Reflectiveness", water.reflectiveness, 0, 1)
+  slider("lakeFresnelStrength", "Fresnel strength", water.fresnelStrength, 0, 1)
+  slider("lakeFresnelPower", "Fresnel power", water.fresnelPower, 1, 10)
+  slider("lakeDistortion", "Reflection distortion", water.distortion, 0, 1)
+  h1text("Sun")
+  slider("lakeSheenStrength", "Sheen strength", water.sheenStrength, 0, 10)
+  slider("lakeSheenSharpness", "Sheen sharpness", water.sheenSharpness, 1, 64)
+  slider("lakeGlintStrength", "Glint strength", water.glintStrength, 0, 100)
+  slider("lakeGlintSharpness", "Glint sharpness", water.glintSharpness, 16, 4000)
+  h1text("Ripples")
+  slider("lakeWaveHeight", "Wave height", water.waveHeight, 0, 2)
+  slider("lakeWaveScale", "Wave scale", water.waveScale, 0.05, 20)
+  slider("lakeWaveSpeed", "Wave speed", water.waveSpeed, 0, 4)
+  slider("lakeWaveDrag", "Wave drag", water.waveDrag, 0, 1)
+  slider("lakeWaveCount", "Wave count", water.waveCount, 1, MaxWaves.float32)
+  slider("lakeRippleFade", "Ripple fade", water.rippleFade, 5, 400)
+  h1text("Refraction")
+  slider("lakeRefraction", "Refraction strength", water.refraction, 0, 0.5)
+  slider("lakeRefractionDepth", "Refraction depth", water.refractionDepth, 0.01, 2)
+  h1text("Shoreline")
+  text("Colour")
+  colorPicker(sk, window, foamColorPicker, water.foamColor, "lakeFoamColor")
+  slider("lakeShoreWidth", "Shoreline distance", water.foamDistance, 0, 6)
+  slider("lakeFoamOpacity", "Opacity", water.foamOpacity, 0, 1)
+  slider("lakeFoamSoftness", "Edge softness", water.foamSoftness, 0.01, 1)
+  slider("lakeFoamNoise", "Foam noise", water.foamNoise, 0, 1)
+  slider("lakeFoamScale", "Foam noise scale", water.foamScale, 0.1, 10)
+  slider("lakeFoamSpeed", "Foam speed toward shore", water.foamSpeed, -3, 3)
+  h1text("Shoreline fade")
+  slider("lakeFadeDistance", "Fade distance", water.fadeDistance, 0, 6)
+  slider("lakeFadeCurve", "Fade curve", water.fadeCurve, 0.1, 5)
 
 const
   DefaultCameraDistance = 17.0'f / 1.2'f
@@ -114,7 +160,7 @@ const
 
 type
   MatchMenuPage = enum
-    HiddenMatchMenu, PauseMenu, MatchSettings
+    HiddenMatchMenu, PauseMenu, MatchSettings, MatchResults
   GraphicsError = object of CatchableError
   GodAnimation = enum
     GodIdle, GodDeath, GodVictory
@@ -242,9 +288,11 @@ proc initializeGraphics*() =
             "the UI atlas is too small for hero portraits"
           )
     addHudIcons(builder)
+    builder.addRewardIcons()
     addAbilityIcons(builder)
     addItemIcons(builder)
     builder.addDefaultFonts()
+    builder.addResultFonts()
     builder.addLobbyFonts()
     builder.addHomeAssets()
     builder.addFont(DefaultFontPath, "HeroVersus", 24.0)
@@ -294,7 +342,7 @@ proc runGraphics*(
   let chatHooks = window.installChatInput(addr chat)
   defer: window.restoreChatInput(chatHooks)
   try:
-    preferences = readPreferences("Polyworld GotA")
+    preferences = readGotaPreferences()
   except CatchableError as error:
     saveError = error.msg
   configureSounds(
@@ -480,6 +528,13 @@ proc runGraphics*(
         for i, name in HeroCastAnimations:
           heroCastClips[class][i] = model.clipIndex(name)
         heroPortalClips[class] = model.clipIndex("Spell_Simple_Idle_Loop")
+  var
+    occlusion = initScreenOcclusion(screenOcclusionSettings(
+      "GOTA_SSAO", block:
+        var settings = ArenaOcclusion
+        settings.enabled = preferences.ambientOcclusion
+        settings
+    ))
   var moveMarkSettings = clickMarkSettings()
   moveMarkSettings.radius *= 0.6
   moveMarkSettings.height *= 0.6
@@ -517,6 +572,28 @@ proc runGraphics*(
       layoutText(sk.atlas.fonts["WorldName"], sk.atlas.size, "Teleporting 3s")
     ]
     damageTrails: DamageTrailTracker
+
+  preferences.ambientOcclusion = occlusion.settings.enabled
+  let debugTabs = @[
+    DebugTab(label: "Post-processing", draw: proc(sk: Silky, window: Window) =
+      ## Keeps the debug toggle and saved display preference synchronized.
+      let enabled = occlusion.settings.enabled
+      sk.drawPostProcessing(window, occlusion.settings)
+      if occlusion.settings.enabled != enabled:
+        preferences.ambientOcclusion = occlusion.settings.enabled
+        try:
+          preferences.savePreferences("Polyworld GotA")
+        except CatchableError as error:
+          saveError = error.msg
+    ),
+    DebugTab(label: "Water", draw: drawWaterTuning)
+  ]
+  proc drawArenaGraphics(sk: Silky, window: Window) =
+    ## Exposes the arena's shading and silhouette switches beside shared graphics.
+    checkBox "Occluded character silhouettes", showOccludedCharacters
+    text "Character shading"
+    radioButton "Toon", scene.shading, ToonCharacters
+    radioButton "PBR", scene.shading, PbrCharacters
 
   const
     SmallTowerScale = 3.5'f
@@ -1215,6 +1292,9 @@ proc runGraphics*(
     selectionStarted = false
     selectionAdditive = false
     attackMoveArmed = false
+    heldRightMove = false
+    nextRightMoveTick = 0'i32
+    resultsInputReady = false
     aimSpell: SpellCast
     aimTargetId = 0'i32
     aimVisible = false
@@ -1228,6 +1308,8 @@ proc runGraphics*(
     viewingSeeking = false
     audioEnabled = false
     arenaAudio: ArenaAudio
+    rewardAudio: RewardAudio
+    rewardTexts: RewardTexts
     actionCam = initActionCam(
       subjectMode = true,
       defaultDistance = DefaultCameraDistance,
@@ -1244,20 +1326,48 @@ proc runGraphics*(
       durationTicks = run.durationTicks(),
       playing = run.world.phase == Drafting or network.isSpectator or not options.pauseOnStart,
       speed = if network.isSpectator: 1'i32 else: options.speed,
-      repeating = not network.isSpectator
+      repeating = run.replayMode and not network.isSpectator
     )
     spectatorStream = if network.isSpectator: newSpectatorStream(network) else: nil
   arenaAudio.syncAudio(run.world)
   transport.streamed = network.isSpectator
   networkSpectator = network.isSpectator
 
+  proc updateMatchResults() =
+    ## Holds every completed live match until the player leaves its results.
+    if run.replayMode or not run.finished():
+      return
+    transport.repeating = false
+    transport.pause()
+    transport.restoreTick = -1
+    transport.accumulator = 0
+    if matchMenu == MatchResults:
+      return
+    matchMenu = MatchResults
+    resultsInputReady = false
+    clearPlayerCommands()
+    resetShopUi()
+    clearHudTooltip()
+    heldRightMove = false
+    attackMoveArmed = false
+    selectionStarted = false
+    minimapPanning = false
+    panning = false
+    bindingCapture = false
+    chat = ChatEditor()
+    window.runeInputEnabled = false
+    actionCam.takeManual()
+
   window.onButtonPress = proc(button: Button) =
     window.captureCursorConfinement(button)
+    if matchMenu == MatchResults:
+      return
     if bindingCapture:
       return
     let wasTyping = chat.typing
     if chat.handleChatButton(button, matchMenu == HiddenMatchMenu and
         not shopOpen and network.canHumanChat):
+      heldRightMove = false
       if not wasTyping and chat.typing:
         chat.team = window.buttonDown[KeyLeftShift] or window.buttonDown[KeyRightShift]
       window.syncChatInput(chat)
@@ -1271,6 +1381,7 @@ proc runGraphics*(
     if window.scaleKey(button, preferences, sk.uiScale, "Polyworld GotA"):
       return
     if button == KeyEscape and shopOpen:
+      heldRightMove = false
       playSound(CancelSound)
       clearHudTooltip()
       shopOpen = false
@@ -1283,6 +1394,7 @@ proc runGraphics*(
       panning = false
       return
     if MenuInput.matches(button):
+      heldRightMove = false
       clearHudTooltip()
       if quitToMenu:
         return
@@ -1308,9 +1420,12 @@ proc runGraphics*(
     # Consume before configurable gameplay and chrome shortcuts.
     if button == KeySpace and options.playerSlot > 0 and not run.replayMode:
       return
+    if handleChromeKey(button):
+      return
     if options.playerSlot > 0 and not run.replayMode and
       run.world.phase != Drafting:
         if ShopInput.matches(button):
+          heldRightMove = false
           clearHudTooltip()
           shopOpen = not shopOpen
           playSound(if shopOpen: ClickSound else: CancelSound)
@@ -1322,12 +1437,14 @@ proc runGraphics*(
           return
         if AttackMoveInput.matches(button) and
           not window.actionDown(ControlInput):
+            heldRightMove = false
             armedAbility = -1
             armedItem = -1
             attackMoveArmed = true
             playSound(SelectSound)
             return
         if StopInput.matches(button):
+          heldRightMove = false
           armedAbility = -1
           armedItem = -1
           attackMoveArmed = false
@@ -1336,8 +1453,6 @@ proc runGraphics*(
           return
     if FullscreenInput.matches(button):
       window.setFullscreen(not window.isFullscreen)
-      return
-    if handleChromeKey(button):
       return
     if PauseInput.matches(button) and run.world.phase != Drafting and
         (options.playerSlot <= 0 or run.replayMode or button != KeySpace) and
@@ -1353,6 +1468,7 @@ proc runGraphics*(
     elif (ItemOneInput.matches(button) or ItemTwoInput.matches(button)) and
         options.playerSlot > 0 and
         not run.replayMode:
+      heldRightMove = false
       playSound(SelectSound)
       activatePlayerItem(
         run.world,
@@ -1434,6 +1550,36 @@ proc runGraphics*(
   proc playerHeroId(): int32 =
     ## Returns the human hero identifier.
     run.world.heroes[options.playerSlot - 1].id
+
+  proc drawHeroOrderMarkers(viewProjection: Mat4) =
+    ## Keeps current and queued hero destinations pulsing until completed.
+    let hero = run.world.heroById(
+      if playerMode(): playerHeroId() else: primaryId
+    )
+    if hero.id == 0 or
+      (viewMode != 0 and hero.team != Team(viewMode - 1)) or
+      not visibleInView(hero.team, hero.position):
+        return
+    var moves, attacks: seq[Vec3]
+    let half = (mapTiles() div 2).float32
+    for marker in hero.heroOrderMarkers():
+      let
+        x = toFloat32(marker.position.x) - half
+        z = toFloat32(marker.position.y) - half
+        point = vec3(x, surfaceHeight(x, z), z)
+      if marker.attack:
+        attacks.add point
+      else:
+        moves.add point
+    clickMarks.drawLoopingClickMarks(viewProjection, moves)
+    attackMarks.drawLoopingClickMarks(viewProjection, attacks)
+
+  rewardAudio.syncRewardAudio(
+    run.world, if playerMode(): playerHeroId() else: 0'i32
+  )
+  rewardTexts.syncRewardTexts(
+    run.world, if playerMode(): playerHeroId() else: 0'i32
+  )
 
   if playerMode():
     actionCam.takeManual()
@@ -1894,7 +2040,8 @@ proc runGraphics*(
     elif followSelection:
       followSelection = false
 
-  proc pickActionTarget(viewProjection: Mat4, healing = false): int32 =
+  proc pickActionTarget(viewProjection: Mat4, healing = false,
+      denying = false): int32 =
     ## Keeps precise mesh hits, then searches near the clicked map position.
     result = pickEntity(viewProjection)
     if result != 0:
@@ -1915,13 +2062,17 @@ proc runGraphics*(
       x: int32(round(point.x * WorldScale.float32)),
       y: int32(round(point.y * WorldScale.float32)),
       z: int32(round(point.z * WorldScale.float32))
-    ), healing)
+    ), healing, if denying: hero.id else: 0'i32)
 
-  proc issueGroundOrder(viewProjection: Mat4, attackMove: bool) =
+  proc issueGroundOrder(
+      viewProjection: Mat4,
+      attackMove: bool,
+      repeated = false
+  ): bool {.discardable.} =
     ## Walks or attack-moves the human hero onto the tile under the pointer.
     let heroId = playerHeroId()
     let hero = heroById(run.world, heroId)
-    if hero.id == 0 or hero.state == Dying:
+    if hero.id == 0 or hero.hp <= 0 or hero.state == Dying:
       return
     let
       (origin, dir) = mouseRay(
@@ -1936,11 +2087,18 @@ proc runGraphics*(
       mapX = int32(layers[walk.layer].originX + walk.x - mapOrigin())
       mapY = int32(layers[walk.layer].originZ + walk.z - mapOrigin())
     if attackMove:
-      queueAttackMove(heroId, mapX, mapY)
+      queueAttackMove(heroId, mapX, mapY,
+        append = window.actionDown(ShiftInput))
       playSound(AttackOrderSound)
     else:
-      queueWalkTo(heroId, mapX, mapY)
-      playSound(MoveOrderSound)
+      if repeated and hero.hasMoveTarget and
+        hero.moveTileX == mapX and hero.moveTileY == mapY:
+          return true
+      queueWalkTo(heroId, mapX, mapY,
+        append = not repeated and window.actionDown(ShiftInput))
+      if not repeated:
+        playSound(MoveOrderSound)
+    true
 
   proc holdingAttackMove(): bool =
     ## Keeps attack-move armed while its binding is held without Control.
@@ -1958,10 +2116,11 @@ proc runGraphics*(
         return
     let
       hero = run.world.heroById(playerHeroId())
-      picked = pickActionTarget(viewProjection)
+      picked = pickActionTarget(viewProjection, denying = attackMoveArmed)
     if hero.id == 0 or hero.hp <= 0 or hero.state == Dying:
       return
-    if picked != 0 and objectTeam(picked) != objectTeam(hero.id):
+    if picked != 0 and (objectTeam(picked) != objectTeam(hero.id) or
+        (attackMoveArmed and run.world.canDeny(hero, picked))):
       return
     let
       (origin, direction) = mouseRay(
@@ -1983,6 +2142,7 @@ proc runGraphics*(
     for slot, action in [AbilityOneInput, AbilityTwoInput,
         AbilityThreeInput, AbilityFourInput]:
       if window.actionPressed(action):
+        heldRightMove = false
         let hero = heroById(run.world, playerHeroId())
         if window.actionDown(ShiftInput):
           queueLevelAbility(hero.id, slot.int32)
@@ -2008,12 +2168,15 @@ proc runGraphics*(
           6.0'f32 and
         not mouseOverUi(window, sk.mousePos, primaryId):
       let picked =
-        if playerMode(): pickActionTarget(viewProjection)
+        if playerMode():
+          pickActionTarget(viewProjection, denying = attackMoveArmed)
         else: pickEntity(viewProjection)
       if playerMode() and attackMoveArmed:
         let heroId = playerHeroId()
-        if picked != 0 and objectTeam(picked) != objectTeam(heroId):
-          queueAttackTarget(heroId, picked)
+        if picked != 0 and (objectTeam(picked) != objectTeam(heroId) or
+            run.world.canDeny(run.world.heroById(heroId), picked)):
+          queueAttackTarget(heroId, picked,
+            append = window.actionDown(ShiftInput))
           playSound(AttackOrderSound)
         else:
           issueGroundOrder(viewProjection, true)
@@ -2026,6 +2189,8 @@ proc runGraphics*(
 
   proc updatePlayerOrder(viewProjection: Mat4, inputFocused = window.focused) =
     ## Confirms aimed casts and submits right-click orders on mouse-down.
+    if window.mousePressed(MouseRight):
+      heldRightMove = false
     if not inputFocused or bindingCapture or chat.blocksGameplay or
       not playerMode() or matchMenu != HiddenMatchMenu or shopOpen or
       run.world.phase == Drafting:
@@ -2047,11 +2212,13 @@ proc runGraphics*(
         center = minimapMarker(destination, 0)
         marker = minimapMarker(destination, surfaceHeight(center.x, center.z))
       if minimapAction == MinimapAttackMove:
-        queueAttackMove(heroId, destination.x, destination.y)
+        queueAttackMove(heroId, destination.x, destination.y,
+          append = window.actionDown(ShiftInput))
         playSound(AttackOrderSound)
         attackMarks.emitClickMark(marker)
       else:
-        queueWalkTo(heroId, destination.x, destination.y)
+        queueWalkTo(heroId, destination.x, destination.y,
+          append = window.actionDown(ShiftInput))
         playSound(MoveOrderSound)
         clickMarks.emitClickMark(marker)
       selectionStarted = false
@@ -2088,7 +2255,8 @@ proc runGraphics*(
             {Heal, Restore}
         else:
           false
-      picked = pickActionTarget(viewProjection, healing)
+      picked = pickActionTarget(viewProjection, healing,
+        denying = attackMoveArmed and armedAbility < 0 and armedItem < 0)
     if armedItem >= 0:
       if run.world.heroById(heroId).inventory[armedItem] != PortalScroll:
         let target = run.world.heroById(picked)
@@ -2149,13 +2317,43 @@ proc runGraphics*(
       armedAbility = -1
       attackMoveArmed = false
       return
-    if picked != 0 and objectTeam(picked) != objectTeam(heroId):
-      queueAttackTarget(heroId, picked)
+    if picked != 0 and (objectTeam(picked) != objectTeam(heroId) or
+        (attackMoveArmed and run.world.canDeny(hero, picked))):
+      queueAttackTarget(heroId, picked,
+        append = window.actionDown(ShiftInput))
       playSound(AttackOrderSound)
       attackMoveArmed = holdingAttackMove()
       return
-    issueGroundOrder(viewProjection, attackMoveArmed)
+    if issueGroundOrder(viewProjection, attackMoveArmed) and
+      not attackMoveArmed and not window.actionDown(ShiftInput):
+        heldRightMove = true
+        nextRightMoveTick = run.world.tick + max(1, TickRate div 10)
     attackMoveArmed = holdingAttackMove()
+
+  proc updateHeldMovement(viewProjection: Mat4, inputFocused = window.focused) =
+    ## Refreshes ground movement while the original world right-click is held.
+    if not inputFocused or bindingCapture or chat.blocksGameplay or
+      not playerMode() or matchMenu != HiddenMatchMenu or shopOpen or
+      run.world.phase == Drafting or run.world.gameOver or
+      not window.mouseDown(MouseRight) or armedAbility >= 0 or armedItem >= 0 or
+      attackMoveArmed or window.mousePressed(MouseLeft) or
+      window.actionDown(ShiftInput):
+        heldRightMove = false
+        return
+    if not heldRightMove:
+      return
+    let hero = run.world.heroById(playerHeroId())
+    if hero.id == 0 or hero.hp <= 0 or hero.state == Dying:
+      heldRightMove = false
+      return
+    if window.mousePos.x < 0 or window.mousePos.y < 0 or
+      window.mousePos.x >= window.size.x or window.mousePos.y >= window.size.y or
+      mouseOverUi(window, sk.mousePos, primaryId):
+        return
+    if run.world.tick < nextRightMoveTick:
+      return
+    nextRightMoveTick = run.world.tick + max(1, TickRate div 10)
+    issueGroundOrder(viewProjection, false, repeated = true)
 
   proc updateAim(viewProjection: Mat4) =
     ## Resolves the visible aim using the same geometry as simulation casts.
@@ -2376,6 +2574,9 @@ proc runGraphics*(
         previousUnitPositions[hero.id] = renderPoint(hero.position)
     feedGotaActions(observeTick = true)
     emitTickParticles()
+    let rewardHero = if playerMode(): playerHeroId() else: 0'i32
+    rewardAudio.queueRewardSounds(run.world, rewardHero, audioEnabled)
+    rewardTexts.collectRewardTexts(run.world, rewardHero, viewMode)
     let audioTeam =
       if playerMode(): heroById(run.world, playerHeroId()).team.ord
       else: -1
@@ -2431,6 +2632,12 @@ proc runGraphics*(
           replayCheckpoints.add captureCheckpoint()
 
     arenaAudio.syncAudio(run.world)
+    rewardAudio.syncRewardAudio(
+      run.world, if playerMode(): playerHeroId() else: 0'i32
+    )
+    rewardTexts.syncRewardTexts(
+      run.world, if playerMode(): playerHeroId() else: 0'i32
+    )
 
   when not defined(gotaTestRoom):
     if not run.replayMode and network == nil:
@@ -2451,6 +2658,9 @@ proc runGraphics*(
     if existsEnv("CAM_X"): cameraTarget.x = getEnv("CAM_X").parseFloat.float32
     if existsEnv("CAM_Z"): cameraTarget.z = getEnv("CAM_Z").parseFloat.float32
     if existsEnv("SHOW_EDGES"): showTiles = getEnv("SHOW_EDGES") != "0"
+    if existsEnv("SHOW_POST_PROCESSING"):
+      debugMenuOpen = true
+      debugTab = 2
     if run.replayMode and existsEnv("REPLAY_TICK"):
       transport.seekTo(int32(getEnv("REPLAY_TICK").parseInt))
     if existsEnv("SIM_SECONDS"):
@@ -2458,6 +2668,8 @@ proc runGraphics*(
       let simSeconds = getEnv("SIM_SECONDS").parseFloat
       for i in 0 ..< int(simSeconds * TickRate.float64):
         advanceGame()
+      if options.pauseOnStart and run.world.phase != Drafting:
+        transport.pause()
     if existsEnv("PARTICLE_DEMO"):
       let
         origin = cameraTarget + vec3(-2.5'f32, 4.0'f32, 0)
@@ -2520,6 +2732,7 @@ proc runGraphics*(
     startTrace()
   window.onFrame = proc() =
     updateSounds()
+    updateMatchResults()
     let previousCapture = bindingCapture
     let chatCapture = chat.blocksGameplay
     bindingCapture = bindingCapture or chat.blocksGameplay
@@ -2631,6 +2844,9 @@ proc runGraphics*(
               else: int32(run.replayPlayer.data.hashes.len)
             transport.durationTicks = run.durationTicks()
             transport.sync(int32(run.world.tick), recordedNow, run.finished())
+      for event in rewardAudio.takeRewardSound(epochTime(), audioEnabled):
+        playSound(event.cue)
+      updateMatchResults()
       let active = if network == nil or network.isSpectator: simulationActive(transport)
                    else: not network.finished and
                      network.client.snapshot.phase == rooms.Playing
@@ -2654,6 +2870,7 @@ proc runGraphics*(
       clickMarks.advanceClickMarks(dt)
       attackMarks.advanceClickMarks(dt)
       if active:
+        rewardTexts.advanceRewardTexts(dt)
         particles.advanceParticles(dt)
         for god in gods.mitems:
           god.animTime += dt
@@ -2693,6 +2910,7 @@ proc runGraphics*(
         updateWorldSelection(viewProjection)
         updateAim(viewProjection)
         updatePlayerOrder(viewProjection)
+      updateHeldMovement(viewProjection)
       if armedAbility < 0:
         aimVisible = false
 
@@ -2841,6 +3059,9 @@ proc runGraphics*(
               viewProjection
             )
 
+          occlusion.settings.enabled = preferences.ambientOcclusion
+          occlusion.captureGround(window.size)
+
           if showOccludedCharacters:
             profileBlock "Character outline pass":
               occlusionOutline.beginMask(window.size)
@@ -2860,12 +3081,15 @@ proc runGraphics*(
             drawWorldCharacters(scene, worldCharacters, worldCharacterCount)
             finishCharacters(scene)
 
+        profileBlock "Ambient occlusion":
+          occlusion.applyScreenOcclusion(window.size, projection)
+
         # The arena's lakes, each with its own reflection. The water mirrors the sky,
         # terrain, towers and characters; particles, spells and markers stay out of it.
         if lakes.len > 0:
           captureScene(window.size)
         for lake in lakes.mitems:
-          lake.params = lakeWater # the panel (-d:waterPanel) may have changed it
+          lake.params = lakeWater # The debug menu may have changed it.
         for lake in lakes:
           if lake.layer notin 0 ..< waterLayerRanges.len or
             waterLayerRanges[lake.layer].len == 0:
@@ -2962,6 +3186,7 @@ proc runGraphics*(
                 )
           clickMarks.drawClickMarks(viewProjection)
           attackMarks.drawClickMarks(viewProjection)
+          drawHeroOrderMarkers(viewProjection)
         worldShapes.clear()
         let trailTime = (run.world.tick.float32 + animationAlpha) /
           TickRate.float32
@@ -3031,7 +3256,7 @@ proc runGraphics*(
           drawCreepWaypoints(viewProjection, barCameraRight, barCameraUp)
 
       profileBlock "ui":
-        if not cleanScreenshot:
+        if not cleanScreenshot and matchMenu != MatchResults:
           glDisable(GL_DEPTH_TEST)
           glDisable(GL_CULL_FACE)
           glDisable(GL_BLEND)
@@ -3053,6 +3278,7 @@ proc runGraphics*(
               sk.theme.defaultTextColor, "H1", CenterAlign
             )
           if matchMenu == HiddenMatchMenu:
+            sk.drawRewardTexts(rewardTexts, viewProjection, window.size.vec2)
             drawUi(
               sk,
               window,
@@ -3067,7 +3293,9 @@ proc runGraphics*(
               focusPlayerHero,
               attackMoveArmed,
               holdingAttackMove(),
-              if connection != nil: connection.stats else: nil
+              if connection != nil: connection.stats else: nil,
+              debugTabs,
+              drawArenaGraphics
             )
           when defined(gotaTestRoom):
             if matchMenu == HiddenMatchMenu and not shopOpen:
@@ -3083,6 +3311,8 @@ proc runGraphics*(
                 previousUnitPositions.clear()
                 previousUnitFacings.clear()
                 particles.clearParticles()
+                rewardTexts.syncRewardTexts(run.world, playerHeroId())
+                rewardAudio.syncRewardAudio(run.world, playerHeroId())
                 cameraTarget = vec3(0)
                 renderAlpha = 1
           if matchMenu != HiddenMatchMenu:
@@ -3094,7 +3324,9 @@ proc runGraphics*(
                   origin + vec2(0, 100), 416, sk.theme.disabledTextColor)
               elif matchMenu == MatchSettings:
                 if sk.settingsPanel(
-                  window, preferences, "Polyworld GotA", origin
+                  window, preferences, "Polyworld GotA", origin,
+                  controls = GotaControlProfile,
+                  supportsAmbientOcclusion = true
                 ):
                   matchMenu = PauseMenu
               else:
@@ -3172,63 +3404,36 @@ proc runGraphics*(
               saveError = error.msg
             if saveError.len > 0:
               sk.menuLabel(saveError, origin + vec2(0, 528), 416, MenuAccent)
-          when defined(waterPanel):
-            # A developer window for the lakes' look; F4 shows and hides it.
-            if window.actionPressed(WaterPanelInput):
-              showWaterPanel = not showWaterPanel
-            subWindow("Water (F4)", showWaterPanel, vec2(16, 130), vec2(340, 800)):
-              template slider(id, caption: string, value: var float32,
-                  low, high: float32) =
-                text(caption & " " & formatFloat(value, ffDecimal, 2))
-                scrubber(id, value, low, high)
-              template water: untyped = lakeWater
-              button("Reset"):
-                lakeWater = GotaLakeWater
-              h1text("Water")
-              text("Colour")
-              colorPicker(sk, window, waterColorPicker, water.color, "lakeColor")
-              slider("lakeColorStrength", "Colour strength", water.colorStrength, 0, 1)
-              slider("lakeLift", "Lift", water.lift, -2, 2)
-              h1text("Reflection")
-              slider("lakeReflectiveness", "Reflectiveness", water.reflectiveness, 0, 1)
-              slider("lakeFresnelStrength", "Fresnel strength", water.fresnelStrength, 0, 1)
-              slider("lakeFresnelPower", "Fresnel power", water.fresnelPower, 1, 10)
-              slider("lakeDistortion", "Reflection distortion", water.distortion, 0, 1)
-              h1text("Sun")
-              slider("lakeSheenStrength", "Sheen strength", water.sheenStrength, 0, 10)
-              slider("lakeSheenSharpness", "Sheen sharpness", water.sheenSharpness, 1, 64)
-              slider("lakeGlintStrength", "Glint strength", water.glintStrength, 0, 100)
-              slider("lakeGlintSharpness", "Glint sharpness", water.glintSharpness, 16, 4000)
-              h1text("Ripples")
-              slider("lakeWaveHeight", "Wave height", water.waveHeight, 0, 2)
-              slider("lakeWaveScale", "Wave scale", water.waveScale, 0.05, 20)
-              slider("lakeWaveSpeed", "Wave speed", water.waveSpeed, 0, 4)
-              slider("lakeWaveDrag", "Wave drag", water.waveDrag, 0, 1)
-              slider("lakeWaveCount", "Wave count", water.waveCount, 1, MaxWaves.float32)
-              slider("lakeRippleFade", "Ripple fade", water.rippleFade, 5, 400)
-              h1text("Refraction")
-              slider("lakeRefraction", "Refraction strength", water.refraction, 0, 0.5)
-              slider("lakeRefractionDepth", "Refraction depth", water.refractionDepth, 0.01, 2)
-              h1text("Shoreline")
-              text("Colour")
-              colorPicker(sk, window, foamColorPicker, water.foamColor, "lakeFoamColor")
-              slider("lakeShoreWidth", "Shoreline distance", water.foamDistance, 0, 6)
-              slider("lakeFoamOpacity", "Opacity", water.foamOpacity, 0, 1)
-              slider("lakeFoamSoftness", "Edge softness", water.foamSoftness, 0.01, 1)
-              slider("lakeFoamNoise", "Foam noise", water.foamNoise, 0, 1)
-              slider("lakeFoamScale", "Foam noise scale", water.foamScale, 0.1, 10)
-              slider("lakeFoamSpeed", "Foam speed toward shore", water.foamSpeed, -3, 3)
-              h1text("Shoreline fade")
-              slider("lakeFadeDistance", "Fade distance", water.fadeDistance, 0, 6)
-              slider("lakeFadeCurve", "Fade curve", water.fadeCurve, 0.1, 5)
           if matchMenu == HiddenMatchMenu:
             sk.drawHumanChat(window.size.vec2 / sk.uiScale, chat,
-              network.visibleHumanChat(), network.canHumanChat)
+              (if network != nil: network.visibleHumanChat()
+               else: run.visibleReplayChat(
+                 if viewMode == 0: -1 else: viewMode - 1)),
+              network.canHumanChat)
           sk.endUi()
           window.syncChatInput(chat)
           if matchMenu == HiddenMatchMenu:
             drawStatsOverlay(sk, window)
           window.syncChatInput(chat)
+        if not cleanScreenshot and matchMenu == MatchResults:
+          glDisable(GL_DEPTH_TEST)
+          glDisable(GL_CULL_FACE)
+          glDisable(GL_BLEND)
+          when not defined(emscripten):
+            glDisable(GL_MULTISAMPLE)
+          glActiveTexture(GL_TEXTURE0)
+          glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
+          let
+            heroId = if playerMode(): playerHeroId() else: 0'i32
+            ready = network == nil or
+              network.client.snapshot.phase in {rooms.Ended, Desynced}
+          if sk.drawMatchResults(window, run, heroId, network != nil, ready) and
+            resultsInputReady:
+              quitToMenu = false
+              leaveMatch = true
+          if not window.buttonDown[MouseLeft] and
+            not window.buttonPressed[MouseLeft]:
+              resultsInputReady = true
       when defined(takeScreenshot) and ActiveTracePath.len == 0:
         captureScreenshot(
           window,
@@ -3273,6 +3478,7 @@ proc runGraphics*(
   clearPlayerCommands()
   if not run.replayMode:
     saveRecording()
+  occlusion.closeScreenOcclusion()
   clickMarks.closeClickMarks()
   attackMarks.closeClickMarks()
   worldShapes.closeShapeRenderer()

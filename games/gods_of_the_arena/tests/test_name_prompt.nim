@@ -2,7 +2,7 @@
 import std/[macros, os, strutils, unittest]
 import vmath, jsony
 import polyworld/menus
-import ../playernames
+import ../[playernames, settings]
 
 macro needsName(): untyped =
   let tree = parseStmt(readFile(currentSourcePath().parentDir.parentDir / "frontend.nim"))
@@ -17,11 +17,18 @@ macro needsName(): untyped =
 
 macro frontendRoute(route: static[string]): untyped =
   let target = route
-  let tree = parseStmt(readFile(currentSourcePath().parentDir.parentDir / "frontend.nim"))
+  let
+    source = if target == "preferenceLoader": "settings.nim" else: "frontend.nim"
+    tree = parseStmt(readFile(currentSourcePath().parentDir.parentDir / source))
   proc find(node: NimNode): NimNode =
     if target == "preferenceLoader" and node.kind == nnkProcDef and
-        node[0].eqIdent("readGotaPreferences"):
-      return node
+        (node[0].eqIdent("readGotaPreferences") or
+        (node[0].kind == nnkPostfix and
+          node[0][1].eqIdent("readGotaPreferences"))):
+      result = copyNimTree(node)
+      if result[0].kind == nnkPostfix:
+        result[0] = result[0][1]
+      return
     if target == "readPreferences" and node.kind == nnkAsgn and
         node[0].eqIdent("preferences") and
         ("readPreferences" in node[1].repr or "readGotaPreferences" in node[1].repr):

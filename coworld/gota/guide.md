@@ -135,6 +135,55 @@ the same decision snapshot and does not change instruction or work budgets.
 The baseline now uses these records. The legacy scalar variables, functions,
 math helpers, neural functions, and chat/LLM APIs remain available.
 
+### Last hits and denies
+
+Bassy policies can deliberately last-hit enemies and deny allied lane creeps
+with `attackTarget(id)`. This uses the same attack command as human A-targeting;
+pass a stable object ID, not the observation index. It starts normal basic
+attacks, including their windup and any movement into range. Acceptance does
+not mean the killing hit has landed, and other units can win the last hit.
+
+Allied lane creeps (`kind = 3`) can be targeted only while alive and strictly
+below 50% health: `hp * 2 < maxHp`. The simulation checks again when the hit
+lands. Automatic targeting does not select allies, and offensive spells/items
+cannot deny. The denying hero receives no gold or XP; nearby enemy heroes
+retain the normal shared creep XP, without a last-hit bonus. These attack
+commands are recorded for deterministic replay.
+
+| Information | Structured API | Legacy API |
+| --- | --- | --- |
+| Creep health | `objects(i).hp` | `objectHp(i)` |
+| Creep maximum health | `objects(i).maxHp` | `objectInfo(i, 2)` |
+| Stable target ID | `objects(i).id` | `objectId(i)` |
+| Basic-attack damage | `self.attackDamage` | `selfAttackDamage` |
+| Ticks until the next hit in range | `self.attackCooldownTicks` | `selfAttackCooldown` |
+| Attack range | `self.attackRange` (tiles) | `selfAttackRange` (world units) |
+
+An idle hero reports a full windup, so do not wait for attack cooldown to
+become zero before issuing the first attack. The example below selects a
+visible lane creep already in range that one basic hit can kill. For a deny,
+the one-hit check is a policy choice; any allied creep below half health can
+be attacked repeatedly until it dies.
+
+```basic
+' @gota-structures
+for i = 0 to match.objectCount - 1
+  if objects(i).kind = 3 and objects(i).alive then
+    enemy = objects(i).team <> self.team
+    deny = objects(i).team = self.team and objects(i).hp * 2 < objects(i).maxHp
+    dx = objects(i).position.x - self.position.x
+    dy = objects(i).position.y - self.position.y
+    inRange = dx * dx + dy * dy <= self.attackRange * self.attackRange
+    if (enemy or deny) and inRange and objects(i).hp <= self.attackDamage then
+      accepted = attackTarget(objects(i).id)
+      if accepted then
+        exit for
+      end if
+    end if
+  end if
+next i
+```
+
 ## BASIC-defined neural networks
 
 Policies can implement their neural architecture in BASIC using packed int32,

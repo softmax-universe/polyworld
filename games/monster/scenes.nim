@@ -46,6 +46,7 @@ type
     characters: CharacterScene
     creature: CharacterModel
     villagers: array[VillagerColors.len, CharacterModel]
+    woodcutters: array[VillagerColors.len, CharacterModel]
     grove: Grove
     buildings, huts, berries, supplies: PropPack
     labels: WorldBarRenderer
@@ -126,6 +127,32 @@ proc supplyNode(kind: ResourceKind): Node =
         (i div 2).float32 * 0.26'f, 0), vec3(0.34'f, 0.26'f, 0.44'f),
         vec3(0.53'f + i.float32 * 0.04'f))
 
+proc addBeam(node: Node, start, finish: Vec3, width: float32, tint: Vec3) =
+  ## Builds a thin straight pole or fishing line between two local points.
+  let
+    direction = normalize(finish - start)
+    reference = if abs(direction.y) > 0.9'f:
+        vec3(0, 0, 1)
+      else: vec3(0, 1, 0)
+    side = normalize(cross(direction, reference))
+    front = cross(side, direction)
+  node.addBox(vec3(0), vec3(width, length(finish - start), width), tint)
+  let primitive = node.mesh.primitives[^1]
+  for point in primitive.points.mitems:
+    point = start + side * point.x + direction * point.y + front * point.z
+  for normal in primitive.normals.mitems:
+    normal = side * normal.x + direction * normal.y + front * normal.z
+
+proc fishingRodNode(): Node =
+  ## Makes a bank-side rod and fine line readable without a floating label.
+  result = Node(name: "fishing_rod", visible: true, scale: vec3(1),
+    rot: quat(0, 0, 0, 1), mesh: Mesh())
+  let tip = vec3(0.2'f, 1.75'f, 2.4'f)
+  result.addBeam(vec3(0.2'f, 0.55'f, 0.2'f), tip, 0.035'f,
+    vec3(0.53'f, 0.34'f, 0.13'f))
+  result.addBeam(tip, vec3(0.2'f, 0.05'f, 2.65'f), 0.012'f,
+    vec3(0.8'f, 0.85'f, 0.8'f))
+
 proc bannerNode(index: int): Node =
   ## Makes a village-colored pennant that marks its communal hall.
   result = Node(
@@ -202,6 +229,7 @@ proc close*(scene: MonsterScene) =
   scene.grove.rocks.closePropPack()
   var models = @[scene.creature]
   models.add scene.villagers
+  models.add scene.woodcutters
   for model in models:
     if model != nil:
       model.file.root.clearFromGpu()
@@ -211,6 +239,8 @@ proc close*(scene: MonsterScene) =
     scene.characters.context.destroy()
   scene.creature = nil
   for model in scene.villagers.mitems:
+    model = nil
+  for model in scene.woodcutters.mitems:
     model = nil
   scene.characters = nil
   scene.closed = true
@@ -313,6 +343,7 @@ proc newMonsterScene*(
       supplyNodes.add bannerNode(i)
     supplyNodes.add ruinNode("building_ruins", true)
     supplyNodes.add ruinNode("smashed_supplies", false)
+    supplyNodes.add fishingRodNode()
     scene.supplies = createPropPack(supplyNodes)
     clearProps()
     for i, tile in map.ground.tiles:
@@ -363,9 +394,14 @@ proc newMonsterScene*(
       scene.villagers[i] = lvdlooks.loadUnitModel(
         manifest, villagerEntry, PeonUnit
       )
-      scene.villagers[i].addClip(manifest, "Hit_Chest")
-      scene.villagers[i].addClip(manifest, "Sprint_Loop")
-      scene.villagers[i].addClip(manifest, "Sitting_Idle_Loop")
+      villagerEntry.preset = lvdassets.woodAxePreset(villagerEntry.preset)
+      scene.woodcutters[i] = lvdlooks.loadUnitModel(
+        manifest, villagerEntry, PeonUnit
+      )
+      for model in [scene.villagers[i], scene.woodcutters[i]]:
+        for clip in ["Hit_Chest", "Sprint_Loop", "Sitting_Idle_Loop",
+          "Walk_Loop", "Fixing_Kneeling", "Idle_Talking_Loop"]:
+            model.addClip(manifest, clip)
     scene.characters = newCharacterScene(window)
     scene.characters.useToonShading()
     scene.characters.toon.setArenaHour(clockHour(0'i32, common.TickRate))
@@ -423,10 +459,34 @@ proc villagerClip(villager: Villager): string =
   if villager.health <= 0: "Death01"
   elif villager.hitTime > 0: "Hit_Chest"
   elif villager.moving and villager.fear > 0: "Sprint_Loop"
-  elif villager.moving: "Jog_Fwd_Loop"
+  elif villager.moving: "Walk_Loop"
   elif villager.sleeping: "Sitting_Idle_Loop"
-  elif villager.task in {IdleTask, FleeTask}: "Idle_Loop"
+  elif villager.task in {IdleTask, FleeTask, WanderTask}: "Idle_Loop"
+  elif villager.task == ChatTask: "Idle_Talking_Loop"
+  elif villager.task in {RepairTask, ChoreTask}: "Fixing_Kneeling"
+  elif villager.task == GatherTask:
+    case villager.resource
+    of BerriesResource, GrainResource: "Fixing_Kneeling"
+    of SoftwoodResource, HardwoodResource: "Sword_Attack"
+    of FishResource: "Sitting_Idle_Loop"
+    of StoneResource: "Interact"
   else: "Interact"
+
+proc villagerModel(
+  scene: MonsterScene,
+  world: World,
+  villager: Villager,
+  index: int
+): CharacterModel =
+  ## Keeps the equipped axe identical in drawing, shadows, and mesh picking.
+  let
+    village = world.households[villager.home].village
+    variant = (village mod VillageColors.len) * 2 + index mod 2
+  if villager.health > 0 and villager.task == GatherTask and
+    villager.resource in {SoftwoodResource, HardwoodResource}:
+      scene.woodcutters[variant]
+  else:
+    scene.villagers[variant]
 
 proc villagerTime(
   villager: Villager,
@@ -438,6 +498,11 @@ proc villagerTime(
   if villager.health <= 0 or villager.hitTime > 0:
     clamp(1 - villager.hitTime / HitDuration, 0'f, 1'f) *
       model.clipDuration(clip)
+  elif not villager.moving and villager.task in
+    {GatherTask, ChoreTask, RepairTask, RefuelTask, ChatTask}:
+      villager.elapsed * 0.75'f
+  elif villager.moving and villager.fear <= 0:
+    time * 0.85'f + index.float32
   else:
     time + index.float32
 
@@ -502,6 +567,12 @@ proc supplyPlacements(world: World): seq[SupplyPlacement] =
       position: world.map.scenePosition(village.position + vec2(-2, 0.5'f)),
       size: 1, selection: owner)
   for person in world.villagers:
+    if person.health > 0 and not person.moving and
+      person.task == GatherTask and person.resource == FishResource:
+        result.add SupplyPlacement(name: "fishing_rod",
+          position: world.map.scenePosition(person.position),
+          size: 1, yaw: person.facing,
+          selection: Selection(kind: VillagerSelection, id: person.id))
     for kind in ResourceKind:
       if person.cargo[kind] > 0:
         let point =
@@ -632,8 +703,7 @@ proc pickSelectionAt*(
       CreatureScale))
   for i, person in world.villagers:
     let
-      village = world.households[person.home].village
-      model = scene.villagers[(village mod VillageColors.len) * 2 + i mod 2]
+      model = scene.villagerModel(world, person, i)
       clip = model.clipIndex(person.villagerClip())
     consider(Selection(kind: VillagerSelection, id: person.id),
       model.pickCharacter(origin, direction,
@@ -724,8 +794,7 @@ proc drawScene*(
   )
   for i, villager in world.villagers:
     let
-      village = world.households[villager.home].village
-      model = scene.villagers[(village mod VillageColors.len) * 2 + i mod 2]
+      model = scene.villagerModel(world, villager, i)
       clipIndex = model.clipIndex(villager.villagerClip())
       animationTime = villager.villagerTime(model, clipIndex, i, time)
     scene.characters.prepareCharacter(

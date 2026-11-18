@@ -11,6 +11,6 @@
   <key>CFBundleShortVersionString</key><string>0.1</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSMicrophoneUsageDescription</key>
-  <string>Monster uses your microphone when you choose Talk to speak to Moss.</string>
+  <string>Monster uses your microphone while Conversation mode is active so you can talk with Moss.</string>
 </dict>
 </plist>

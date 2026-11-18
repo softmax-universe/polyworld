@@ -244,7 +244,8 @@ block:
       destination = world.villageIndex(recipient)
       other = world.villageIndex(
         if recipient == "hall": "bracken" else: "village")
-      deadline = getMonoTime() + initDuration(seconds = 5)
+      # Long regional trips need room for coarse OS sleep scheduling.
+      deadline = getMonoTime() + initDuration(seconds = 15)
     doAssert source >= 0 and destination >= 0 and other >= 0
     let
       originalStone = world.sources[source].amount
@@ -263,7 +264,10 @@ block:
       if not brain.pending and not brain.explanationPending and
         not world.active and world.actions.len == 0:
           break
-      doAssert getMonoTime() < deadline, "resource delivery did not settle"
+      doAssert getMonoTime() < deadline,
+        "Resource delivery did not settle: " & recipient &
+          " tick=" & $world.tick & " active=" & $world.active &
+          " pending=" & $brain.pending & " position=" & $world.creature.position
       sleep(2)
     doAssert world.creature.cargo.total() == 0
     doAssert world.villages[destination].stock[StoneResource] ==

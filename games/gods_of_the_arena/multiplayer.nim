@@ -129,7 +129,8 @@ proc decodeSubmission*(bytes: string): GameSubmission =
     if actionKind notin [uint32(ActionWalkTo), ActionAttackTarget,
       ActionBuyItem, ActionUseItem, ActionAttackMove, ActionCastTarget,
       ActionCastPoint, ActionUseItemAt, ActionLevelAbility, ActionBuyback,
-      ActionDraft, ActionStop, ActionSellItem, ActionSwapItems]:
+      ActionDraft, ActionStop, ActionSellItem, ActionSwapItems,
+      ActionQueueWalkTo, ActionQueueAttackMove, ActionQueueAttackTarget]:
         reject("Unknown GotA action")
     result.action.kind = uint8(actionKind)
     result.action.slot = cast[int32](reader.get32())
@@ -246,12 +247,13 @@ proc sendHumanChat*(session: NetworkMatch, text: string, team = false): bool =
       first: (if team: -1'i32 else: -2'i32))).encodeSubmission())
 
 proc visibleHumanChat*(session: NetworkMatch): seq[HumanChatMessage] =
+  ## Filters recorded chat by the viewer and playhead, including after seeking.
   if session == nil: return
   let viewer = session.humanHeroIndex()
-  for message in session.humanChat:
-    if not message.team or session.isSpectator or
-      (viewer >= 0 and session.game.world.heroes[viewer].team.ord == message.senderTeam):
-      result.add message
+  session.game.visibleReplayChat(
+    if session.isSpectator: -1
+    elif viewer >= 0: session.game.world.heroes[viewer].team.ord
+    else: 2)
 
 proc decide(session: NetworkMatch) =
   ## Runs owned VMs for live rooms while closed rooms only drain buffered ticks.
@@ -314,6 +316,7 @@ proc applyPacket*(session: NetworkMatch, packet: RoomMessage, localPlayback = fa
     if recorder != nil and int(packet.tick) <= recorder.data.hashes.len:
       game.recorder = ReplayRecorder(data: recorder.data)
       game.recorder.data.actions = @[]
+      game.recorder.data.events = @[]
     game.historyPlayback = false
   defer:
     game.recorder = recorder
@@ -321,6 +324,10 @@ proc applyPacket*(session: NetworkMatch, packet: RoomMessage, localPlayback = fa
   for ordinal, submission in submissions:
     if submission.humanChat:
       let index = game.world.heroIndex(submission.action.heroId)
+      game.recorder.recordChat(ReplayChat(
+        tick: packet.tick, kind: HumanReplayChat,
+        sender: submission.action.heroId, target: submission.action.first,
+        text: submission.text))
       session.humanChat.appendHumanChat(HumanChatMessage(
         tick: packet.tick, ordinal: ordinal,
         sender: game.recorder.data.config.players[index].name,
@@ -329,7 +336,7 @@ proc applyPacket*(session: NetworkMatch, packet: RoomMessage, localPlayback = fa
     elif submission.mailbox:
       discard game.deliverChat(
         game.world.heroIndex(submission.action.heroId),
-        int(submission.action.first), submission.text
+        int(submission.action.first), submission.text, int32(packet.tick)
       )
     else:
       var action = submission.action
@@ -340,6 +347,10 @@ proc applyPacket*(session: NetworkMatch, packet: RoomMessage, localPlayback = fa
     reject("GotA failed to execute the authoritative tick")
   # Only the recorded server command emits a system notice. Retain this latch
   # outside rewindable worlds even after bounded display history evicts it.
+  if serverNotice:
+    game.recorder.recordChat(ReplayChat(
+      tick: packet.tick, kind: SystemReplayChat,
+      target: -2, text: ThreeMinuteNotice))
   if serverNotice and not session.noticeDelivered:
     session.noticeDelivered = true
     session.humanChat.appendHumanChat(HumanChatMessage(

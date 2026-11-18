@@ -17,11 +17,11 @@ when defined(headless):
 else:
   import
     windy, polyworld/[menus, sounds],
-    assets, game, graphics, frontend, pointers
+    assets, game, graphics, frontend, pointers, settings
   initializeOptions()
   configureSoundLaunch(options.soundMuted, options.soundOverride)
   try:
-    var preferences = readPreferences("Polyworld GotA")
+    var preferences = readGotaPreferences()
     configureSounds(
       false, preferences.mainVolume,
       preferences.fxVolume, preferences.uiVolume, preferences.musicVolume

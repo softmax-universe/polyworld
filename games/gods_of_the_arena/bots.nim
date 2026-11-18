@@ -277,12 +277,21 @@ proc abilityProc(heroId: int32, field: AbilityField): HostProc =
     of AbilityManaCost: spec.manaCost
 
 proc deliverChat*(
-  game: Game, sender, target: int, text: openArray[char]
+  game: Game, sender, target: int, text: openArray[char], tick = -1'i32
 ): int32 =
-  ## Routes chat according to this game's player and team rules.
+  ## Records policy traffic and routes it by this game's player and team rules.
   if sender notin 0 ..< game.inboxes.len or
-    target < -2 or target >= game.inboxes.len:
+    target < -2 or target >= game.inboxes.len or
+    text.len == 0 or text.len > MaxChatBytes:
       return 0
+  if game.recorder != nil:
+    var message = newString(text.len)
+    for i in 0 ..< text.len:
+      message[i] = text[i]
+    game.recorder.recordChat(ReplayChat(
+      tick: uint32(if tick >= 0: tick else: game.world.tick),
+      kind: PolicyReplayChat, sender: game.world.heroes[sender].id,
+      target: target.int32, text: message))
   let id = int32(if target < 0: target else: sender)
   for recipient in 0 ..< game.inboxes.len:
     case target

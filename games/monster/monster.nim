@@ -20,7 +20,7 @@ when not defined(headless):
 
 type Options = object
   seed, width, height, frames: int
-  offline, noVoice, soundMuted: bool
+  offline, noVoice, soundMuted, conversation: bool
   saveDir, screenshot, prompt, model, selection: string
 
 proc options(): Options =
@@ -38,7 +38,9 @@ proc options(): Options =
   try:
     var arguments: seq[string]
     for argument in commandLineParams():
-      if not result.soundMuted.takeSoundFlag(argument):
+      if result.soundMuted.takeSoundFlag(argument):
+        result.conversation = not result.soundMuted
+      else:
         arguments.add argument
     if arguments.len > 0:
       for kind, key, value in getopt(arguments):
@@ -72,8 +74,9 @@ proc options(): Options =
             echo "Monster / Polyworld"
             echo "Run from the repository: nim r games/monster/monster.nim"
             echo "Options: --model:ID --seed:N --save-dir:PATH --offline"
-            echo "Voice connects on startup. Click Talk, then Finish to send."
-            echo "Audio: --mute[=BOOL], --unmute, --no-voice"
+            echo "Modes: Text, or Conversation with an OpenAI key."
+            echo "Conversation listens continuously and supports interruption."
+            echo "Audio: --no-voice disables Conversation; --unmute starts it."
             echo "Hidden capture: --screenshot:PATH [--prompt:TEXT] [--frames:N]"
             echo "Inspect a profile on launch: --select:moss or a person/place ID."
             echo "Or compile with -d:takeScreenshot (default: output/monster.png)."
@@ -205,12 +208,13 @@ else:
     let voice = newMonsterVoice(
       historyCount = brain.messages.len,
       enabled = not settings.offline and not settings.noVoice and
-        not capturing and getEnv("COGAME_LLM").toLowerAscii() != "off",
-      muted = settings.soundMuted
+        not capturing and getEnv("COGAME_LLM").toLowerAscii() != "off"
     )
     defer:
       voice.close()
-    voice.connect()
+    voice.refreshKey()
+    if settings.conversation:
+      voice.setMode(ConversationMode)
     var
       chat = initChatUi()
       clock: ViewingClock
@@ -301,11 +305,12 @@ else:
       )
       sk.uiScale = chat.scale
       chat.voiceEnabled = voice.enabled
+      chat.voiceHasKey = voice.hasKey
+      chat.conversationMode = voice.mode == ConversationMode
       chat.voiceConnected = voice.client.state == Connected
       chat.voiceConnecting = voice.client.state == Connecting
       chat.voiceListening = voice.listening()
       chat.voiceSpeaking = voice.speaking()
-      chat.voiceMuted = voice.muted
       chat.voiceStatus = voice.status()
       chat.voiceError = voice.error
       sk.beginUi(window, window.size)
@@ -317,15 +322,12 @@ else:
       )
       sk.endUi()
       window.syncInput(chat)
-      if chat.voiceToggleRequested:
-        voice.toggleListening()
-        chat.voiceToggleRequested = false
-      if chat.voiceMuteRequested:
-        voice.setMuted(not voice.muted)
-        chat.voiceMuteRequested = false
-      if chat.voiceReconnectRequested:
-        voice.connect()
-        chat.voiceReconnectRequested = false
+      if chat.textModeRequested:
+        voice.setMode(TextMode)
+        chat.textModeRequested = false
+      if chat.conversationModeRequested:
+        voice.setMode(ConversationMode)
+        chat.conversationModeRequested = false
       if spoken.len > 0:
         voice.interrupt()
         if not world.speak(brain, spoken):

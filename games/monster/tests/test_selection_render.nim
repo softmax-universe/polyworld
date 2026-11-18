@@ -99,6 +99,27 @@ block:
   doAssert world.toJson() == before,
     "Picking and drawing must not issue orders or mutate the simulation."
 
+  for resource in [SoftwoodResource, FishResource]:
+    world.villagers[0].task = GatherTask
+    world.villagers[0].resource = resource
+    world.villagers[0].elapsed = 2
+    let working = world.toJson()
+    scene.drawScene(window, world, cameraTarget, CameraDistance, 0,
+      world.selectionById("ada"))
+    discard scene.pickNear(world, cameraTarget, world.villagers[0].position,
+      0.7'f, world.selectionById("ada"))
+    if resource == FishResource:
+      let
+        person = world.villagers[0]
+        rodPixel = project(vec3(person.position.x + 0.2'f,
+          world.map.groundHeight(person.position) + 1.15'f,
+          person.position.y + 1.3'f), cameraTarget)
+      doAssert scene.pickSelectionAt(world, rodPixel, ViewSize, cameraTarget,
+        CameraDistance, 0) == world.selectionById("ada"),
+        "The fishing rod belongs to the same selected villager."
+    doAssert world.toJson() == working,
+      "Rendering tools and inspecting workers cannot change their jobs."
+
   world.villagers[0].position = world.households[0].position
   world.villagers[0].sleeping = true
   world.villagers[0].task = SleepTask

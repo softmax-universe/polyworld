@@ -625,7 +625,8 @@ proc planVillager(
   if not world.map.walkable(position):
     world.villagers[index].activity = "Cannot reach supplies; resting"
     return false
-  let arrival = world.arrivalPosition(index, target, position)
+  let arrival = if task == ChatTask: position
+    else: world.arrivalPosition(index, target, position)
   try:
     let path = world.map.route(world.villagers[index].position, arrival)
     world.villagers[index].task = task
@@ -644,7 +645,8 @@ proc seekResource(
   index: int,
   kinds: set[ResourceKind],
   forHall = false,
-  meal = false
+  meal = false,
+  preferred: set[ResourceKind] = {}
 ): bool =
   ## Tries the shared hall before choosing the nearest reachable source.
   let
@@ -668,14 +670,25 @@ proc seekResource(
   for i, source in world.sources:
     if not source.destroyed and source.resource in kinds and source.amount > 0 and
       source.owner in [-1, village]:
-      candidates.add i
+      var claimed = 0
+      for other, worker in world.villagers:
+        if other != index and worker.health > 0 and worker.target == source.id:
+          if worker.task == GatherTask:
+            claimed += max(0, VillagerCarryLimit - worker.cargo.total())
+          elif worker.task == EatTask:
+            inc claimed
+      if source.amount > claimed:
+        candidates.add i
+  let origin = world.villagers[index].position
+  proc travelCost(source: ResourceSource): float32 =
+    ## Favors varied jobs only when their travel distances are comparable.
+    max(0'f, length(source.position - origin) -
+      (if source.resource in preferred: 5'f else: 0'f))
   while candidates.len > 0:
     var nearest = 0
     for i in 1 ..< candidates.len:
-      if lengthSq(world.sources[candidates[i]].position -
-        world.villagers[index].position) <
-        lengthSq(world.sources[candidates[nearest]].position -
-        world.villagers[index].position):
+      if travelCost(world.sources[candidates[i]]) <
+        travelCost(world.sources[candidates[nearest]]):
           nearest = i
     let source = world.sources[candidates[nearest]]
     candidates.delete(nearest)
@@ -717,11 +730,137 @@ proc clearVillagerTask(person: var Villager) {.raises: [].} =
   person.elapsed = 0
   person.retry = 0
 
-proc chooseVillagerTask(world: var World, index: int) =
-  ## Chooses a personal or household need without accepting player commands.
+proc workOffset(person: Villager): int {.raises: [].} =
+  ## Gives each resident a stable preference without changing saved games.
+  for i, id in VillagerIds:
+    if person.id == id:
+      return i
+  person.home * 2
+
+proc householdReserves(world: World, home: int): Inventory =
+  ## Counts household supplies and trips already bringing supplies home.
+  result = world.households[home].stock
+  for worker in world.villagers:
+    if worker.health <= 0 or worker.home != home or worker.supplyingHall:
+      continue
+    for kind in ResourceKind:
+      result[kind] += worker.cargo[kind]
+    if worker.task in {GatherTask, WithdrawTask}:
+      result[worker.resource] +=
+        max(0, VillagerCarryLimit - worker.cargo.total())
+
+proc chooseVillageWork(world: var World, index: int): bool =
+  ## Shares varied gathering jobs while accounting for supplies on the way.
+  let
+    person = world.villagers[index]
+    village = world.households[person.home].village
+    hall = world.villages[village]
+  if hall.health <= 0 or person.cargo.total() > 0:
+    return false
+  var reserves = hall.stock
+  for worker in world.villagers:
+    if worker.health <= 0 or not worker.supplyingHall or
+      world.households[worker.home].village != village:
+        continue
+    for kind in ResourceKind:
+      reserves[kind] += worker.cargo[kind]
+    if worker.task == GatherTask:
+      reserves[worker.resource] +=
+        max(0, VillagerCarryLimit - worker.cargo.total())
+  const Jobs = [GrainResource, FishResource, SoftwoodResource,
+    HardwoodResource, StoneResource, BerriesResource]
+  const
+    FoodKinds = {BerriesResource, GrainResource, FishResource}
+    WoodKinds = {SoftwoodResource, HardwoodResource}
+    FoodReserve = VillageWorkReserves[0] + VillageWorkReserves[1] +
+      VillageWorkReserves[2]
+    WoodReserve = VillageWorkReserves[3] + VillageWorkReserves[4]
+  var residents = 0
+  for worker in world.villagers:
+    if worker.health > 0 and world.households[worker.home].village == village:
+      inc residents
+  if world.villageSupplies(village).foodTotal() < residents and
+    reserves.foodTotal() < residents and
+    world.seekResource(index, FoodKinds, forHall = true):
+      return true
+  for offset in 0 ..< Jobs.len:
+    let kind = Jobs[(person.workOffset() + offset) mod Jobs.len]
+    let kinds = case kind
+      of BerriesResource .. FishResource: FoodKinds
+      of SoftwoodResource, HardwoodResource: WoodKinds
+      of StoneResource: {StoneResource}
+    let needed = case kind
+      of BerriesResource .. FishResource: reserves.foodTotal() < FoodReserve
+      of SoftwoodResource, HardwoodResource:
+        reserves[SoftwoodResource] + reserves[HardwoodResource] < WoodReserve
+      of StoneResource: reserves[kind] < VillageWorkReserves[kind.ord]
+    if needed and world.seekResource(index, kinds, forHall = true,
+      preferred = {kind}):
+        return true
+
+proc chatWithNeighbor(world: var World, index: int): bool =
+  ## Arranges a short conversation only between free, nearby neighbors.
+  let
+    person = world.villagers[index]
+    village = world.households[person.home].village
+    night = isNight(clockHour(world.tick, TickRate.int32))
+  for other, neighbor in world.villagers:
+    if other == index or neighbor.health <= 0 or neighbor.fear > 0 or
+      neighbor.sleeping or neighbor.wantsSleep(night) or
+      neighbor.hunger >= MealHunger or neighbor.cargo.total() > 0 or
+      neighbor.task notin {IdleTask, WanderTask} or
+      world.households[neighbor.home].village != village or
+      length(neighbor.position - person.position) > 10:
+        continue
+    let
+      middle = (person.position + neighbor.position) / 2
+      first = middle + vec2(-0.7'f, 0)
+      second = middle + vec2(0.7'f, 0)
+    if not world.map.walkable(first) or not world.map.walkable(second):
+      continue
+    if world.planVillager(index, ChatTask, neighbor.id, first,
+      "Meeting " & neighbor.name):
+      if world.planVillager(other, ChatTask, person.id, second,
+        "Meeting " & person.name):
+          return true
+      world.villagers[index].clearVillagerTask()
+
+proc chooseVillageLeisure(world: var World, index: int): bool =
+  ## Alternates small chores, neighborly chats, and walks near the village.
   let
     person = world.villagers[index]
     house = world.households[person.home]
+    hall = world.villages[house.village]
+    phase = world.tick.int div (18 * TickRate) + person.workOffset()
+  if phase mod 3 == 2 and world.chatWithNeighbor(index):
+    return true
+  if phase mod 3 == 0 and house.integrity > 0:
+    if phase mod 2 == 0:
+      let farmId = if house.village == 0: "farm" else: hall.id & "_farm"
+      let farm = world.sourceIndex(farmId)
+      if farm >= 0 and not world.sources[farm].destroyed and
+        world.planVillager(index, ChoreTask, farmId,
+          world.sources[farm].position, "Tending the crops"):
+            return true
+    if world.planVillager(index, ChoreTask, house.id,
+      house.position, "Sweeping outside " & house.name):
+        return true
+  for attempt in 0 ..< 8:
+    let
+      angle = (phase + attempt).float32 * PI.float32 / 4
+      destination = hall.position +
+        vec2(cos(angle), sin(angle)) * (4 + phase mod 4).float32
+    if world.planVillager(index, WanderTask, person.id, destination,
+      "Strolling around " & hall.name):
+        return true
+  false
+
+proc chooseVillagerTask(world: var World, index: int) =
+  ## Meets urgent needs before work, maintenance, and village social life.
+  let
+    person = world.villagers[index]
+    house = world.households[person.home]
+    reserves = world.householdReserves(person.home)
     hall = world.villages[house.village]
     deliverHall = (person.supplyingHall and hall.health > 0) or
       house.integrity <= 0
@@ -733,8 +872,9 @@ proc chooseVillagerTask(world: var World, index: int) =
   var planned = false
   if person.cargo.total() == 0:
     world.villagers[index].supplyingHall = false
-  if person.hunger >= UrgentHunger:
-    planned = world.seekMeal(index)
+  if person.hunger >= UrgentHunger or
+    (night and person.wantsSleep(night) and person.hunger >= BedtimeHunger):
+      planned = world.seekMeal(index)
   if not planned and person.hunger < UrgentHunger and person.wantsSleep(night):
     if house.integrity > 0:
       planned = world.planVillager(index, SleepTask, house.id,
@@ -750,29 +890,29 @@ proc chooseVillagerTask(world: var World, index: int) =
       planned = world.planVillager(index, DeliverTask, deliveryId,
         deliveryPosition, "Taking " & person.cargo.inventoryText() &
           " to " & deliveryName)
-  if not planned and person.hunger >= 50:
+  if not planned and person.hunger >= MealHunger:
     planned = world.seekMeal(index)
   if not planned and person.cargo.total() > 0 and canDeliver:
     planned = world.planVillager(index, DeliverTask, deliveryId,
       deliveryPosition, "Taking " & person.cargo.inventoryText() &
         " to " & deliveryName)
-  if not planned and person.hunger < 50:
+  if not planned and person.hunger < MealHunger:
     if house.integrity <= 0:
       if hall.health > 0 and person.cargo.total() < VillagerCarryLimit and
         hall.stock.foodTotal() < 12:
           planned = world.seekResource(index,
             {BerriesResource, GrainResource, FishResource}, forHall = true)
-    elif house.stock.foodTotal() < 4:
+    elif reserves.foodTotal() < HouseholdFoodReserve:
       planned = world.seekResource(index,
         {BerriesResource, GrainResource, FishResource})
-    elif house.fuel < 35:
+    if not planned and house.integrity > 0 and house.fuel < 35:
       if house.stock[SoftwoodResource] + house.stock[HardwoodResource] > 0:
         planned = world.planVillager(index, RefuelTask, house.id,
           house.position, "Tending the hearth")
       else:
         planned = world.seekResource(index,
           {SoftwoodResource, HardwoodResource})
-    elif house.integrity < 100:
+    if not planned and house.integrity > 0 and house.integrity < 100:
       if house.stock[StoneResource] >= 2 and
         house.stock[HardwoodResource] >= 1:
           planned = world.planVillager(index, RepairTask, house.id,
@@ -781,26 +921,20 @@ proc chooseVillagerTask(world: var World, index: int) =
         planned = world.seekResource(index, {StoneResource})
       else:
         planned = world.seekResource(index, {HardwoodResource})
-    elif hall.health > 0 and hall.stock.foodTotal() < 12:
-      planned = world.seekResource(index,
-        {BerriesResource, GrainResource, FishResource}, forHall = true)
-    elif hall.health > 0 and
-      hall.stock[SoftwoodResource] + hall.stock[HardwoodResource] < 8:
-      planned = world.seekResource(index,
-        {SoftwoodResource, HardwoodResource}, forHall = true)
-    elif hall.health > 0 and hall.stock[StoneResource] < 6:
-      planned = world.seekResource(index, {StoneResource}, forHall = true)
-  if not planned and person.hunger < 50 and house.stock.foodTotal() >= 4 and
-    house.fuel >= 35 and house.integrity >= 100:
-      let resting = world.arrivalPosition(index, house.id, house.position)
-      if length(person.position - resting) > 0.1'f:
-        planned = world.planVillager(index, DeliverTask, house.id,
-          house.position, "Going home to rest")
+    if not planned and house.stock.foodTotal() >= HouseholdFoodReserve and
+      house.fuel >= 35 and
+      house.integrity >= 100 and world.tick >= 30 * TickRate and
+      (world.tick.int div (20 * TickRate) + person.workOffset()) mod 4 == 0:
+        planned = world.chooseVillageLeisure(index)
+    if not planned:
+      planned = world.chooseVillageWork(index)
+    if not planned and person.cargo.total() == 0:
+      planned = world.chooseVillageLeisure(index)
   if not planned:
     world.villagers[index].retry = 5
     world.villagers[index].moving = false
     world.villagers[index].activity =
-      if person.hunger >= 50: "Looking for food"
+      if person.hunger >= MealHunger: "Looking for food"
       elif person.wantsSleep(night): "Looking for a way home to sleep"
       elif house.integrity <= 0: "Homeless; seeking shelter"
       elif house.integrity < 100: "Waiting for repair supplies"
@@ -895,7 +1029,7 @@ proc finishVillagerTask(world: var World, index: int) =
             inc world.villages[village].harvested
             ate = true
     if ate:
-      world.villagers[index].hunger = max(0'f, person.hunger - 45)
+      world.villagers[index].hunger = max(0'f, person.hunger - MealRelief)
   of RefuelTask:
     if world.households[home].integrity > 0 and world.households[home].fuel < 35:
       if world.households[home].stock[SoftwoodResource] > 0:
@@ -913,6 +1047,9 @@ proc finishVillagerTask(world: var World, index: int) =
         dec world.households[home].stock[HardwoodResource]
         world.households[home].integrity = min(100'f,
           world.households[home].integrity + 35)
+  of ChoreTask, WanderTask, ChatTask:
+    world.villagers[index].retry = 2 + (person.workOffset() mod 4).float32
+    world.villagers[index].activity = "Taking a short break"
   of IdleTask, FleeTask, SleepTask:
     discard
   world.villagers[index].task = IdleTask
@@ -930,14 +1067,7 @@ proc stepVillage(world: var World) =
       source.elapsed = 0
       continue
     source.elapsed += Dt
-    let interval =
-      case source.resource
-      of BerriesResource: 12'f
-      of GrainResource: 18'f
-      of FishResource: 15'f
-      of SoftwoodResource: 35'f
-      of HardwoodResource: 50'f
-      of StoneResource: 0'f
+    let interval = RegrowthSeconds[source.resource.ord]
     if source.elapsed >= interval:
       source.elapsed -= interval
       inc source.amount
@@ -954,7 +1084,7 @@ proc stepVillage(world: var World) =
       world.villagers[i].activity = "Dead"
       continue
     world.villagers[i].hunger = min(100'f,
-      world.villagers[i].hunger + Dt * 0.12'f)
+      world.villagers[i].hunger + Dt * VillagerHungerRate)
     if not world.villagers[i].sleeping:
       world.villagers[i].sleepiness = min(100'f,
         world.villagers[i].sleepiness + Dt * (if night: 0.5'f else: 0.24'f))
@@ -1034,7 +1164,8 @@ proc stepVillage(world: var World) =
       hungry = person.hunger >= UrgentHunger and
         not findingMeal and not freeingSpace
       tired = person.hunger < UrgentHunger and person.wantsSleep(night) and
-        person.task notin {SleepTask, EatTask}
+        person.task notin {SleepTask, EatTask} and
+        not (findingMeal and person.hunger >= BedtimeHunger)
     if person.task != IdleTask and (hungry or tired):
       world.villagers[i].clearVillagerTask()
     if world.villagers[i].task == IdleTask:
@@ -1045,7 +1176,9 @@ proc stepVillage(world: var World) =
       continue
     world.villagers[i].moving = walk(
       world.villagers[i].position, world.villagers[i].facing,
-      world.villagers[i].path, world.villagers[i].waypoint, Dt * 1.7'f
+      world.villagers[i].path, world.villagers[i].waypoint,
+      Dt * (if world.villagers[i].task in {ChoreTask, WanderTask, ChatTask}:
+        1.1'f else: 1.7'f)
     )
     if world.villagers[i].moving:
       continue
@@ -1053,12 +1186,50 @@ proc stepVillage(world: var World) =
       world.villagers[i].sleeping = true
       world.villagers[i].activity = "Sleeping"
       continue
+    if world.villagers[i].task == ChatTask:
+      let partner = world.villagerIndex(world.villagers[i].target)
+      if partner < 0 or world.villagers[partner].task != ChatTask or
+        world.villagers[partner].target != world.villagers[i].id:
+          world.villagers[i].clearVillagerTask()
+          continue
+      let direction = world.villagers[partner].position -
+        world.villagers[i].position
+      world.villagers[i].facing = arctan2(direction.x, direction.y)
+      if world.villagers[partner].waypoint < world.villagers[partner].path.len:
+        world.villagers[i].activity =
+          "Waiting for " & world.villagers[partner].name
+        continue
+      world.villagers[i].activity =
+        "Chatting with " & world.villagers[partner].name
+    if world.villagers[i].task == GatherTask:
+      let source = world.sourceIndex(world.villagers[i].target)
+      if source < 0 or world.sources[source].amount <= 0:
+        world.villagers[i].clearVillagerTask()
+        continue
+      let kind = world.villagers[i].resource
+      let work = case kind
+        of BerriesResource: "Picking berries"
+        of GrainResource: "Harvesting grain"
+        of FishResource: "Fishing"
+        of SoftwoodResource: "Chopping pine wood"
+        of HardwoodResource: "Chopping oak wood"
+        of StoneResource: "Mining stone"
+      world.villagers[i].activity = work & " at " & world.sources[source].name
+      let direction = world.sources[source].position - world.villagers[i].position
+      world.villagers[i].facing = if kind == FishResource:
+          (if world.sources[source].id == "south_fish": -PI.float32 / 2
+            else: PI.float32 / 2)
+        else: arctan2(direction.x, direction.y)
     world.villagers[i].elapsed += Dt
     let duration = case world.villagers[i].task
-      of GatherTask: 3'f
+      of GatherTask:
+        GatherSeconds[world.villagers[i].resource.ord]
       of RepairTask: 8'f
       of RefuelTask: 3'f
       of EatTask: 2'f
+      of ChoreTask: 10'f
+      of WanderTask: 4'f
+      of ChatTask: 12'f
       else: 1'f
     if world.villagers[i].elapsed >= duration:
       world.finishVillagerTask(i)
@@ -1237,7 +1408,8 @@ proc observation*(world: World): string =
       "Homeless residents seek shelter at an intact hall or sleep outside. " &
       "Sleepiness falls while sleeping; urgent hunger or " &
       "danger wakes them. One full day lasts five real minutes. " &
-      "Huts consume food and firewood; pine gives 35 warmth, oak 50. " &
+      "Residents eat about two meals per day and eat before bed when " &
+      "hungry. Huts consume firewood; pine gives 35 warmth, oak 50. " &
       "Each repair uses two stone and one oak wood for 35 condition. " &
       "Villagers act independently; you cannot order them around. " &
       "Attack strikes one named living villager, hut, or village hall once " &
@@ -1258,8 +1430,15 @@ proc observation*(world: World): string =
       "Our village means Willow. Bracken and Reedbank are independent " &
       "neighbors competing for the same wild supplies and finite stone. " &
       "People use only their own village hall and farms, but everyone " &
-      "can gather shared resources. Supplied households gather communal " &
-      "reserves of 12 food, 8 wood, and 6 stone. Wellbeing averages actual " &
+      "can gather shared resources. Residents share harvesting, fishing, " &
+      "woodcutting, and mining jobs, carrying two supplies at a time. " &
+      "Hall reserves target 14 food, 10 wood, and 6 stone; homes keep " &
+      "about four food. Nearby foods and fuel woods can substitute for " &
+      "each other. Shortages take priority over optional stockpiling. " &
+      "Gathering takes 6 to 12 seconds plus travel per two-unit load. " &
+      "When supplied, people tend crops, sweep, " &
+      "stroll around their village, and chat with neighbors. " &
+      "Wellbeing averages actual " &
       "hunger, home condition, and warmth, not military strength. " &
       "Berries, grain, fish and fallen wood replenish slowly; stone is finite. " &
       "North is negative z, east is positive x."
@@ -1555,7 +1734,8 @@ proc restoreWorld*(world: var World, path: string) =
           (not migrating and source.owner != expected.owner) or
           source.amount notin 0 .. expected.capacity or
           (source.destroyed and source.amount != 0) or
-          not (source.elapsed >= 0 and source.elapsed <= 50):
+          not (source.elapsed >= 0 and
+            source.elapsed <= max(50'f, RegrowthSeconds[source.resource.ord])):
             raise newException(MonsterError, "Monster resource save is invalid.")
         restored.sources[i].amount = source.amount
         restored.sources[i].elapsed = source.elapsed

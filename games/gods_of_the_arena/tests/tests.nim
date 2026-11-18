@@ -58,6 +58,8 @@ import
   test_presets,
   test_progression,
   test_replays,
+  test_replay_chat,
+  test_policy_chat_replay,
   test_rotations,
   test_rusher,
   test_scores,

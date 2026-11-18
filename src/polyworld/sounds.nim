@@ -16,6 +16,8 @@ type
     worldCount: int
     workWindowStart: float64
     workCount: int
+    rewardPlayed: bool
+    rewardLast: float64
   SoundMix* = object
     gain*, pan*: float32
   SoundVariants = object
@@ -67,6 +69,8 @@ proc soundCooldown*(cue: SoundCue): float64 =
     2.0
   of ReadySound:
     0.6
+  of LastHitGoldSound, ExperienceSound, DenySound:
+    RewardSoundCooldown
   of HumanDeathSound, CreatureDeathSound, BuildingDeathSound:
     0.18
   else:
@@ -76,10 +80,17 @@ proc isWorkSound*(cue: SoundCue): bool =
   ## Separates routine harvesting from combat and construction feedback.
   cue in {ChopSound, MineSound, DeliverWoodSound, DeliverGoldSound}
 
+proc isRewardSound*(cue: SoundCue): bool =
+  ## Groups local gold, experience, and deny feedback under one shared gate.
+  cue in {LastHitGoldSound, ExperienceSound, DenySound}
+
 proc acceptSound*(gate: var SoundGate, cue: SoundCue, now: float64): bool =
-  ## Bounds harvesting independently so busy workers cannot silence battles.
+  ## Bounds combat, harvesting and personal reward feedback independently.
   if gate.played[cue] and now >= gate.last[cue] and
       now - gate.last[cue] < soundCooldown(cue):
+    return false
+  if cue.isRewardSound and gate.rewardPlayed and now >= gate.rewardLast and
+      now - gate.rewardLast < RewardSoundCooldown:
     return false
   if now < gate.windowStart or
       now - gate.windowStart >= WorldBurstSeconds:
@@ -93,6 +104,9 @@ proc acceptSound*(gate: var SoundGate, cue: SoundCue, now: float64): bool =
     if gate.workCount >= WorkBurstLimit:
       return false
     inc gate.workCount
+  elif cue.isRewardSound:
+    gate.rewardPlayed = true
+    gate.rewardLast = now
   elif not cue.isInterfaceSound:
     if gate.worldCount >= WorldBurstLimit:
       return false
@@ -124,6 +138,8 @@ proc cueGain(cue: SoundCue): float32 =
     0.25'f
   of BuildStartSound:
     0.34'f
+  of LastHitGoldSound, ExperienceSound, DenySound:
+    0.45'f
   of ClickSound, CancelSound, SelectSound:
     0.40'f
   of MoveOrderSound, AttackOrderSound, PurchaseSound, ErrorSound,

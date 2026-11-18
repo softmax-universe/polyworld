@@ -1,7 +1,7 @@
 # Voice experiment
 
-A standalone native voice bot using Windy for its window and Silky for its
-interface. macOS uses native audio with explicit device routing and echo
+A standalone native and browser voice bot using Windy for its window and Silky
+for its interface. macOS uses native audio with explicit device routing and echo
 cancellation during continuous conversation. Other native platforms use
 Slappy capture and queued OpenAL playback.
 The authenticated Realtime connection uses Polyworld's existing `ws`
@@ -111,8 +111,75 @@ need another press after approval. If access was denied, enable Voice Lab in
 System Settings > Privacy & Security > Microphone. On Linux, the normal Windy
 window dependencies and an
 OpenAL capture device are required. Slappy's microphone API is native OpenAL
-code, not a Linux-only implementation. Browser builds are outside this
-experiment's scope.
+code, not a Linux-only implementation. Browser builds use Slappy's Web Audio
+capture backend, described below.
+
+## Browser build and local server
+
+Install Emscripten, then run from the repository root:
+
+```sh
+./experiments/voice/build_web.sh
+python3 experiments/voice/serve.py --port 8001
+```
+
+Open <http://localhost:8001/> on the computer running the server. The same
+`voice.nim` app runs as WebAssembly with its Windy/Silky canvas UI. Browser
+controls above the canvas start audio directly from a click. Click **Start
+conversation**, allow microphone access, then speak. Capture continues during
+spoken replies, and new speech interrupts playback. **Stop conversation**
+releases the microphone. **Disconnect** also closes the OpenAI session. Typed
+messages, push-to-talk, and mute use the existing conversation controls.
+
+Browser builds require Slappy's microphone implementation from
+[Slappy PR #29](https://github.com/treeform/slappy/pull/29). The build script
+recognizes the sibling `slappy-wasm-microphone` checkout. For another checkout,
+set `SLAPPY_PATH=/path/to/slappy/src` before building. No engine configuration
+or game assets are changed.
+
+The local server reads `OPENAI_API_KEY` or `~/secrets/openai.key`. If neither is
+set, enter your key in the password field for this session. The full key stays
+on the local server or in the entered field, is never compiled into WASM, and
+is not saved in browser storage. The server exchanges it for a short-lived
+Realtime token. Audio and transcripts travel directly between the browser and
+OpenAI over a WebSocket. This is an experiment server bound to loopback, not a
+public hosting service. For a remote work computer, forward its port over SSH
+and still open a localhost URL in your browser.
+
+The browser uses its selected input/output devices. Browser permission, autoplay,
+and background-tab scheduling rules apply. Microphone capture uses AudioWorklet
+and needs localhost or HTTPS. Headphones help when evaluating acoustic feedback;
+physical speaker-to-microphone echo cancellation depends on the browser and
+hardware. Tests use synthetic input instead of recording room audio.
+
+The browser path retains the native Realtime event parser. It uses the documented
+[browser WebSocket authentication](https://developers.openai.com/api/docs/guides/voice-websockets?api=realtime)
+and [ephemeral client-secret exchange](https://developers.openai.com/api/docs/guides/voice-webrtc?api=realtime).
+WebRTC is OpenAI's recommended browser transport for general applications; this
+experiment uses WebSockets to exercise Slappy's PCM capture and playback directly.
+
+Offline browser transport and local-server regressions:
+
+```sh
+node experiments/voice/tests/test_browser_transport.mjs
+python3 experiments/voice/tests/test_web_server.py
+```
+
+The live browser tests require Playwright and use billable OpenAI requests:
+
+```sh
+npm install --prefix experiments/voice/build/web-tests --no-save playwright@1.63.0
+experiments/voice/build/web-tests/node_modules/.bin/playwright install chromium
+node experiments/voice/tests/live_browser_text.mjs
+```
+
+`live_browser_duplex.mjs --audio=/absolute/path/to/synthetic-speech.wav`
+uses Chromium's fake microphone. Its fixture should contain a few seconds of
+silence, "Hello, please explain how flowers grow in five sentences", two seconds
+of silence, "Stop, just say blue", then silence. It checks transcription,
+simultaneous capture/playback, spoken interruption, and microphone shutdown.
+`VOICE_WEB_URL` selects another local server address, and
+`VOICE_PLAYWRIGHT_PATH` can point to an existing Playwright installation.
 
 ## Build and preview
 

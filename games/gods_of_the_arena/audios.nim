@@ -24,6 +24,14 @@ type
     hp: Table[int32, int32]
     snapshotCapacity: int
     gameOver, preparing, night: bool
+  RewardSoundKind = enum
+    NoRewardSound, XpRewardSound, GoldRewardSound, DenyRewardSound
+  RewardAudio* = object
+    world: World
+    heroId, tick: int32
+    ready, played: bool
+    pending: RewardSoundKind
+    lastPlayed: float64
 
 iterator items*(sounds: ArenaSounds): ArenaSound =
   ## Iterates only populated entries in the fixed event buffer.
@@ -40,6 +48,59 @@ proc add(sounds: var ArenaSounds, event: ArenaSound) {.inline.} =
   doAssert sounds.len < sounds.events.len
   sounds.events[sounds.len] = event
   inc sounds.len
+
+proc syncRewardAudio*(audio: var RewardAudio, world: World, heroId: int32) =
+  ## Discards pending rewards when loading, seeking, or changing perspective.
+  audio.world = world
+  audio.heroId = heroId
+  audio.tick = world.tick
+  audio.ready = true
+  audio.pending = NoRewardSound
+
+proc queueRewardSounds*(
+    audio: var RewardAudio, world: World, heroId: int32, enabled = true
+) =
+  ## Collects this player's rewards and successful denies across one frame.
+  if not enabled or heroId == 0 or not audio.ready or audio.world != world or
+      audio.heroId != heroId:
+    audio.syncRewardAudio(world, heroId)
+    return
+  if world.tick == audio.tick:
+    return
+  if world.tick != audio.tick + 1:
+    audio.syncRewardAudio(world, heroId)
+    return
+  audio.tick = world.tick
+  for reward in world.rewardEffects:
+    if reward.heroId != heroId:
+      continue
+    if reward.gold > 0 and audio.pending < GoldRewardSound:
+      audio.pending = GoldRewardSound
+    elif reward.xp > 0 and audio.pending == NoRewardSound:
+      audio.pending = XpRewardSound
+  for deny in world.denyEffects:
+    if deny.heroId == heroId:
+      audio.pending = DenyRewardSound
+
+proc takeRewardSound*(
+    audio: var RewardAudio, now: float64, enabled = true
+): ArenaSounds =
+  ## Plays one deny-first batch and drops feedback during its shared cooldown.
+  let pending = audio.pending
+  audio.pending = NoRewardSound
+  if not enabled or pending == NoRewardSound:
+    return
+  if audio.played and now >= audio.lastPlayed and
+      now - audio.lastPlayed < RewardSoundCooldown:
+    return
+  audio.played = true
+  audio.lastPlayed = now
+  let cue =
+    case pending
+    of DenyRewardSound: DenySound
+    of GoldRewardSound: LastHitGoldSound
+    else: ExperienceSound
+  result.add ArenaSound(cue: cue)
 
 proc prepareAudio*(
     audio: var ArenaAudio, world: World, footmanCapacity = 0

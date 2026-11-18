@@ -79,7 +79,7 @@ doAssert client.submit(0, "reserved game command")
 client.lost()
 client.opened()
 client.welcomeWithRoom()
-client.accept(RoomMessage(kind: CommandAck, match: 2, sequence: 2, tick: 2).encode)
+client.accept(RoomMessage(kind: CommandAck, match: 2, sequence: 2, tick: 3).encode)
 doAssert client.hasPendingCommand(0)
 client.outgoing.setLen(0)
 client.flushCommands()
@@ -94,13 +94,25 @@ for bytes in client.outgoing:
     inc commands
     doAssert message.sequence == 2 and message.payload == "reserved game command"
 doAssert commands == 1
-client.accept(RoomMessage(kind: TickPacket, match: 2, tick: 2,
+client.accept(RoomMessage(kind: TickPacket, match: 2, tick: 3,
   seats: client.snapshot.seats,
   commands: @[Command(participant: 7, seat: 0, sequence: 2,
     payload: "reserved game command")]).encode)
-doAssert not client.hasPendingCommand(0)
+doAssert client.hasPendingCommand(0), "A buffered echo cannot release the seat"
+client.lost()
+client.opened()
+client.welcomeWithRoom()
+for bytes in client.outgoing:
+  doAssert decode(bytes).kind != SubmitCommand,
+    "A buffered authoritative echo needs no retransmission"
+client.accept(RoomMessage(kind: TickPacket, match: 2, tick: 2).encode)
 doAssert client.takeTick(packet) and packet.tick == 2
 client.appliedTick(2)
+doAssert client.hasPendingCommand(0)
+doAssert client.takeTick(packet) and packet.tick == 3
+doAssert client.hasPendingCommand(0), "Taking a packet only hands it to the game"
+client.appliedTick(3)
+doAssert not client.hasPendingCommand(0)
 
 client.accept(RoomMessage(
   kind: MatchStatus, match: client.match, phase: Waiting,
@@ -207,6 +219,8 @@ block reconnectMembership:
       var packet: RoomMessage
       doAssert client.takeTick(packet) and packet.commands.len == 1
       doAssert packet.commands[0].payload == "queued during disconnect"
+      doAssert client.hasPendingCommand(0)
+      client.appliedTick(packet.tick)
       doAssert not client.hasPendingCommand(0)
     else:
       doAssert relay.rooms.len == 0 and client.snapshot.room.len == 0

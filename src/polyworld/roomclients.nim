@@ -8,6 +8,7 @@ type
   PendingCommand = object
     message: RoomMessage
     sent: bool
+    echoedTick: uint32
   RoomClient* = ref object
     identity*: GameIdentity
     name*, token*, error*, status*: string
@@ -98,12 +99,12 @@ proc flushCommands*(client: RoomClient) =
   if not client.welcomed:
     return
   for pending in client.pending.mitems:
-    if not pending.sent:
+    if not pending.sent and pending.echoedTick == 0:
       client.send(pending.message)
       pending.sent = true
 
 proc hasPendingCommand*(client: RoomClient, seat: uint32): bool =
-  ## Reports a seat's submissions still awaiting the authoritative tick.
+  ## Reports a seat's submissions whose authoritative tick is not applied yet.
   for pending in client.pending:
     if pending.message.seat == seat:
       return true
@@ -229,11 +230,6 @@ proc accept*(client: RoomClient, bytes: string) =
     if message.match != client.match or message.tick == 0:
       reject("Tick packet belongs to an unexpected match")
     client.serverTick = max(client.serverTick, message.tick)
-    for command in message.commands:
-      if command.participant == client.participant:
-        for i in countdown(client.pending.high, 0):
-          if client.pending[i].message.sequence == command.sequence:
-            client.pending.delete(i)
     if message.tick <= client.applied:
       return
     for packet in client.packets:
@@ -250,6 +246,12 @@ proc accept*(client: RoomClient, bytes: string) =
     if client.packets.len >= MaxBufferedTicks:
       reject("Client tick buffer exhausted")
     client.packets.add message
+    for command in message.commands:
+      if command.participant == client.participant:
+        for pending in client.pending.mitems:
+          if pending.message.sequence == command.sequence:
+            pending.echoedTick = message.tick
+            break
   of CommandAck:
     if message.match != client.match or message.sequence > client.sequence:
       reject("Unknown command acknowledgement")
@@ -264,7 +266,7 @@ proc accept*(client: RoomClient, bytes: string) =
           client.pending.delete(i)
         else:
           # A reconnect receipt can arrive before the reserved tick is sealed.
-          # Leave the submission sent until the authoritative echo arrives.
+          # Keep the submission pending until the game applies the echo.
           client.pending[i].sent = true
         break
   of CaughtUp:
@@ -323,6 +325,9 @@ proc appliedTick*(client: RoomClient, tick: uint32) =
   if tick != client.applied + 1:
     reject("Simulation tick did not advance exactly once")
   client.applied = tick
+  for i in countdown(client.pending.high, 0):
+    if client.pending[i].echoedTick == tick:
+      client.pending.delete(i)
   if client.takenTick == tick:
     client.appliedSeats = client.takenSeats
     client.takenTick = 0

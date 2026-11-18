@@ -61,13 +61,25 @@ proc queueFeedbackAttack*(world: World, player: int32, selected: openArray[int32
 
 proc queueFeedbackHarvest*(world: World, player: int32, selected: openArray[int32],
     target: int32, tree: bool, append = false): bool =
+  ## Assigns selected peons now and selected producers' future peons to resources.
   let candidate = TargetFeedback(kind: (if tree: HarvestTreeFlash else: HarvestEntityFlash),
     target: target, player: player, remaining: ClickMarkDuration)
   if not candidate.targetFlashVisible(world): return false
+  let building = if tree: -1'i32 else: world.buildingIndex(target)
+  if not tree and (building < 0 or
+      world.buildings[building].kind != GoldMineBuilding):
+    return false
   for id in world.targetOrderUnits(player, selected, append):
     if world.units[world.unitIndex(id)].kind == PeonUnit:
       queueHarvest(player, id, target, tree.int32, append = append)
       result = true
+  let
+    x = if tree: target mod world.map.side
+      else: world.buildings[building].origin.x.int32
+    y = if tree: target div world.map.side
+      else: world.buildings[building].origin.y.int32
+  if world.queueSelectedRally(player, selected, x, y):
+    result = true
 
 proc queueFeedbackDeposit*(world: World, player: int32,
     selected: openArray[int32], target: int32, append = false): bool =

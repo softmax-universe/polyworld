@@ -1330,17 +1330,8 @@ proc runGraphics*(network: NetworkMatch = nil,
             continue
         queueMove(player, id, x, y, append = append)
         result = true
-    for id in selectedIds:
-      let index = run.world.buildingIndex(id)
-      if index >= 0:
-        let structure = run.world.buildings[index]
-        if structure.owner == player and structure.hp > 0 and
-            structure.state == BuildingComplete:
-          for kind in UnitKind:
-            if unitOf(player, kind).trainedAt == structure.kind:
-              queueSetRally(player, id, x, y)
-              result = true
-              break
+    if run.world.queueSelectedRally(player, selectedIds, x, y):
+      result = true
 
   proc updatePlayerOrder(viewProjection: Mat4, focused = window.focused) =
     ## Armed clicks attack; otherwise left places and right moves.

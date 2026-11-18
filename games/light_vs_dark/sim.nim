@@ -110,6 +110,9 @@ type
   BuildingState* = enum
     BuildingUnderConstruction, BuildingComplete, BuildingDying
 
+  RallyKind* = enum
+    RallyMove, RallyGold, RallyWood
+
   Building* = object
     id*, owner*: int32
       ## Owner is -1 for a neutral gold mine.
@@ -126,6 +129,7 @@ type
     researchLevel*, researchTicks*, researchTotal*: int32
     rally*: Tile2
     hasRally*: bool
+    rallyKind*: RallyKind
     cooldown*: int32
     goldLeft*, minersInside*: int32
     deathTicks*: int32
@@ -1903,6 +1907,31 @@ proc resumeTreeWork(w: World, index: int32) =
     return
   w.units[index].clearOrder(true)
 
+proc followRally(w: World, index: int32, building: Building) =
+  ## Sends new peons to their resource assignment, or follows a ground rally.
+  if w.units[index].kind == PeonUnit:
+    case building.rallyKind
+    of RallyGold:
+      let
+        mineId = w.blocker[w.map.tileIndex(building.rally)]
+        mine = w.buildingIndex(mineId)
+      if mine >= 0 and w.buildings[mine].kind == GoldMineBuilding and
+          w.buildings[mine].state == BuildingComplete and
+          w.buildings[mine].hp > 0 and w.buildings[mine].goldLeft > 0:
+        w.beginMineTrip(index, mineId)
+        return
+    of RallyWood:
+      let tree = w.nearestTree(building.rally)
+      if tree >= 0:
+        w.units[index].harvestCenter = building.rally
+        w.beginTreeTrip(index, tree)
+        return
+    of RallyMove:
+      discard
+  w.setGoal(index, building.rally)
+  if w.units[index].hasGoal:
+    w.units[index].state = UnitMoving
+
 proc mineExitTile(w: World, unit: Unit, mine: Building): Tile2 =
   ## Prefer the first safe unoccupied perimeter slot, then a safe soft-friendly
   ## slot. Validate BOTH passes: an empty occupancy slot can still overlap a
@@ -2414,10 +2443,7 @@ proc advanceBuilding(w: World, index: int32) =
               w.buildings[index].queue[0] - 1
             )).trainTicks
         if w.buildings[index].hasRally:
-          let unitIndex = w.unitIndex(id)
-          w.setGoal(unitIndex, w.buildings[index].rally)
-          if w.units[unitIndex].hasGoal:
-            w.units[unitIndex].state = UnitMoving
+          w.followRally(w.unitIndex(id), w.buildings[index])
 
   let stats = BuildingTable[w.buildings[index].kind]
   if stats.damage > 0:
@@ -2957,12 +2983,22 @@ proc applyTrain*(w: World, player, buildingId, kindValue: int32): bool =
   true
 
 proc applySetRally*(w: World, player, buildingId, x, y: int32): bool =
-  ## Points newly trained units at a tile.
+  ## Assigns newly trained units a destination or a peon's harvesting area.
   let index = w.ownedBuilding(player, buildingId)
   if index < 0 or not w.map.inGrid(x, y) or not w.terrainOpen(x, y):
     return false
   w.buildings[index].rally = tile2(x, y)
   w.buildings[index].hasRally = true
+  w.buildings[index].rallyKind = RallyMove
+  let tileIndex = w.map.tileIndex(x, y)
+  if w.treeWood[tileIndex] > 0:
+    w.buildings[index].rallyKind = RallyWood
+  else:
+    let mine = w.buildingIndex(w.blocker[tileIndex])
+    if mine >= 0 and w.buildings[mine].kind == GoldMineBuilding and
+        w.buildings[mine].state == BuildingComplete and
+        w.buildings[mine].hp > 0 and w.buildings[mine].goldLeft > 0:
+      w.buildings[index].rallyKind = RallyGold
   true
 
 proc applyCancel*(w: World, player, entityId: int32): bool =
@@ -3312,6 +3348,7 @@ proc hashWorld(w: World): uint64 =
     hash.addHashy(structure.researchTotal)
     hash.mixTile(structure.rally)
     hash.addHashy(structure.hasRally)
+    hash.addHashy(structure.rallyKind.ord.int32)
     hash.addHashy(structure.cooldown)
     hash.addHashy(structure.goldLeft)
     hash.addHashy(structure.minersInside)

@@ -216,6 +216,25 @@ proc queueSetRally*(player, buildingId, x, y: int32) =
     second: y
   )
 
+proc queueSelectedRally*(world: World, player: int32,
+    selected: openArray[int32], x, y: int32): bool =
+  ## Rallies selected completed producers through the ordinary command queue.
+  if world == nil or player < 0 or player >= world.players.len or
+      not world.terrainOpen(x, y):
+    return false
+  for id in selected:
+    let index = world.buildingIndex(id)
+    if index < 0: continue
+    let building = world.buildings[index]
+    if building.owner != player or building.hp <= 0 or
+        building.state != BuildingComplete:
+      continue
+    for kind in UnitKind:
+      if unitOf(player, kind).trainedAt == building.kind:
+        queueSetRally(player, id, x, y)
+        result = true
+        break
+
 proc queueCancel*(player, entityId: int32) =
   ## Queues a cancel on one owned entity.
   pending.add PlayerCommand(

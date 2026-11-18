@@ -61,9 +61,10 @@ assert.deepEqual(configure("?draft-mode=open&player=1"), [
   "--draft-mode", "open", "--player=1"
 ]);
 
-function loadReplay(query, hash, body) {
+function loadReplay(query, hash, body, maxReplayBytes) {
   return new Promise((resolve, reject) => {
     const Module = {
+      polyworldMaxReplayBytes: maxReplayBytes,
       FS_createPath() {},
       FS_createDataFile(directory, name, bytes) {
         assert.equal(directory + "/" + name, "/web/replay.replay");
@@ -95,18 +96,41 @@ assert.deepEqual(await loadReplay("", "#replay=record.replay",
   new Blob([gzipSync(replay)]).stream()), replay);
 
 const mebibyte = new Uint8Array(1024 * 1024);
-let rawChunks = 0;
-const oversized = new ReadableStream({pull(controller) {
-  if (rawChunks === 65) {
-    controller.close();
-  } else {
-    rawChunks++;
-    controller.enqueue(mebibyte);
-  }
-}});
-await assert.rejects(loadReplay("?replay=record.replay", "", oversized), /64 MiB/);
-const compressed = gzipSync(Buffer.alloc(64 * 1024 * 1024 + 1));
+function largeReplayStream() {
+  let rawChunks = 0;
+  return new ReadableStream({pull(controller) {
+    if (rawChunks === 65) {
+      controller.close();
+    } else {
+      rawChunks++;
+      controller.enqueue(mebibyte);
+    }
+  }});
+}
 await assert.rejects(loadReplay("?replay=record.replay", "",
-  new Blob([compressed]).stream()), /64 MiB/);
+  largeReplayStream()), /64 MiB/);
+assert.equal((await loadReplay("?replay=record.replay", "",
+  largeReplayStream(), 65 * 1024 * 1024)).length, 65 * 1024 * 1024);
+
+const replayUrl = "?replay=record.replay";
+const customLimit = 128;
+const exact = Buffer.alloc(customLimit);
+const over = Buffer.alloc(customLimit + 1);
+for (const encode of [bytes => bytes, gzipSync]) {
+  assert.deepEqual(await loadReplay(replayUrl, "",
+    new Blob([encode(exact)]).stream(), customLimit), exact);
+  await assert.rejects(loadReplay(replayUrl, "",
+    new Blob([encode(over)]).stream(), customLimit), /128 bytes/);
+}
+
+const compressedOver = gzipSync(exact.map((_value, index) => index));
+assert(compressedOver.length > customLimit);
+await assert.rejects(loadReplay(replayUrl, "",
+  new Blob([compressedOver]).stream(), customLimit), /128 bytes/);
+
+for (const invalid of [0, -1, 3.5, Infinity, "128", Number.MAX_SAFE_INTEGER + 1]) {
+  await assert.rejects(loadReplay(replayUrl, "", new Blob([replay]).stream(), invalid),
+    /polyworldMaxReplayBytes must be a positive safe integer/);
+}
 
 console.log("Browser input arguments and bounded replay loading passed");

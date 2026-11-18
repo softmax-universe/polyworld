@@ -10,7 +10,16 @@
   var botSpecifications = parameters.getAll("bot").filter(Boolean);
   var commandArguments = [];
   var inputs = [];
-  var maxReplayBytes = 64 * 1024 * 1024;
+  var bytesPerMebibyte = 1024 * 1024;
+  var maxReplayBytes = Module["polyworldMaxReplayBytes"];
+  if (maxReplayBytes === undefined) {
+    maxReplayBytes = 64 * bytesPerMebibyte;
+  } else if (!Number.isSafeInteger(maxReplayBytes) || maxReplayBytes <= 0) {
+    throw new Error("polyworldMaxReplayBytes must be a positive safe integer.");
+  }
+  var replayByteLimit = maxReplayBytes % bytesPerMebibyte === 0
+    ? (maxReplayBytes / bytesPerMebibyte) + " MiB"
+    : maxReplayBytes + " bytes";
 
   if (replayUrls.length === 0) {
     var fragment = new URLSearchParams((window.location.hash || "").slice(1));
@@ -150,7 +159,7 @@
         length += item.value.byteLength;
         if (length > maxReplayBytes) {
           await reader.cancel();
-          throw new Error("Replay exceeds the 64 MiB size limit.");
+          throw new Error("Replay exceeds the " + replayByteLimit + " size limit.");
         }
         chunks.push(item.value);
       }

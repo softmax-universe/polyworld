@@ -11,7 +11,7 @@ type
     DaybreakSound, NightfallSound, HoverSound,
     ChopSound, MineSound, DeliverWoodSound, DeliverGoldSound,
     BuildPlaceSound, BuildStartSound, LastHitGoldSound, ExperienceSound,
-    DenySound
+    DenySound, CardDrawSound, CardPlaySound
   SoundClip* = object
     cue*: SoundCue
     path*: string
@@ -19,6 +19,14 @@ type
 const
   RewardSoundCooldown* = 0.2
   SoundClips*: seq[SoundClip] = @[
+    SoundClip(cue: CardDrawSound,
+      path: "sounds/kenney-rpg/bookFlip3.ogg"),
+    SoundClip(cue: CardDrawSound,
+      path: "sounds/kenney-rpg/bookFlip2.ogg"),
+    SoundClip(cue: CardPlaySound,
+      path: "sounds/kenney-rpg/bookPlace1.ogg"),
+    SoundClip(cue: CardPlaySound,
+      path: "sounds/kenney-rpg/bookPlace3.ogg"),
     SoundClip(cue: ClickSound,
       path: "sounds/artisticdude-rpg/wood-small.ogg"),
     SoundClip(cue: CancelSound,

@@ -39,7 +39,7 @@ proc castAndWait(ability: Ability): int =
 
 echo "Testing the cooldown sweep runs unbroken from cast to ready"
 block:
-  for ability in [BlazingBlade, MeteorStrike, BowAttack, BattleHorn]:
+  for ability in [BlazingBlade, Icicle, BowAttack, BattleHorn]:
     doAssert castAndWait(ability) == Abilities[ability].cooldownTicks - 1
 
 echo "Testing a skill with no cooldown only dims while it is cast"
@@ -66,12 +66,12 @@ block:
   let
     game = newGame(2026, 2000)
     wizard = game.world.actors[1]
-    cost = Abilities[MeteorStrike].manaCost
+    cost = Abilities[Icicle].manaCost
   doAssert wizard.heroClass == WizardClass
   wizard.mana = cost
-  doAssert not wizard.lacksMana(MeteorStrike)
+  doAssert not wizard.lacksMana(Icicle)
   wizard.mana = cost - 1
-  doAssert wizard.lacksMana(MeteorStrike)
+  doAssert wizard.lacksMana(Icicle)
   wizard.mana = 0
   doAssert not wizard.lacksMana(SwordAttack), "free skills never lack mana"
 

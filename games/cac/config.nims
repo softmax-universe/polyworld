@@ -52,6 +52,11 @@ when defined(emscripten):
   --exceptions:goto
   --define:noSignalHandler
   --define:noAutoGLerrorCheck
+  when not defined(headless):
+    switch("passL", "-s EXPORTED_FUNCTIONS=" &
+      "_main,_malloc,_free,_windy_websocket_open_callback," &
+      "_windy_websocket_message_callback,_windy_websocket_error_callback," &
+      "_windy_websocket_close_callback")
   switch("passL", "--preload-file " &
     quoteShell(cacWebAssets / "polyworld_art" & "@/polyworld_art"))
   switch("passL", "--preload-file " &

@@ -49,6 +49,23 @@ proc testSoundStartup() =
     preferences.savePreferences(app)
     doAssert readPreferences(app).musicVolume == music
 
+  echo "Testing legacy mute preserves and saves the missing Music default"
+  setConfig(app, "settings.json", """{"soundMuted":true,"mainVolume":37}""")
+  let legacyDefault = readPreferences(app)
+  doAssert legacyDefault.mainVolume == 0 and legacyDefault.musicVolume == 25
+  legacyDefault.savePreferences(app)
+  doAssert readPreferences(app).musicVolume == 25
+
+  echo "Testing malformed settings retain the error and fallback contract"
+  setConfig(app, "settings.json", "{\"musicVolume\":")
+  var malformedRejected = false
+  try:
+    discard readPreferences(app)
+  except MenusError:
+    malformedRejected = true
+  doAssert malformedRejected
+  doAssert Preferences().musicVolume == 25
+
   echo "Testing every saved slider survives launches and menu transitions"
   var saved = Preferences(
     name: "Saved player",
@@ -154,11 +171,12 @@ proc testSoundStartup() =
   removeFile(directory / "settings.json")
   configureSoundLaunch(true)
   launched = readPreferences(app)
-  doAssert launched.mainVolume == 0
+  doAssert launched.mainVolume == 0 and launched.musicVolume == 25
   launched.name = "New player"
   launched.savePreferences(app)
   configureSoundLaunch(false, false)
   doAssert readPreferences(app).mainVolume == 100
+  doAssert readPreferences(app).musicVolume == 25
   echo "PASS saved sliders, Master mute, legacy migration and launch overrides"
 
 testSoundStartup()

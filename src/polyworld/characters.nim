@@ -330,6 +330,7 @@ proc drawModel(
       scene.toon.unlitNodes.incl name
     scene.toon.transform = transform
     scene.toon.tint = tint
+    scene.toon.glaze = color(0, 0, 0, 0)
     scene.toon.draw(root)
 
 proc visibleIn(node, root: Node): bool =
@@ -414,9 +415,11 @@ proc prepareCharacter*(
 proc drawCharacter*(
   scene: CharacterScene,
   pose: var CharacterPose,
-  tint = color(1, 1, 1, 1)
+  tint = color(1, 1, 1, 1),
+  glaze = color(0, 0, 0, 0)
 ) =
   ## Reuses prepared toon geometry while preserving the PBR debug renderer.
+  ## A `glaze` lays its colour over the toon body by its alpha.
   let model = pose.model
   if scene.shading == PbrCharacters:
     scene.drawCharacter(
@@ -428,6 +431,7 @@ proc drawCharacter*(
   else:
     scene.toon.unlitNodes.clear()
     scene.toon.tint = tint
+    scene.toon.glaze = glaze
     scene.toon.draw(model.file.root, pose.toon.addr)
 
 proc finishCharacters*(scene: CharacterScene) =

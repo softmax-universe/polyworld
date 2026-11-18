@@ -51,6 +51,7 @@ var
   toonRimColor: Uniform[Vec4]
   toonUnlit: Uniform[bool]           # always in the highlight band
   toonTint: Uniform[Vec4]
+  toonGlaze: Uniform[Vec4]           # laid over the colour by its alpha
   toonLightingMode: Uniform[int32]
   toonPerPixelLighting: Uniform[bool]
   toonNeutralMaterial: Uniform[bool]
@@ -166,6 +167,13 @@ proc toonVert(
   lightIntensity = max(dot(normal, toLight), 0.0'f)
   gl_Position = toonProj * toonView * vec4(worldPos, 1.0'f)
 
+proc glazed(color: Vec4): Vec4 =
+  ## Lays `toonGlaze` over a finished colour by its alpha, keeping the
+  ## colour's light and dark, so a body can read as made of something else.
+  let shade = dot(color.rgb, vec3(0.3'f, 0.59'f, 0.11'f))
+  result = vec4(mix(color.rgb, toonGlaze.rgb * (0.45'f + 0.9'f * shade),
+    toonGlaze.a), color.a)
+
 proc toonFrag(
   worldPos: Vec3,
   color: Vec4,
@@ -192,7 +200,7 @@ proc toonFrag(
     albedo = vec4(0.8'f, 0.8'f, 0.8'f, albedo.a)
   if toonUnlit or (toonPackedParts and parts.x > 0.5'f) or
     toonLightingMode == 2:
-    fragColor = albedo * toonTint
+    fragColor = glazed(albedo * toonTint)
     return
   var lambert = lightIntensity
   if toonPerPixelLighting or toonLightingMode == 1:
@@ -220,7 +228,7 @@ proc toonFrag(
     emissive = emission.xyz
   if toonNeutralMaterial:
     emissive = vec3(0.0'f)
-  fragColor = vec4(lit * albedo.rgb + emissive, albedo.a) * toonTint
+  fragColor = glazed(vec4(lit * albedo.rgb + emissive, albedo.a) * toonTint)
 
 ## Sun depth pass: the same skinned vertex path projected by the sun's
 ## light matrix instead of the camera, with the base color's alpha cutout
@@ -401,7 +409,7 @@ type
     baseColorTexture, baseColorFactor: GLint
     emissiveTexture, emissiveFactor: GLint
     alphaCutoff, ramp: GLint
-    highlightColor, shadowColor, rimColor, unlit, tint: GLint
+    highlightColor, shadowColor, rimColor, unlit, tint, glaze: GLint
     lightingMode, perPixelLighting, neutralMaterial: GLint
     shadowMvp0, shadowMvp1, shadowMap0, shadowMap1, shadowStep: GLint
     shadowsOn, shadowStrength: GLint
@@ -467,6 +475,7 @@ type
     view*, proj*: Mat4
     cameraPosition*: Vec3
     tint*: Color                 ## multiplies the final colour
+    glaze*: Color                ## laid over the final colour by its alpha
     lightDirection*: Vec3        ## direction the light travels
     highlightColor*: Color
     shadowColor*: Color
@@ -555,6 +564,7 @@ proc newToonContext*(): ToonContext =
   loc(rimColor, "toonRimColor")
   loc(unlit, "toonUnlit")
   loc(tint, "toonTint")
+  loc(glaze, "toonGlaze")
   loc(lightingMode, "toonLightingMode")
   loc(perPixelLighting, "toonPerPixelLighting")
   loc(neutralMaterial, "toonNeutralMaterial")
@@ -909,6 +919,7 @@ proc draw*(
     u.rimColor, ctx.rimColor.r, ctx.rimColor.g, ctx.rimColor.b,
     ctx.rimColor.a)
   glUniform4f(u.tint, ctx.tint.r, ctx.tint.g, ctx.tint.b, ctx.tint.a)
+  glUniform4f(u.glaze, ctx.glaze.r, ctx.glaze.g, ctx.glaze.b, ctx.glaze.a)
   glUniform1i(u.lightingMode, ctx.lighting.ord.GLint)
   glUniform1i(u.perPixelLighting, ctx.perPixelLighting.ord.GLint)
   glUniform1i(u.neutralMaterial, ctx.neutralMaterial.ord.GLint)

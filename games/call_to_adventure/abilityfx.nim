@@ -105,6 +105,8 @@ const
     ## Every character model carries it, whatever its weapon.
   CloakTint* = color(0.24, 0.26, 0.4, 1)
     ## A cloaked body drawn in shadow, which is its whole tell.
+  FrostGlaze* = color(0.30, 0.67, 1.0, 0.80)
+    ## The ice a frozen body is glazed with, which is its whole tell.
   VolleyArrows* = 12
   VolleyHeight* = 9.0'f32
     ## How high a volley climbs before it turns and falls, in tiles.
@@ -129,10 +131,9 @@ const AbilityLooks*: array[Ability, AbilityLook] = [
   look(SwingDelivery, plain = true),                     # SwordAttack
   look(RallyDelivery, burst = MagicBurst),               # Taunt
   look(WardDelivery),                                    # LionGuard
-  look(LobDelivery, heavy = true, burst = FireBurst,     # MeteorStrike
-    missile = Fireball),
-  look(ShotDelivery, burst = MagicBurst),                # FrostLance
-  look(RiteDelivery),                                    # VoidPortal
+  look(ShotDelivery, burst = FrostBurst, missile = IceShard), # Icicle
+  look(GrowDelivery),                                    # Glacier
+  look(RiteDelivery),                                    # Lightning
   look(ShotDelivery, heavy = true, missile = ArrowWake), # PiercingArrow
   look(ShotDelivery, missile = ArrowWake),               # BowAttack
   look(WardDelivery),                                    # ShadowCloak
@@ -166,7 +167,8 @@ const AbilityLooks*: array[Ability, AbilityLook] = [
   look(SlamDelivery, heavy = true),                      # CrushingSlam
   look(ThrustDelivery),                                  # SwarmBite
   look(VolleyDelivery, heavy = true, missile = ArrowWake), # HailOfArrows
-  look(WardDelivery)                                     # Heat
+  look(WardDelivery),                                    # Heat
+  look(SkyDelivery, heavy = true, plain = true)          # Blizzard
 ]
 
 ## Timing
@@ -796,3 +798,136 @@ proc addVineWrap*(
         b = twist((step + 1).float32 / Steps.float32)
       shapes.addQuad(a - band, a + band, b + band, b - band,
         ink(blend(StemDark, StemLight, step.float32 / Steps.float32), 0.95))
+
+
+## The Arcanist's ice
+
+const
+  GlacierRiseTicks = 5.0'f32
+    ## How long a Glacier takes to burst up out of the floor.
+  IceDeep = color(0.10, 0.38, 0.65, 1)
+  IcePale = color(0.74, 0.93, 1.0, 1)
+  IceLight = vec3(-0.5, 0.0, -0.45)
+    ## Where the light falls on a crystal's faces from, across the floor.
+  FrostFadeTicks = 8.0'f32
+    ## How long a Blizzard's frost takes to whiten the floor and to thaw.
+  StormFallTicks* = 6'i32
+    ## How long each of a Blizzard's later waves takes to fall.
+  BoltHeight* = 6.0'f32
+    ## How far above the floor Lightning strikes down from, in tiles.
+
+proc iceNoise(glacier: IceBlock, index, salt: int): float32 =
+  ## A steady value in 0 ..< 1 for one crystal of one Glacier.
+  var hash = uint32(glacier.raised) * 747796405'u32 +
+    uint32(index) * 2891336453'u32 + uint32(salt) * 277803737'u32 +
+    uint32(glacier.tile.x) * 1103515245'u32 +
+    uint32(glacier.tile.z) * 12345'u32
+  hash = (hash xor (hash shr 16)) * 2246822519'u32
+  hash = hash xor (hash shr 13)
+  float32(hash and 0xFFFF'u32) / 65536'f32
+
+proc addGlacier*(shapes: var ShapeRenderer, glacier: IceBlock,
+    now: float32, eye: Vec3) =
+  ## A solid tile of beveled ice rises from the floor. Shattering sends a
+  ## frost front across the same disc that freezes its victims.
+  let feet = tileFeet(glacier.tile)
+  if glacier.shattered != 0:
+    let age = now - glacier.shattered.float32
+    if age < 0 or age >= GlacierShardTicks.float32:
+      return
+    let
+      progress = age / GlacierShardTicks.float32
+      reach = ShatterTiles.float32 + 0.5'f32
+      radius = mix(0.18'f32, reach, easeOut(progress / 0.7'f32))
+      fade = 1 - progress
+      floor = feet + vec3(0, GroundLift, 0)
+    shapes.addCircle(floor, radius, ink(IcePale, 0.16'f32 * fade), 48)
+    shapes.addRing(floor, radius, 0.09'f32, ink(IcePale, 0.86'f32 * fade))
+    for ray in 0 ..< 12:
+      let turn = ray.float32 * TAU.float32 / 12
+      shapes.addTriangle(
+        floor + heading(turn - 0.045'f32) * (radius * 0.76'f32),
+        floor + heading(turn + 0.045'f32) * (radius * 0.76'f32),
+        floor + heading(turn) * radius,
+        ink(IcePale, 0.76'f32 * fade))
+    return
+  let age = now - glacier.raised.float32
+  if age <= 0:
+    return
+  let
+    rise = easeOut(age / GlacierRiseTicks)
+    melt = clamp((age - GlacierTicks.float32) / GlacierMeltTicks.float32, 0, 1)
+    tall = rise * (1 - melt)
+    alpha = (1 - melt) * rise
+    floor = feet + vec3(0, GroundLift * 0.5'f32, 0)
+  shapes.addCircle(floor, 0.64'f32 * rise,
+    ink(IcePale, 0.28'f32 * (1 - melt)), 32)
+  if tall < 0.02'f32:
+    return
+  let corners = [vec2(-0.34, -0.48), vec2(0.34, -0.48),
+    vec2(0.48, -0.34), vec2(0.48, 0.34), vec2(0.34, 0.48),
+    vec2(-0.34, 0.48), vec2(-0.48, 0.34), vec2(-0.48, -0.34)]
+  let
+    crest = feet + vec3(-0.07, 1.40'f32 * tall, 0.05)
+    light = normalize(IceLight)
+  let peaks = [1.78'f32, 1.10'f32, 2.06'f32, 1.27'f32,
+    1.66'f32, 1.05'f32, 1.84'f32, 1.18'f32]
+  var base, rim: array[8, Vec3]
+  for i, corner in corners:
+    base[i] = feet + vec3(corner.x, 0.025'f32, corner.y)
+    rim[i] = feet + vec3(corner.x * 0.89'f32,
+      (peaks[i] + 0.14'f32 * glacier.iceNoise(i, 0)) * tall, corner.y * 0.89'f32)
+  for i in 0 ..< corners.len:
+    let
+      j = (i + 1) mod corners.len
+      edge = base[j] - base[i]
+      normal = normalize(vec3(edge.z, 0, -edge.x))
+      shade = clamp(dot(normal, light) * 0.32'f32 + 0.36'f32, 0, 1)
+    if dot(normal, eye - base[i]) > 0:
+      let
+        footTint = ink(blend(IceDeep, IcePale, shade * 0.35'f32), 0.46'f32 * alpha)
+        topTint = ink(blend(IceDeep, IcePale, shade + 0.3'f32), 0.24'f32 * alpha)
+        clear = ink(IcePale, 0)
+        glint = ink(IcePale, (0.62'f32 + 0.16'f32 * sin(now * 0.16'f32 +
+          i.float32 * 2.3'f32)) * alpha)
+      # The base is denser than the crest. Light catches a narrow seam and
+      # fades through the adjacent glass face.
+      shapes.addTriangle([base[i], base[j], rim[j]], [footTint, footTint, topTint])
+      shapes.addTriangle([base[i], rim[j], rim[i]], [footTint, topTint, topTint])
+      shapes.addTriangle([base[i], rim[i], mix(rim[i], rim[j], 0.19'f32)],
+        [clear, glint, clear])
+      shapes.addTriangle([mix(base[i], rim[i], 0.41'f32),
+        mix(rim[i], rim[j], 0.83'f32), mix(base[j], rim[j], 0.73'f32)],
+        [clear, ink(IcePale, 0.30'f32 * alpha), clear])
+    let capNormal = cross(crest - rim[i], rim[j] - rim[i])
+    if dot(capNormal, eye - rim[i]) > 0:
+      shapes.addTriangle([rim[i], rim[j], crest],
+        [ink(IcePale, 0.44'f32 * alpha), ink(IcePale, 0.26'f32 * alpha),
+         ink(IceDeep, 0.14'f32 * alpha)])
+      shapes.addTriangle([rim[i], rim[j], mix(rim[i], crest, 0.12'f32)],
+        [ink(IcePale, 0.74'f32 * alpha), ink(IcePale, 0.48'f32 * alpha), ink(IcePale, 0)])
+
+proc frostReach*(): float32 =
+  ## A Blizzard's radius on the floor, as `inArea` judges a disc.
+  Abilities[Blizzard].radiusTiles.float32 + 0.5'f32
+
+proc addStormFrost*(shapes: var ShapeRenderer, storm: Storm, now: float32) =
+  ## Whitens the floor a Blizzard falls on while it falls, so the ground it
+  ## hurts on stays plain after its marker has gone.
+  let age = now - storm.started.float32
+  if age < 0 or age > BlizzardTicks.float32:
+    return
+  let
+    strength = min(clamp(age / FrostFadeTicks, 0, 1),
+      clamp((BlizzardTicks.float32 - age) / FrostFadeTicks, 0, 1))
+    feet = tileFeet(storm.center)
+  let
+    ground = feet + vec3(0, GroundLift * 0.5'f32, 0)
+    reach = frostReach()
+    waveTicks = BlizzardWaveTicks.float32
+    wave = (age - floor(age / waveTicks) * waveTicks) / waveTicks
+    front = mix(0.25'f32, reach, easeOut(wave))
+  shapes.addCircle(ground, reach, ink(IcePale, 0.10'f32 * strength), 48)
+  shapes.addRing(ground, reach, 0.045'f32, ink(IcePale, 0.18'f32 * strength))
+  shapes.addRing(ground, front, 0.075'f32,
+    ink(IcePale, 0.38'f32 * (1 - wave) * (1 - wave)))

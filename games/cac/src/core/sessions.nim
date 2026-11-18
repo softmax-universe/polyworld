@@ -3,6 +3,7 @@
 import std/[algorithm, json, options, sets, strutils]
 from polyworld/cli import takeSoundFlag
 import sim
+from battlesetup import MaxBattlePlayers
 export sim
 
 const
@@ -13,7 +14,7 @@ type
   SessionOptions* = object
     seed*: int64
     seedGiven*: bool  ## --seed was passed; otherwise games may pick their own.
-    playerCount*: int  ## Above two selects the multiplayer scene preview.
+    playerCount*: int  ## Number of seats for a direct local match.
     human*: bool
     soundMuted*: bool = true
       ## Launch audio preference, separate from deterministic match state.
@@ -22,6 +23,8 @@ type
       ## plays. Only its setup runs.
     botPaths*: seq[string]
     replayPath*: string  ## A recorded match to watch instead of playing.
+    menu*: bool = true
+    serverAddress*, roomCode*: string
 
   BotActionKind* = enum
     PlayCardAction, EndTurnAction, ResolveTriggerAction, TossAction
@@ -55,15 +58,27 @@ proc parseSessionOptions*(args: openArray[string]): SessionOptions =
   ## --human PATH.bas plays the deck that script lists.
   result = SessionOptions(seed: DefaultSessionSeed, playerCount: PlayerCount,
     human: false)
-  var index = 0
+  var
+    index = 0
+    directLaunch = false
+    menuChoice: Option[bool]
   while index < args.len:
     if result.soundMuted.takeSoundFlag(args[index]):
       inc index
       continue
     let separator = args[index].find('=')
     let key = if separator >= 0: args[index][0 ..< separator] else: args[index]
-    if key notin ["--seed", "--players", "--bot", "--human", "--replay"]:
+    if key in ["--menu", "--direct"]:
+      if separator >= 0:
+        raise newException(ValueError, key & " does not take a value")
+      menuChoice = some(key == "--menu")
+      inc index
+      continue
+    if key notin ["--seed", "--players", "--bot", "--human", "--replay",
+        "--server", "--room"]:
       raise newException(ValueError, "Unknown session option: " & key)
+    if key in ["--players", "--bot", "--human", "--replay"]:
+      directLaunch = true
     if key == "--human":
       var value = "true"
       if separator >= 0:
@@ -103,14 +118,23 @@ proc parseSessionOptions*(args: openArray[string]): SessionOptions =
       if result.playerCount < PlayerCount:
         raise newException(ValueError, "Player count must be at least " &
           $PlayerCount)
+      if result.playerCount > MaxBattlePlayers:
+        raise newException(ValueError, "Player count must be at most " &
+          $MaxBattlePlayers)
     of "--bot":
       if result.botPaths.len >= PlayerCount:
         raise newException(ValueError, "Too many --bot arguments (max " &
           $PlayerCount & ")")
       result.botPaths.add value
     of "--replay": result.replayPath = value
+    of "--server": result.serverAddress = value
+    of "--room": result.roomCode = value
     else: discard
     inc index
+  result.menu = menuChoice.get(not directLaunch or
+    result.serverAddress.len > 0 or result.roomCode.len > 0)
+  if result.replayPath.len > 0:
+    result.menu = false
 
 proc botPick(game: GameState, choices: seq[Choice], player: int,
     helps: bool): Choice =

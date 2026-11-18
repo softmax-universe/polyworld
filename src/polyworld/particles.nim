@@ -205,6 +205,18 @@ proc effectParticleCount(kind: ParticleEffectKind): int =
     160
   of HeatEmbers:
     40
+  of IceShard:
+    28
+  of FrostBurst:
+    30
+  of IceShatter:
+    90
+  of BlizzardShards:
+    48
+  of SnowSquall:
+    220
+  of LightningBolt:
+    LightningParticleCount
 
 proc effectLifetime(
     kind: ParticleEffectKind,
@@ -244,6 +256,18 @@ proc effectLifetime(
     0.55'f32
   of HeatEmbers:
     1.25'f32
+  of IceShard:
+    travelTime + 0.6'f32
+  of FrostBurst:
+    0.9'f32
+  of IceShatter:
+    1.3'f32
+  of BlizzardShards:
+    travelTime + 0.4'f32
+  of SnowSquall:
+    travelTime + 0.1'f32
+  of LightningBolt:
+    0.45'f32
 
 proc addParticleEffect(
     system: var ParticleSystem,
@@ -516,7 +540,8 @@ proc drawParticles*(
       ):
         continue
     if effect.kind in
-        {ArrowWake, LeafBolt, LeafBurst, BloomSeed, BloomPetals, RootLeaves}:
+        {ArrowWake, LeafBolt, LeafBurst, BloomSeed, BloomPetals, RootLeaves,
+         IceShard, FrostBurst, IceShatter, BlizzardShards, SnowSquall}:
       glBlendFuncSeparate(
         GL_SRC_ALPHA,
         GL_ONE_MINUS_SRC_ALPHA,

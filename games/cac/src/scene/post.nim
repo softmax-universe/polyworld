@@ -354,7 +354,8 @@ void main() {
 }
 """
 
-  LayerFragment = ViewFromDepth & """
+when PostLayerControls:
+  const LayerFragment = ViewFromDepth & """
 uniform sampler2D colorTexture;
 uniform sampler2D otherTexture;
 uniform int mode;
@@ -732,9 +733,9 @@ when PostLayerControls:
     pass[].setFloat("far", post.far)
     post.drawFullscreen()
 
-proc present*(post: var PostFx, windowSize: IVec2) =
-  ## Composites the finished scene onto the window. The window framebuffer is
-  ## bound afterwards, ready for the HUD.
+proc present*(post: var PostFx, windowSize: IVec2,
+    outputFramebuffer: GLuint = 0) =
+  ## Composites onto the window or a hidden capture target, ready for the HUD.
   if not post.settings.enabled:
     return
   let settings = post.settings
@@ -773,7 +774,7 @@ proc present*(post: var PostFx, windowSize: IVec2) =
       post.drawFullscreen()
     glDisable(GL_BLEND)
 
-  glBindFramebuffer(GL_FRAMEBUFFER, 0)
+  glBindFramebuffer(GL_FRAMEBUFFER, outputFramebuffer)
   glViewport(0, 0, windowSize.x.GLsizei, windowSize.y.GLsizei)
   glUseProgram(post.finalPass.program)
   post.finalPass.setTexture("sceneTexture", 0, post.sceneColor)

@@ -21,6 +21,7 @@
 ## walkable but never linked.
 
 import
+  std/sequtils,
   polyworld/[hashes, pathing, profiles, rngs],
   content
 
@@ -34,6 +35,17 @@ const
   GoldTile* = 10'u32
   MossTile* = 11'u32
   RampTile* = 12'u32
+  ArmoryTile* = 13'u32
+  LibraryTile* = 14'u32
+  DungeonTile* = 15'u32
+  TempleTile* = 16'u32
+  ArmoryWallTile* = 17'u32
+  LibraryWallTile* = 18'u32
+  DungeonWallTile* = 19'u32
+  TempleWallTile* = 20'u32
+
+  OldHallsLevel* = 1
+  StairTreadsPerTile* = 4
 
 ## Height bands
 
@@ -71,9 +83,13 @@ type
   RoomKind* = enum
     RectRoom, PillarRoom
 
+  RoomTheme* = enum
+    NoRoomTheme, ArmoryTheme, LibraryTheme, DungeonTheme, TempleTheme
+
   Room* = object
     x*, z*, width*, depth*: int32
     kind*: RoomKind
+    theme*: RoomTheme
 
   RampLink* = object
     ## One authored connection between two levels, kept so the world can
@@ -85,15 +101,79 @@ type
   StairSite* = object
     x*, z*: int32      ## x is the shaft centre, z the top landing row
 
+  DecorKind* = enum
+    TreeDecor, RockDecor, BushDecor,
+    HeraldryDecor, WeaponsDecor, ArmorDecor, TargetDecor,
+    ShelvesDecor, BooksDecor, CircleDecor,
+    BonesDecor, ShacklesDecor, PrisonRackDecor,
+    AltarDecor, StatueDecor, GemsDecor, RugDecor,
+    ColumnDecor, PewDecor, BrokenPewDecor, BookMoundDecor, GateDecor,
+    BenchDecor, CrateDecor, PracticeLineDecor, WallTrimDecor,
+    TorchDecor, ArchDecor, MarbleBorderDecor, GobletNicheDecor
+
+  DecorPlacement* = object
+    kind*: DecorKind
+    tile*: TileRef
+    facing*: Facing
+    variant*: int32
+    theme*: RoomTheme
+    span*: int32
+    alongEighths*: int32
+
   Dungeon* = object
     seed*: int32
     hash*: uint64
     rooms*: array[LevelCount, seq[Room]]
     ramps*: seq[RampLink]
+    decor*: seq[DecorPlacement]
     entrance*: TileRef         ## where the party starts, on the surface
     vault*: TileRef            ## the deepest room's centre
 
   MapData* = Dungeon
+
+const OldHallsFloors = [
+  FloorTile, ArmoryTile, LibraryTile, DungeonTile, TempleTile
+]
+
+proc roomFloor*(theme: RoomTheme): uint32 =
+  ## The material at the centre of an Old Halls room.
+  OldHallsFloors[theme.ord]
+
+proc roomWall*(theme: RoomTheme): uint32 =
+  [StoneTile, ArmoryWallTile, LibraryWallTile, DungeonWallTile,
+    TempleWallTile][theme.ord]
+
+proc stairFlight*(level, x, z: int): bool =
+  ## True on the incline between the two flat stair landings.
+  if level < 0 or level >= layers.len:
+    return false
+  let layer = layers[level]
+  if x < 0 or x >= layer.width or z < 0 or z >= layer.depth:
+    return false
+  let tile = layer.tiles[z * layer.width + x]
+  tile.kind == RampTile and tile.tops[0] != tile.tops[2]
+
+proc colorOldHalls(dungeon: var Dungeon, seed: int32) =
+  ## Shuffles the local theme pool without consuming the layout RNG. Every
+  ## group of four rooms sees the whole pool, with no repeat at its boundary.
+  var
+    rng = initRng(seed, 0x4F6C6448616C6C73'u64)
+    pool = [ArmoryTheme, LibraryTheme, DungeonTheme, TempleTheme]
+    previous = NoRoomTheme
+  for index, room in dungeon.rooms[OldHallsLevel].mpairs:
+    let slot = index mod pool.len
+    if slot == 0:
+      for i in countdown(pool.high, 1):
+        swap(pool[i], pool[rng.below(int32(i + 1))])
+      if pool[0] == previous:
+        swap(pool[0], pool[1 + rng.below(int32(pool.high))])
+    room.theme = pool[slot]
+    previous = room.theme
+    for z in room.z ..< room.z + room.depth:
+      for x in room.x ..< room.x + room.width:
+        let tile = addr layers[OldHallsLevel].tiles[z * GridTiles + x]
+        if tile[].exists and not tile[].impassable and tile.kind == FloorTile:
+          tile.kind = room.theme.roomFloor
 
 proc center*(room: Room): (int32, int32) =
   (room.x + room.width div 2, room.z + room.depth div 2)
@@ -552,7 +632,7 @@ proc carveRamp(
           near - SlabSteps, near - SlabSteps,
           far - SlabSteps, far - SlabSteps
         ],
-        flags: TileExists or TileConnectedEast or TileConnectedSouth,
+        flags: TileExists or TileConnectedSouth,
         kind: RampTile
       )
       rampLocked[lower][tz * GridTiles + (x + lane)] = true
@@ -686,8 +766,412 @@ proc decorateLevel(dungeon: Dungeon, level: int) =
   let
     height = levelBase(level)
     theme = Themes[level]
-  for room in dungeon.rooms[level]:
-    placePillars(level, room, height, theme.wallKind)
+  if level != OldHallsLevel:
+    for room in dungeon.rooms[level]:
+      placePillars(level, room, height, theme.wallKind)
+
+const RoomAxes: array[Facing, tuple[dx, dz: int32]] = [
+  (1'i32, 0'i32), (0'i32, 1'i32), (-1'i32, 0'i32), (0'i32, -1'i32)
+]
+
+type RoomWall = object
+  facing: Facing
+  width: int32
+  x, z: int32
+  closed: seq[bool]
+
+proc roomWallAt(room: Room, facing: Facing): RoomWall =
+  ## Coordinates increase from left to right when facing into the room.
+  result.facing = facing
+  case facing
+  of South:
+    (result.x, result.z, result.width) = (room.x, room.z, room.width)
+  of North:
+    (result.x, result.z, result.width) =
+      (room.x + room.width - 1, room.z + room.depth - 1, room.width)
+  of East:
+    (result.x, result.z, result.width) = (room.x, room.z + room.depth - 1, room.depth)
+  of West:
+    (result.x, result.z, result.width) = (room.x + room.width - 1, room.z, room.depth)
+  result.closed.setLen(result.width)
+  let (dx, dz) = RoomAxes[facing]
+  for i in 0 ..< result.width:
+    let
+      x = result.x + dz * i - dx
+      z = result.z - dx * i - dz
+      tile = tileAt(OldHallsLevel, x, z)
+    result.closed[i] = tile.exists and tile.impassable and
+      tile.tops[0] > levelBase(OldHallsLevel)
+
+proc at(wall: RoomWall, along, inward: int32): (int32, int32) =
+  let (dx, dz) = RoomAxes[wall.facing]
+  (wall.x + dz * along + dx * inward, wall.z - dx * along + dz * inward)
+
+proc furnishRoom(dungeon: var Dungeon, room: Room, rng: var Rng) =
+  ## The layout is composed around an end wall, a clear aisle and doorways.
+  ## Each theme uses the same orientation and fit rules on any footprint.
+  let
+    level = OldHallsLevel
+    floor = room.theme.roomFloor
+  var walls: array[Facing, RoomWall]
+  var used: seq[(int32, int32)]
+  var staged: seq[DecorPlacement]
+
+  proc onFloor(x, z: int32): bool =
+    if not room.contains(x, z):
+      return false
+    let tile = tileAt(level, x, z)
+    tile.exists and not tile.impassable and tile.kind == floor
+
+  proc nearDoor(x, z: int32): bool =
+    for wall in walls:
+      for along, closed in wall.closed:
+        if closed:
+          continue
+        let (doorX, doorZ) = wall.at(int32(along), 0)
+        if abs(x - doorX) + abs(z - doorZ) <= 1:
+          return true
+
+  proc place(wall: RoomWall, kind: DecorKind, along, inward: int32,
+      solid = false, span = 0'i32, alongEighths = 0'i32,
+      facing = wall.facing): bool =
+    let (x, z) = wall.at(along, inward)
+    if not onFloor(x, z) or (solid and ((x, z) in used or nearDoor(x, z))):
+      return false
+    if solid:
+      used.add (x, z)
+    staged.add DecorPlacement(kind: kind,
+      tile: TileRef(level: int8(level), x: uint8(x), z: uint8(z)),
+      facing: facing, theme: room.theme, span: span, alongEighths: alongEighths)
+    true
+
+  proc clearSquare(wall: RoomWall, along, inward, radius: int32): bool =
+    for v in inward - radius .. inward + radius:
+      for u in along - radius .. along + radius:
+        let (x, z) = wall.at(u, v)
+        if not onFloor(x, z):
+          return false
+    true
+
+  var endWall: RoomWall
+  var endScore = int32.low
+  for facing in Facing:
+    walls[facing] = roomWallAt(room, facing)
+    let wall = walls[facing]
+    var score = if wall.width == min(room.width, room.depth): 50'i32 else: 0'i32
+    for i, closed in wall.closed:
+      if closed:
+        score += 2
+        if abs(int32(i) - wall.width div 2) <= 1:
+          score += 4
+    if score > endScore:
+      endWall = wall
+      endScore = score
+
+  let
+    left = walls[Facing((endWall.facing.ord + 1) mod 4)]
+    right = walls[Facing((endWall.facing.ord + 3) mod 4)]
+    length = left.width
+    middle = endWall.width div 2
+
+  # Match raised wall blocks to the room they face. Trace actual
+  # corridor openings independently of gaps in the outside apron.
+  for wall in walls:
+    var start = -1'i32
+    for i in 0'i32 .. wall.width:
+      var doorway = false
+      if i < wall.width:
+        let
+          (x, z) = wall.at(i, -1)
+          (insideX, insideZ) = wall.at(i, 0)
+          tile = addr tileAt(level, x, z)
+        if wall.closed[i]:
+          tile.kind = room.theme.roomWall
+          if i mod 3 == 1:
+            discard wall.place(WallTrimDecor, i, 0)
+        doorway = onFloor(insideX, insideZ) and tile[].exists and
+          not tile[].impassable and tile.tops[0] == levelBase(level)
+      if doorway:
+        if start < 0:
+          start = i
+      elif start >= 0:
+        let size = i - start
+        discard wall.place(ArchDecor, start + (size - 1) div 2, 0,
+          span = size, alongEighths = (1 - size mod 2) * 4)
+        for jamb in [start - 1, i]:
+          if jamb >= 0 and jamb < wall.width and wall.closed[jamb]:
+            discard wall.place(TorchDecor, jamb, 0)
+        start = -1
+    for i in [wall.width div 4, wall.width * 3 div 4]:
+      if wall.closed[i] and not staged.anyIt(
+          it.kind == TorchDecor and it.facing == wall.facing and
+          (int32(it.tile.x), int32(it.tile.z)) == wall.at(i, 0)):
+        discard wall.place(TorchDecor, i, 0)
+
+  template setProp(wall: RoomWall, prop: DecorKind, u, v: int32,
+      solid = false) =
+    discard wall.place(prop, u, v, solid)
+
+  proc feature(wall: RoomWall, kind: DecorKind, u, v: int32,
+      solid = false, span = 0'i32) =
+    ## Preserve the main feature if the authored spot is cut by a shaft.
+    if wall.place(kind, u, v, solid, span):
+      return
+    for distance in 1'i32 .. 3'i32:
+      for offset in [-distance, distance]:
+        if wall.place(kind, u + offset, v, solid, span):
+          return
+      if wall.place(kind, u, v + distance, solid, span):
+        return
+
+  case room.theme
+  of TempleTheme:
+    var shrineRng = initRng(dungeon.seed,
+      0x54656D706C65'u64 xor (uint64(room.x) shl 8) xor uint64(room.z))
+    var altar = middle
+    var altarSpan = 1'i32
+    for offset in [0'i32, 1, -1, 2, -2, 3, -3]:
+      let u = middle + offset
+      if u < 1 or u + 1 >= endWall.width:
+        continue
+      var fits = true
+      for i in u - 1 .. u + 1:
+        let (x, z) = endWall.at(i, 0)
+        let (ix, iz) = endWall.at(i, 1)
+        if not endWall.closed[i] or not onFloor(x, z) or
+            not onFloor(ix, iz) or nearDoor(x, z):
+          fits = false
+      if fits and endWall.place(AltarDecor, u, 0, true, span = 3):
+        used.add endWall.at(u - 1, 0)
+        used.add endWall.at(u + 1, 0)
+        altar = u
+        altarSpan = 3
+        break
+    if altarSpan == 1:
+      endWall.feature(AltarDecor, middle, 0, true, span = 1)
+      for prop in staged:
+        if prop.kind != AltarDecor:
+          continue
+        let (dx, dz) = RoomAxes[endWall.facing]
+        altar = (int32(prop.tile.x) - endWall.x) * dz -
+          (int32(prop.tile.z) - endWall.z) * dx
+        break
+
+    # Choose a matching pair of positions at the altar or one of the room's
+    # doorways. Keep both figures flanking the same opening.
+    var statuePairs: seq[tuple[wall: RoomWall, a, b, inward: int32]]
+    proc offerStatues(wall: RoomWall, a, b, inward: int32) =
+      let
+        first = wall.at(a, inward)
+        second = wall.at(b, inward)
+      if a >= 0 and b < wall.width and wall.closed[a] and wall.closed[b] and
+          onFloor(first[0], first[1]) and onFloor(second[0], second[1]) and
+          first notin used and second notin used and
+          not nearDoor(first[0], first[1]) and not nearDoor(second[0], second[1]):
+        statuePairs.add (wall, a, b, inward)
+    endWall.offerStatues(altar - 2, altar + 2, 0)
+    for prop in staged:
+      if prop.kind != ArchDecor:
+        continue
+      let wall = walls[prop.facing]
+      for i in 0'i32 ..< wall.width:
+        if wall.at(i, 0) == (int32(prop.tile.x), int32(prop.tile.z)):
+          let start = i - (prop.span - 1) div 2
+          wall.offerStatues(start - 1, start + prop.span, 1)
+          break
+    if statuePairs.len > 0:
+      let pair = statuePairs[shrineRng.below(int32(statuePairs.len))]
+      let pose = shrineRng.below(2)
+      discard pair.wall.place(StatueDecor, pair.a, pair.inward, true, span = pose)
+      discard pair.wall.place(StatueDecor, pair.b, pair.inward, true, span = 1 - pose)
+    else:
+      for side in [-1'i32, 1'i32]:
+        var placed = false
+        let pose = (side + 1) div 2
+        for inward in 0'i32 .. 2:
+          if placed:
+            break
+          for distance in 2'i32 .. endWall.width - 1:
+            if endWall.place(StatueDecor, altar + side * distance,
+                inward, true, span = pose):
+              placed = true
+              break
+        if not placed:
+          # Irregular stair rooms can lose a whole flank. Use the nearest
+          # free tile along the adjacent wall without crowding the opening.
+          let wall = if side < 0: left else: right
+          for i in 1'i32 ..< wall.width - 1:
+            if wall.place(StatueDecor, i, 1, true, span = pose):
+              break
+
+    for side in [-1'i32, 1'i32]:
+      endWall.setProp(GemsDecor, altar + side * 2, 1)
+      for row in 0'i32 .. 2:
+        let
+          z = 2 + row * (length - 4) div 3
+          column = if side < 0: 1'i32 else: endWall.width - 2
+          pew = middle + side * (if endWall.width < 10: 2'i32 else: 3'i32)
+        endWall.setProp(ColumnDecor, column, z, true)
+        let kind = if rng.chance(28): BrokenPewDecor else: PewDecor
+        discard endWall.place(kind, pew, z, solid = true,
+          facing = Facing((endWall.facing.ord + 2) mod 4))
+
+    # Join modular runner pieces with matching borders and center line.
+    # Door and stair openings may shorten the runner into separate runs.
+    for row in 1'i32 ..< length:
+      let (x, z) = endWall.at(altar, row)
+      if not onFloor(x, z):
+        continue
+      let
+        (beforeX, beforeZ) = endWall.at(altar, row - 1)
+        (afterX, afterZ) = endWall.at(altar, row + 1)
+        capStart = row == 1 or not onFloor(beforeX, beforeZ)
+        capEnd = row == length - 1 or not onFloor(afterX, afterZ)
+        motif = if row mod 3 == 2: 1'i32 elif row mod 3 == 0: 2'i32 else: 0'i32
+        design = motif + (if capStart: 4'i32 else: 0'i32) +
+          (if capEnd: 8'i32 else: 0'i32)
+      discard endWall.place(RugDecor, altar, row, span = design)
+
+    var nicheFallback: seq[tuple[wall: RoomWall, index: int32]]
+    var niches = 0
+    for wall in walls:
+      for i in 0'i32 ..< wall.width:
+        if not wall.closed[i]:
+          continue
+        wall.setProp(MarbleBorderDecor, i, 0)
+        if i == 0 or i == wall.width - 1:
+          continue
+        let (x, z) = wall.at(i, 0)
+        if not onFloor(x, z) or (x, z) in used:
+          continue
+        if i mod 3 == 1 or staged.anyIt(it.kind == TorchDecor and
+            it.facing == wall.facing and
+            (int32(it.tile.x), int32(it.tile.z)) == (x, z)):
+          nicheFallback.add (wall, i)
+        elif wall.place(GobletNicheDecor, i, 0):
+          inc niches
+    if niches == 0 and nicheFallback.len > 0:
+      let (wall, index) = nicheFallback[0]
+      let (x, z) = wall.at(index, 0)
+      for i in countdown(staged.high, 0):
+        let prop = staged[i]
+        if prop.kind in {WallTrimDecor, TorchDecor} and prop.facing == wall.facing and
+            (int32(prop.tile.x), int32(prop.tile.z)) == (x, z):
+          staged.delete(i)
+      wall.setProp(GobletNicheDecor, index, 0)
+  of LibraryTheme:
+    for wall in [endWall, left]:
+      for i in 0'i32 ..< wall.width:
+        if wall.closed[i]:
+          let (x, z) = wall.at(i, 0)
+          if not staged.anyIt(it.kind == TorchDecor and
+              (int32(it.tile.x), int32(it.tile.z)) == (x, z)):
+            discard wall.place(ShelvesDecor, i, 0, true)
+    # The double-sided divider stops well before both cross-aisles.
+    let dividerEnd = min(length - 2, 7'i32)
+    var dividerFits = true
+    for row in 2'i32 ..< dividerEnd:
+      if not endWall.clearSquare(2, row, 1):
+        dividerFits = false
+    if dividerFits:
+      for row in 2'i32 ..< dividerEnd:
+        discard endWall.place(ShelvesDecor, 2, row, true, span = 1,
+          facing = right.facing)
+    var circle = false
+    for radius in [2'i32, 1'i32]:
+      if circle:
+        break
+      for delta in [0'i32, 1, -1, 2, -2]:
+        let row = length div 2 + delta
+        if endWall.clearSquare(middle, row, radius):
+          circle = endWall.place(CircleDecor, middle, row, span = radius)
+          break
+    if not circle:
+      endWall.feature(CircleDecor, middle, length div 2, span = 1)
+    endWall.feature(BookMoundDecor, middle + 2, length div 2 + 2)
+    endWall.feature(BooksDecor, middle - 1, 2)
+    endWall.setProp(BooksDecor, middle + 2, length div 2 - 2)
+  of DungeonTheme:
+    for bay in 1'i32 .. 3:
+      let i = left.width * bay div 4
+      if left.closed[i]:
+        left.setProp(ShacklesDecor, i, 0)
+        if bay != 2:
+          left.setProp(GateDecor, i, 0)
+    if not staged.anyIt(it.kind == ShacklesDecor):
+      left.feature(ShacklesDecor, left.width div 2, 0)
+    if not staged.anyIt(it.kind == GateDecor):
+      left.feature(GateDecor, left.width div 4, 0)
+    left.feature(BonesDecor, left.width * 3 div 4, 1)
+    endWall.setProp(BonesDecor, endWall.width - 2, 1)
+    for i in [right.width div 3, right.width * 2 div 3]:
+      right.setProp(PrisonRackDecor, i, 0, true)
+    if not staged.anyIt(it.kind == PrisonRackDecor):
+      right.feature(PrisonRackDecor, right.width div 2, 1, true)
+  of ArmoryTheme:
+    endWall.feature(HeraldryDecor, middle, 0)
+    for side in [-1'i32, 1'i32]:
+      endWall.feature(ArmorDecor, middle + side * 2, 0, true)
+    for i in 1'i32 ..< left.width - 1:
+      if left.closed[i] and i mod 2 == 1:
+        discard left.place(WeaponsDecor, i, 0, true, span = i mod 3)
+    left.feature(WeaponsDecor, left.width div 2, 1, true)
+    left.feature(BenchDecor, left.width - 2, 0, true)
+    if not staged.anyIt(it.kind == BenchDecor):
+      left.feature(BenchDecor, left.width - 2, 2, true)
+    left.setProp(CrateDecor, left.width - 2, 1)
+    for i in [right.width div 4, right.width div 2, right.width * 3 div 4]:
+      if right.closed[i]:
+        right.setProp(TargetDecor, i, 0, true)
+    if not staged.anyIt(it.kind == TargetDecor):
+      right.feature(TargetDecor, right.width div 2, 1, true)
+    for i in 2'i32 ..< right.width - 2:
+      right.setProp(PracticeLineDecor, i, 2)
+    if not staged.anyIt(it.kind == PracticeLineDecor):
+      right.feature(PracticeLineDecor, right.width div 2, 1)
+  of NoRoomTheme:
+    discard
+
+  # Place solid models only where they cannot cut a narrow walkable strip.
+  # For every occupied cell, keep its walkable neighbours connected around it.
+  for (x, z) in used:
+    var neighbors = 0
+    var transitions = 0
+    const Ring = [(0'i32,-1'i32), (1'i32,-1'i32), (1'i32,0'i32), (1'i32,1'i32),
+      (0'i32,1'i32), (-1'i32,1'i32), (-1'i32,0'i32), (-1'i32,-1'i32)]
+    var previous = onFloor(x - 1, z - 1)
+    for (dx, dz) in Ring:
+      let open = onFloor(x + dx, z + dz)
+      if open and not previous:
+        inc transitions
+      if open and (dx == 0 or dz == 0):
+        inc neighbors
+      previous = open
+    if neighbors >= 2 and transitions == 1:
+      tileAt(level, x, z).impassable = true
+  dungeon.decor.add staged
+
+proc furnishDungeon(dungeon: var Dungeon, seed: int32) =
+  ## Leaves the seeded Surface scatter independent of the room layouts.
+  var rng = initRng(seed, 0x4465636F72617465'u64)
+  let clearing = dungeon.rooms[SurfaceLevel][0]
+  for side in [0'i32, 1]:
+    for row in 0'i32 .. 11:
+      let
+        inset = rng.between(1, 5)
+        x = if side == 0: clearing.x + inset
+            else: clearing.x + clearing.width - 1 - inset
+        z = clearing.z + 3 + row * 3 + rng.between(0, 1)
+        kind = DecorKind((row + side) mod 3)
+        tile = addr tileAt(SurfaceLevel, x, z)
+      if tile[].exists and not tile[].impassable and tile.kind == GrassTile:
+        dungeon.decor.add DecorPlacement(kind: kind,
+          tile: TileRef(level: SurfaceLevel, x: uint8(x), z: uint8(z)),
+          facing: Facing(rng.below(4)), variant: rng.below(12))
+        if kind != BushDecor:
+          tile[].impassable = true
+  for room in dungeon.rooms[OldHallsLevel]:
+    dungeon.furnishRoom(room, rng)
 
 proc terrainHash*(): uint64
 
@@ -863,6 +1347,9 @@ proc generateDungeon(seed: int32): Dungeon {.measure.} =
   doAssert vx >= 0, "the vault room has no floor"
   result.vault = TileRef(level: int8(deepest), x: uint8(vx), z: uint8(vz))
   result.seed = seed
+  result.colorOldHalls(seed)
+  result.furnishDungeon(seed)
+  computeWalkable()
   result.hash = terrainHash()
 
 proc terrainHash*(): uint64 =

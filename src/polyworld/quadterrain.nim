@@ -175,31 +175,6 @@ var
   groundRing: Uniform[Vec4]
   groundRingShape: Uniform[Vec3]
   propTint: Uniform[Vec4]
-  terrainCutaways: Uniform[array[8, Vec4]]
-    ## One per actor kept in view: xyz its feet, w its size. A zero size
-    ## leaves the slot unused.
-  terrainCutawayView: Uniform[Vec4]
-    ## xyz points toward the eye; w is the body center's height above the
-    ## feet at size one.
-  terrainCutawayShape: Uniform[Vec4]
-    ## The screen-plane ellipse cut around a body at size one: x half its
-    ## width, y half its height, z how far in front of the body center a
-    ## surface must be to go. Zero w turns every cut off.
-
-const TerrainCutawaySlots* = 8
-  ## How many actors one terrain draw can cut a view to.
-
-type
-  TerrainCutaway* = object
-    ## How a fixed camera sees bodies through terrain: see setTerrainCutaways.
-    towardEye*: Vec3
-    rise*: float32
-      ## Body center above the feet.
-    halfWidth*, halfHeight*: float32
-      ## The hole's screen-plane ellipse around that center.
-    clearance*: float32
-      ## Surfaces nearer the body center than this stay, so the floor and
-      ## walls beside a body are not notched.
 
 proc texture(buffer: Uniform[Sampler2dArray], position: Vec3): Vec4 =
   ## Provides Shady with the texture-array builtin signature.
@@ -297,28 +272,6 @@ proc terrainFrag(
     shadowPos: Vec3
 ) =
   ## Height-blends textured tile materials and applies visibility fog.
-  # Cutaways: anything standing above an actor's floor and over its body on
-  # screen, nearer the eye, is dropped, so walls, pillars and higher slabs
-  # never hide who is fighting.
-  if terrainCutawayShape.w > 0.0:
-    let
-      view: Vec3 = terrainCutawayView.xyz
-      up: Vec3 = normalize(vec3(0.0, 1.0, 0.0) - view * view.y)
-    for i in 0 ..< 8:
-      let cut = terrainCutaways[i]
-      if cut.w > 0.0 and worldPos.y > cut.y + 0.1:
-        let
-          offset: Vec3 = worldPos -
-            vec3(cut.x, cut.y + terrainCutawayView.w * cut.w, cut.z)
-          along = dot(offset, view)
-          across: Vec3 = offset - view * along
-          upward = dot(across, up)
-          side = length(across - up * upward) /
-            (terrainCutawayShape.x * cut.w)
-          rise = upward / (terrainCutawayShape.y * cut.w)
-        if along > terrainCutawayShape.z * cut.w and
-            side * side + rise * rise < 1.0:
-          discardFragment()
   let
     tilePos = vec2(worldPos.x, worldPos.z)
     h = clamp(
@@ -1007,9 +960,6 @@ var
   unboostedMaterialLocation: GLint
   groundMaskLocation, groundMaskEnabledLocation, groundLayersLocation: GLint
   groundRingLocation, groundRingShapeLocation: GLint
-  cutawaysLocation, cutawayViewLocation, cutawayShapeLocation: GLint
-  cutawayData: array[TerrainCutawaySlots, Vec4]
-  cutawayView, cutawayShape: Vec4
   visibilitySize = GridTiles
   visibilityOffsetLocation, visibilityScaleLocation: GLint
   terrainTextureArray, visibilityTexture, groundMaskTexture: GLuint
@@ -2210,12 +2160,25 @@ proc generatedMaterial(directory, name: string): tuple[color, height: Image] =
       let gray = ((value.r.int * alpha.int + 127) div 255).uint8
       result.height.data[i] = rgbx(gray, gray, gray, alpha)
 
-proc loadGeneratedTiles(extraTiles: openArray[string]): seq[seq[Image]] =
+type GeneratedTileImages* = tuple[color, height: Image]
+
+proc loadGeneratedTiles(
+    extraTiles: openArray[string],
+    extraImages: openArray[GeneratedTileImages]
+): seq[seq[Image]] =
   ## Packs independently filtered color and height into the terrain array.
   terrainAverageColors.setLen(0)
+  var pairs: seq[GeneratedTileImages]
   for name in @SurfaceNames & @extraTiles:
+    pairs.add generatedMaterial("tiles", name)
+  pairs.add extraImages
+  for pair in pairs:
+    if pair.color.width != GeneratedTextureSize or
+        pair.color.height != GeneratedTextureSize or
+        pair.height.width != GeneratedTextureSize or
+        pair.height.height != GeneratedTextureSize:
+      raise newException(QuadTerrainError, "Expected 256x256 terrain images")
     let
-      pair = generatedMaterial("tiles", name)
       colors = mipChain(pair.color)
       heights = mipChain(pair.height)
     terrainAverageColors.add averageColor(colors[0])
@@ -2259,7 +2222,7 @@ proc uploadTerrainData(texture: var GLuint, values: seq[float32]): Vec2 =
   glBindTexture(GL_TEXTURE_2D, 0)
   vec2(width.float32, height.float32)
 
-proc rebuildTerrainData() {.measure.} =
+proc rebuildTerrainData(hardMaterials: openArray[int]) {.measure.} =
   ## Refreshes visual sidecars without altering terrain or simulation flags.
   if not generatedTerrain:
     return
@@ -2277,7 +2240,8 @@ proc rebuildTerrainData() {.measure.} =
       terrainSplatCount,
       terrainSplatChance,
       terrainAverageColors.len,
-      groundMaterialOverrides
+      groundMaterialOverrides,
+      hardMaterials
     )
   except TerrainMapError:
     raise newException(QuadTerrainError, getCurrentExceptionMsg())
@@ -2696,7 +2660,7 @@ proc scatterRocks*(count, randomSeed: int, scale = 1.0'f) =
 var
   vertexArray, vertexBuffer: GLuint
   mesh: seq[float32]
-  tileTopOffsets: seq[seq[int]]
+  tileTopOffsets: seq[seq[Slice[int]]]
   meshVertexCount = 0
   propVertexArray, propVertexBuffer: GLuint
   propMesh: seq[float32]   # x y z r g b nx ny nz; grass, boulders, props
@@ -3361,14 +3325,160 @@ proc cornerMaterial(
       best = kind
   tileMaterial(best).topMaterial
 
+proc emitStairTreads(
+    northWest, northEast, southWest, southEast: Vec3,
+    style: TileMaterial, materials: Vec4,
+    edgeMask: float32, splatRange: Vec3, treads: int,
+    westSide, eastSide: bool
+): int =
+  ## A tile's navigation surface spans the full rise. Draw level stone
+  ## treads above it, with a riser at each lip and closed outer cheeks.
+  let
+    up = vec3(0, 1, 0)
+    rise = (northWest.y - southWest.y) / treads.float32
+  for step in 0 ..< treads:
+    let
+      front = step.float32 / treads.float32
+      back = (step + 1).float32 / treads.float32
+      a = mix(northWest, southWest, front)
+      b = mix(northEast, southEast, front)
+      c = mix(northWest, southWest, back) + up * rise
+      d = mix(northEast, southEast, back) + up * rise
+    let
+      nw = mix(CornerWeights[0], CornerWeights[2], front)
+      ne = mix(CornerWeights[1], CornerWeights[3], front)
+      sw = mix(CornerWeights[0], CornerWeights[2], back)
+      se = mix(CornerWeights[1], CornerWeights[3], back)
+    addTriangle(a, b, c, up, up, up, style.top, materials,
+      nw, ne, sw, edgeMask, splatRange)
+    addTriangle(b, d, c, up, up, up, style.top, materials,
+      ne, se, sw, edgeMask, splatRange)
+  let topEnd = mesh.len
+  for step in 0 ..< treads:
+    let
+      front = step.float32 / treads.float32
+      back = (step + 1).float32 / treads.float32
+      a = mix(northWest, southWest, front)
+      b = mix(northEast, southEast, front)
+      c = mix(northWest, southWest, back) + up * rise
+      d = mix(northEast, southEast, back) + up * rise
+    addWall(c, d, c - up * rise, d - up * rise,
+      vec3(0, 0, 1), style.skirt, style.skirtMaterial)
+    if westSide:
+      addWall(a, c, a, c - up * rise, vec3(-1, 0, 0),
+        style.skirt, style.skirtMaterial)
+    if eastSide:
+      addWall(b, d, b, d - up * rise, vec3(1, 0, 0),
+        style.skirt, style.skirtMaterial)
+  topEnd
+
+type WallRecess* = object
+  ## An opening in the rendered face of a wall tile. Facing uses edgeLink's
+  ## east, south, west, north order, pointing out of the wall.
+  layer*, x*, z*, facing*: int
+  base*, bottom*, spring*, rise*, halfWidth*, depth*: float32
+
+proc recessWidth*(recess: WallRecess, progress: float32): float32 =
+  recess.halfWidth * (1 - progress * progress)
+
+proc addRecessedWall(top0, top1, bottom0, bottom1, normal, tint: Vec3,
+    material: float32, recess: WallRecess) =
+  ## Leave the face intact around the opening and line the pocket with stone.
+  let
+    center = (top0 + top1) * 0.5
+    along = normalize(top1 - top0)
+    up = vec3(0, 1, 0)
+    level = center - up * (center.y - recess.base)
+    sill = recess.bottom
+    spring = recess.spring
+    radius = recess.halfWidth
+    inward = -normal * recess.depth
+  proc point(x, y: float32): Vec3 =
+    level + along * x + up * y
+  proc band(y0, y1, r0, r1: float32) =
+    addWall(point(-0.5, y1), point(-r1, y1),
+      point(-0.5, y0), point(-r0, y0), normal, tint, material)
+    addWall(point(r1, y1), point(0.5, y1),
+      point(r0, y0), point(0.5, y0), normal, tint, material)
+  addWall(point(-0.5, sill), point(0.5, sill), bottom0, bottom1,
+    normal, tint, material)
+  band(sill, spring, radius, radius)
+  addWall(point(radius, spring), point(radius, spring) + inward,
+    point(radius, sill), point(radius, sill) + inward,
+    -along, tint * 0.80, material)
+  addWall(point(-radius, spring) + inward, point(-radius, spring),
+    point(-radius, sill) + inward, point(-radius, sill),
+    along, tint * 0.80, material)
+  let
+    shelfLeft = point(-radius, sill)
+    shelfRight = point(radius, sill)
+  addWall(shelfLeft, shelfRight, shelfLeft + inward, shelfRight + inward,
+    up, tint, material)
+  const Segments = 12
+  for i in 0 ..< Segments:
+    let
+      t0 = i.float32 / Segments.float32
+      t1 = (i + 1).float32 / Segments.float32
+      y0 = spring + recess.rise * t0
+      y1 = spring + recess.rise * t1
+      r0 = recess.recessWidth(t0)
+      r1 = recess.recessWidth(t1)
+    band(y0, y1, r0, r1)
+    for sign in [-1'f32, 1]:
+      let
+        a = point(sign * r1, y1)
+        b = point(sign * r0, y0)
+        lipNormal = normalize(along * (-sign * (y1 - y0)) -
+          up * (r0 - r1))
+      addWall(a, a + inward, b, b + inward,
+        lipNormal, tint * 0.75, material)
+  let peak = spring + recess.rise
+  addWall(top0, top1, point(-0.5, peak), point(0.5, peak),
+    normal, tint, material)
+  let backTint = tint * 0.43
+  addWall(point(-radius, spring) + inward, point(radius, spring) + inward,
+    shelfLeft + inward, shelfRight + inward, normal, backTint, material)
+  for i in 0 ..< Segments:
+    let
+      t0 = i.float32 / Segments.float32
+      t1 = (i + 1).float32 / Segments.float32
+      y0 = spring + recess.rise * t0
+      y1 = spring + recess.rise * t1
+      r0 = recess.recessWidth(t0)
+      r1 = recess.recessWidth(t1)
+    addWall(point(-r1, y1) + inward, point(r1, y1) + inward,
+      point(-r0, y0) + inward, point(r0, y0) + inward,
+      normal, backTint, material)
+
 proc emitLayer(
     layerIndex: int,
     layer: QuadLayer,
     floorY: float32,
-    blockers: openArray[seq[int32]]
+    blockers: openArray[seq[int32]],
+    stairKind: uint32,
+    stairTreads: int,
+    wallRecesses: Table[(int, int, int), WallRecess]
 ) =
   ## Emits one solid tile layer with tops, skirts, cliffs, and edge masks.
   let w = layer.width
+  template wallFace(
+      top0, top1, bottom0, bottom1, normal, tint, material: untyped,
+      wallX, wallZ, facing: int
+  ) =
+    let key = (wallX, wallZ, facing)
+    if key in wallRecesses:
+      let
+        recess = wallRecesses[key]
+        outward = case facing
+          of 0: vec3(1, 0, 0)
+          of 1: vec3(0, 0, 1)
+          of 2: vec3(-1, 0, 0)
+          else: vec3(0, 0, -1)
+      addRecessedWall(top0, top1, bottom0, bottom1, outward, tint, material,
+        recess)
+    else:
+      addWall(top0, top1, bottom0, bottom1, normal, tint, material)
+
   var faceNormals = newSeq[Vec3](layer.tiles.len)
   for i, t in layer.tiles:
     if t.exists:
@@ -3414,37 +3524,50 @@ proc emitLayer(
         n1 = cornerNormal(layer, faceNormals, x, z, 1)
         n2 = cornerNormal(layer, faceNormals, x, z, 2)
         n3 = cornerNormal(layer, faceNormals, x, z, 3)
-      tileTopOffsets[layerIndex][i] = mesh.len
-      addTriangle(
-        v00,
-        v10,
-        v01,
-        n0,
-        n1,
-        n2,
-        style.top,
-        materials,
-        CornerWeights[0],
-        CornerWeights[1],
-        CornerWeights[2],
-        edgeMask,
-        splatRange
-      )
-      addTriangle(
-        v10,
-        v11,
-        v01,
-        n1,
-        n3,
-        n2,
-        style.top,
-        materials,
-        CornerWeights[1],
-        CornerWeights[3],
-        CornerWeights[2],
-        edgeMask,
-        splatRange
-      )
+      let firstTop = mesh.len
+      let lastTop =
+        if stairTreads > 0 and t.kind == stairKind and h[0] > h[2] and
+            h[0] == h[1] and h[2] == h[3]:
+          let
+            westSide = x == 0 or layer.tiles[i - 1].kind != stairKind or
+              layer.tiles[i - 1].tops != t.tops
+            eastSide = x == w - 1 or layer.tiles[i + 1].kind != stairKind or
+              layer.tiles[i + 1].tops != t.tops
+          emitStairTreads(v00, v10, v01, v11, style, materials, edgeMask,
+            splatRange, stairTreads, westSide, eastSide)
+        else:
+          addTriangle(
+            v00,
+            v10,
+            v01,
+            n0,
+            n1,
+            n2,
+            style.top,
+            materials,
+            CornerWeights[0],
+            CornerWeights[1],
+            CornerWeights[2],
+            edgeMask,
+            splatRange
+          )
+          addTriangle(
+            v10,
+            v11,
+            v01,
+            n1,
+            n3,
+            n2,
+            style.top,
+            materials,
+            CornerWeights[1],
+            CornerWeights[3],
+            CornerWeights[2],
+            edgeMask,
+            splatRange
+          )
+          mesh.len
+      tileTopOffsets[layerIndex][i] = firstTop ..< lastTop
 
       if layer.slab:
         # Underside of the slab; never walkable.
@@ -3470,14 +3593,15 @@ proc emitLayer(
         let
           y0 = if layer.slab: b[1] else: floorY
           y1 = if layer.slab: b[3] else: floorY
-        addWall(
+        wallFace(
           v10,
           v11,
           vec3(x1, y0, z0),
           vec3(x1, y1, z1),
           vec3(1, 0, 0),
           style.skirt,
-          style.skirtMaterial
+          style.skirtMaterial,
+          x, z, 0
         )
       else:
         let n = layer.tiles[z * w + x + 1]
@@ -3489,15 +3613,20 @@ proc emitLayer(
               style
             else:
               tileMaterial(n.kind)
-          addWall(
-            v10,
-            v11,
-            vec3(x1, nh[0], z0),
-            vec3(x1, nh[2], z1),
-            vec3(1, 0, 0),
-            cliffStyle.skirt,
-            cliffStyle.skirtMaterial
-          )
+          if (x + 1, z, 2) in wallRecesses:
+            wallFace(vec3(x1, nh[0], z0), vec3(x1, nh[2], z1), v10, v11,
+              vec3(-1, 0, 0), cliffStyle.skirt, cliffStyle.skirtMaterial,
+              x + 1, z, 2)
+          else:
+            addWall(
+              v10,
+              v11,
+              vec3(x1, nh[0], z0),
+              vec3(x1, nh[2], z1),
+              vec3(1, 0, 0),
+              cliffStyle.skirt,
+              cliffStyle.skirtMaterial
+            )
         if layer.slab:
           let nb = n.bottoms.unpack
           if b[1] != nb[0] or b[3] != nb[2]:
@@ -3513,14 +3642,15 @@ proc emitLayer(
         let
           y0 = if layer.slab: b[2] else: floorY
           y1 = if layer.slab: b[3] else: floorY
-        addWall(
+        wallFace(
           v01,
           v11,
           vec3(x0, y0, z1),
           vec3(x1, y1, z1),
           vec3(0, 0, 1),
           style.skirt,
-          style.skirtMaterial
+          style.skirtMaterial,
+          x, z, 1
         )
       else:
         let n = layer.tiles[(z + 1) * w + x]
@@ -3531,15 +3661,20 @@ proc emitLayer(
               style
             else:
               tileMaterial(n.kind)
-          addWall(
-            v01,
-            v11,
-            vec3(x0, nh[0], z1),
-            vec3(x1, nh[1], z1),
-            vec3(0, 0, 1),
-            cliffStyle.skirt,
-            cliffStyle.skirtMaterial
-          )
+          if (x, z + 1, 3) in wallRecesses:
+            wallFace(vec3(x0, nh[0], z1), vec3(x1, nh[1], z1), v01, v11,
+              vec3(0, 0, -1), cliffStyle.skirt, cliffStyle.skirtMaterial,
+              x, z + 1, 3)
+          else:
+            addWall(
+              v01,
+              v11,
+              vec3(x0, nh[0], z1),
+              vec3(x1, nh[1], z1),
+              vec3(0, 0, 1),
+              cliffStyle.skirt,
+              cliffStyle.skirtMaterial
+            )
         if layer.slab:
           let nb = n.bottoms.unpack
           if b[2] != nb[0] or b[3] != nb[1]:
@@ -3555,28 +3690,30 @@ proc emitLayer(
         let
           y0 = if layer.slab: b[0] else: floorY
           y1 = if layer.slab: b[2] else: floorY
-        addWall(
+        wallFace(
           v00,
           v01,
           vec3(x0, y0, z0),
           vec3(x0, y1, z1),
           vec3(-1, 0, 0),
           style.skirt,
-          style.skirtMaterial
+          style.skirtMaterial,
+          x, z, 2
         )
       if z == 0 or not layer.tiles[(z - 1) * w + x].exists or
           not layer.tiles[(z - 1) * w + x].connectedSouth:
         let
           y0 = if layer.slab: b[0] else: floorY
           y1 = if layer.slab: b[1] else: floorY
-        addWall(
+        wallFace(
           v00,
           v10,
           vec3(x0, y0, z0),
           vec3(x1, y1, z0),
           vec3(0, 0, -1),
           style.skirt,
-          style.skirtMaterial
+          style.skirtMaterial,
+          x, z, 3
         )
 
 proc emitWaterLayer(layer: QuadLayer) =
@@ -3681,12 +3818,14 @@ proc initTerrain*(
   terrainStyle: TerrainStyle = CartoonTerrain,
   rockStyle: RockStyle = LowPolyRocks,
   extraTiles: openArray[string] = [],
-  settings = DefaultTerrainAssets
+  settings = DefaultTerrainAssets,
+  extraImages: openArray[GeneratedTileImages] = []
 ) =
   ## Initializes rendering with a current GL context, once before bakeTerrain.
   ## Extra generated tile names append after SurfaceNames without splat stamps.
   ## Assets load from ../polyworld_data/terrain/ relative to the repo root.
-  if terrainStyle != GeneratedTerrain and extraTiles.len > 0:
+  if terrainStyle != GeneratedTerrain and
+      (extraTiles.len > 0 or extraImages.len > 0):
     raise newException(QuadTerrainError, "Extra tiles need generated terrain.")
   terrainMaterialSize = settings.size
   terrainUnboostedMaterial = -1.0'f
@@ -3768,15 +3907,6 @@ proc initTerrain*(
     terrainProgram,
     "groundRingShape"
   )
-  cutawaysLocation = glGetUniformLocation(terrainProgram, "terrainCutaways")
-  cutawayViewLocation = glGetUniformLocation(
-    terrainProgram,
-    "terrainCutawayView"
-  )
-  cutawayShapeLocation = glGetUniformLocation(
-    terrainProgram,
-    "terrainCutawayShape"
-  )
   visibilityOffsetLocation = glGetUniformLocation(
     terrainProgram,
     "visibilityOffset"
@@ -3787,7 +3917,7 @@ proc initTerrain*(
   )
   if generatedTerrain:
     terrainTextureArray = buildTextureArray(
-      loadGeneratedTiles(extraTiles), GL_REPEAT.GLint
+      loadGeneratedTiles(extraTiles, extraImages), GL_REPEAT.GLint
     )
     let stamps = loadGeneratedStamps()
     splatColorArray = buildTextureArray(stamps.colors, GL_CLAMP_TO_EDGE.GLint)
@@ -4240,7 +4370,11 @@ proc initTerrain*(
 
 proc bakeTerrain*(
     rebuildWalkability = true,
-    blockers: openArray[seq[int32]] = []
+    blockers: openArray[seq[int32]] = [],
+    stairKind = uint32.high,
+    stairTreads = 0,
+    hardMaterials: openArray[int] = [],
+    wallRecesses: openArray[WallRecess] = []
 ) {.measure.} =
   ## Rebuilds and uploads terrain and props, with optional tile edge blockers.
   ## Nonzero per-layer blockers affect the overlay only. Omitted grids are open.
@@ -4248,9 +4382,9 @@ proc bakeTerrain*(
   mesh.setLen(0)
   tileTopOffsets.setLen(layers.len)
   for i, layer in layers:
-    tileTopOffsets[i] = newSeq[int](layer.tiles.len)
-    for offset in tileTopOffsets[i].mitems:
-      offset = -1
+    tileTopOffsets[i] = newSeq[Slice[int]](layer.tiles.len)
+    for span in tileTopOffsets[i].mitems:
+      span = 0 ..< 0
   waterMesh.setLen(0)
   layerVertexRanges.setLen(0)
   waterLayerRanges.setLen(0)
@@ -4260,7 +4394,10 @@ proc bakeTerrain*(
   let floorY = -amplitude - 6
   if rebuildWalkability:
     computeWalkable()
-  rebuildTerrainData()
+  rebuildTerrainData(hardMaterials)
+  var recesses = newSeq[Table[(int, int, int), WallRecess]](layers.len)
+  for recess in wallRecesses:
+    recesses[recess.layer][(recess.x, recess.z, recess.facing)] = recess
   profileBlock "terrain geometry":
     for i in 0 ..< layers.len:
       let
@@ -4270,7 +4407,7 @@ proc bakeTerrain*(
       if layers[i].water:
         emitWaterLayer(layers[i])
       else:
-        emitLayer(i, layers[i], floorY, blockers)
+        emitLayer(i, layers[i], floorY, blockers, stairKind, stairTreads, recesses[i])
       layerVertexRanges.add first ..< (mesh.len div TerrainVertexSize)
       waterLayerRanges.add firstWater ..< (waterMesh.len div 6)
   rebuildTreeMesh()
@@ -4297,56 +4434,22 @@ proc updateTerrainEdges*(walkable: PathWalkable) =
   glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer)
   for layerIndex, offsets in tileTopOffsets:
     let width = layers[layerIndex].width
-    for i, offset in offsets:
-      if offset < 0:
+    for i, span in offsets:
+      if span.a > span.b:
         continue
+      let offset = span.a
       let mask = float32(pathing.edgeMask(
         layerIndex, i mod width, i div width, walkable = walkable))
       if mesh[offset + 3] == mask:
         continue
-      for vertex in 0 ..< 6:
-        mesh[offset + vertex * TerrainVertexSize + 3] = mask
+      for vertex in countup(span.a, span.b, TerrainVertexSize):
+        mesh[vertex + 3] = mask
       glBufferSubData(
         GL_ARRAY_BUFFER,
         offset * sizeof(float32),
-        6 * TerrainVertexSize * sizeof(float32),
+        span.len * sizeof(float32),
         mesh[offset].addr
       )
-
-proc setTerrainCutaways*(
-    shape: TerrainCutaway,
-    cuts: openArray[Vec4]
-) =
-  ## Keeps up to TerrainCutawaySlots bodies in view from a fixed camera.
-  ## Each cut is a body's feet (xyz) and size (w, scaling `shape`): terrain
-  ## above those feet that covers the body's ellipse on screen and sits
-  ## more than the clearance nearer the eye is not drawn. Lasts until the
-  ## next call; no cuts turns it off.
-  for i in 0 ..< TerrainCutawaySlots:
-    cutawayData[i] = if i < cuts.len: cuts[i] else: vec4(0)
-  cutawayView = vec4(normalize(shape.towardEye), shape.rise)
-  cutawayShape = vec4(
-    max(shape.halfWidth, 0.01'f32),
-    max(shape.halfHeight, 0.01'f32),
-    shape.clearance,
-    if cuts.len > 0: 1'f32 else: 0'f32
-  )
-
-proc setCutawayUniforms() =
-  ## Uploads the current cutaways to the bound terrain program.
-  glUniform4fv(
-    cutawaysLocation,
-    TerrainCutawaySlots.GLsizei,
-    cast[ptr float32](cutawayData.addr)
-  )
-  glUniform4f(
-    cutawayViewLocation,
-    cutawayView.x, cutawayView.y, cutawayView.z, cutawayView.w
-  )
-  glUniform4f(
-    cutawayShapeLocation,
-    cutawayShape.x, cutawayShape.y, cutawayShape.z, cutawayShape.w
-  )
 
 proc drawTerrainRange*(
     viewProjection: Mat4,
@@ -4374,7 +4477,6 @@ proc drawTerrainRange*(
   glUniform1f(heightBlendLocation, terrainHeightBlend)
   glUniform1f(visibilityOffsetLocation, visibilitySize.float32 / 2)
   glUniform1f(visibilityScaleLocation, 1.0'f / visibilitySize.float32)
-  setCutawayUniforms()
   glActiveTexture(GL_TEXTURE1)
   glBindTexture(GL_TEXTURE_2D, visibilityTexture)
   glUniform1i(visibilityTexLocation, 1)
@@ -4471,7 +4573,6 @@ proc drawTerrain*(viewProjection: Mat4, showEdges = false,
   glUniform1f(heightBlendLocation, terrainHeightBlend)
   glUniform1f(visibilityOffsetLocation, visibilitySize.float32 / 2)
   glUniform1f(visibilityScaleLocation, 1.0'f / visibilitySize.float32)
-  setCutawayUniforms()
   glActiveTexture(GL_TEXTURE1)
   glBindTexture(GL_TEXTURE_2D, visibilityTexture)
   glUniform1i(visibilityTexLocation, 1)

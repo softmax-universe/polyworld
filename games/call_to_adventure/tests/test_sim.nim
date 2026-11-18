@@ -259,6 +259,11 @@ block:
   mutates "actor entanglement": world.actors[0].entangledTicks = 5
   mutates "vines": world.vines.add VinePatch(center: world.actors[0].home,
     sprouted: 3)
+  mutates "actor frost": world.actors[0].frozenTicks = 6
+  mutates "glaciers": world.glaciers.add IceBlock(
+    tile: world.actors[0].home, raised: 3)
+  mutates "storms": world.storms.add Storm(center: world.actors[0].home,
+    started: 3)
   mutates "actor path":
     world.actors[0].path.add PathStep(
       tile: TileRef(level: 0, x: 12, z: 10), direction: East)
@@ -1821,3 +1826,277 @@ block:
   game.sendAt(druid, loner)
   doAssert game.world.actors[druid].action == SunOrb
   doAssert game.world.actors[druid].aim == game.world.actors[loner].home
+
+echo "Testing the Arcanist's bar is what it fights with"
+block:
+  doAssert HeroAbilities[WizardClass] == [Icicle, Glacier, Lightning, Blizzard]
+  doAssert ClassAttacks[WizardClass] == @[Icicle, SwordAttack]
+  doAssert ClassSkills[WizardClass] == @[Blizzard, Glacier]
+  doAssert Abilities[Icicle].freezeTicks == TickRate div 4
+  doAssert ShatterFreezeTicks == TickRate
+  doAssert ShatterTiles == 2
+  doAssert Abilities[Glacier].aimsAtTile and Abilities[Lightning].aimsAtTile
+  doAssert Abilities[Lightning].rangeTiles == 4
+  doAssert BlizzardTicks == TickRate * 3
+  doAssert Abilities[Blizzard].shape == RoundArea and
+    Abilities[Blizzard].radiusTiles == 3
+  # The heavy artillery shoots and storms whatever its light shows it, and
+  # its Icicle outranges the bow and the monster casters' bolts.
+  let sight = int16(ClassLightRadius[WizardClass])
+  doAssert Abilities[Icicle].rangeTiles >= sight
+  doAssert Abilities[Blizzard].rangeTiles >= sight
+  doAssert Abilities[Icicle].rangeTiles > Abilities[BowAttack].rangeTiles
+  doAssert Abilities[Icicle].rangeTiles > Abilities[HexBolt].rangeTiles
+
+proc mageArena(foes: int, species = DustlingSpecies): (Game, int32) =
+  ## The Arcanist alone with `foes` monsters that do not die, everyone
+  ## placed by hand.
+  var monsters: seq[Species]
+  for _ in 0 ..< foes:
+    monsters.add species
+  let
+    game = newArenaGame(2026, 4000, [WizardClass], monsters)
+    mage = int32(WizardClass.ord)
+  for slot in 0 ..< game.world.actors.len:
+    if game.world.actors[slot].alive:
+      game.world.actors[slot].hp = 30_000
+      game.world.actors[slot].maxHp = 30_000
+  (game, mage)
+
+echo "Testing frost slows a monster's swing and feet by a quarter"
+block:
+  let
+    (game, mage) = mageArena(1, BarrowWardenSpecies)
+    warden = int32(PartySize)
+    spec = Abilities[CrushingSlam]
+  discard mage
+  game.world.actors[warden].frozenTicks = 30_000
+  game.world.actors[warden].action = CrushingSlam
+  game.world.actors[warden].target = game.world.actors[warden].id
+  game.world.actors[warden].aim = game.world.actors[warden].home
+  var ticks = 0
+  while game.world.actors[warden].action == CrushingSlam:
+    game.tickWorld(idle)
+    inc ticks
+  let paced = int(spec.totalTicks) * int(FrostStallTicks) div
+    int(FrostStallTicks - 1)
+  doAssert ticks in paced .. paced + 1,
+    "a frozen slam took " & $ticks & " ticks, not about " & $paced
+
+echo "Testing an Icicle chips at its target and freezes it a moment"
+block:
+  let
+    (game, mage) = mageArena(1, BarrowWardenSpecies)
+    warden = int32(PartySize)
+    home = game.world.actors[mage].home
+  game.placeActor(int(warden), int32(home.x) - 4, int32(home.z))
+  game.world.rebuildClaims()
+  game.world.actors[warden].staggerTicks = 30_000
+  let before = game.world.actors[warden].hp
+  game.world.actors[mage].action = Icicle
+  game.world.actors[mage].target = game.world.actors[warden].id
+  game.world.actors[mage].aim = game.world.actors[warden].home
+  while game.world.actors[mage].actionTicks < Abilities[Icicle].impactTicks:
+    doAssert not game.world.actors[warden].frozen
+    game.tickWorld(idle)
+  doAssert game.world.actors[warden].hp < before
+  doAssert game.world.actors[warden].frozen
+  var frozen = 1
+  while game.world.actors[warden].frozen:
+    game.tickWorld(idle)
+    inc frozen
+  doAssert frozen == int(Abilities[Icicle].freezeTicks)
+
+echo "Testing a Glacier walls a tile off until an Icicle shatters it"
+block:
+  let
+    (game, mage) = mageArena(3)
+    home = game.world.actors[mage].home
+    x = int32(home.x)
+    z = int32(home.z)
+    near = int32(PartySize)
+    edge = near + 1
+    far = near + 2
+  proc tile(dx, dz: int32): TileRef =
+    TileRef(level: home.level, x: uint8(x + dx), z: uint8(z + dz))
+  game.placeActor(int(near), x - 5, z + 1)
+  game.placeActor(int(edge), x - 3, z + 1)
+  game.placeActor(int(far), x - 7, z - 3)
+  for slot in near .. far:
+    game.world.actors[slot].staggerTicks = 30_000
+  game.world.rebuildClaims()
+  game.castAt(mage, Glacier, tile(-5, -1))
+  let ice = tile(-5, -1)
+  doAssert game.world.glaciers.len == 1
+  doAssert game.world.iced(ice)
+  # Nobody's route crosses it, and a body walking straight at it stops.
+  game.world.actors[far].staggerTicks = 0
+  game.world.actors[far].frozenTicks = 0
+  doAssert game.world.setPath(far, tile(-3, 0))
+  for step in game.world.actors[far].path:
+    doAssert step.tile != ice, "a route ran through the ice"
+  doAssert not game.world.setPath(mage, ice) or
+    game.world.pathGoal(mage) != ice, "a route ended in the ice"
+  game.world.clearPath(mage)
+  game.world.actors[far].staggerTicks = 30_000
+  # Raised where someone stands, it goes up beside them instead.
+  game.castAt(mage, Glacier, game.world.actors[near].home)
+  doAssert game.world.glaciers.len == 2
+  doAssert game.world.glaciers[1].tile != game.world.actors[near].home
+  doAssert tileDistance(game.world.glaciers[1].tile,
+    game.world.actors[near].home) == 1
+  game.world.glaciers.setLen(1)
+  # The shatter freezes every foe within two tiles of it, and only them.
+  game.castAt(mage, Icicle, ice)
+  doAssert game.world.glaciers[0].shattered > 0
+  doAssert not game.world.iced(ice)
+  doAssert game.world.actors[near].frozen
+  doAssert not game.world.actors[edge].frozen
+  doAssert not game.world.actors[far].frozen
+  doAssert game.world.actors[near].frozenTicks >= ShatterFreezeTicks -
+    int16(Abilities[Icicle].recoverTicks) - 1
+  let warden = game.world.actors[near]
+  doAssert warden.speed == warden.baseSpeed * FrozenPercent div 100
+  # A Glacier nobody shoots melts in its own time.
+  game.castAt(mage, Glacier, tile(-2, -3))
+  for _ in 0 ..< int(GlacierTicks):
+    game.tickWorld(idle)
+  doAssert not game.world.iced(tile(-2, -3))
+
+echo "Testing Lightning lands its caster on the tile it aimed at"
+block:
+  let
+    (game, mage) = mageArena(1)
+    home = game.world.actors[mage].home
+    foe = int32(PartySize)
+  game.world.actors[foe].staggerTicks = 30_000
+  let landing = TileRef(level: home.level, x: home.x - 4, z: home.z + 1)
+  game.castAt(mage, Lightning, landing)
+  doAssert game.world.actors[mage].home == landing
+  doAssert game.world.claimant(landing) == mage
+  doAssert game.world.claimant(home) == -1
+  # Someone stood where it aimed: it stays put.
+  let blocked = game.world.actors[foe].home
+  game.castAt(mage, Lightning, blocked)
+  doAssert game.world.actors[mage].home == landing
+
+echo "Testing a Blizzard lands every wave on what stands in it"
+block:
+  let
+    (game, mage) = mageArena(2, BarrowWardenSpecies)
+    home = game.world.actors[mage].home
+    x = int32(home.x)
+    z = int32(home.z)
+    inside = int32(PartySize)
+    outside = inside + 1
+  game.placeActor(int(inside), x - 5, z + 2)
+  game.placeActor(int(outside), x - 5, z - 3)
+  for slot in [inside, outside]:
+    game.world.actors[slot].staggerTicks = 30_000
+    game.world.actors[slot].action = CrushingSlam
+    game.world.actors[slot].aim = game.world.actors[slot].home
+  game.world.rebuildClaims()
+  let center = TileRef(level: home.level, x: uint8(x - 5), z: uint8(z + 1))
+  var
+    waves = 0
+    hp = game.world.actors[inside].hp
+  let untouched = game.world.actors[outside].hp
+  game.world.actors[mage].action = Blizzard
+  game.world.actors[mage].target = game.world.actors[mage].id
+  game.world.actors[mage].aim = center
+  for _ in 0 ..< int(Abilities[Blizzard].totalTicks + BlizzardTicks):
+    game.tickWorld(idle)
+    for slot in [inside, outside]:
+      game.world.actors[slot].action = CrushingSlam
+    if game.world.actors[inside].hp < hp:
+      inc waves
+      hp = game.world.actors[inside].hp
+  doAssert waves == int(BlizzardTicks div BlizzardWaveTicks),
+    "waves landed: " & $waves
+  doAssert game.world.actors[outside].hp == untouched
+  doAssert game.world.storms.len == 0
+
+echo "Testing the Arcanist shoots its Glacier once foes crowd it"
+block:
+  let
+    (game, mage) = mageArena(3)
+    home = game.world.actors[mage].home
+    x = int32(home.x)
+    z = int32(home.z)
+  proc tile(dx, dz: int32): TileRef =
+    TileRef(level: home.level, x: uint8(x + dx), z: uint8(z + dz))
+  game.world.actors[mage].cooldowns[int(Blizzard)] = 30_000
+  game.world.actors[mage].cooldowns[int(Glacier)] = 30_000
+  game.world.glaciers.add IceBlock(side: HeroActor, tile: tile(-5, 0),
+    raised: game.world.tick)
+  for index in 0'i32 .. 2:
+    game.placeActor(int(PartySize + index), x - 6, z - 1 + index)
+    game.world.actors[PartySize + index].staggerTicks = 30_000
+  game.world.rebuildClaims()
+  game.world.rebuildVision()
+  game.sendAt(mage, int32(PartySize))
+  doAssert game.world.actors[mage].action == Icicle
+  doAssert game.world.actors[mage].target == game.world.actors[mage].id
+  doAssert game.world.actors[mage].aim == tile(-5, 0)
+  # Two of three round it: it waits for the third, shooting its target.
+  game.world.actors[mage].action = NoAbility
+  game.placeActor(int(PartySize + 2), x - 9, z + 3)
+  game.world.rebuildClaims()
+  game.sendAt(mage, int32(PartySize))
+  doAssert game.world.actors[mage].action == Icicle
+  doAssert game.world.actors[mage].target ==
+    game.world.actors[PartySize].id
+
+echo "Testing a cornered Arcanist strikes itself away with Lightning"
+block:
+  let
+    (game, mage) = mageArena(1)
+    home = game.world.actors[mage].home
+    foe = int32(PartySize)
+  game.world.actors[mage].cooldowns[int(Blizzard)] = 30_000
+  game.world.actors[mage].cooldowns[int(Glacier)] = 30_000
+  game.placeActor(int(foe), int32(home.x) - 1, int32(home.z))
+  game.world.actors[foe].staggerTicks = 30_000
+  game.world.rebuildClaims()
+  game.world.rebuildVision()
+  game.sendAt(mage, foe)
+  doAssert game.world.actors[mage].action == Lightning
+  let distance = tileDistance(game.world.actors[mage].aim,
+    game.world.actors[foe].home)
+  doAssert distance >= 3, "it landed " & $distance & " from its foe"
+  doAssert tileDistance(game.world.actors[mage].aim, home) <=
+    int32(Abilities[Lightning].rangeTiles)
+  # With Lightning spent it holds and shoots point blank instead.
+  game.world.actors[mage].action = NoAbility
+  game.world.actors[mage].cooldowns[int(Lightning)] = 30_000
+  game.sendAt(mage, foe)
+  doAssert game.world.actors[mage].action == Icicle
+
+echo "Testing the Arcanist beats a room of Dustlings with all four skills"
+block:
+  var monsters: seq[Species]
+  for _ in 0 ..< 10:
+    monsters.add DustlingSpecies
+  let
+    game = newArenaGame(2026, 4000, [WizardClass], monsters)
+    mage = int32(WizardClass.ord)
+  var
+    casts: array[Ability, int]
+    shattered = false
+  proc fightOn(game: Game, slot: int32) =
+    let enemy = game.nearestEnemy(slot, HeroAggroTiles)
+    if enemy >= 0:
+      game.sendAt(slot, enemy)
+  while game.world.arenaDecided == 0 and game.world.tick < 4000:
+    game.tickWorld(fightOn)
+    let actor = game.world.actors[mage]
+    if actor.busy and actor.actionTicks == 1:
+      inc casts[actor.action]
+    for glacier in game.world.glaciers:
+      if glacier.shattered > 0:
+        shattered = true
+  doAssert game.world.actors[mage].alive, "the Arcanist fell"
+  doAssert game.monstersOn(int(game.world.actors[mage].home.level)) == 0
+  for ability in HeroAbilities[WizardClass]:
+    doAssert casts[ability] > 0, $ability & " was never cast"
+  doAssert shattered, "no Glacier was shattered"

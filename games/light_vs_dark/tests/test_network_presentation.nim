@@ -120,7 +120,10 @@ suite "LvD network presentation":
     client.appliedTick(packet.tick)
     presentation.appliedTick()
     check presentation.frameAlpha(playback, stats, 10.001, 24) == 0
-    client.catchupPending = true
+    client.began = true
+    client.welcomed = true
+    client.requestHistory()
+    check client.catchingUp
     client.accept(RoomMessage(kind: TickPacket, match: 2, tick: 2).encode)
     check playback.takeTick(client, packet, 10.001, 24, true)
     check not playback.started

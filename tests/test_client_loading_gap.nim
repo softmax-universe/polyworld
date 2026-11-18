@@ -46,6 +46,8 @@ suite "Browser graphics loading gap":
     pump() # Initial Catchup -> CaughtUp(0), before graphics loading.
     check not clients[0].catchupPending
     check not clients[1].catchupPending
+    check not clients[0].catchingUp
+    check not clients[1].catchingUp
 
     # About four seconds of synchronous graphics loading: callbacks cannot pump
     # and neither browser can publish AppliedTick. Relay only pushes ticks 1..16.
@@ -59,6 +61,8 @@ suite "Browser graphics loading gap":
       check client.applied == 16
     pump()
     # Actual first host pick is accepted, but cannot be applied while stranded.
+    for client in clients:
+      check client.catchingUp
     check clients[0].submit(0, "ordinary queued host hero selection")
     pump()
     relay.advance(97.0 * 0.05)
@@ -95,6 +99,7 @@ suite "Browser graphics loading gap":
       check received[i].len == 97
       check selections[i] == @["ordinary queued host hero selection"]
       check not client.catchupPending
+      check not client.catchingUp
     check clients[1].submit(5, "ordinary queued guest hero selection")
     pump()
     relay.advance(98.0 * 0.05)

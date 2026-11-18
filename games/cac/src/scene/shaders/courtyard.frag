@@ -96,7 +96,7 @@ void main() {
         base *= 1.0 - pore * 0.06;
         float edge = max(smoothstep(8.4, 10.2, abs(p.x)),
                          smoothstep(5.6, 8.5, abs(p.z)));
-        if (playerCount > 2)
+        if (arenaRadius > 0.0)
             edge = smoothstep(arenaRadius - 1.6, arenaRadius + 0.1, length(p.xz));
         float moss = smoothstep(0.55, 0.76, broad) * edge *
             (0.35 + 0.45 * max(n.y, 0.0));
@@ -136,7 +136,7 @@ void main() {
     vec3 ambient = mix(vec3(0.33, 0.35, 0.39), vec3(0.62, 0.64, 0.68),
                        max(0.0, n.y));
     vec3 lighting = ambient + vec3(0.67, 0.53, 0.36) * diffuse * sun;
-    if (playerCount > 2) {
+    if (arenaRadius > 0.0) {
         // Six nearest lamps keep cost fixed as more islands are added. Their
         // radial positions exactly match the reused lantern meshes, without
         // imposing a uniform-array limit on the number of player balconies.
@@ -148,6 +148,7 @@ void main() {
         float stepAngle = 6.28318530718 / count;
         float nearest = floor(atan(-lp.x, lp.z + 0.00001) / stepAngle + 0.5);
         for (int offset = -1; offset <= 1; offset++) {
+            if (playerCount == 2 && offset == 1) continue;
             float seat = mod(nearest + float(offset), count);
             float yaw = seat * stepAngle;
             for (int end = -1; end <= 1; end += 2) {
@@ -168,7 +169,7 @@ void main() {
     }
     if (material > 3.5 && material < 4.5)
         result = vec3(1.0, 0.68, 0.25) * (0.95 + 0.04 * sin(time * 6.0));
-    float sceneScale = playerCount > 2 ? 11.5 / max(arenaRadius, 11.5) : 1.0;
+    float sceneScale = arenaRadius > 0.0 ? 11.5 / max(arenaRadius, 11.5) : 1.0;
     float depth = max(0.0, -p.z * cameraSide * sceneScale - 8.0);
     float fog = 1.0 - exp(-depth * 0.055);
     vec3 mist = vec3(0.035, 0.055, 0.10);

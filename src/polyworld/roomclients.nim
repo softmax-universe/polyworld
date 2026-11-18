@@ -26,6 +26,12 @@ type
     lastHash, finalHash: RoomMessage
     retainedNotice: RoomMessage
     noticeShown: bool
+    recoveryReplyPending: bool
+    recoveryTarget: uint32
+
+proc catchingUp*(client: RoomClient): bool =
+  ## Distinguishes missing match history from a routine live-edge probe.
+  client.recoveryReplyPending or client.applied < client.recoveryTarget
 
 proc send*(client: RoomClient, message: RoomMessage) =
   ## Adds a bounded control operation to the transport outbox.
@@ -58,14 +64,19 @@ proc lost*(client: RoomClient) =
   client.connected = false
   client.welcomed = false
   client.catchupPending = false
+  client.recoveryReplyPending = client.began
   client.status = "Disconnected. Reconnecting with the same seats."
   client.outgoing.setLen(0)
   for pending in client.pending.mitems:
     pending.sent = false
 
-proc requestHistory*(client: RoomClient) =
-  ## Requests a bounded history batch starting after the applied tick.
-  if not client.welcomed or not client.began or client.catchupPending:
+proc requestHistory*(client: RoomClient, recovery = true) =
+  ## Requests recovery or probes the live edge without blocking gameplay.
+  if not client.welcomed or not client.began:
+    return
+  if recovery:
+    client.recoveryReplyPending = true
+  if client.catchupPending:
     return
   client.send(RoomMessage(
     kind: Catchup, match: client.match, tick: client.applied
@@ -134,6 +145,8 @@ proc accept*(client: RoomClient, bytes: string) =
       client.pending.setLen(0)
       client.packets.setLen(0)
       client.catchupPending = false
+      client.recoveryReplyPending = false
+      client.recoveryTarget = 0
       client.lastHash = RoomMessage()
       client.finalHash = RoomMessage()
       client.retainedNotice = RoomMessage()
@@ -151,6 +164,9 @@ proc accept*(client: RoomClient, bytes: string) =
       client.sequence = 0
       client.packets.setLen(0)
       client.pending.setLen(0)
+      client.catchupPending = false
+      client.recoveryReplyPending = false
+      client.recoveryTarget = 0
       client.events.add message
       client.requestHistory()
   of TickPacket:
@@ -188,8 +204,12 @@ proc accept*(client: RoomClient, bytes: string) =
   of CaughtUp:
     if message.match != client.match:
       reject("Catch-up belongs to another match")
+    let recovering = client.catchingUp or message.tick < message.number
     client.catchupPending = false
+    client.recoveryReplyPending = false
     client.serverTick = max(client.serverTick, message.number)
+    if recovering:
+      client.recoveryTarget = max(client.recoveryTarget, message.number)
     if client.applied == message.number:
       client.send(RoomMessage(
         kind: AppliedTick, match: client.match, tick: client.applied
@@ -255,4 +275,4 @@ proc appliedTick*(client: RoomClient, tick: uint32) =
   if client.packets.len == 0 and
       (client.snapshot.phase in {Playing, Waiting} or
         (client.snapshot.phase == Ended and client.serverTick > client.applied)):
-    client.requestHistory()
+    client.requestHistory(recovery = false)

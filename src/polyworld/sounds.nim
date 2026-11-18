@@ -51,7 +51,7 @@ proc isInterfaceSound*(cue: SoundCue): bool =
 proc soundCooldown*(cue: SoundCue): float64 =
   ## Prevents repeated events and dense armies from overwhelming the mix.
   case cue
-  of HoverSound:
+  of HoverSound, CardDrawSound, CardPlaySound:
     0.09
   of ChopSound:
     0.45
@@ -132,6 +132,8 @@ proc cueGain(cue: SoundCue): float32 =
   case cue
   of HoverSound:
     0.15'f
+  of CardDrawSound, CardPlaySound:
+    0.50'f
   of ChopSound, MineSound:
     0.30'f
   of DeliverWoodSound, DeliverGoldSound, BuildPlaceSound:

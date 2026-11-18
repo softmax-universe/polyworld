@@ -16,7 +16,7 @@ const
   ReplayFormatVersion* = 7'u16
   ## This client supports only this gameplay version. Bump it when rules change.
   ## Older replays use their archived client; never add compatibility branches.
-  ReplayGameVersion* = 47'u16
+  ReplayGameVersion* = 48'u16
 
   ActionMove* = 1'u8
   ActionAttack* = 2'u8
@@ -64,7 +64,7 @@ type
     playerId*: int32
     kind*: uint8
     append*: bool
-      ## Append move, attack-move, attack, harvest, or deposit to a unit FIFO.
+      ## Appends a unit order to its FIFO instead of replacing its assignment.
     offset*: FixedVec2
       ## Movement and ground aim offsets from the named tile center.
     entityId*: int32

@@ -79,12 +79,14 @@ proc issueHeroAction(action: ReplayAction): int32 =
     return 0
   if not action.validReplayPayload():
     return 0
-  if activeGame.historyPlayback:
+  if activeGame.warmingPolicies:
     let player = activeGame.replayPlayer
     if player != nil and
         player.data.actions.takeMatchingAction(player.actionIndex, action):
       return int32(activeGame.applyHeroAction(
         activeHeroSlot, player.data.actions[player.actionIndex - 1]))
+    return 0
+  if activeGame.historyPlayback:
     return 0
   if activeGame.recorder != nil:
     activeGame.recorder.recordAction(
@@ -137,7 +139,7 @@ proc sendChat*(
       sender notin 0 ..< game.inboxes.len or target != -2 or
       text.len == 0 or text.len > MaxChatBytes:
     return 0
-  if game.historyPlayback:
+  if game.warmingPolicies:
     let player = game.replayPlayer
     if player != nil and not player.finished:
       let action = player.data.actions[player.actionIndex]
@@ -152,7 +154,7 @@ proc sendChat*(
           inc player.actionIndex
         return
     return 0
-  if game.replayMode:
+  if game.replayMode or game.historyPlayback:
     return 0
   let origin = game.world.actors[sender].home
   var recipients = 0'u8

@@ -264,6 +264,7 @@ proc initializeMatch*() =
       options.validateResume(replayData.hashes.len, setup.players.len)
       loadBots(run, options.botGroups.expandBotSources(
         controllerKinds(setup.players.len, 0)))
+      run.warmingPolicies = true
       run.maximumTicks = maximumTicks
   else:
     let playerCount = options.botGroups.botCount + int(options.playerSlot > 0)
@@ -318,12 +319,12 @@ proc decide(w: World) =
   if run.historyPlayback:
     if run.recorder != nil:
       run.replayPlayer.data = run.recorder.data
-    if options.resumeStep >= 0 and w.tick > 0 and
+    if run.warmingPolicies and w.tick > 0 and
         w.tick mod DecisionTicks == 0:
       runBotDecisions(run)
     var action: ReplayAction
     while run.replayPlayer.takeActionAt(uint32(w.tick), action):
-      if action.kind != ActionChat or options.resumeStep >= 0:
+      if action.kind != ActionChat or run.warmingPolicies:
         run.applyRecordedAction(action)
   else:
     flushPlayerCommands(run)
@@ -342,8 +343,7 @@ proc verifyTick(game: Game) =
 
 proc resumeIfReady() =
   ## Hands control to the warmed policies after the verified replay prefix.
-  if options.resumeStep >= 0 and run.historyPlayback and
-      run.world.tick == options.resumeStep:
+  if run.warmingPolicies and run.world.tick == options.resumeStep:
     run.hashCheck.requireReplayComplete(uint32(run.world.tick),
       int(options.resumeStep))
     run.recorder = ReplayRecorder(data: run.replayData.replayPrefix(
@@ -353,6 +353,7 @@ proc resumeIfReady() =
         inc run.recorder.chatCount
     run.recorder.data.config.players =
       localGameConfig(options, run.world.players.len).players
+    run.warmingPolicies = false
     run.historyPlayback = false
     run.replayMode = false
 
@@ -361,7 +362,7 @@ proc advanceGame*() =
   if run.historyPlayback and run.world.tick == 0:
     if run.recorder != nil:
       run.replayPlayer.data = run.recorder.data
-    if options.resumeStep >= 0:
+    if run.warmingPolicies:
       decide(run.world)
     else:
       run.replayPlayer.syncCursor(0)
@@ -422,7 +423,7 @@ proc runHeadless*() =
   var
     pacer = initTickPacer(options.headlessTickRate)
     pollers: seq[RequestPoll]
-  if options.waitForLlm and (not run.replayMode or options.resumeStep >= 0):
+  if options.waitForLlm and (not run.replayMode or run.warmingPolicies):
     for vm in run.brains:
       if vm != nil:
         pollers.add vm.pollRequests

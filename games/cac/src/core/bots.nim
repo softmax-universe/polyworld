@@ -32,7 +32,9 @@ type
   BotVm* = ref object
     runtime*: Runtime
     failed*: bool  ## Compilation or presentation failure stops this script.
-    watching*: bool  ## Replay warm-up suppresses outgoing messages.
+    warmingPolicies*: bool
+      ## Selected policies execute with recorded setup and actions authoritative.
+      ## Suppresses new mail; callbacks may admit recorded messages inline.
     lastError*: string  ## Why the last decision (or the compile) failed.
     output*: PrintProc  ## Where the script's PRINT goes (nil: nowhere).
     onSendChat*: proc(sender, target: int, text: openArray[char]): int32
@@ -321,7 +323,7 @@ proc buildBotHost(playerId: int32, policySlot = -1): Host =
   # Mailboxes, as in the other Polyworld games.
   let sendChatProc: NumericHostProc = proc(args: openArray[Value]): Value =
     ## Sends one explicit message from the owning seat.
-    if activeVm.watching and activeVm.onSendChat == nil:
+    if activeVm.warmingPolicies and activeVm.onSendChat == nil:
       return toValue(0'i32)
     activeVm.runtime.withString(args[1], text):
       if activeVm.onSendChat == nil:

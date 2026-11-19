@@ -17,9 +17,9 @@ type
     tick*: uint32  ## Actions taken so far.
     maxTicks*: uint32
     recorder*: ReplayRecorder
-    warmup*: ReplayData
+    replayData*: ReplayData
     resumeStep*: uint32
-    warmupCursor: ReplayCursor
+    replayCursor: ReplayCursor
     scriptError*: proc(player: int, message: string)
       ## Called when a seat fails to supply a legal action.
     failed*: bool  ## No valid explicit action was supplied.
@@ -74,25 +74,30 @@ proc nextAction(match: var BotMatch): ReplayAction =
   if match.scriptError != nil:
     match.scriptError(player, message)
 
+proc warmingPolicies*(match: BotMatch): bool =
+  ## Selected policies execute while recorded setup and actions
+  ## remain authoritative.
+  match.tick < match.resumeStep
+
 proc step*(match: var BotMatch): bool =
   ## Plays one tick. False once the match is over.
   if match.outcome != MatchRunning:
     return false
   var action: ReplayAction
-  if match.tick < match.resumeStep:
+  if match.warmingPolicies:
     let
       vm = match.bots[match.game.actingPlayer()]
-      first = match.warmupCursor.actionIndex
-      cursor = addr match.warmupCursor
-      data = match.warmup
+      first = match.replayCursor.actionIndex
+      replayCursor = addr match.replayCursor
+      replayData = match.replayData
       tick = match.tick
-    cursor.inboxes = inboxes
-    vm.watching = true
+    replayCursor.inboxes = inboxes
+    vm.warmingPolicies = true
     vm.onSendChat = proc(sender, target: int,
         text: openArray[char]): int32 =
-      if cursor.actionIndex >= data.actions.len:
+      if replayCursor.actionIndex >= replayData.actions.len:
         return
-      let recorded = data.actions[cursor.actionIndex]
+      let recorded = replayData.actions[replayCursor.actionIndex]
       if recorded.kind != ActionMailbox or recorded.tick != tick or
           recorded.playerId != sender or recorded.target != target or
           recorded.text.len != text.len:
@@ -100,21 +105,21 @@ proc step*(match: var BotMatch): bool =
       for index, value in text:
         if recorded.text[index] != value:
           return
-      result = cursor.inboxes.applyMailbox(recorded)
+      result = replayCursor.inboxes.applyMailbox(recorded)
       if result > 0:
-        inc cursor.actionIndex
+        inc replayCursor.actionIndex
     try:
       discard vm.runDecision(match.game, apply = false)
     finally:
-      vm.watching = false
+      vm.warmingPolicies = false
       vm.onSendChat = nil
-    # Admit this decision's original messages, stopping at its game action.
-    if not match.warmup.takeReplayAction(
-      match.warmupCursor, match.tick, action
+    # Admit remaining recorded messages, stopping at the recorded game action.
+    if not match.replayData.takeReplayAction(
+      match.replayCursor, match.tick, action
     ):
       raise newException(ReplayError, "Replay gameplay action is missing")
-    for index in first ..< match.warmupCursor.actionIndex - 1:
-      match.recorder.record(match.warmup.actions[index])
+    for index in first ..< match.replayCursor.actionIndex - 1:
+      match.recorder.record(match.replayData.actions[index])
     if not match.game.applyAction(action):
       raise newException(ReplayError, "Replay action refused during warm-up")
   else:
@@ -125,7 +130,7 @@ proc step*(match: var BotMatch): bool =
   inc match.tick
   action.tick = match.tick
   if match.tick <= match.resumeStep and
-      match.game.stateHash != match.warmup.hashes[match.tick.int - 1]:
+      match.game.stateHash != match.replayData.hashes[match.tick.int - 1]:
     raise newException(ReplayError, "Replay hash mismatch during warm-up")
   if match.recorder != nil:
     match.recorder.record(action)

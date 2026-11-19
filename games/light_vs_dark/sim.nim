@@ -212,6 +212,8 @@ type
     hashCheck*: ReplayHashCheck
     historyPlayback*: bool
     replayMode*: bool
+    warmingPolicies*: bool
+      ## Runs selected policies while recorded actions remain authoritative.
     networked*: bool
     submissions*: seq[ReplayAction]
     chatSubmissions*: seq[ChatSubmission]
@@ -3189,9 +3191,11 @@ proc applyDiplomacy*(
   offerId = 0'i32
 ): bool =
   ## Records an accepted diplomacy command through the normal action tape.
-  if game.historyPlayback:
+  if game.warmingPolicies:
     return game.replayCommand(ActionDiplomacy, player, NoEntity, other,
       int32(command.ord), offerId)
+  if game.historyPlayback:
+    return false
   if game.networked:
     return game.queueNetworkAction(ActionDiplomacy, player, NoEntity, other,
       int32(command.ord), offerId)
@@ -3206,9 +3210,11 @@ proc applyMove*(
     append = false
 ): bool =
   ## Walks a unit to a tile and records the command when accepted.
-  if game.historyPlayback:
+  if game.warmingPolicies:
     return game.replayCommand(ActionMove, player, unitId, x, y,
       offset = offset, append = append)
+  if game.historyPlayback:
+    return false
   if game.networked:
     return game.queueNetworkAction(ActionMove, player, unitId, x, y, offset = offset, append = append)
   result = game.world.applyMove(player, unitId, x, y, offset, append)
@@ -3221,9 +3227,11 @@ proc applyAttackMove*(
     append = false
 ): bool =
   ## Attack-moves a unit and records the command when accepted.
-  if game.historyPlayback:
+  if game.warmingPolicies:
     return game.replayCommand(ActionAttackMove, player, unitId, x, y,
       offset = offset, append = append)
+  if game.historyPlayback:
+    return false
   if game.networked:
     return game.queueNetworkAction(ActionAttackMove, player, unitId, x, y, offset = offset, append = append)
   result = game.world.applyAttackMove(player, unitId, x, y, offset, append)
@@ -3235,9 +3243,11 @@ proc applyAttack*(
     game: Game, player, unitId, targetId: int32, append = false
 ): bool =
   ## Sends a unit after an enemy and records the command when accepted.
-  if game.historyPlayback:
+  if game.warmingPolicies:
     return game.replayCommand(ActionAttack, player, unitId, targetId,
       append = append)
+  if game.historyPlayback:
+    return false
   if game.networked:
     return game.queueNetworkAction(ActionAttack, player, unitId, targetId, append = append)
   result = game.world.applyAttack(player, unitId, targetId, append)
@@ -3249,9 +3259,11 @@ proc applyHarvest*(
     game: Game, player, unitId, target, isTree: int32, append = false
 ): bool =
   ## Puts a peon on a gold mine or a tree and records the command.
-  if game.historyPlayback:
+  if game.warmingPolicies:
     return game.replayCommand(ActionHarvest, player, unitId, target, isTree,
       append = append)
+  if game.historyPlayback:
+    return false
   if game.networked:
     return game.queueNetworkAction(ActionHarvest, player, unitId, target, isTree, append = append)
   result = game.world.applyHarvest(player, unitId, target, isTree, append)
@@ -3263,9 +3275,11 @@ proc applyDeposit*(
     game: Game, player, unitId, depotId: int32, append = false
 ): bool =
   ## Records or submits a return-cargo order through the authoritative path.
-  if game.historyPlayback:
+  if game.warmingPolicies:
     return game.replayCommand(ActionDeposit, player, unitId, depotId,
       append = append)
+  if game.historyPlayback:
+    return false
   if game.networked:
     return game.queueNetworkAction(ActionDeposit, player, unitId, depotId,
       append = append)
@@ -3278,9 +3292,11 @@ proc applyBuild*(
     game: Game, player, peonId, kindValue, x, y: int32, append = false
 ): bool =
   ## Starts a building and records the command when accepted.
-  if game.historyPlayback:
+  if game.warmingPolicies:
     return game.replayCommand(ActionBuild, player, peonId, kindValue, x, y,
       append = append)
+  if game.historyPlayback:
+    return false
   if game.networked:
     return game.queueNetworkAction(ActionBuild, player, peonId, kindValue, x, y,
       append = append)
@@ -3293,8 +3309,10 @@ proc applyTrain*(
     game: Game, player, buildingId, kindValue: int32
 ): bool =
   ## Queues one unit and records the command when accepted.
-  if game.historyPlayback:
+  if game.warmingPolicies:
     return game.replayCommand(ActionTrain, player, buildingId, kindValue)
+  if game.historyPlayback:
+    return false
   if game.networked:
     return game.queueNetworkAction(ActionTrain, player, buildingId, kindValue)
   result = game.world.applyTrain(player, buildingId, kindValue)
@@ -3304,8 +3322,10 @@ proc applyTrain*(
 
 proc applyResearch*(game: Game, player, buildingId, kindValue: int32): bool =
   ## Record only accepted local actions; online commands wait for relay ticks.
-  if game.historyPlayback:
+  if game.warmingPolicies:
     return game.replayCommand(ActionResearch, player, buildingId, kindValue)
+  if game.historyPlayback:
+    return false
   if game.networked:
     return game.queueNetworkAction(ActionResearch, player, buildingId, kindValue)
   result = game.world.applyResearch(player, buildingId, kindValue)
@@ -3317,8 +3337,10 @@ proc applySetRally*(
     game: Game, player, buildingId, x, y: int32
 ): bool =
   ## Sets a rally point and records the command when accepted.
-  if game.historyPlayback:
+  if game.warmingPolicies:
     return game.replayCommand(ActionSetRally, player, buildingId, x, y)
+  if game.historyPlayback:
+    return false
   if game.networked:
     return game.queueNetworkAction(ActionSetRally, player, buildingId, x, y)
   result = game.world.applySetRally(player, buildingId, x, y)
@@ -3330,8 +3352,10 @@ proc applyCancel*(
     game: Game, player, entityId: int32
 ): bool =
   ## Cancels an order and records the command when accepted.
-  if game.historyPlayback:
+  if game.warmingPolicies:
     return game.replayCommand(ActionCancel, player, entityId)
+  if game.historyPlayback:
+    return false
   if game.networked:
     return game.queueNetworkAction(ActionCancel, player, entityId)
   result = game.world.applyCancel(player, entityId)

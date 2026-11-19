@@ -298,7 +298,7 @@ proc sendChat*(
     game: Game, sender, target: int, text: openArray[char]
 ): int32 =
   ## Sends local mailbox traffic or queues it for authoritative delivery.
-  if game.watchingPolicies:
+  if game.warmingPolicies:
     if sender notin 0 ..< game.inboxes.len or
       target < -2 or target >= game.inboxes.len or
       text.len == 0 or text.len > MaxChatBytes:
@@ -502,7 +502,7 @@ proc publishActionResult*(game: Game, heroId: int32, accepted: bool) =
 
 proc requestAction(action: ReplayAction): bool =
   ## Preserves immediate offline results and queue-only multiplayer results.
-  if activeGame.watchingPolicies:
+  if activeGame.warmingPolicies:
     let player = activeGame.replayPlayer
     if player.data.actions.takeMatchingAction(player.actionIndex, action):
       result = activeGame.applyReplayCommand(
@@ -1027,7 +1027,7 @@ proc runHeroScript(game: Game, index: int) =
     hero = game.world.heroes[index]
     vm = game.heroVms[index]
   defer:
-    if game.watchingPolicies:
+    if game.warmingPolicies:
       let player = game.replayPlayer
       while player.actionIndex < player.data.actions.len:
         let action = player.data.actions[player.actionIndex]
@@ -1130,6 +1130,6 @@ proc runBotDecisions*(game: Game) {.measure.} =
   for offset in 0 ..< game.world.heroes.len:
     let index = (game.world.heroTurnStart + offset) mod game.world.heroes.len
     runHeroScript(game, index)
-  if not game.networked and not game.watchingPolicies:
+  if not game.networked and not game.warmingPolicies:
     game.world.heroTurnStart =
       (game.world.heroTurnStart + 1) mod game.world.heroes.len

@@ -37,7 +37,7 @@ let
 resumed.loadBotSources([Candidate, Candidate])
 resumed.replayPlayer = initReplayPlayer(tape)
 resumed.historyPlayback = true
-resumed.watchingPolicies = true
+resumed.warmingPolicies = true
 resumed.applyReplayActions(0)
 resumed.applyReplayActions(0)
 for inbox in resumed.inboxes:
@@ -64,7 +64,7 @@ for vm in resumed.heroVms:
 resumed.recorder = initReplayRecorder(resumed.currentSetup(12), map.preset)
 resumed.historyPlayback = false
 resumed.replayMode = false
-resumed.watchingPolicies = false
+resumed.warmingPolicies = false
 resumed.tickWorld(proc() = resumed.runBotDecisions())
 doAssert resumed.recorder.data.actions.len == 4
 var chatCount = 0
@@ -84,12 +84,12 @@ let immediate = newGame(map, 240, 0, true, tape)
 immediate.loadBotSources([Candidate, Candidate])
 immediate.replayPlayer = initReplayPlayer(tape)
 immediate.historyPlayback = true
-immediate.watchingPolicies = true
+immediate.warmingPolicies = true
 immediate.applyReplayActions(0)
 immediate.recorder = ReplayRecorder(data: replayPrefix(tape, 0))
 immediate.historyPlayback = false
 immediate.replayMode = false
-immediate.watchingPolicies = false
+immediate.warmingPolicies = false
 immediate.tickWorld(proc() = immediate.runBotDecisions())
 for vm in immediate.heroVms:
   doAssert vm.runtime.getGlobal("count") == 1
@@ -127,28 +127,28 @@ proc checkFeedback(mixed: bool) =
           expected[slot][i] = vm.runtime.getGlobal(name)
   let
     recorded = live.recorder.data
-    watching = newGame(map, 240, 0, true, recorded)
-  watching.loadBotSources([if mixed: Candidate else: Feedback, Feedback])
-  watching.replayPlayer = initReplayPlayer(recorded)
-  watching.historyPlayback = true
-  watching.watchingPolicies = true
+    policyReplay = newGame(map, 240, 0, true, recorded)
+  policyReplay.loadBotSources([if mixed: Candidate else: Feedback, Feedback])
+  policyReplay.replayPlayer = initReplayPlayer(recorded)
+  policyReplay.historyPlayback = true
+  policyReplay.warmingPolicies = true
   for tick in 1 .. 4:
-    watching.tickWorld(proc() = watching.runBotDecisions())
-    doAssert watching.stateHash() == recorded.hashes[tick - 1]
-  for slot, vm in watching.heroVms:
+    policyReplay.tickWorld(proc() = policyReplay.runBotDecisions())
+    doAssert policyReplay.stateHash() == recorded.hashes[tick - 1]
+  for slot, vm in policyReplay.heroVms:
     doAssert not vm.failed, vm.lastError
     if not mixed or slot == 1:
       for i, name in Names:
         doAssert vm.runtime.getGlobal(name) == expected[slot][i], name
   if not mixed:
-    watching.recorder = ReplayRecorder(data: replayPrefix(recorded, 4))
-    watching.historyPlayback = false
-    watching.replayMode = false
-    watching.watchingPolicies = false
+    policyReplay.recorder = ReplayRecorder(data: replayPrefix(recorded, 4))
+    policyReplay.historyPlayback = false
+    policyReplay.replayMode = false
+    policyReplay.warmingPolicies = false
     for tick in 5 .. 6:
-      watching.tickWorld(proc() = watching.runBotDecisions())
-    doAssert watching.recorder.data.actions == recorded.actions
-    doAssert watching.recorder.data.hashes == recorded.hashes
+      policyReplay.tickWorld(proc() = policyReplay.runBotDecisions())
+    doAssert policyReplay.recorder.data.actions == recorded.actions
+    doAssert policyReplay.recorder.data.hashes == recorded.hashes
 
 checkFeedback(false)
 checkFeedback(true)
@@ -163,7 +163,7 @@ discard full.inboxes[0].pop()
 doAssert full.sendChat(0, 0, "retry") == 1
 full.replayPlayer = initReplayPlayer(full.recorder.data)
 full.recorder = nil
-full.watchingPolicies = true
+full.warmingPolicies = true
 doAssert full.sendChat(0, 0, "retry") == 0
 doAssert full.replayPlayer.actionIndex == 1
 discard full.inboxes[0].pop()

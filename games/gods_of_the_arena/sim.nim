@@ -391,7 +391,8 @@ type
     countedReplayActions, replayCommands: int
     hashCheck*: ReplayHashCheck
     historyPlayback*: bool
-    watchingPolicies*: bool
+    warmingPolicies*: bool
+      ## Runs selected policies while recorded actions remain authoritative.
     replayMode*: bool
     recordingError*: string
     networked*: bool
@@ -5585,8 +5586,8 @@ proc applyReplayCommand*(game: Game, action: ReplayAction): bool =
   of ActionHumanChat, ActionSystemNotice:
     discard
   of ActionPolicyChat:
-    # Watching policies consume recorded messages through their normal inboxes.
-    if not game.historyPlayback or game.watchingPolicies:
+    # Warming policies consume recorded messages through their normal inboxes.
+    if not game.historyPlayback or game.warmingPolicies:
       discard game.deliverPolicyChat(
         game.world.heroIndex(action.heroId), int(action.first), action.text)
   else:
@@ -6346,7 +6347,7 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
     let decide = world.heroTurnTicks <= 0
     if decide:
       world.heroTurnTicks = TickRate div 2
-    if game.watchingPolicies and decide and onHeroTurn != nil:
+    if game.warmingPolicies and decide and onHeroTurn != nil:
       onHeroTurn()
     if game.historyPlayback:
       game.applyReplayActions(uint32(world.tick))
@@ -6391,7 +6392,7 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
     discard world.freezeObservations()
     defer:
       world.thawObservations()
-    if game.watchingPolicies and world.heroTurnTicks <= 1 and
+    if game.warmingPolicies and world.heroTurnTicks <= 1 and
         onHeroTurn != nil:
       onHeroTurn()
     if game.historyPlayback:

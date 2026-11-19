@@ -190,7 +190,7 @@ proc initializeMatch*() =
     run.historyPlayback = true
     options.validateResume(replayData.hashes.len, run.world.heroes.len)
     if options.resumeStep >= 0:
-      run.watchingPolicies = true
+      run.warmingPolicies = true
       loadBots(run, options.botGroups)
       run.applyReplayActions(0)
   else:
@@ -367,12 +367,12 @@ when defined(headless):
       steps = 0
       pacer = initTickPacer(options.headlessTickRate)
       pollers: seq[RequestPoll]
-    if options.waitForLlm and (not run.replayMode or run.watchingPolicies):
+    if options.waitForLlm and (not run.replayMode or run.warmingPolicies):
       for vm in run.heroVms:
         if vm != nil:
           pollers.add vm.pollRequests
     while run.recordingError.len == 0:
-      if run.watchingPolicies and run.world.tick == options.resumeStep:
+      if run.warmingPolicies and run.world.tick == options.resumeStep:
         run.hashCheck.requireReplayComplete(run.world.tick.uint32,
           options.resumeStep.int)
         run.recorder = ReplayRecorder(
@@ -382,7 +382,7 @@ when defined(headless):
         run.recorder.data.config.playerSlot = 0
         run.replayMode = false
         run.historyPlayback = false
-        run.watchingPolicies = false
+        run.warmingPolicies = false
       if (if run.replayMode: steps >= run.replayData.hashes.len
           else: run.finished()):
         break

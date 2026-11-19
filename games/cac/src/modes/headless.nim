@@ -87,11 +87,11 @@ proc runHeadless*() =
   let seats = options.botGroups.botCount
   if seats notin 2 .. MaxPlayers:
     fail("supply 2 to " & $MaxPlayers & " bots with --bot PATH[:COUNT]")
-  var warmup: ReplayData
+  var replayData: ReplayData
   if options.resumeStep >= 0:
-    warmup = loadReplay(options.replayPath)
-    options.validateResume(warmup.hashes.len,
-      warmup.header.setup.classes.len)
+    replayData = loadReplay(options.replayPath)
+    options.validateResume(replayData.hashes.len,
+      replayData.header.setup.classes.len)
     if parsed.classNames.len > 0:
       fail("--resume-step uses the replay's recorded classes and decks")
   var classOverride: seq[Seat]
@@ -110,21 +110,21 @@ proc runHeadless*() =
   let
     bots = loadBots(sources)
     seed =
-      if options.resumeStep >= 0: warmup.header.setup.seed
+      if options.resumeStep >= 0: replayData.header.setup.seed
       else: options.seed
     maxTicks =
-      if options.resumeStep >= 0: warmup.header.setup.maximumTicks
+      if options.resumeStep >= 0: replayData.header.setup.maximumTicks
       else: options.maximumTicks.uint32
   for bot in bots:
     if bot != nil:
-      bot.watching = options.resumeStep >= 0
+      bot.warmingPolicies = options.resumeStep >= 0
   let
     selected =
       if classOverride.len == 0 or options.resumeStep >= 0:
         setupBotSeats(bots, seed.int64, options.resumeStep < 0)
       else: classOverride
     seated =
-      if options.resumeStep >= 0: warmup.header.setup.seats()
+      if options.resumeStep >= 0: replayData.header.setup.seats()
       elif classOverride.len > 0: classOverride
       else: selected
     recorder = initReplayRecorder(
@@ -133,14 +133,14 @@ proc runHeadless*() =
         maxTicks: maxTicks.int32))
   for bot in bots:
     if bot != nil:
-      bot.watching = false
+      bot.warmingPolicies = false
   for player, bot in bots:
     for problem in bot.deckProblems:
       echo "player ", player, " illegal deck: ", problem
   var played = initBotMatch(seated, seed.int64, bots,
     maxTicks, recorder)
   if options.resumeStep >= 0:
-    played.warmup = warmup
+    played.replayData = replayData
     played.resumeStep = options.resumeStep.uint32
   played.scriptError = proc(player: int, message: string) =
     echo "player ", player, " BASIC error: ", message

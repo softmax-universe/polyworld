@@ -42,6 +42,8 @@ type
     hashCheck*: ReplayHashCheck
     historyPlayback*: bool
     replayMode*: bool
+    warmingPolicies*: bool
+      ## Runs selected policies while recorded actions remain authoritative.
     heroVms*: array[PartySize, HeroVm]
     inboxes*: array[PartySize, Mailbox]
 

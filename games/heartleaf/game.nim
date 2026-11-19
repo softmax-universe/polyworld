@@ -125,6 +125,7 @@ block:
       run.maximumTicks = int32(replayData.header.setup.maximumTicks)
       loadBots(run, options.botGroups.expandBotSources(
         controllerKinds(VillagerCount, 0)))
+      run.warmingPolicies = true
   else:
     var gameMap: MapData
     profileBlock "map":
@@ -154,7 +155,7 @@ startupTarget.validate(run.world.dayCount, run.maximumTicks)
 proc decide(w: World) =
   ## Supplies one decision tick's commands from whichever source owns them.
   if run.historyPlayback:
-    if options.resumeStep >= 0:
+    if run.warmingPolicies:
       runBotDecisions(run)
     if run.recorder != nil:
       run.replayPlayer.data = run.recorder.data
@@ -178,8 +179,7 @@ proc verifyTick(game: Game) =
 
 proc resumeGame() =
   ## Hands warmed policies control immediately after the requested replay tick.
-  if options.resumeStep < 0 or not run.historyPlayback or
-      run.world.tick != options.resumeStep:
+  if not run.warmingPolicies or run.world.tick != options.resumeStep:
     return
   run.hashCheck.requireReplayComplete(
     uint32(run.world.tick), int(options.resumeStep))
@@ -188,6 +188,7 @@ proc resumeGame() =
   run.recorder.data.config.players = localGameConfig(options, VillagerCount).players
   run.historyPlayback = false
   run.replayMode = false
+  run.warmingPolicies = false
 
 proc advanceGame*() =
   ## Advances the live world by one tick and verifies it when replaying.

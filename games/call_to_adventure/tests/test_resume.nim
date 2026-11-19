@@ -50,12 +50,14 @@ proc replayDecision(game: Game, slot: int32) =
   let actor = game.world.actors[slot]
   if not actor.alive or actor.busy:
     return
-  game.runBotDecisions(slot)
+  if game.warmingPolicies:
+    game.runBotDecisions(slot)
   var action: ReplayAction
   while game.replayPlayer.takeActionAt(
       uint32(game.world.tick), actor.id, action):
     if action.kind == ActionChat:
-      game.deliverChat(action)
+      if game.warmingPolicies:
+        game.deliverChat(action)
     else:
       discard game.applyHeroAction(slot, action)
 
@@ -91,6 +93,7 @@ try:
   game.recorder = initReplayRecorder(game.world.setup)
   game.replayMode = true
   game.historyPlayback = true
+  game.warmingPolicies = true
   game.replayPlayer = initReplayPlayer(data)
   for action in data.chatsAt(0):
     game.deliverChat(action)
@@ -125,6 +128,7 @@ try:
 
   let prefix = data.replayPrefix(2)
   game.recorder = initReplayRecorder(prefix)
+  game.warmingPolicies = false
   game.historyPlayback = false
   game.replayMode = false
   var
@@ -149,6 +153,29 @@ try:
     doAssert vm.runtime.getGlobal("candidateSeen") == handoffOrder[slot]
     doAssert vm.runtime.getGlobal("sent") == PartySize
     doAssert game.inboxes[slot].count == PartySize - handoffOrder[slot]
+
+  let viewer = newGame(2026, 4)
+  viewer.loadBots([BotGroup(path: originalPath, count: PartySize)])
+  viewer.historyPlayback = true
+  viewer.replayMode = true
+  viewer.replayPlayer = initReplayPlayer(data)
+  let
+    firstIndex = viewer.replayPlayer.actionIndex
+    first = data.actions[firstIndex]
+  viewer.world.tick = first.tick.int32
+  let beforeViewerCommand = viewer.stateHash()
+  viewer.runBotDecisions(first.heroId - 100)
+  doAssert viewer.stateHash() == beforeViewerCommand
+  doAssert viewer.replayPlayer.actionIndex == firstIndex
+  doAssert viewer.sendChat(first.heroId.int - 100, -2, "recorded") == 0
+  viewer.world.tick = 0
+  viewer.loadBots([BotGroup(path: originalPath, count: PartySize)])
+  for tick in 1 .. 3:
+    viewer.tickWorld(replayDecision)
+    doAssert viewer.stateHash() == data.hashes[tick - 1]
+  for slot, vm in viewer.heroVms:
+    doAssert vm.decisions == 0
+    doAssert viewer.inboxes[slot].count == 0
 
   var full = initReplayData(game.world.setup)
   full.actions = newSeq[ReplayAction](MaxReplayChats)
@@ -183,7 +210,8 @@ try:
     for tick in 1 .. 6:
       resumed.historyPlayback = tick <= cutoff
       resumed.replayMode = resumed.historyPlayback
-      if resumed.historyPlayback:
+      resumed.warmingPolicies = tick <= cutoff
+      if resumed.warmingPolicies:
         resumed.tickWorld(replayDecision)
       else:
         resumed.tickWorld(proc(game: Game, slot: int32) =
@@ -223,6 +251,7 @@ try:
   retryWarm.loadBots([BotGroup(path: retryPath, count: PartySize)])
   retryWarm.historyPlayback = true
   retryWarm.replayMode = true
+  retryWarm.warmingPolicies = true
   retryWarm.replayPlayer = initReplayPlayer(retryData)
   for action in retryData.chatsAt(0):
     retryWarm.deliverChat(action)

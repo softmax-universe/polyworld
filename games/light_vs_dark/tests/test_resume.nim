@@ -12,6 +12,7 @@ accepted = setRally(obsId(0), obsX(ownBuildings), obsY(ownBuildings))
 let game = newGame(generateMap(2026, 2), 120)
 game.loadBots([Policy, Policy])
 game.historyPlayback = true
+game.warmingPolicies = true
 let original = game.stateHash()
 for i in 0 ..< 2:
   game.runBotDecisions()
@@ -21,6 +22,7 @@ for i in 0 ..< 2:
     doAssert brain.runtime.getGlobal("visits") == int32(i + 1)
     doAssert brain.runtime.getGlobal("accepted") == 0
 game.historyPlayback = false
+game.warmingPolicies = false
 game.runBotDecisions()
 doAssert game.stateHash() != original
 for brain in game.brains:
@@ -60,6 +62,7 @@ sent = sendChat(mailboxSelf(), "candidate")
     resumed.replayPlayer = initReplayPlayer(data)
     resumed.replayMode = true
     resumed.historyPlayback = true
+    resumed.warmingPolicies = true
     runner.options = GameOptions(resumeStep: cutoff)
     runner.run = resumed
     for tick in 1 .. cutoff:
@@ -78,6 +81,7 @@ sent = sendChat(mailboxSelf(), "candidate")
     for tick in cutoff + 1 .. cutoff + DecisionTicks:
       runner.advanceGame()
     doAssert not resumed.historyPlayback and not resumed.replayMode
+    doAssert not resumed.warmingPolicies
     for player, brain in resumed.brains:
       doAssert not brain.failed, brain.lastError
       doAssert brain.runtime.getGlobal("visits") == cutoff div DecisionTicks + 1
@@ -160,6 +164,7 @@ broadcast = sendChat(-2, "peer")
   resumed.replayPlayer = initReplayPlayer(data)
   resumed.replayMode = true
   resumed.historyPlayback = true
+  resumed.warmingPolicies = true
   runner.options = GameOptions(resumeStep: config.maxTicks div 2)
   runner.run = resumed
   for tick in 1 .. config.maxTicks:
@@ -174,6 +179,7 @@ broadcast = sendChat(-2, "peer")
           ", global " & name
   doAssert resumed.recorder.data.hashes == data.hashes
   doAssert resumed.recorder.data.actions == data.actions
+  doAssert not resumed.warmingPolicies
   echo "Light vs Dark preserves command results, immediate chat and policy state"
 
 block retryFullInbox:
@@ -198,6 +204,7 @@ wend
       target: 0, text: "retry")
   ]))
   game.historyPlayback = true
+  game.warmingPolicies = true
   let before = game.stateHash()
   game.runBotDecisions()
   let brain = game.brains[0]
@@ -212,3 +219,36 @@ wend
     "The per-player drain must not deliver an accepted retry twice"
   doAssert game.stateHash() == before
   echo "Light vs Dark retries recorded chat after a full mailbox refusal"
+
+block ordinaryHistory:
+  let game = newGame(generateMap(2026, 2), 120)
+  game.loadBots([Policy, Policy])
+  var hall: Building
+  for building in game.world.buildings:
+    if building.owner == 0 and building.kind == TownHallBuilding:
+      hall = building
+      break
+  doAssert hall.id != 0
+  let
+    unit = game.world.units[0]
+    rally = ReplayAction(kind: ActionSetRally, playerId: hall.owner,
+      entityId: hall.id, first: int32(unit.tile.x), second: int32(unit.tile.y))
+    chat = ReplayAction(kind: ActionChat, playerId: 0, target: 0,
+      text: "history")
+    before = game.stateHash()
+  doAssert game.world.clone().applyReplayAction(rally)
+  game.historyPlayback = true
+  doAssert not game.warmingPolicies
+  for replayMode in [false, true]:
+    game.replayMode = replayMode
+    game.replayPlayer = ReplayPlayer(data: ReplayData(actions: @[rally]))
+    doAssert not game.applySetRally(rally.playerId, rally.entityId,
+      rally.first, rally.second)
+    doAssert game.replayPlayer.actionIndex == 0
+    doAssert game.stateHash() == before
+    game.replayPlayer = ReplayPlayer(data: ReplayData(actions: @[chat]))
+    doAssert game.sendChat(0, 0, chat.text) == 0
+    doAssert game.replayPlayer.actionIndex == 0
+    doAssert game.inboxes[0].count == 0
+    doAssert game.stateHash() == before
+  echo "Light vs Dark ordinary history never matches policy proposals"

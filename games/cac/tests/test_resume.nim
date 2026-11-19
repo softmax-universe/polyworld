@@ -103,7 +103,7 @@ proc resumed(data: ReplayData, step: uint32,
     data.header.setup.maximumTicks,
     recorder
   )
-  result.warmup = data
+  result.replayData = data
   result.resumeStep = step
 
 proc total(game: BotMatch, name: string): int32 =

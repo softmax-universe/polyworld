@@ -11,6 +11,7 @@ game.loadBots(repeat("""
 """, VillagerCount))
 game.world.villagers[0].orderFailed = true
 game.historyPlayback = true
+game.warmingPolicies = true
 let originalHash = game.stateHash()
 game.runBotDecisions()
 doAssert game.stateHash() == originalHash
@@ -21,6 +22,7 @@ for brain in game.brains:
   doAssert brain.runtime.getGlobal("accepted") == 0
 
 game.historyPlayback = false
+game.warmingPolicies = false
 game.runBotDecisions()
 doAssert game.brains[0].runtime.getGlobal("decisions") == 2
 doAssert not game.world.villagers[0].orderFailed
@@ -38,6 +40,11 @@ live.loadBots(repeat(source, VillagerCount))
 live.runBotDecisions()
 warm.replayPlayer = ReplayPlayer(data: live.recorder.data)
 warm.historyPlayback = true
+let viewerHash = warm.stateHash()
+doAssert not warm.applyGather(1, 0)
+doAssert warm.replayPlayer.actionIndex == 0
+doAssert warm.stateHash() == viewerHash
+warm.warmingPolicies = true
 var sources = repeat(source, VillagerCount)
 sources[1] = "accepted = gather(1)"
 warm.loadBots(sources)

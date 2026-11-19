@@ -200,7 +200,7 @@ proc decideHeroSlot(game: Game, slot: int32) =
   if not actor.alive or actor.busy:
     return
   if game.historyPlayback:
-    if options.resumeStep >= 0:
+    if game.warmingPolicies:
       runBotDecisions(game, slot)
     if game.recorder != nil:
       game.replayPlayer.data = game.recorder.data
@@ -211,7 +211,7 @@ proc decideHeroSlot(game: Game, slot: int32) =
         action
     ):
       if action.kind == ActionChat:
-        if options.resumeStep >= 0:
+        if game.warmingPolicies:
           game.deliverChat(action)
       else:
         discard game.applyHeroAction(slot, action)
@@ -255,13 +255,14 @@ proc saveRecording*(path = options.recordPath) =
 
 proc resumeReplay() =
   ## Gives the warmed policies control after the verified replay prefix.
-  if run.historyPlayback and run.world.tick == options.resumeStep:
+  if run.warmingPolicies and run.world.tick == options.resumeStep:
     run.hashCheck.requireReplayComplete(
       uint32(run.world.tick), options.resumeStep.int
     )
     run.recorder = initReplayRecorder(
       run.replayData.replayPrefix(uint32(run.world.tick)))
     run.recorder.data.config.players = localGameConfig(options, PartySize).players
+    run.warmingPolicies = false
     run.historyPlayback = false
     run.replayMode = false
 
@@ -345,7 +346,7 @@ proc runHeadless*() =
     reported = 0
     pacer = initTickPacer(options.headlessTickRate)
     pollers: seq[RequestPoll]
-  if options.waitForLlm and (not run.replayMode or options.resumeStep >= 0):
+  if options.waitForLlm and (not run.replayMode or run.warmingPolicies):
     for vm in run.heroVms:
       if vm != nil:
         pollers.add vm.pollRequests
@@ -432,6 +433,7 @@ if options.replayPath.len > 0:
     )
   if options.resumeStep >= 0:
     loadBots(run, options.botGroups, options.playerSlot)
+    run.warmingPolicies = true
     for action in replayData.chatsAt(0):
       run.deliverChat(action)
 else:

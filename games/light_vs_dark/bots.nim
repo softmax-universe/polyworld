@@ -353,7 +353,7 @@ proc deliverChat*(
 
 proc sendChat*(game: Game, sender, target: int, text: openArray[char]): int32 =
   ## Networked mailboxes receive only authoritative relay deliveries.
-  if game.historyPlayback:
+  if game.warmingPolicies:
     if game.replayPlayer.finished or sender notin 0 ..< game.inboxes.len or
       target < -2 or target == -1 or target >= game.inboxes.len or
       text.len == 0 or text.len > MaxChatBytes:
@@ -367,7 +367,7 @@ proc sendChat*(game: Game, sender, target: int, text: openArray[char]): int32 =
       if result > 0:
         inc game.replayPlayer.actionIndex
     return
-  if game.replayMode or
+  if game.replayMode or game.historyPlayback or
     (game.recorder != nil and (game.recorder.chatCount >= MaxReplayChats or
       game.recorder.data.actions.len >= MaxReplayActions)):
       return 0
@@ -982,7 +982,7 @@ proc runBotDecisions*(game: Game) {.measure.} =
   for offset in 0'i32 ..< count:
     let player = (first + offset) mod count
     game.runDecision(player)
-    if game.historyPlayback and game.replayPlayer != nil:
+    if game.warmingPolicies and game.replayPlayer != nil:
       while not game.replayPlayer.finished:
         let action = game.replayPlayer.data.actions[game.replayPlayer.actionIndex]
         if action.tick != uint32(game.world.tick) or action.playerId != player:

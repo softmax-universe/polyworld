@@ -80,15 +80,35 @@ proc step*(match: var BotMatch): bool =
     return false
   var action: ReplayAction
   if match.tick < match.resumeStep:
-    let vm = match.bots[match.game.actingPlayer()]
+    let
+      vm = match.bots[match.game.actingPlayer()]
+      first = match.warmupCursor.actionIndex
+      cursor = addr match.warmupCursor
+      data = match.warmup
+      tick = match.tick
+    cursor.inboxes = inboxes
     vm.watching = true
+    vm.onSendChat = proc(sender, target: int,
+        text: openArray[char]): int32 =
+      if cursor.actionIndex >= data.actions.len:
+        return
+      let recorded = data.actions[cursor.actionIndex]
+      if recorded.kind != ActionMailbox or recorded.tick != tick or
+          recorded.playerId != sender or recorded.target != target or
+          recorded.text.len != text.len:
+        return
+      for index, value in text:
+        if recorded.text[index] != value:
+          return
+      result = cursor.inboxes.applyMailbox(recorded)
+      if result > 0:
+        inc cursor.actionIndex
     try:
       discard vm.runDecision(match.game, apply = false)
     finally:
       vm.watching = false
+      vm.onSendChat = nil
     # Admit this decision's original messages, stopping at its game action.
-    let first = match.warmupCursor.actionIndex
-    match.warmupCursor.inboxes = inboxes
     if not match.warmup.takeReplayAction(
       match.warmupCursor, match.tick, action
     ):

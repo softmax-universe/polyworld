@@ -1,6 +1,6 @@
 import
   bassy,
-  polyworld/tapes,
+  polyworld/[tapes, mailboxes],
   ../[bots, maps, replays, sim]
 
 const
@@ -42,6 +42,7 @@ resumed.applyReplayActions(0)
 resumed.applyReplayActions(0)
 for inbox in resumed.inboxes:
   doAssert inbox.count == 1
+let firstHero = resumed.world.heroTurnStart
 for tick in 1 .. 6:
   resumed.tickWorld(proc() = resumed.runBotDecisions())
   doAssert resumed.stateHash() == tape.hashes[tick - 1]
@@ -49,8 +50,9 @@ for tick in 1 .. 6:
     doAssert vm.runtime.getGlobal("initialReceived") == 1
     doAssert vm.runtime.getGlobal("candidateReceived") == 0
     if tick == 1:
-      doAssert vm.runtime.getGlobal("recordedReceived") == 0
-      doAssert resumed.inboxes[i].count == 2
+      let earlierMessages = if i == firstHero: 0 else: 1
+      doAssert vm.runtime.getGlobal("recordedReceived") == earlierMessages
+      doAssert resumed.inboxes[i].count == 2 - earlierMessages
     else:
       doAssert vm.runtime.getGlobal("recordedReceived") == 2
       doAssert resumed.inboxes[i].count == 0
@@ -95,4 +97,77 @@ for vm in immediate.heroVms:
   doAssert vm.runtime.getGlobal("recordedReceived") == 0
   doAssert vm.runtime.getGlobal("sent") == 2
 
-echo "PASS GOTA replay warm-up preserves VM state and ordered chat at handoff"
+const Feedback = """
+count = count + 1
+if worldTick = 1 then
+  purchased = buyItem(8)
+end if
+accepted = walkTo(selfX + count, selfY)
+if accepted then successes = successes + 1
+sent = sendChat(-2, "recorded")
+delivered = delivered + sent
+while mailboxCount() > 0
+  message$ = pullMailbox$()
+  if message$ = "recorded" then received = received + 1
+wend
+"""
+
+proc checkFeedback(mixed: bool) =
+  ## Keeps unchanged policies' feedback identical even beside a replacement.
+  const Names = ["count", "purchased", "successes", "delivered", "received"]
+  let live = newGame(map, 240, 2, false, ReplayData(), drafting = false)
+  live.loadBotSources([Feedback, Feedback])
+  live.recorder = initReplayRecorder(live.currentSetup(6), map.preset)
+  var expected: array[2, array[Names.len, int32]]
+  for tick in 1 .. 6:
+    live.tickWorld(proc() = live.runBotDecisions())
+    if tick == 4:
+      for slot, vm in live.heroVms:
+        for i, name in Names:
+          expected[slot][i] = vm.runtime.getGlobal(name)
+  let
+    recorded = live.recorder.data
+    watching = newGame(map, 240, 0, true, recorded)
+  watching.loadBotSources([if mixed: Candidate else: Feedback, Feedback])
+  watching.replayPlayer = initReplayPlayer(recorded)
+  watching.historyPlayback = true
+  watching.watchingPolicies = true
+  for tick in 1 .. 4:
+    watching.tickWorld(proc() = watching.runBotDecisions())
+    doAssert watching.stateHash() == recorded.hashes[tick - 1]
+  for slot, vm in watching.heroVms:
+    doAssert not vm.failed, vm.lastError
+    if not mixed or slot == 1:
+      for i, name in Names:
+        doAssert vm.runtime.getGlobal(name) == expected[slot][i], name
+  if not mixed:
+    watching.recorder = ReplayRecorder(data: replayPrefix(recorded, 4))
+    watching.historyPlayback = false
+    watching.replayMode = false
+    watching.watchingPolicies = false
+    for tick in 5 .. 6:
+      watching.tickWorld(proc() = watching.runBotDecisions())
+    doAssert watching.recorder.data.actions == recorded.actions
+    doAssert watching.recorder.data.hashes == recorded.hashes
+
+checkFeedback(false)
+checkFeedback(true)
+
+let full = newGame(map, 240, 2, false, ReplayData(), drafting = false)
+full.loadBotSources(["stop", "stop"])
+full.recorder = initReplayRecorder(full.currentSetup(1), map.preset)
+for i in 0 ..< MaxMailboxMessages:
+  doAssert full.inboxes[0].push(0, "full")
+doAssert full.sendChat(0, 0, "retry") == 0
+discard full.inboxes[0].pop()
+doAssert full.sendChat(0, 0, "retry") == 1
+full.replayPlayer = initReplayPlayer(full.recorder.data)
+full.recorder = nil
+full.watchingPolicies = true
+doAssert full.sendChat(0, 0, "retry") == 0
+doAssert full.replayPlayer.actionIndex == 1
+discard full.inboxes[0].pop()
+doAssert full.sendChat(0, 0, "retry") == 1
+doAssert full.replayPlayer.actionIndex == 2
+
+echo "PASS GOTA replay warm-up preserves policy feedback and ordered chat"

@@ -321,7 +321,7 @@ proc buildBotHost(playerId: int32, policySlot = -1): Host =
   # Mailboxes, as in the other Polyworld games.
   let sendChatProc: NumericHostProc = proc(args: openArray[Value]): Value =
     ## Sends one explicit message from the owning seat.
-    if activeVm.watching:
+    if activeVm.watching and activeVm.onSendChat == nil:
       return toValue(0'i32)
     activeVm.runtime.withString(args[1], text):
       if activeVm.onSendChat == nil:

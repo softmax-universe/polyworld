@@ -299,6 +299,22 @@ proc sendChat*(
 ): int32 =
   ## Sends local mailbox traffic or queues it for authoritative delivery.
   if game.watchingPolicies:
+    if sender notin 0 ..< game.inboxes.len or
+      target < -2 or target >= game.inboxes.len or
+      text.len == 0 or text.len > MaxChatBytes:
+        return 0
+    var message = newString(text.len)
+    for i, c in text:
+      message[i] = c
+    let
+      player = game.replayPlayer
+      action = ReplayAction(
+        tick: uint32(game.world.tick), kind: ActionPolicyChat,
+        heroId: game.world.heroes[sender].id, first: target.int32,
+        text: message)
+    if player.data.actions.takeMatchingAction(player.actionIndex, action):
+      return game.deliverPolicyChat(sender, target,
+        player.data.actions[player.actionIndex - 1].text)
     return 0
   if game.networked:
     if sender notin 0 ..< game.world.heroes.len or
@@ -487,7 +503,12 @@ proc publishActionResult*(game: Game, heroId: int32, accepted: bool) =
 proc requestAction(action: ReplayAction): bool =
   ## Preserves immediate offline results and queue-only multiplayer results.
   if activeGame.watchingPolicies:
-    return false
+    let player = activeGame.replayPlayer
+    if player.data.actions.takeMatchingAction(player.actionIndex, action):
+      result = activeGame.applyReplayCommand(
+        player.data.actions[player.actionIndex - 1])
+      finishStructuredAction(action.heroId, result)
+    return
   try:
     result = activeGame.submitAction(action)
   except ReplayError as error:
@@ -1005,6 +1026,15 @@ proc runHeroScript(game: Game, index: int) =
   let
     hero = game.world.heroes[index]
     vm = game.heroVms[index]
+  defer:
+    if game.watchingPolicies:
+      let player = game.replayPlayer
+      while player.actionIndex < player.data.actions.len:
+        let action = player.data.actions[player.actionIndex]
+        if action.tick != uint32(game.world.tick) or action.heroId != hero.id:
+          break
+        inc player.actionIndex
+        discard game.applyReplayCommand(action)
   if vm == nil or vm.failed:
     return
   try:

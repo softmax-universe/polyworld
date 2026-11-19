@@ -203,6 +203,26 @@ proc testGame[T](
   doAssert length > 2
   when T isnot heartleaf.ReplayData:
     doAssert recorded.actions.anyIt(it.text == "recorded")
+  let unchangedPath = directory / name & "-unchanged.replay"
+  run([
+    executable, "--replay", source, "--resume-step", $middle,
+    "--bot", original & ":" & $seats, "--record", unchangedPath
+  ])
+  let unchanged = load(unchangedPath)
+  run([executable, "--replay", unchangedPath])
+  doAssert unchanged.hashes.len == length,
+    name & " unchanged policies changed match length after handoff " & $middle &
+    ": expected " & $length & ", got " & $unchanged.hashes.len
+  for index, expected in recorded.hashes:
+    doAssert unchanged.hashes[index] == expected,
+      name & " unchanged policies first diverged at tick " & $(index + 1) &
+      " after handoff " & $middle & ": expected " & $expected &
+      ", got " & $unchanged.hashes[index]
+  doAssert unchanged.actions == recorded.actions,
+    name & " unchanged policies changed ordered actions after handoff " &
+      $middle
+  echo "  unchanged policies preserved all ", length,
+    " hashes and actions after handoff ", middle
   when T is gota.ReplayData:
     testGotaTakeover(executable, source, original, directory, recorded)
   for (cutoff, mixed) in [

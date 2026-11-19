@@ -188,6 +188,24 @@ block:
   except ReplayError as error:
     doAssert error.msg.contains("first at tick 2")
 
+echo "Testing policy feedback consumes only the next recorded command"
+block:
+  let actions = @[
+    TapeAction(tick: 1, kind: 1), TapeAction(tick: 1, kind: 2),
+    TapeAction(tick: 2, kind: 1)
+  ]
+  var index = 0
+  doAssert not actions.takeMatchingAction(index, actions[1])
+  doAssert index == 0
+  doAssert actions.takeMatchingAction(index, actions[0])
+  doAssert not actions.takeMatchingAction(index, actions[0])
+  doAssert index == 1
+  var action: TapeAction
+  doAssert actions.takeActionAt(index, 1, action) and action == actions[1]
+  doAssert not actions.takeMatchingAction(index, actions[0])
+  doAssert actions.takeMatchingAction(index, actions[2])
+  doAssert not actions.takeMatchingAction(index, actions[2])
+
 echo "Testing resume prefixes preserve setup and exclude future actions"
 block:
   type

@@ -1,7 +1,7 @@
 import
   std/[os, tempfiles],
   bassy,
-  polyworld/[cli, tapes],
+  polyworld/[cli, mailboxes, tapes],
   ../[bots, content, replays, sim]
 
 const
@@ -24,6 +24,40 @@ wend
 accepted = walkTo(objectiveLevel, objectiveX, objectiveY)
 sent = sendChat(-2, "candidate")
 """
+  Feedback = """
+while mailboxCount() > 0
+  ignored$ = pullMailbox$()
+wend
+if broken or successes < decisions then
+  accepted = walkTo(objectiveLevel, objectiveX, objectiveY)
+else
+  accepted = walkTo(currentLevel, x + 0.25, y)
+end if
+decisions = decisions + 1
+if accepted <> 0 then successes = successes + 1
+sent = sendChat(-2, "feedback")
+reply$ = pullMailbox$()
+if sent = 0 or reply$ <> "feedback" then broken = 1
+"""
+  Retry = """
+failedSend = sendChat(-2, "retry")
+ignored$ = pullMailbox$()
+retried = sendChat(-2, "retry")
+"""
+
+proc replayDecision(game: Game, slot: int32) =
+  ## Matches calls inline, then drains any remaining authoritative actions.
+  let actor = game.world.actors[slot]
+  if not actor.alive or actor.busy:
+    return
+  game.runBotDecisions(slot)
+  var action: ReplayAction
+  while game.replayPlayer.takeActionAt(
+      uint32(game.world.tick), actor.id, action):
+    if action.kind == ActionChat:
+      game.deliverChat(action)
+    else:
+      discard game.applyHeroAction(slot, action)
 
 proc recordedBefore(data: ReplayData, tick: uint32, heroId: int32): int32 =
   ## Counts earlier messages in the original rotating hero decision order.
@@ -127,6 +161,79 @@ try:
   except ReplayError:
     rejected = true
   doAssert rejected, "prefix chat still counts toward the recording limit"
+
+  let
+    feedbackPath = directory / "feedback.bas"
+    feedbackGame = newGame(2026, 6)
+  writeFile(feedbackPath, Feedback)
+  feedbackGame.loadBots([BotGroup(path: feedbackPath, count: PartySize)])
+  feedbackGame.recorder = initReplayRecorder(feedbackGame.world.setup)
+  for tick in 1 .. 6:
+    feedbackGame.tickWorld(proc(game: Game, slot: int32) =
+      ## Records policies that retain command results and read their own chat.
+      game.runBotDecisions(slot)
+    )
+    feedbackGame.recorder.recordHash(feedbackGame.stateHash())
+  let feedbackData = decodeReplay(feedbackGame.recorder.data.encodeReplay())
+  for cutoff in [0, 3, 6]:
+    let resumed = newGame(2026, 6)
+    resumed.loadBots([BotGroup(path: feedbackPath, count: PartySize)])
+    resumed.replayPlayer = initReplayPlayer(feedbackData)
+    resumed.recorder = initReplayRecorder(feedbackData.replayPrefix(cutoff.uint32))
+    for tick in 1 .. 6:
+      resumed.historyPlayback = tick <= cutoff
+      resumed.replayMode = resumed.historyPlayback
+      if resumed.historyPlayback:
+        resumed.tickWorld(replayDecision)
+      else:
+        resumed.tickWorld(proc(game: Game, slot: int32) =
+          ## Continues the same feedback-dependent VMs after the cutoff.
+          game.runBotDecisions(slot)
+        )
+        resumed.recorder.recordHash(resumed.stateHash())
+      doAssert resumed.stateHash() == feedbackData.hashes[tick - 1]
+    let branch = decodeReplay(resumed.recorder.data.encodeReplay())
+    doAssert branch.hashes == feedbackData.hashes
+    doAssert branch.actions == feedbackData.actions
+    for slot, vm in resumed.heroVms:
+      doAssert not vm.failed, vm.lastError
+      for name in ["decisions", "successes", "broken", "accepted", "sent"]:
+        doAssert vm.runtime.getGlobal(name) ==
+          feedbackGame.heroVms[slot].runtime.getGlobal(name)
+      doAssert vm.runtime.getGlobal("broken") == 0
+      doAssert vm.runtime.getGlobal("successes") > 0
+
+  let
+    retryPath = directory / "retry.bas"
+    retryGame = newGame(2026, 2)
+  writeFile(retryPath, Retry)
+  retryGame.loadBots([BotGroup(path: retryPath, count: PartySize)])
+  retryGame.recorder = initReplayRecorder(retryGame.world.setup)
+  for message in 0 ..< MaxMailboxMessages:
+    doAssert retryGame.sendChat(0, -2, "startup") == PartySize
+  for tick in 1 .. 2:
+    retryGame.tickWorld(proc(game: Game, slot: int32) =
+      ## Fails a full-mailbox send, then records the same send after reading.
+      game.runBotDecisions(slot)
+    )
+    retryGame.recorder.recordHash(retryGame.stateHash())
+  let
+    retryData = decodeReplay(retryGame.recorder.data.encodeReplay())
+    retryWarm = newGame(2026, 2)
+  retryWarm.loadBots([BotGroup(path: retryPath, count: PartySize)])
+  retryWarm.historyPlayback = true
+  retryWarm.replayMode = true
+  retryWarm.replayPlayer = initReplayPlayer(retryData)
+  for action in retryData.chatsAt(0):
+    retryWarm.deliverChat(action)
+  for tick in 1 .. 2:
+    retryWarm.tickWorld(replayDecision)
+    doAssert retryWarm.stateHash() == retryData.hashes[tick - 1]
+    for vm in retryWarm.heroVms:
+      doAssert not vm.failed, vm.lastError
+      doAssert vm.runtime.getGlobal("failedSend") == 0
+      doAssert vm.runtime.getGlobal("retried") == 1
+  doAssert retryWarm.replayPlayer.finished
 finally:
   removeDir(directory)
 

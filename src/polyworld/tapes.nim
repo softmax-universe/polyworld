@@ -275,6 +275,14 @@ proc replayPrefix*[T](data: T, tick: uint32): T =
   result.hashes.setLen(int(tick))
   result.actions.setLen(data.actions.actionIndexAfter(tick))
 
+proc takeMatchingAction*[T](
+    actions: openArray[T], actionIndex: var int, action: T
+): bool =
+  ## Consumes only the next recorded command when a policy proposes it exactly.
+  if actionIndex < actions.len and actions[actionIndex] == action:
+    inc actionIndex
+    return true
+
 proc hashAt*(
     hashes: openArray[uint64],
     tick: uint32,

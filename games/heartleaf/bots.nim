@@ -335,8 +335,7 @@ proc buildVillagerHost*(slot: int32, policySlot = -1): Host =
   let orderFailedProc: HostProc = proc(arguments: openArray[int32]): int32 =
     ## Reads and clears the flag, so one failure is reported exactly once.
     result = int32(me.orderFailed)
-    if not activeGame.historyPlayback:
-      me.orderFailed = false
+    me.orderFailed = false
   discard result.addFunction("orderFailed", 0, orderFailedProc, 4)
 
 ## Lifecycle
@@ -411,5 +410,15 @@ proc runBotDecisions*(game: Game) {.measure.} =
   activeGame = game
   let first = (game.world.tick div DecisionTicks) mod int32(VillagerCount)
   for offset in 0'i32 ..< int32(VillagerCount):
-    game.runDecision((first + offset) mod int32(VillagerCount))
+    let slot = (first + offset) mod int32(VillagerCount)
+    game.runDecision(slot)
+    if game.historyPlayback and game.replayPlayer != nil:
+      let player = game.replayPlayer
+      while player.actionIndex < player.data.actions.len:
+        let action = player.data.actions[player.actionIndex]
+        if action.tick != uint32(game.world.tick) or
+            int32(action.playerId) != slot:
+          break
+        game.world.applyReplayAction(action)
+        inc player.actionIndex
   activeGame = nil

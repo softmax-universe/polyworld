@@ -1,3 +1,4 @@
+import polyworld/mailboxes
 import ../src/core/[bots, match, replays, sim]
 
 const
@@ -33,25 +34,66 @@ else
   endTurn()
 end if
 """
+  SendResultSource = SetupSource & """
+previous = sent
+sent = sendChat(enemyPlayer, "x")
+if previous > 0 and canPlay(0) then
+  playCard(0)
+else
+  endTurn()
+end if
+"""
+  SelfReadSource = SetupSource & """
+previous = received
+sent = sendChat(selfPlayer, "x")
+received = mailboxCount()
+message$ = pullMailbox$()
+if previous > 0 and canPlay(0) then
+  playCard(0)
+else
+  endTurn()
+end if
+"""
+  FullMailboxSource = SetupSource & """
+previous = accepted
+if initialized = 0 then
+  for i = 1 to """ & $MaxMailboxMessages & """
 
-proc recording(): ReplayData =
-  ## Records a legal match whose policies always end their turns.
+    sent = sendChat(selfPlayer, "x")
+  next
+  initialized = 1
+end if
+rejected = sendChat(selfPlayer, "x")
+message$ = pullMailbox$()
+accepted = sendChat(selfPlayer, "x")
+if previous > 0 and canPlay(0) then
+  playCard(0)
+else
+  endTurn()
+end if
+"""
+  MageSource = staticRead("../players/mage.bas")
+
+proc recording(source = OriginalSource, maxTicks = 8'u32): ReplayData =
+  ## Records a legal match with the same policy in both seats.
   let
-    bots = loadBots([OriginalSource, OriginalSource])
+    bots = loadBots([source, source])
     seats = bots.setupBotSeats(19)
     recorder = initReplayRecorder(
-      matchSetup(seats, 19, 8),
-      GameConfig(seed: 19, maxTicks: 8, players: unnamedPlayers(2))
+      matchSetup(seats, 19, maxTicks),
+      GameConfig(seed: 19, maxTicks: maxTicks.int32,
+        players: unnamedPlayers(2))
     )
-  var game = initBotMatch(seats, 19, bots, 8, recorder)
+  var game = initBotMatch(seats, 19, bots, maxTicks, recorder)
   game.run()
-  doAssert game.tick == 8
+  doAssert game.outcome in {MatchWon, MatchDrawn, MatchTimedOut}
   recorder.data
 
-proc resumed(data: ReplayData, step: uint32): BotMatch =
+proc resumed(data: ReplayData, step: uint32,
+    source = ReplacementSource): BotMatch =
   ## Initializes selected policies while preserving the recorded match setup.
   let
-    bots = loadBots([ReplacementSource, ReplacementSource])
+    bots = loadBots([source, source])
     recorder = initReplayRecorder(data.header.setup, data.config)
   discard bots.setupBotSeats(data.header.setup.seed)
   result = initBotMatch(
@@ -157,3 +199,31 @@ block:
   complete.run()
   doAssert complete.recorder.data.actions == data.actions[0 ..< 24]
   complete.recorder.data.verify()
+
+echo "CaC preserves unchanged policies that read their own chat effects"
+for source in [SendResultSource, SelfReadSource, FullMailboxSource]:
+  let data = recording(source)
+  var game = resumed(data, 2, source)
+  game.run()
+  doAssert game.tick == uint32(data.hashes.len)
+  doAssert game.recorder.data.actions == data.actions
+  doAssert game.recorder.data.hashes == data.hashes
+  doAssert game.game.stateHash == data.hashes[^1]
+  if source == FullMailboxSource:
+    for bot in game.bots:
+      doAssert bot.runtime.getGlobal("rejected") == 0
+      doAssert bot.runtime.getGlobal("accepted") == 1
+  game.recorder.data.verify()
+
+echo "CaC reproduces a complete Mage match after a halfway handoff"
+block:
+  let data = recording(MageSource, 2_000)
+  doAssert data.hashes.len > 2
+  var game = resumed(data, uint32(data.hashes.len div 2), MageSource)
+  game.run()
+  doAssert game.outcome == MatchWon
+  doAssert game.tick == uint32(data.hashes.len)
+  doAssert game.recorder.data.actions == data.actions
+  doAssert game.recorder.data.hashes == data.hashes
+  doAssert game.game.stateHash == data.hashes[^1]
+  game.recorder.data.verify()

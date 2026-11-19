@@ -353,7 +353,21 @@ proc deliverChat*(
 
 proc sendChat*(game: Game, sender, target: int, text: openArray[char]): int32 =
   ## Networked mailboxes receive only authoritative relay deliveries.
-  if game.replayMode or game.historyPlayback or
+  if game.historyPlayback:
+    if game.replayPlayer.finished or sender notin 0 ..< game.inboxes.len or
+      target < -2 or target == -1 or target >= game.inboxes.len or
+      text.len == 0 or text.len > MaxChatBytes:
+        return 0
+    var action = ReplayAction(kind: ActionChat, tick: uint32(game.world.tick),
+      playerId: int32(sender), target: int32(target), text: newString(text.len))
+    for i, ch in text:
+      action.text[i] = ch
+    if game.replayPlayer.data.actions[game.replayPlayer.actionIndex] == action:
+      result = game.deliverChat(sender, target, text)
+      if result > 0:
+        inc game.replayPlayer.actionIndex
+    return
+  if game.replayMode or
     (game.recorder != nil and (game.recorder.chatCount >= MaxReplayChats or
       game.recorder.data.actions.len >= MaxReplayActions)):
       return 0
@@ -948,6 +962,14 @@ proc runDecision(game: Game, player: int32) =
     overlordLimits().maxInstructions
   )
 
+proc applyRecordedAction*(game: Game, action: ReplayAction) =
+  ## Applies one authoritative action without generating another tape entry.
+  if action.kind == ActionChat:
+    discard game.deliverChat(int(action.playerId), int(action.target),
+      action.text, int32(action.tick))
+  elif game.world.applyReplayAction(action):
+    game.metrics.command(int(action.playerId), game.world.tick)
+
 proc runBotDecisions*(game: Game) {.measure.} =
   ## Runs every player's script for this decision tick.
   ##
@@ -958,5 +980,13 @@ proc runBotDecisions*(game: Game) {.measure.} =
     count = int32(game.world.players.len)
     first = (game.world.tick div DecisionTicks) mod count
   for offset in 0'i32 ..< count:
-    game.runDecision((first + offset) mod count)
+    let player = (first + offset) mod count
+    game.runDecision(player)
+    if game.historyPlayback and game.replayPlayer != nil:
+      while not game.replayPlayer.finished:
+        let action = game.replayPlayer.data.actions[game.replayPlayer.actionIndex]
+        if action.tick != uint32(game.world.tick) or action.playerId != player:
+          break
+        inc game.replayPlayer.actionIndex
+        game.applyRecordedAction(action)
   activeGame = nil

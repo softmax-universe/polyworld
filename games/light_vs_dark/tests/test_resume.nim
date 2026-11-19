@@ -1,6 +1,6 @@
 import
   bassy,
-  polyworld/cli,
+  polyworld/[cli, mailboxes],
   ../[bots, content, maps, multiplayer, presets, replays, sim],
   ../game as runner
 
@@ -101,3 +101,114 @@ sent = sendChat(mailboxSelf(), "candidate")
       doAssert playback.stateHash() == branch.hashes[tick - 1]
     doAssert playback.hashCheck.mismatches == 0
   echo "Light vs Dark consumes recorded chat once and enables outgoing chat at handoff"
+
+block matchingFeedback:
+  const
+    Feedback = """
+visits = visits + 1
+while mailboxCount() > 0
+  message$ = pullMailbox$()
+  if message$ = "peer" then
+    peerMessages = peerMessages + 1
+  end if
+wend
+sent = sendChat(mailboxSelf(), "echo")
+if sent = 1 then
+  message$ = pullMailbox$()
+  if message$ = "echo" then
+    echoes = echoes + 1
+  end if
+end if
+rejected = setRally(obsId(0), -1, -1)
+target = ownBuildings + ((successes + echoes) mod 3)
+accepted = setRally(obsId(0), obsX(target), obsY(target))
+if accepted = 1 then
+  successes = successes + 1
+end if
+observed = rallyX(obsId(0))
+if observed <> obsX(target) then
+  readErrors = readErrors + 1
+end if
+broadcast = sendChat(-2, "peer")
+"""
+    Names = ["visits", "peerMessages", "sent", "echoes", "rejected",
+      "accepted", "successes", "observed", "readErrors", "broadcast"]
+  var config = defaultConfig(2)
+  config.maxTicks = 8 * DecisionTicks
+  config.mapSettings = MapSettings(layout: RandomLayout, size: 90, expansions: 0)
+  let original = newLocalMatch(config, [Feedback, Feedback])
+  var globals: seq[array[2, array[Names.len, int32]]]
+  runner.options = GameOptions()
+  runner.run = original
+  for tick in 1 .. config.maxTicks:
+    runner.advanceGame()
+    var values: array[2, array[Names.len, int32]]
+    for player, brain in original.brains:
+      doAssert not brain.failed, brain.lastError
+      for index, name in Names:
+        values[player][index] = brain.runtime.getGlobal(name)
+      doAssert brain.runtime.getGlobal("successes") == tick div DecisionTicks
+      doAssert brain.runtime.getGlobal("echoes") == tick div DecisionTicks
+      doAssert brain.runtime.getGlobal("readErrors") == 0
+    globals.add values
+  let
+    data = decodeReplay(encodeReplay(original.recorder.data))
+    resumed = newGame(original.world.map, config.maxTicks,
+      data.header.setup.diplomacySettings)
+  resumed.loadBots([Feedback, Feedback])
+  resumed.replayData = data
+  resumed.replayPlayer = initReplayPlayer(data)
+  resumed.replayMode = true
+  resumed.historyPlayback = true
+  runner.options = GameOptions(resumeStep: config.maxTicks div 2)
+  runner.run = resumed
+  for tick in 1 .. config.maxTicks:
+    runner.advanceGame()
+    doAssert resumed.stateHash() == data.hashes[tick - 1],
+      "Unchanged policies must reproduce every world tick"
+    for player, brain in resumed.brains:
+      doAssert not brain.failed, brain.lastError
+      for index, name in Names:
+        doAssert brain.runtime.getGlobal(name) == globals[tick - 1][player][index],
+          "Feedback differs at tick " & $tick & ", player " & $player &
+          ", global " & name
+  doAssert resumed.recorder.data.hashes == data.hashes
+  doAssert resumed.recorder.data.actions == data.actions
+  echo "Light vs Dark preserves command results, immediate chat and policy state"
+
+block retryFullInbox:
+  const Retry = """
+first = sendChat(mailboxSelf(), "retry")
+removed$ = pullMailbox$()
+second = sendChat(mailboxSelf(), "retry")
+while mailboxCount() > 0
+  message$ = pullMailbox$()
+  if message$ = "retry" then
+    received = received + 1
+  end if
+wend
+"""
+  let game = newGame(generateMap(2026, 2), 120)
+  game.loadBots([Retry, ""])
+  game.world.tick = DecisionTicks
+  for index in 0 ..< MaxMailboxMessages:
+    doAssert game.inboxes[0].push(1, "full")
+  game.replayPlayer = ReplayPlayer(data: ReplayData(actions: @[
+    ReplayAction(kind: ActionChat, tick: uint32(DecisionTicks), playerId: 0,
+      target: 0, text: "retry")
+  ]))
+  game.historyPlayback = true
+  let before = game.stateHash()
+  game.runBotDecisions()
+  let brain = game.brains[0]
+  doAssert not brain.failed, brain.lastError
+  doAssert brain.runtime.getGlobal("first") == 0
+  doAssert brain.runtime.getGlobal("second") == 1,
+    "A refused delivery must leave the recorded action available for retry"
+  doAssert brain.runtime.getGlobal("received") == 1
+  doAssert game.replayPlayer.actionIndex == 1
+  doAssert game.replayPlayer.finished
+  doAssert game.inboxes[0].count == 0,
+    "The per-player drain must not deliver an accepted retry twice"
+  doAssert game.stateHash() == before
+  echo "Light vs Dark retries recorded chat after a full mailbox refusal"

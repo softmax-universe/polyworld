@@ -316,19 +316,15 @@ proc initializeLocalMatch*(config: LvdConfig, sources: openArray[string]) =
 proc decide(w: World) =
   ## Supplies one decision tick's commands from whichever source owns them.
   if run.historyPlayback:
+    if run.recorder != nil:
+      run.replayPlayer.data = run.recorder.data
     if options.resumeStep >= 0 and w.tick > 0 and
         w.tick mod DecisionTicks == 0:
       runBotDecisions(run)
-    if run.recorder != nil:
-      run.replayPlayer.data = run.recorder.data
     var action: ReplayAction
     while run.replayPlayer.takeActionAt(uint32(w.tick), action):
-      if action.kind == ActionChat:
-        if options.resumeStep >= 0:
-          discard run.deliverChat(int(action.playerId), int(action.target),
-            action.text, int32(action.tick))
-      elif w.applyReplayAction(action):
-        run.metrics.command(int(action.playerId), w.tick)
+      if action.kind != ActionChat or options.resumeStep >= 0:
+        run.applyRecordedAction(action)
   else:
     flushPlayerCommands(run)
     runBotDecisions(run)

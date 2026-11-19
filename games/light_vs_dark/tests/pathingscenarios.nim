@@ -1,4 +1,4 @@
-## Deterministic showcase scenes using the ordinary Light vs Dark simulation.
+## Deterministic pathing test scenes using the ordinary Light vs Dark simulation.
 
 import
   fixxy,
@@ -8,23 +8,23 @@ import
 export fixxy, content, maps, sim
 
 const
-  DemoUnitCount* = 100
-  DemoDurationTicks* = 1800
-  DemoMapSide = 80'i32
+  PathingUnitCount* = 100
+  PathingDurationTicks* = 1800
+  PathingMapSide = 80'i32
 
 type
   PathingScenario* = enum
     OpenField, OpposingStreams, CrossingStreams, NarrowChoke, BuildingDetour
 
-  DemoRect* = object
+  PathingRect* = object
     x*, y*, width*, height*: int32
 
-  DemoScene* = object
+  PathingScene* = object
     world*: World
     starts*, goals*: seq[FixedVec2]
     groups*: seq[int]
-    obstacles*: seq[DemoRect]
-    bounds*: DemoRect
+    obstacles*: seq[PathingRect]
+    bounds*: PathingRect
 
 const
   ScenarioNames*: array[PathingScenario, string] = [
@@ -43,19 +43,19 @@ proc emptyWorld(): World =
   ## Keeps real match rules and offscreen halls on a flat, obstacle-free map.
   var map = MapData(
     seed: 73021,
-    side: DemoMapSide,
-    passable: newSeq[uint8](DemoMapSide * DemoMapSide),
-    kinds: newSeq[uint8](DemoMapSide * DemoMapSide),
-    treeWood: newSeq[int16](DemoMapSide * DemoMapSide),
-    heights: newSeq[int16](DemoMapSide * DemoMapSide),
+    side: PathingMapSide,
+    passable: newSeq[uint8](PathingMapSide * PathingMapSide),
+    kinds: newSeq[uint8](PathingMapSide * PathingMapSide),
+    treeWood: newSeq[int16](PathingMapSide * PathingMapSide),
+    heights: newSeq[int16](PathingMapSide * PathingMapSide),
     hallOrigin: @[tile2(3, 3), tile2(72, 72)]
   )
   let layer = QuadLayer(
-    originX: GridTiles div 2 - DemoMapSide.int div 2,
-    originZ: GridTiles div 2 - DemoMapSide.int div 2,
-    width: DemoMapSide.int,
-    depth: DemoMapSide.int,
-    tiles: newSeq[Tile](DemoMapSide * DemoMapSide)
+    originX: GridTiles div 2 - PathingMapSide.int div 2,
+    originZ: GridTiles div 2 - PathingMapSide.int div 2,
+    width: PathingMapSide.int,
+    depth: PathingMapSide.int,
+    tiles: newSeq[Tile](PathingMapSide * PathingMapSide)
   )
   for i in 0 ..< map.passable.len:
     map.passable[i] = 1
@@ -72,7 +72,7 @@ proc emptyWorld(): World =
   for player in result.players.mitems:
     player.foodUsed = 0
 
-proc plantTrees(scene: var DemoScene, obstacle: DemoRect) =
+proc plantTrees(scene: var PathingScene, obstacle: PathingRect) =
   ## Adds visible, harvestable trees and their ordinary movement blockers.
   scene.obstacles.add obstacle
   for y in obstacle.y ..< obstacle.y + obstacle.height:
@@ -85,7 +85,7 @@ proc plantTrees(scene: var DemoScene, obstacle: DemoRect) =
       scene.world.map.terrain[0].tiles[index].kind = TreeTile
   inc scene.world.pathTerrainRevision
 
-proc addBuilding(scene: var DemoScene, kind: BuildingKind, x, y: int32) =
+proc addBuilding(scene: var PathingScene, kind: BuildingKind, x, y: int32) =
   ## Creates a completed real structure through the normal placement pipeline.
   let
     world = scene.world
@@ -98,10 +98,10 @@ proc addBuilding(scene: var DemoScene, kind: BuildingKind, x, y: int32) =
   world.buildings[^1].buildTicks = 0
   world.buildings[^1].builderId = NoEntity
   let size = world.buildings[^1].footprint
-  scene.obstacles.add DemoRect(
+  scene.obstacles.add PathingRect(
     x: x, y: y, width: size.width, height: size.depth
   )
-  # Setup builders never enter the demonstration or leave pending requests.
+  # Setup builders never enter the test scene or leave pending requests.
   world.units.setLen(0)
   for slot in world.unitSlot.mitems:
     slot = -1
@@ -109,7 +109,7 @@ proc addBuilding(scene: var DemoScene, kind: BuildingKind, x, y: int32) =
     occupant = NoEntity
   world.pathQueue.setLen(0)
 
-proc addUnit(scene: var DemoScene, start, goal: FixedVec2, group: int) =
+proc addUnit(scene: var PathingScene, start, goal: FixedVec2, group: int) =
   ## Registers an ordinary soldier and issues its exact movement destination.
   let
     world = scene.world
@@ -130,29 +130,29 @@ proc addUnit(scene: var DemoScene, start, goal: FixedVec2, group: int) =
     0, id, goalTile.x.int32, goalTile.y.int32, goal - center
   )
 
-proc createScene*(scenario: PathingScenario): DemoScene =
+proc createScene*(scenario: PathingScenario): PathingScene =
   ## Recreates a complete scene, including deterministic paths and body state.
   result.world = emptyWorld()
   case scenario
   of OpenField:
-    result.bounds = DemoRect(x: 18, y: 29, width: 45, height: 20)
+    result.bounds = PathingRect(x: 18, y: 29, width: 45, height: 20)
   of OpposingStreams:
-    result.bounds = DemoRect(x: 16, y: 29, width: 50, height: 16)
+    result.bounds = PathingRect(x: 16, y: 29, width: 50, height: 16)
   of CrossingStreams:
-    result.bounds = DemoRect(x: 18, y: 18, width: 48, height: 42)
+    result.bounds = PathingRect(x: 18, y: 18, width: 48, height: 42)
   of NarrowChoke:
-    result.bounds = DemoRect(x: 18, y: 29, width: 45, height: 20)
+    result.bounds = PathingRect(x: 18, y: 29, width: 45, height: 20)
     # The wall reaches map edges so every route uses the visible opening.
-    result.plantTrees(DemoRect(x: 39, y: 0, width: 2, height: 39))
-    result.plantTrees(DemoRect(x: 39, y: 41, width: 2, height: 39))
+    result.plantTrees(PathingRect(x: 39, y: 0, width: 2, height: 39))
+    result.plantTrees(PathingRect(x: 39, y: 41, width: 2, height: 39))
   of BuildingDetour:
-    result.bounds = DemoRect(x: 18, y: 27, width: 45, height: 21)
+    result.bounds = PathingRect(x: 18, y: 27, width: 45, height: 21)
     result.addBuilding(FarmBuilding, 37, 33)
     result.addBuilding(TownHallBuilding, 39, 36)
-  for i in 0 ..< DemoUnitCount:
+  for i in 0 ..< PathingUnitCount:
     let
       split = scenario in {OpposingStreams, CrossingStreams}
-      group = if split: i mod 2 else: i div (DemoUnitCount div 2)
+      group = if split: i mod 2 else: i div (PathingUnitCount div 2)
       rank = if split: i div 2 else: i
       column = int32(rank mod 10)
       row = int32(rank div 10)

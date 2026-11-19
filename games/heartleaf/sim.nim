@@ -698,6 +698,44 @@ proc startScoreScreen(w: World) =
   w.phase = ScorePhase
   w.phaseTicks = ScoreScreenTicks
 
+proc setMaximumTicks*(w: World, maximumTicks: int32) =
+  ## Changes the time budget, beginning another morning after a timed end.
+  let timedOut = w.over and w.phase == GameOverPhase and
+    w.tick == w.maximumTicks
+  w.maximumTicks = maximumTicks
+  w.dayCount = durationDays(maximumTicks)
+  if timedOut and w.tick < maximumTicks:
+    w.over = false
+    dec w.day
+    w.startDay()
+
+proc pendingDuration(game: Game): ReplayAction =
+  ## Reads a control for the next tick without changing the completed state.
+  if game.historyPlayback and game.replayPlayer != nil:
+    let player = game.replayPlayer
+    if player.actionIndex >= player.data.actions.len:
+      return
+    result = player.data.actions[player.actionIndex]
+  elif game.recorder != nil and game.recorder.data.actions.len > 0:
+    result = game.recorder.data.actions[^1]
+  if result.kind != ActionDuration or
+      result.tick != uint32(game.world.tick + 1):
+    result = ReplayAction()
+
+proc replayEnded*(game: Game): bool =
+  ## Allows playback to cross a recorded extension after a timed ending.
+  game.world.over and game.pendingDuration().kind != ActionDuration
+
+proc applyReplayDuration*(game: Game) =
+  ## Applies a duration control before advancing its tick, including endings.
+  let action = game.pendingDuration()
+  if action.kind != ActionDuration:
+    return
+  if game.historyPlayback:
+    inc game.replayPlayer.actionIndex
+  game.world.setMaximumTicks(action.first)
+  game.dayCount = game.world.dayCount
+
 ## Commands
 ##
 ## Each of these is the single validator for one command kind, and every one

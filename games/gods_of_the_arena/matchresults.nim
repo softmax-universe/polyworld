@@ -35,8 +35,8 @@ proc matchResult*(game: Game, heroId = 0'i32): MatchResult =
       result.ownTeam = hero.team.ord
       break
   var ticks = max(0'i32, world.battleTick())
-  if game.config.maxTicks > 0:
-    ticks = min(ticks, game.config.maxTicks)
+  if game.maximumTicks() > 0:
+    ticks = min(ticks, game.maximumTicks())
   let seconds = ticks div TickRate
   result.duration = $(seconds div 60) & ":" &
     align($(seconds mod 60), 2, '0')

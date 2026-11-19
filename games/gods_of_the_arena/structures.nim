@@ -574,7 +574,7 @@ proc refreshStructures*(game: Game, index: int) =
     raise newException(BasicError, "GotA structured observation capacity exceeded")
   put("match.tick", world.tick)
   put("match.battleTick", world.battleTick())
-  put("match.maxTicks", game.config.maxTicks)
+  put("match.maxTicks", game.maximumTicks())
   put("match.tickRate", TickRate)
   put("match.seed", cast[int32](game.config.seed))
   put("match.waveTicks", world.spawnTimerTicks)

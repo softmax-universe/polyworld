@@ -1,6 +1,7 @@
 import
   std/sequtils,
   bassy,
+  polyworld/tapes,
   ../[bots, content, maps, replays, sim]
 
 let game = newGame(generateMap(DefaultSeed), 1)
@@ -60,3 +61,67 @@ for slot, brain in warm.brains:
     doAssert brain.runtime.getGlobal("stopped") == 1
     doAssert brain.runtime.getGlobal("again") == 1
 echo "Heartleaf warm-up preserves command results and flushes replaced actions"
+
+echo "Testing duration changes preserve the prefix and extend a timed ending"
+block:
+  let
+    map = generateMap(DefaultSeed)
+    original = newGame(map, 1)
+    recorder = initReplayRecorder(Setup(
+      mapSeed: DefaultSeed,
+      tickRate: uint16(TickRate),
+      gridTiles: uint16(GridSide),
+      decisionTicks: uint16(DecisionTicks),
+      dayCount: 1,
+      maximumTicks: uint32(gameLengthTicks(1)),
+      mapHash: map.hash,
+      contentHash: contentHash()
+    ))
+  for tick in 1 .. gameLengthTicks(1):
+    original.world.tickWorld(nil)
+    recorder.recordHash(original.stateHash())
+  doAssert original.world.over
+  let tape = decodeReplay(encodeReplay(recorder.data))
+  for cutoff in [0'i32, DayTicks + 10, gameLengthTicks(1)]:
+    let resumed = newGame(map, 1)
+    resumed.historyPlayback = true
+    resumed.replayPlayer = initReplayPlayer(tape)
+    for tick in 1 .. cutoff:
+      resumed.world.tickWorld(nil)
+      doAssert resumed.stateHash() == tape.hashes[tick - 1]
+    resumed.recorder = ReplayRecorder(data: replayPrefix(tape, uint32(cutoff)))
+    resumed.recorder.recordAction(
+      uint32(cutoff + 1), 0, ActionDuration, gameLengthTicks(2))
+    resumed.recorder.data.config.maxTicks = gameLengthTicks(2)
+    resumed.recorder.data.config.dayCount = 2
+    resumed.historyPlayback = false
+    if cutoff > 0:
+      doAssert resumed.stateHash() == tape.hashes[cutoff - 1]
+    if cutoff == gameLengthTicks(1):
+      doAssert resumed.world.over
+      doAssert not resumed.replayEnded()
+    for tick in cutoff + 1 .. gameLengthTicks(2):
+      resumed.applyReplayDuration()
+      resumed.world.tickWorld(nil)
+      doAssert resumed.world.tick == tick
+      resumed.recorder.recordHash(resumed.stateHash())
+    doAssert resumed.world.over and resumed.world.dayCount == 2
+    let branch = decodeReplay(encodeReplay(resumed.recorder.data))
+    doAssert branch.hashes[0 ..< cutoff] == tape.hashes[0 ..< cutoff]
+    doAssert branch.header.setup == tape.header.setup
+    doAssert branch.durationAt(uint32(cutoff)) == gameLengthTicks(1)
+    doAssert branch.durationAt(uint32(cutoff + 1)) == gameLengthTicks(2)
+    var prefix = replayPrefix(branch, uint32(cutoff))
+    prefix.config.maxTicks = prefix.durationAt(uint32(cutoff))
+    prefix.config.dayCount = durationDays(prefix.config.maxTicks)
+    prefix.validate()
+    let playback = newGame(map, 1)
+    playback.historyPlayback = true
+    playback.replayPlayer = initReplayPlayer(branch)
+    for tick in 1 .. gameLengthTicks(2):
+      playback.applyReplayDuration()
+      playback.world.tickWorld(nil)
+      doAssert playback.stateHash() == branch.hashes[tick - 1]
+    doAssert playback.replayEnded()
+    doAssert playback.replayPlayer.finished
+echo "Heartleaf duration controls preserve every replay hash"

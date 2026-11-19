@@ -103,4 +103,35 @@ block envelope:
     caught = true
   doAssert caught, "invalid magic was accepted"
 
+echo "Testing duration control validation"
+block:
+  var data = sampleReplay()
+  let control = ReplayAction(
+    tick: 1, kind: ActionDuration, first: gameLengthTicks(3))
+  data.actions.insert(control, 0)
+  data.config.maxTicks = gameLengthTicks(3)
+  data.config.dayCount = 3
+  discard decodeReplay(encodeReplay(data))
+  for invalid in [
+    ReplayAction(tick: 0, kind: ActionDuration, first: gameLengthTicks(3)),
+    ReplayAction(tick: 1, kind: ActionDuration, first: 0),
+    ReplayAction(tick: 1, kind: ActionDuration, first: int32(MaxGameTicks) + 1),
+    ReplayAction(tick: 1, kind: ActionDuration, first: 24, playerId: 1)
+  ]:
+    var rejected = false
+    data.actions[0] = invalid
+    try:
+      data.validate()
+    except ReplayError:
+      rejected = true
+    doAssert rejected
+  data.actions[0] = control
+  data.actions.insert(control, 1)
+  var rejected = false
+  try:
+    data.validate()
+  except ReplayError:
+    rejected = true
+  doAssert rejected, "two duration controls in one tick were accepted"
+
 echo "test_replays: all checks passed"

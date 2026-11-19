@@ -87,11 +87,13 @@ proc isGameplay[A](action: A): bool =
   when A is gota.ReplayAction:
     gota.isGameplayAction(action)
   elif A is cta.ReplayAction:
-    action.kind != cta.ActionChat
+    action.kind notin {cta.ActionChat, cta.ActionDuration}
   elif A is lvd.ReplayAction:
-    action.kind != lvd.ActionChat
+    action.kind notin {lvd.ActionChat, lvd.ActionDuration}
   elif A is cac.ReplayAction:
-    action.kind != cac.ActionMailbox
+    action.kind in 1'u8 .. cac.ActionGameKindHigh
+  elif A is heartleaf.ReplayAction:
+    action.kind != heartleaf.ActionDuration
   else:
     true
 
@@ -155,6 +157,97 @@ proc testGotaTakeover(
     run([executable, "--replay", branch])
     echo "  base -> ", replaced, " rushers: replay through ", cutoff,
       ", live from ", cutoff + 1, " through ", resumed.hashes.len
+
+proc testDurations[T](
+    name, executable, source, original, directory: string,
+    seats: int,
+    recorded: T,
+    load: proc(path: string): T
+) =
+  ## Extends and shortens real recordings without changing their history.
+  let
+    length = recorded.hashes.len
+    middle = length div 2
+    originalLimit = recorded.header.setup.maximumTicks.int
+    openingTicks = length - originalLimit
+    bots = @["--bot", original & ":" & $seats]
+    extendedLimit =
+      when T is lvd.ReplayData:
+        1440
+      else:
+        originalLimit + 24
+    duration =
+      when T is lvd.ReplayData:
+        @["--minutes", "1"]
+      elif T is cta.ReplayData or T is cac.ReplayData:
+        @["--seconds=" & $(extendedLimit div 24)]
+      else:
+        @["--ticks", $extendedLimit]
+  doAssert openingTicks >= 0, name & " must reach its original time limit"
+  for cutoff in [middle, length]:
+    let path = directory / name & "-extended-" & $cutoff & ".replay"
+    run(@[
+      executable, "--replay", source, "--resume-step", $cutoff
+    ] & bots & duration & @["--record", path])
+    let extended = load(path)
+    checkPrefix(recorded, extended, cutoff)
+    doAssert extended.config.maxTicks == extendedLimit,
+      name & " ignored the explicit duration"
+    doAssert extended.hashes.len == openingTicks + extendedLimit,
+      name & " did not continue to the extended time limit"
+    run([executable, "--replay", path])
+
+  let unchangedPath = directory / name & "-explicit-duration.replay"
+  run(@[
+    executable, "--replay", source, "--resume-step", $middle,
+    "--ticks", $originalLimit, "--record", unchangedPath
+  ] & bots)
+  let unchanged = load(unchangedPath)
+  doAssert unchanged.actions == recorded.actions
+  doAssert unchanged.hashes == recorded.hashes
+  run([executable, "--replay", unchangedPath])
+
+  let
+    liveTicks = min(12, (length - middle) div 2)
+    shorterLimit = middle - openingTicks + liveTicks
+    shorterPath = directory / name & "-shorter.replay"
+  doAssert shorterLimit > 0
+  run(@[
+    executable, "--replay", source, "--resume-step", $middle,
+    "--ticks=" & $shorterLimit, "--record", shorterPath
+  ] & bots)
+  let shorter = load(shorterPath)
+  checkPrefix(recorded, shorter, middle)
+  doAssert shorter.hashes.len == middle + liveTicks
+  doAssert shorter.config.maxTicks == shorterLimit
+  run([executable, "--replay", shorterPath])
+  run(@[
+    executable, "--replay", source, "--resume-step", $length,
+    "--ticks", "1"
+  ] & bots, succeeds = false)
+
+  block:
+    let
+      extendedPath = directory / name & "-extended-" & $middle & ".replay"
+      extended = load(extendedPath)
+    for cutoff in [middle - 1, middle + 1]:
+      let path = directory / name & "-nested-" & $cutoff & ".replay"
+      run(@[
+        executable, "--replay", extendedPath, "--resume-step", $cutoff,
+        "--record", path
+      ] & bots)
+      let
+        nested = load(path)
+        expected = if cutoff < middle: recorded else: extended
+      checkPrefix(extended, nested, cutoff)
+      doAssert nested.config.maxTicks == expected.config.maxTicks,
+        name & " inherited a duration outside its replay prefix"
+      doAssert nested.hashes == expected.hashes,
+        name & " changed state after a nested handoff"
+      doAssert nested.actions == expected.actions,
+        name & " changed actions after a nested handoff"
+      run([executable, "--replay", path])
+  echo "  verified explicit duration, endpoint extension, and branch playback"
 
 proc testGame[T](
     name, entry: string,
@@ -225,6 +318,8 @@ proc testGame[T](
     " hashes and actions after handoff ", middle
   when T is gota.ReplayData:
     testGotaTakeover(executable, source, original, directory, recorded)
+  testDurations(name, executable, source, original, directory,
+    seats, recorded, load)
   for (cutoff, mixed) in [
     (0, false), (middle, false), (middle, true), (length, false)
   ]:

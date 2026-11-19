@@ -3584,6 +3584,15 @@ proc checkVictory(w: World) =
     # Scores remain rankings, not victory. A solo sandbox still ends at its cap.
     w.winner = if oneSide: survivor else: -1
 
+proc setMaximumTicks*(w: World, maximumTicks: int32) =
+  ## Changes the duration while preserving elimination victories at a timeout.
+  let timedOut = w.over and w.tick >= w.maximumTicks
+  w.maximumTicks = maximumTicks
+  if timedOut:
+    w.over = false
+    w.winner = -1
+    w.checkVictory()
+
 ## The tick
 ##
 ## Phase order is fixed and is the reason a replay resynchronises: vision is

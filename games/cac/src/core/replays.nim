@@ -21,7 +21,7 @@ const
   ReplayFormatVersion* = 2'u16
   ## This client supports only this gameplay version. Bump it when rules
   ## change. Older replays use their archived client.
-  ReplayGameVersion* = 4'u16
+  ReplayGameVersion* = 5'u16
 
   MaxReplayActions* = 1_000_000
   MaxReplayHashes* = 1_000_000
@@ -34,7 +34,8 @@ const
   ActionToss* = 5'u8
   ActionGameKindHigh* = ActionToss
   ActionMailbox* = 6'u8
-  ActionKindHigh* = ActionMailbox
+  ActionDuration* = 7'u8
+  ActionKindHigh* = ActionDuration
 
 type
   ReplayChoice* = object
@@ -60,7 +61,7 @@ type
       ## game actions already completed, including zero before the first.
     playerId*: int32  ## The seat that acted.
     kind*: uint8
-    handIndex*: int32  ## PlayCard: the hand card.
+    handIndex*: int32  ## PlayCard: the hand card. Duration: the new tick cap.
     attacker*: int32  ## Attack: the minion's id.
     choices*: seq[ReplayChoice]
       ## PlayCard and ResolveTrigger: one per target. Attack: the target.
@@ -76,6 +77,7 @@ type
     ## Replay consumes the public stream without running private bot programs.
     actionIndex*: int
     inboxes*: seq[Mailbox]
+    maximumTicks*: uint32
 
 proc fail(message: string) {.noreturn.} =
   raise newException(ReplayError, message)
@@ -99,6 +101,7 @@ proc applyMailbox*(inboxes: openArray[Mailbox], action: ReplayAction): int32 =
 
 proc initReplayCursor*(data: ReplayData): ReplayCursor =
   ## Starts with independent inboxes; rewinds create a fresh cursor.
+  result.maximumTicks = data.header.setup.maximumTicks
   for _ in data.header.setup.classes:
     result.inboxes.add newMailbox()
 
@@ -118,8 +121,16 @@ proc takeReplayAction*(data: ReplayData, cursor: var ReplayCursor,
   data.applyReplayMailboxes(cursor, tick)
   if cursor.actionIndex == data.actions.len:
     return false
+  if data.actions[cursor.actionIndex].kind == ActionDuration:
+    let duration = data.actions[cursor.actionIndex]
+    if duration.tick != tick + 1:
+      fail("replay cursor skipped a duration change")
+    cursor.maximumTicks = uint32(duration.handIndex)
+    inc cursor.actionIndex
+    if cursor.actionIndex == data.actions.len:
+      fail("replay duration change has no following game action")
   action = data.actions[cursor.actionIndex]
-  if action.kind == ActionMailbox or action.tick != tick + 1:
+  if action.kind > ActionGameKindHigh or action.tick != tick + 1:
     fail("replay cursor skipped a game action")
   inc cursor.actionIndex
   true
@@ -230,7 +241,27 @@ proc record*(recorder: ReplayRecorder, action: ReplayAction) =
     action.validateMailbox(recorder.data.header.setup.classes.len)
     if action.tick != recorder.data.hashes.len.uint32:
       fail("replay mailbox message is not at the current game tick")
+  elif action.kind == ActionDuration:
+    if action.tick != recorder.data.hashes.len.uint32 + 1 or
+      action.handIndex < int32(action.tick) or
+      action.handIndex > MaxReplayHashes:
+        fail("replay duration change is invalid")
+    recorder.data.config.maxTicks = action.handIndex
   recorder.data.actions.appendAction(action, MaxReplayActions)
+
+proc recordDuration*(recorder: ReplayRecorder, tick, maximumTicks: uint32) =
+  ## Changes the cap immediately before the named gameplay action.
+  recorder.record(ReplayAction(kind: ActionDuration, tick: tick,
+    handIndex: int32(maximumTicks)))
+
+proc durationAt*(data: ReplayData, tick: uint32): uint32 =
+  ## Returns the match cap after all gameplay actions through this tick.
+  result = data.header.setup.maximumTicks
+  for action in data.actions:
+    if action.tick > tick:
+      break
+    if action.kind == ActionDuration:
+      result = uint32(action.handIndex)
 
 proc recordMailbox*(recorder: ReplayRecorder, tick: uint32,
     sender, target: int, text: openArray[char]) =
@@ -244,7 +275,10 @@ proc recordMailbox*(recorder: ReplayRecorder, tick: uint32,
     playerId: sender.int32, target: target.int32, text: message))
 
 proc recordHash*(recorder: ReplayRecorder, hash: uint64) =
-  recordHash(recorder, hash, MaxReplayHashes)
+  ## Appends one tick hash using the current recorded duration.
+  if recorder != nil:
+    recorder.data.hashes.appendHash(hash,
+      uint32(recorder.data.config.maxTicks), MaxReplayHashes)
 
 proc validate*(data: ReplayData) =
   ## Rejects a replay this build can't play back exactly.
@@ -256,9 +290,10 @@ proc validate*(data: ReplayData) =
   data.config.validateConfig(setup.classes.len)
   if data.hashes.len > MaxReplayHashes or data.actions.len > MaxReplayActions:
     fail("replay is too long")
-  if setup.maximumTicks > 0 and data.hashes.len.uint64 > setup.maximumTicks:
-    fail("replay is longer than its tick limit")
-  var tick = 0'u32
+  var
+    tick = 0'u32
+    maximumTicks = setup.maximumTicks
+    pendingDuration = false
   for action in data.actions:
     if action.kind == 0 or action.kind > ActionKindHigh:
       fail("replay action kind is invalid")
@@ -266,12 +301,27 @@ proc validate*(data: ReplayData) =
       fail("replay action names an unknown player")
     if action.kind == ActionMailbox:
       action.validateMailbox(setup.classes.len)
-      if action.tick != tick:
+      if action.tick != tick or pendingDuration:
         fail("replay mailbox message is not at its admission tick")
+    elif action.kind == ActionDuration:
+      if pendingDuration or action.tick != tick + 1 or
+        action.handIndex < int32(action.tick) or
+        action.handIndex > MaxReplayHashes or
+        (maximumTicks > 0 and tick > maximumTicks):
+          fail("replay duration change is invalid")
+      maximumTicks = uint32(action.handIndex)
+      pendingDuration = true
     else:
       if action.tick != tick + 1:
         fail("replay game actions are not one per tick")
       tick = action.tick
+      pendingDuration = false
+      if maximumTicks > 0 and tick > maximumTicks:
+        fail("replay is longer than its tick limit")
+  if pendingDuration:
+    fail("replay duration change has no following game action")
+  if data.config.maxTicks.uint32 != maximumTicks:
+    fail("replay duration disagrees with its configuration")
   if tick.uint64 != data.hashes.len.uint64:
     fail("replay actions and hashes do not match")
 

@@ -263,6 +263,62 @@ try:
       doAssert vm.runtime.getGlobal("failedSend") == 0
       doAssert vm.runtime.getGlobal("retried") == 1
   doAssert retryWarm.replayPlayer.finished
+
+  echo "Testing duration changes preserve the prefix and replay exactly"
+  for cutoff in [0, 3, 6]:
+    let extended = newGame(2026, 6)
+    extended.loadBots([BotGroup(path: feedbackPath, count: PartySize)])
+    extended.historyPlayback = true
+    extended.warmingPolicies = true
+    extended.replayPlayer = initReplayPlayer(feedbackData)
+    for tick in 1 .. cutoff:
+      extended.tickWorld(replayDecision)
+      doAssert extended.stateHash() == feedbackData.hashes[tick - 1]
+    extended.recorder = initReplayRecorder(
+      feedbackData.replayPrefix(cutoff.uint32))
+    extended.recorder.recordDuration(uint32(cutoff + 1), 12)
+    if cutoff > 0:
+      doAssert extended.stateHash() == feedbackData.hashes[cutoff - 1]
+    extended.historyPlayback = false
+    extended.warmingPolicies = false
+    while extended.world.tick < 12:
+      extended.tickWorld(proc(game: Game, slot: int32) =
+        ## Lets the warmed policies continue under the extended time limit.
+        game.runBotDecisions(slot)
+      )
+      extended.recorder.recordHash(extended.stateHash())
+    let
+      branch = decodeReplay(extended.recorder.data.encodeReplay())
+      prefix = branch.replayPrefix(cutoff.uint32)
+      replay = newGame(2026, 6)
+    doAssert branch.header.setup.maximumTicks == 6
+    doAssert branch.config.maxTicks == 12 and branch.hashes.len == 12
+    doAssert prefix.config.maxTicks == 6
+    doAssert prefix.actions ==
+      feedbackData.replayPrefix(cutoff.uint32).actions
+    doAssert prefix.hashes == feedbackData.hashes[0 ..< cutoff]
+    doAssert branch.replayPrefix(uint32(cutoff + 1)).config.maxTicks == 12
+    replay.historyPlayback = true
+    replay.replayPlayer = initReplayPlayer(branch)
+    for tick in 1 .. 12:
+      replay.tickWorld(replayDecision)
+      doAssert replay.stateHash() == branch.hashes[tick - 1]
+    doAssert replay.replayPlayer.finished
+
+  echo "Testing duration changes cannot resume a decided expedition"
+  for phase in [EscapedPhase, WipedPhase]:
+    let
+      terminal = newGame(2026, 6)
+      recorder = initReplayRecorder(terminal.world.setup)
+    terminal.world.phase = phase
+    recorder.recordDuration(1, 12)
+    recorder.recordHash(terminal.stateHash())
+    terminal.historyPlayback = true
+    terminal.replayPlayer = initReplayPlayer(recorder.data)
+    terminal.tickWorld(replayDecision)
+    doAssert terminal.world.tick == 0
+    doAssert terminal.world.setup.maximumTicks == 6
+    doAssert terminal.world.phase == phase
 finally:
   removeDir(directory)
 

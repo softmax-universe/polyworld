@@ -104,6 +104,7 @@ Light vs Dark, a small real-time strategy match between any number of BASIC over
   --llm-mode:async|barrier Wait for all requests between headless ticks.
   --help           Show this message.
 
+With --resume-step, explicit duration flags replace the replay's time limit.
 Compile with -d:headless for a command-line match.
 Compile with -d:emscripten for the web backend.
 Compile with -d:takeScreenshot for a deterministic capture."""
@@ -229,7 +230,7 @@ proc initializeMatch*() =
     profileBlock "replay":
       replayData = loadReplay(options.replayPath)
     mapSeed = replayData.config.seed
-    maximumTicks = replayData.config.maxTicks
+    maximumTicks = replayData.header.setup.maximumTicks.int32
     var gameMap: MapData
     profileBlock "map":
       gameMap = generateMap(
@@ -265,7 +266,12 @@ proc initializeMatch*() =
       loadBots(run, options.botGroups.expandBotSources(
         controllerKinds(setup.players.len, 0)))
       run.warmingPolicies = true
-      run.maximumTicks = maximumTicks
+      if options.durationOverride and
+          options.maximumTicks < options.resumeStep:
+        fail("the duration must not end before --resume-step")
+      if options.durationOverride and
+          options.maximumTicks.uint32 > MaxMatchTicks:
+        fail("the duration exceeds the maximum match length")
   else:
     let playerCount = options.botGroups.botCount + int(options.playerSlot > 0)
     var gameMap: MapData
@@ -341,6 +347,17 @@ proc verifyTick(game: Game) =
     game.hashCheck
   )
 
+proc preparePlaybackStart() =
+  ## Delivers startup messages before a possible handoff at tick zero.
+  if run.historyPlayback and run.world.tick == 0 and
+      run.replayPlayer.actionIndex == 0:
+    if run.recorder != nil:
+      run.replayPlayer.data = run.recorder.data
+    if run.warmingPolicies:
+      decide(run.world)
+    else:
+      run.replayPlayer.syncCursor(0)
+
 proc resumeIfReady() =
   ## Hands control to the warmed policies after the verified replay prefix.
   if run.warmingPolicies and run.world.tick == options.resumeStep:
@@ -353,20 +370,57 @@ proc resumeIfReady() =
         inc run.recorder.chatCount
     run.recorder.data.config.players =
       localGameConfig(options, run.world.players.len).players
+    run.recorder.data.config.maxTicks = run.world.maximumTicks
+    run.maximumTicks =
+      if options.durationOverride: options.maximumTicks
+      else: run.world.maximumTicks
     run.warmingPolicies = false
     run.historyPlayback = false
     run.replayMode = false
 
-proc advanceGame*() =
-  ## Advances the live world by one tick and verifies it when replaying.
-  if run.historyPlayback and run.world.tick == 0:
+proc applyReplayDuration() =
+  ## Applies a duration change before the next tick, after its prefix hash.
+  if run.historyPlayback:
     if run.recorder != nil:
       run.replayPlayer.data = run.recorder.data
-    if run.warmingPolicies:
-      decide(run.world)
+    if not run.replayPlayer.finished:
+      let action = run.replayPlayer.data.actions[run.replayPlayer.actionIndex]
+      if action.kind == ActionDuration and
+          action.tick == run.world.tick.uint32 + 1:
+        run.world.setMaximumTicks(action.first)
+        inc run.replayPlayer.actionIndex
+  elif options.durationOverride and run.world.tick == options.resumeStep and
+      options.maximumTicks > run.world.tick and
+      options.maximumTicks != run.world.maximumTicks:
+    let previous = run.world.maximumTicks
+    run.world.setMaximumTicks(options.maximumTicks)
+    if run.world.over:
+      run.world.maximumTicks = previous
     else:
-      run.replayPlayer.syncCursor(0)
+      run.recorder.recordAction(run.world.tick.uint32 + 1,
+        0, ActionDuration, 0, options.maximumTicks)
+      run.recorder.data.config.maxTicks = options.maximumTicks
+
+proc replayEnded*(game: Game): bool =
+  ## Keeps playback running when the next recorded tick extends a timeout.
+  if not game.world.over:
+    return false
+  if game.historyPlayback and game.replayPlayer != nil:
+    let
+      actions =
+        if game.recorder != nil: game.recorder.data.actions
+        else: game.replayPlayer.data.actions
+      index = game.replayPlayer.actionIndex
+    if index < actions.len and actions[index].kind == ActionDuration and
+        actions[index].tick == game.world.tick.uint32 + 1:
+      return false
+  true
+
+proc advanceGame*() =
+  ## Advances the live world by one tick and verifies it when replaying.
+  preparePlaybackStart()
   resumeIfReady()
+  applyReplayDuration()
   run.world.tickWorld(decide)
   if run.historyPlayback:
     if run.world.tick mod DecisionTicks != 0:
@@ -427,7 +481,12 @@ proc runHeadless*() =
     for vm in run.brains:
       if vm != nil:
         pollers.add vm.pollRequests
-  while run.world.tick < run.maximumTicks and not run.world.over:
+  while true:
+    preparePlaybackStart()
+    resumeIfReady()
+    applyReplayDuration()
+    if run.world.tick >= run.maximumTicks or run.world.over:
+      break
     advanceGame()
     waitForRequests(pollers)
     pacer.pace()

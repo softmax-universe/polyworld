@@ -1,6 +1,6 @@
 import
   bassy,
-  polyworld/[cli, mailboxes],
+  polyworld/[cli, mailboxes, tapes],
   ../[bots, content, maps, multiplayer, presets, replays, sim],
   ../game as runner
 
@@ -8,6 +8,90 @@ const Policy = """
 visits = visits + 1
 accepted = setRally(obsId(0), obsX(ownBuildings), obsY(ownBuildings))
 """
+
+block durationOverride:
+  var config = defaultConfig(2)
+  config.maxTicks = 2 * DecisionTicks
+  config.mapSettings = MapSettings(layout: RandomLayout, size: 90, expansions: 0)
+  let original = newLocalMatch(config, ["", ""])
+  runner.options = GameOptions()
+  runner.run = original
+  for tick in 1 .. config.maxTicks:
+    runner.advanceGame()
+  doAssert original.world.over
+  let data = decodeReplay(encodeReplay(original.recorder.data))
+  for cutoff in [0'i32, DecisionTicks, config.maxTicks]:
+    let resumed = newGame(original.world.map, config.maxTicks)
+    resumed.loadBots(["", ""])
+    resumed.replayData = data
+    resumed.replayPlayer = initReplayPlayer(data)
+    resumed.replayMode = true
+    resumed.historyPlayback = true
+    resumed.warmingPolicies = true
+    runner.options = GameOptions(resumeStep: cutoff, durationOverride: true,
+      maximumTicks: config.maxTicks + DecisionTicks)
+    runner.run = resumed
+    for tick in 1 .. config.maxTicks + DecisionTicks:
+      runner.advanceGame()
+      doAssert resumed.world.tick == tick
+      if tick <= cutoff:
+        doAssert resumed.stateHash() == data.hashes[tick - 1]
+    doAssert resumed.world.over
+    let branch = decodeReplay(encodeReplay(resumed.recorder.data))
+    doAssert branch.header.setup.maximumTicks == data.header.setup.maximumTicks
+    doAssert branch.config.maxTicks == config.maxTicks + DecisionTicks
+    doAssert branch.actions.len == 1
+    doAssert branch.actions[0].kind == ActionDuration
+    doAssert branch.actions[0].tick == cutoff.uint32 + 1
+    doAssert branch.hashes[0 ..< cutoff] == data.hashes[0 ..< cutoff]
+    let playback = newGame(original.world.map, config.maxTicks)
+    playback.replayData = branch
+    playback.replayPlayer = initReplayPlayer(branch)
+    playback.replayMode = true
+    playback.historyPlayback = true
+    runner.options = GameOptions()
+    runner.run = playback
+    for tick in 1 .. branch.hashes.len:
+      runner.advanceGame()
+      doAssert playback.world.tick == tick
+      doAssert playback.stateHash() == branch.hashes[tick - 1]
+      if tick == cutoff and cutoff == config.maxTicks:
+        doAssert playback.world.over and not playback.replayEnded(),
+          "The viewer must continue past a recorded timeout extension"
+    doAssert playback.hashCheck.mismatches == 0
+    doAssert playback.replayEnded()
+    var invalid = branch
+    invalid.actions[0].first = cutoff
+    try:
+      invalid.validate()
+      doAssert false, "A duration event must allow its next tick"
+    except ReplayError:
+      discard
+    let nested = newGame(original.world.map, config.maxTicks)
+    nested.loadBots(["", ""])
+    nested.replayData = branch
+    nested.replayPlayer = initReplayPlayer(branch)
+    nested.replayMode = true
+    nested.historyPlayback = true
+    nested.warmingPolicies = true
+    runner.options = GameOptions(resumeStep: cutoff)
+    runner.run = nested
+    for tick in 1 .. config.maxTicks:
+      runner.advanceGame()
+    doAssert nested.recorder.data.config.maxTicks == config.maxTicks
+    doAssert nested.recorder.data.actions.len == 0,
+      "A future source duration must not leak across an earlier handoff"
+    doAssert nested.recorder.data.hashes == data.hashes
+  let victory = newGame(original.world.map, config.maxTicks).world
+  victory.players[1].defeated = true
+  victory.tick = config.maxTicks
+  victory.over = true
+  victory.winner = 0
+  victory.setMaximumTicks(config.maxTicks + DecisionTicks)
+  doAssert victory.over and victory.winner == 0,
+    "Extending the duration must not revive an elimination victory"
+  runner.options = GameOptions()
+  echo "Light vs Dark duration changes preserve prefixes and replay extensions"
 
 let game = newGame(generateMap(2026, 2), 120)
 game.loadBots([Policy, Policy])

@@ -299,7 +299,7 @@ proc runGraphics*() =
   seekStartup(captureCheckpoint)
   transport.sync(run.world.tick,
     (if run.recorder != nil: int32(run.recorder.data.hashes.len)
-     else: int32(run.replayPlayer.data.hashes.len)), run.world.over)
+     else: int32(run.replayPlayer.data.hashes.len)), run.replayEnded())
 
   ## Camera and input
 
@@ -559,7 +559,7 @@ proc runGraphics*() =
     if existsEnv("SIM_SECONDS"):
       let wanted = int32(getEnv("SIM_SECONDS").parseFloat * TickRate.float64)
       while run.world.tick < wanted and
-          run.world.tick < run.maximumTicks and not run.world.over:
+          run.world.tick < run.maximumTicks and not run.replayEnded():
         advanceGame()
     var screenshotFrame = 0
 
@@ -570,11 +570,11 @@ proc runGraphics*() =
       let recorded =
         if run.recorder != nil: int32(run.recorder.data.hashes.len)
         else: int32(run.replayPlayer.data.hashes.len)
-      transport.sync(run.world.tick, recorded, run.world.over)
+      transport.sync(run.world.tick, recorded, run.replayEnded())
       let restoreTick = transport.takeRestore()
       if restoreTick >= 0:
         restoreTo(restoreTick)
-        transport.sync(run.world.tick, recorded, run.world.over)
+        transport.sync(run.world.tick, recorded, run.replayEnded())
       transport.startScoreFrame(run.world, dt)
       let frameStart = epochTime()
       run.historyPlayback = transport.inHistory
@@ -588,7 +588,7 @@ proc runGraphics*() =
           let recordedNow =
             if run.recorder != nil: int32(run.recorder.data.hashes.len)
             else: int32(run.replayPlayer.data.hashes.len)
-          transport.sync(run.world.tick, recordedNow, run.world.over)
+          transport.sync(run.world.tick, recordedNow, run.replayEnded())
           if transport.stopAtScoreBoundary(previousPhase, run.world):
             break
       scorePresentation.update(run.world, dt)

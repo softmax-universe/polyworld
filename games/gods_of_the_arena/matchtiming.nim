@@ -8,7 +8,7 @@ proc remainingMatchTicks*(game: Game): int32 =
   ## durationTicks includes draft deadlines and the full preparation budget.
   ## Do not use replay hash length: a recording may stop before the cutoff.
   if game.world.gameOver: return 0
-  var cutoff = game.config.maxTicks + game.world.draftTicks
+  var cutoff = game.maximumTicks() + game.world.draftTicks
   if game.world.drafting: cutoff += PreparationTicks
   if game.world.phase == Drafting:
     cutoff += (game.world.draftOrder.len - game.world.draftTurn).int32 *

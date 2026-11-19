@@ -13,7 +13,7 @@ const
   ReplayFormatVersion* = 5'u16
   ## This client supports only this gameplay version. Bump it when rules change.
   ## Older replays use their archived client; never add compatibility branches.
-  ReplayGameVersion* = 27'u16
+  ReplayGameVersion* = 28'u16
   ActionWalkTo* = 1'u8
   ActionAttackTarget* = 2'u8
   ActionPickupTarget* = 3'u8
@@ -21,7 +21,8 @@ const
   ActionUseItem* = 5'u8
   ActionDropItem* = 6'u8
   ActionChat* = 7'u8
-  ActionKindHigh* = ActionChat
+  ActionDuration* = 8'u8
+  ActionKindHigh* = ActionDuration
   MaxReplayBytes* = 64 * 1024 * 1024
   MaxReplayActions* = 4_000_000
   MaxReplayHashes* = 10_000_000
@@ -73,6 +74,35 @@ proc initReplayRecorder*(setup: Setup): ReplayRecorder =
   ## Creates an in-memory recorder owning the complete replay data.
   ReplayRecorder(data: initReplayData(setup))
 
+proc durationAt*(data: ReplayData, tick: uint32): int32 =
+  ## Returns the time limit after the recorded commands through this tick.
+  result = int32(data.header.setup.maximumTicks)
+  for action in data.actions:
+    if action.tick > tick:
+      break
+    if action.kind == ActionDuration:
+      result = action.first
+
+proc replayPrefix*(data: ReplayData, tick: uint32): ReplayData =
+  ## Trims future commands and restores the duration at the branch point.
+  result = tapes.replayPrefix(data, tick)
+  result.config.maxTicks = data.durationAt(tick)
+
+proc recordDuration*(
+    recorder: ReplayRecorder, tick: uint32, maximumTicks: int32
+) =
+  ## Records a time-limit change before the next tick's policy commands.
+  if tick == 0 or maximumTicks < int64(tick) or
+    maximumTicks > MaxReplayHashes or
+    (recorder.data.actions.len > 0 and
+      recorder.data.actions[^1].tick >= tick):
+      fail("replay duration change has invalid bounds or ordering")
+  recorder.data.actions.appendAction(
+    ReplayAction(tick: tick, kind: ActionDuration, first: maximumTicks),
+    MaxReplayActions
+  )
+  recorder.data.config.maxTicks = maximumTicks
+
 proc validateChat(action: ReplayAction, setup: Setup) =
   ## Validates one nearby message without interpreting its private bytes.
   if action.heroId < 100 or action.heroId >= 100 + PartySize:
@@ -95,7 +125,9 @@ proc recordChat*(recorder: ReplayRecorder, action: ReplayAction) =
     return
   if action.kind != ActionChat:
     fail("replay chat action kind is invalid")
-  action.validateChat(recorder.data.header.setup)
+  var setup = recorder.data.header.setup
+  setup.maximumTicks = uint32(recorder.data.config.maxTicks)
+  action.validateChat(setup)
   if recorder.chatCount >= MaxReplayChats:
     fail("replay chat limit exceeded")
   recorder.data.actions.appendAction(action, MaxReplayActions)
@@ -150,7 +182,7 @@ proc recordHash*(recorder: ReplayRecorder, hash: uint64) =
   ## Appends the canonical hash for one completed simulation tick.
   if recorder != nil:
     recorder.data.hashes.appendHash(
-      hash, recorder.data.header.setup.maximumTicks, MaxReplayHashes)
+      hash, uint32(recorder.data.config.maxTicks), MaxReplayHashes)
 
 proc validateSetup(setup: Setup) =
   ## Validates the immutable expedition description.
@@ -172,6 +204,14 @@ proc validateSetup(setup: Setup) =
 
 proc validateAction(action: ReplayAction, setup: Setup) =
   ## Validates one recorded hero command and its payload.
+  if action.kind == ActionDuration:
+    if action.tick == 0 or action.tick > setup.maximumTicks + 1 or
+      action.first < int64(action.tick) or action.first > MaxReplayHashes or
+      action.heroId != 0 or action.second != 0 or action.third != 0 or
+      action.offset != FixedVec2Zero or action.text.len > 0 or
+      action.target != 0 or action.recipients != 0:
+        fail("replay duration change has an invalid payload")
+    return
   if action.kind == ActionChat:
     action.validateChat(setup)
     return
@@ -200,9 +240,8 @@ proc validateAction(action: ReplayAction, setup: Setup) =
 proc validate*(data: ReplayData) =
   ## Validates versions, setup, commands, and per-tick hash coverage.
   data.config.validateConfig(PartySize)
-  if data.config.seed != data.header.setup.seed or
-    data.config.maxTicks != int32(data.header.setup.maximumTicks):
-      fail("replay configuration does not match its simulation setup")
+  if data.config.seed != data.header.setup.seed:
+    fail("replay configuration does not match its simulation setup")
   data.header.requireTapeVersion(
     ReplayFormatVersion,
     ReplayGameVersion
@@ -210,22 +249,30 @@ proc validate*(data: ReplayData) =
   data.header.setup.validateSetup()
   if data.actions.len > MaxReplayActions:
     fail("replay action limit exceeded")
-  if data.hashes.len > int(data.header.setup.maximumTicks):
+  if data.hashes.len > data.config.maxTicks or
+      data.hashes.len > MaxReplayHashes:
     fail("replay hashes exceed the configured duration")
   var
     lastTick = 0'u32
     chatCount = 0
+    setup = data.header.setup
   for index, action in data.actions:
     if action.tick > uint32(data.hashes.len):
       fail("replay action exceeds the recorded duration")
     if index > 0 and action.tick < lastTick:
       fail("replay actions move backward in time")
-    action.validateAction(data.header.setup)
+    action.validateAction(setup)
+    if action.kind == ActionDuration:
+      if index > 0 and action.tick == lastTick:
+        fail("replay duration change must be first at its tick")
+      setup.maximumTicks = uint32(action.first)
     if action.kind == ActionChat:
       inc chatCount
       if chatCount > MaxReplayChats:
         fail("replay chat limit exceeded")
     lastTick = action.tick
+  if data.config.maxTicks != int32(setup.maximumTicks):
+    fail("replay configuration disagrees with its duration changes")
   try:
     data.metrics.validate(
       data.config.players.len,

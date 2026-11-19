@@ -347,6 +347,8 @@ type
     matchSeed*: int32
     nextFootmanId*: int32
     tick*: int32
+    maximumTicks*: int32
+      ## Current replay battle limit; zero uses the live configuration.
     phase*: MatchPhase
     draftMode*: DraftMode
     drafting*: bool
@@ -441,6 +443,13 @@ proc config*(game: Game): lent GotaConfig =
   if game.recorder != nil:
     return game.recorder.data.config
   game.replayData.config
+
+proc maximumTicks*(game: Game): int32 =
+  ## Returns the battle limit at the current point in the action stream.
+  if game.world.maximumTicks > 0:
+    game.world.maximumTicks
+  else:
+    game.config.maxTicks
 
 proc worldPoint(point: PathPoint): WorldPoint =
   ## Converts one exact 1/32-tile path point into integer world units.
@@ -4246,7 +4255,23 @@ proc visibleReplayChat*(game: Game, viewerTeam = -1): seq[HumanChatMessage] =
 proc finished*(game: Game): bool =
   ## Ends a battle on victory or after its full configured battle duration.
   game.world.gameOver or (game.world.phase == Playing and
-    game.world.battleTick() >= game.config.maxTicks)
+    game.world.battleTick() >= game.maximumTicks())
+
+proc replayEnded*(game: Game): bool =
+  ## Keeps playback running across a recorded extension after a time limit.
+  if not game.finished():
+    return false
+  if not game.world.gameOver and game.historyPlayback and
+      game.replayPlayer != nil:
+    let
+      actions =
+        if game.recorder != nil: game.recorder.data.actions
+        else: game.replayPlayer.data.actions
+      index = game.replayPlayer.actionIndex
+    if index < actions.len and actions[index].kind == ActionDuration and
+        actions[index].tick == game.world.tick.uint32 + 1:
+      return false
+  true
 
 proc outcome*(world: World): string =
   ## Distinguishes a victorious side, simultaneous god deaths, and a timeout.
@@ -4262,7 +4287,7 @@ proc durationTicks*(game: Game): int32 =
   if game.replayMode:
     return game.replayData.hashes.len.int32
   let world = game.world
-  result = game.config.maxTicks + world.draftTicks
+  result = game.maximumTicks() + world.draftTicks
   if world.drafting:
     result += PreparationTicks
   if world.phase == Drafting:
@@ -5583,6 +5608,8 @@ proc deliverPolicyChat*(
 proc applyReplayCommand*(game: Game, action: ReplayAction): bool =
   ## Consumes one ordered command while counting only accepted gameplay actions.
   case action.kind
+  of ActionDuration:
+    game.world.maximumTicks = action.first
   of ActionHumanChat, ActionSystemNotice:
     discard
   of ActionPolicyChat:
@@ -5602,6 +5629,20 @@ proc applyReplayActions*(game: Game, tick: uint32) =
   var action: ReplayAction
   while game.replayPlayer.takeActionAt(tick, action):
     discard game.applyReplayCommand(action)
+
+proc applyReplayDuration*(game: Game) =
+  ## Applies the next tick's limit before timeout checks or policy observations.
+  if game.replayPlayer == nil:
+    return
+  if game.recorder != nil:
+    game.replayPlayer.data = game.recorder.data
+  let player = game.replayPlayer
+  if player.actionIndex < player.data.actions.len:
+    let action = player.data.actions[player.actionIndex]
+    if action.kind == ActionDuration and
+        action.tick == game.world.tick.uint32 + 1:
+      discard game.applyReplayCommand(action)
+      inc player.actionIndex
 
 proc replayCommandCount*(game: Game): int =
   ## Counts consumed gameplay commands without counting chat or notice entries.
@@ -6330,10 +6371,12 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
     world.events.setLen(0)
     world.eventTick = world.tick + 1
   world.syncBuildings()
+  if game.historyPlayback:
+    if world.tick == 0:
+      game.applyReplayActions(0)
+    game.applyReplayDuration()
   if game.finished():
     return
-  if game.historyPlayback and world.tick == 0:
-    game.applyReplayActions(0)
 
   if game.replayMode and
       world.tick >= game.replayData.hashes.len:
@@ -6527,7 +6570,7 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
         amount: (if world.draw: -1 else: world.winner.ord),
         actor: world.eventEntity(0), target: world.eventEntity(0), related: -1
       )
-    elif world.battleTick() == game.config.maxTicks:
+    elif world.battleTick() == game.maximumTicks():
       world.emit GameEvent(
         kind: MatchEnded, cause: TimeLimit, amount: -1,
         actor: world.eventEntity(0), target: world.eventEntity(0), related: -1
@@ -6649,6 +6692,8 @@ proc newGame*(
   ## Builds one match session: world, lane paths, towers, and heroes.
   result = Game(
     world: World(
+      maximumTicks:
+        if replayMode: replayData.header.setup.maximumTicks.int32 else: 0,
       draftMode:
         if replayMode: replayData.header.setup.draftMode else: draftMode,
       forts: startingForts(map),

@@ -58,7 +58,7 @@ proc parseHeadlessArgs*(arguments: seq[string]): HeadlessArgs =
   ## `--bot PATH[:COUNT]` once per group of seats (2 to 7 seats), `--seed`,
   ## `--ticks` (or `--seconds`, `--minutes`), `--classes archer,mage,...`
   ## and `--record PATH`; or `--replay PATH` to verify a recording. Add
-  ## `--resume-step N` and bots to watch through N, then take control.
+  ## `--resume-step N` warms bots through N; duration flags override its limit.
   result.options = GameOptions(seed: DefaultSessionSeed.int32,
     maximumTicks: DefaultDurationTicks)
   var index = 0
@@ -92,6 +92,8 @@ proc runHeadless*() =
     replayData = loadReplay(options.replayPath)
     options.validateResume(replayData.hashes.len,
       replayData.header.setup.classes.len)
+    if options.durationOverride and options.maximumTicks < options.resumeStep:
+      fail("duration override ends before --resume-step")
     if parsed.classNames.len > 0:
       fail("--resume-step uses the replay's recorded classes and decks")
   var classOverride: seq[Seat]
@@ -113,7 +115,8 @@ proc runHeadless*() =
       if options.resumeStep >= 0: replayData.header.setup.seed
       else: options.seed
     maxTicks =
-      if options.resumeStep >= 0: replayData.header.setup.maximumTicks
+      if options.resumeStep >= 0:
+        replayData.header.setup.maximumTicks
       else: options.maximumTicks.uint32
   for bot in bots:
     if bot != nil:
@@ -142,6 +145,10 @@ proc runHeadless*() =
   if options.resumeStep >= 0:
     played.replayData = replayData
     played.resumeStep = options.resumeStep.uint32
+    if options.durationOverride:
+      if options.maximumTicks > MaxReplayHashes:
+        fail("duration override exceeds the replay tick limit")
+      played.resumeMaximumTicks = options.maximumTicks.uint32
   played.scriptError = proc(player: int, message: string) =
     echo "player ", player, " BASIC error: ", message
   played.run()

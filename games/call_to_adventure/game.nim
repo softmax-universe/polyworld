@@ -32,6 +32,7 @@ proc usage() =
   echo "  --seconds NUMBER        Duration in seconds (default 1200)."
   echo "  --minutes NUMBER        Duration in minutes (default 20)."
   echo "  --ticks NUMBER          Duration in ticks (default 28800)."
+  echo "                          Explicit durations override the resume limit."
   echo "  --headless-tick-rate N   Wall-clock ticks per second, 0 is unlimited."
   echo "  --llm-mode:async|barrier Wait for all requests between headless ticks."
   echo "  --speed NUMBER          Graphical start speed: 1, 2, 4, or 16."
@@ -231,6 +232,8 @@ proc verifyTick(game: Game) =
 
 proc advanceGame*() =
   ## Advances the live expedition by one tick and verifies it when replaying.
+  if run.historyPlayback and run.recorder != nil:
+    run.replayPlayer.data = run.recorder.data
   run.tickWorld(decideHeroSlot)
   if run.historyPlayback:
     run.verifyTick()
@@ -262,6 +265,16 @@ proc resumeReplay() =
     run.recorder = initReplayRecorder(
       run.replayData.replayPrefix(uint32(run.world.tick)))
     run.recorder.data.config.players = localGameConfig(options, PartySize).players
+    if not options.durationOverride:
+      options.maximumTicks = int32(run.world.setup.maximumTicks)
+    elif options.maximumTicks < run.world.tick or
+        options.maximumTicks > MaxReplayHashes:
+      fail("resume duration must cover the replay prefix and fit replay limits")
+    elif options.maximumTicks > run.world.tick and
+      uint32(options.maximumTicks) != run.world.setup.maximumTicks and
+      run.world.phase notin {EscapedPhase, WipedPhase}:
+        run.recorder.recordDuration(
+          uint32(run.world.tick + 1), options.maximumTicks)
     run.warmingPolicies = false
     run.historyPlayback = false
     run.replayMode = false
@@ -414,9 +427,11 @@ if options.replayPath.len > 0:
     replayData = loadReplay(options.replayPath)
   options.seed = replayData.config.seed
   options.validateResume(replayData.hashes.len, PartySize)
-  options.maximumTicks =
-    if options.resumeStep >= 0: replayData.config.maxTicks
-    else: int32(replayData.hashes.len)
+  if options.resumeStep < 0 or not options.durationOverride:
+    options.maximumTicks = int32(replayData.hashes.len)
+  elif options.maximumTicks < options.resumeStep or
+      options.maximumTicks > MaxReplayHashes:
+    fail("resume duration must cover the replay prefix and fit replay limits")
   profileBlock "map":
     run = newGame(
       options.seed,

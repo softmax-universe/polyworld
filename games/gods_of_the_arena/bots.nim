@@ -437,7 +437,7 @@ proc infoFunctions(host: var Host, heroId: int32) =
       team = world.heroById(heroId).team
     case args[0]
     of 0: world.battleTick()
-    of 1: activeGame.config.maxTicks
+    of 1: activeGame.maximumTicks()
     of 2: cast[int32](activeGame.config.seed)
     of 3: world.spawnTimerTicks
     of 4: world.spawnIntervalTicks

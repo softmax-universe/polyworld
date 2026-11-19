@@ -90,21 +90,24 @@ proc recording(source = OriginalSource, maxTicks = 8'u32): ReplayData =
   recorder.data
 
 proc resumed(data: ReplayData, step: uint32,
-    source = ReplacementSource): BotMatch =
+    source = ReplacementSource, maximum = 0'u32): BotMatch =
   ## Initializes selected policies while preserving the recorded match setup.
   let
     bots = loadBots([source, source])
     recorder = initReplayRecorder(data.header.setup, data.config)
+    maxTicks = data.header.setup.maximumTicks
+  recorder.data.config.maxTicks = maxTicks.int32
   discard bots.setupBotSeats(data.header.setup.seed)
   result = initBotMatch(
     data.header.setup.seats,
     data.header.setup.seed,
     bots,
-    data.header.setup.maximumTicks,
+    maxTicks,
     recorder
   )
   result.replayData = data
   result.resumeStep = step
+  result.resumeMaximumTicks = maximum
 
 proc total(game: BotMatch, name: string): int32 =
   ## Sums a private counter across the selected policies.
@@ -180,12 +183,11 @@ block:
   doAssert complete.total("received") == int32((data.hashes.len - 1) * 2)
   doAssert complete.recorder.data.hashes == data.hashes
   doAssert complete.recorder.data.actions == data.actions
-  inc complete.maxTicks
-  inc complete.recorder.data.header.setup.maximumTicks
-  inc complete.recorder.data.config.maxTicks
+  complete.resumeMaximumTicks = complete.maxTicks + 1
   doAssert complete.step()
   doAssert complete.total("calls") == int32(data.hashes.len + 1)
-  doAssert complete.recorder.data.actions[^2].text == "candidate"
+  doAssert complete.recorder.data.actions[^3].text == "candidate"
+  doAssert complete.recorder.data.actions[^2].kind == ActionDuration
   doAssert complete.recorder.data.actions[^1].kind == ActionPlayCard
   complete.recorder.data.verify()
 
@@ -199,6 +201,69 @@ block:
   complete.run()
   doAssert complete.recorder.data.actions == data.actions[0 ..< 24]
   complete.recorder.data.verify()
+
+echo "CaC supports longer and unchanged explicit durations"
+for cutoff in [0'u32, 4, 8]:
+  for maximum in [8'u32, 12]:
+    let data = recording()
+    var game = resumed(data, cutoff, OriginalSource, maximum)
+    game.run()
+    doAssert game.tick == maximum
+    doAssert game.outcome == MatchTimedOut
+    doAssert game.recorder.data.hashes[0 ..< data.hashes.len] == data.hashes
+    let count = data.actions.actionIndexAfter(cutoff)
+    for index in 0 ..< count:
+      if data.actions[index].kind != ActionMailbox or
+        data.actions[index].tick < cutoff:
+          doAssert game.recorder.data.actions[index] == data.actions[index]
+    game.recorder.data.verify()
+
+echo "CaC nested branches retain only past duration changes"
+block:
+  let data = recording()
+  var extended = resumed(data, 4, OriginalSource, 12)
+  extended.run()
+  let branch = extended.recorder.data
+  doAssert branch.header.setup.maximumTicks == 8
+  doAssert branch.config.maxTicks == 12
+  doAssert branch.durationAt(4) == 8
+  doAssert branch.durationAt(5) == 12
+  for cutoff in [2'u32, 4, 5, 10, 12]:
+    var nested = resumed(branch, cutoff, OriginalSource)
+    nested.run()
+    let expected = if cutoff <= 4: data else: branch
+    doAssert nested.recorder.data.actions == expected.actions
+    doAssert nested.recorder.data.hashes == expected.hashes
+    nested.recorder.data.verify()
+
+echo "CaC rejects malformed duration controls"
+block:
+  let data = recording()
+  var extended = resumed(data, 4, OriginalSource, 12)
+  extended.run()
+  let branch = extended.recorder.data
+  var control = -1
+  for index, action in branch.actions:
+    if action.kind == ActionDuration:
+      control = index
+  doAssert control >= 0
+  for variant in 0 .. 3:
+    var invalid = branch
+    case variant
+    of 0:
+      invalid.actions[control].handIndex = 4
+    of 1:
+      invalid.actions[control].tick = 4
+    of 2:
+      invalid.actions.insert(invalid.actions[control], control)
+    else:
+      invalid.config.maxTicks = 8
+    var rejected = false
+    try:
+      invalid.validate()
+    except ReplayError:
+      rejected = true
+    doAssert rejected
 
 echo "CaC preserves unchanged policies that read their own chat effects"
 for source in [SendResultSource, SelfReadSource, FullMailboxSource]:
@@ -227,3 +292,11 @@ block:
   doAssert game.recorder.data.hashes == data.hashes
   doAssert game.game.stateHash == data.hashes[^1]
   game.recorder.data.verify()
+  var extended = resumed(data, data.hashes.len.uint32, MageSource, 3_000)
+  extended.run()
+  doAssert extended.outcome == MatchWon
+  doAssert extended.tick == data.hashes.len.uint32,
+    "Extending time must preserve a decided match"
+  doAssert extended.recorder.data.hashes == data.hashes
+  doAssert extended.recorder.data.actions == data.actions
+  extended.recorder.data.verify()

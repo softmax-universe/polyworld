@@ -39,6 +39,7 @@ proc usage() =
   echo "  --seconds NUMBER        Battle seconds (default 1200)."
   echo "  --minutes NUMBER        Battle minutes (default 20)."
   echo "  --ticks NUMBER          Battle ticks (default 28800)."
+  echo "Explicit duration flags override the replay's limit when resuming."
   echo "Drafting allows 10 seconds per pick, separate from battle time."
   echo "  --seed NUMBER           Match seed for draft order, bot turn order,"
   echo "                          and combat randomness; the arena stays fixed."
@@ -166,7 +167,8 @@ proc initializeMatch*() =
     profileBlock "replay":
       replayData = loadReplay(options.replayPath)
     mapSeed = replayData.config.seed
-    options.maximumTicks = int32(replayData.hashes.len)
+    if options.resumeStep < 0 or not options.durationOverride:
+      options.maximumTicks = int32(replayData.hashes.len)
   var gameMap: MapData
   profileBlock "map":
     gameMap =
@@ -377,12 +379,27 @@ when defined(headless):
           options.resumeStep.int)
         run.recorder = ReplayRecorder(
           data: replayPrefix(run.replayData, run.world.tick.uint32))
+        run.recorder.data.config.maxTicks = run.maximumTicks()
+        if options.durationOverride:
+          if options.maximumTicks < run.world.battleTick():
+            fail("duration override ends before --resume-step")
+          if options.maximumTicks > run.world.battleTick() and
+              options.maximumTicks != run.maximumTicks() and
+              not run.world.gameOver:
+            run.recorder.record(ReplayAction(
+              kind: ActionDuration, tick: run.world.tick.uint32 + 1,
+              first: options.maximumTicks))
+            run.world.maximumTicks = options.maximumTicks
+            run.recorder.data.config.maxTicks = options.maximumTicks
         for i, player in options.localGameConfig(run.world.heroes.len).players:
           run.recorder.data.config.players[i] = player
         run.recorder.data.config.playerSlot = 0
         run.replayMode = false
         run.historyPlayback = false
         run.warmingPolicies = false
+        if options.durationOverride and
+            options.maximumTicks == run.world.battleTick():
+          break
       if (if run.replayMode: steps >= run.replayData.hashes.len
           else: run.finished()):
         break

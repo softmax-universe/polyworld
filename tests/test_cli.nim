@@ -111,19 +111,50 @@ block:
 echo "Testing duration flags write maximumTicks"
 block:
   var options = parseCommon(@["--minutes", "20"])
+  doAssert options.durationOverride
   doAssert options.maximumTicks == DefaultDurationTicks
   doAssert options.seconds == DefaultMinutes * 60
   options = parseCommon(@["--seconds", "60"])
+  doAssert options.durationOverride
   doAssert options.maximumTicks == 60 * SharedTickRate
   doAssert options.seconds == 60
   options = parseCommon(@["--ticks", "28800"])
+  doAssert options.durationOverride
   doAssert options.maximumTicks == 28800
   options = parseCommon(@["--minutes=5"])
+  doAssert options.durationOverride
   doAssert options.maximumTicks == 5 * 60 * SharedTickRate
   options = parseCommon(@["--seconds=90"])
+  doAssert options.durationOverride
   doAssert options.maximumTicks == 90 * SharedTickRate
   options = parseCommon(@["--ticks=480"])
+  doAssert options.durationOverride
   doAssert options.maximumTicks == 480
+
+echo "Testing duration overrides distinguish explicit flags from defaults"
+block:
+  let defaults = GameOptions(maximumTicks: DefaultDurationTicks)
+  doAssert not parseCommon(@[], defaults = defaults).durationOverride
+  var options = defaults
+  options.setMaximumTicks(480)
+  doAssert not options.durationOverride
+  for flags in [
+    @["--minutes", $DefaultMinutes],
+    @["--minutes=" & $DefaultMinutes],
+    @["--seconds", $(DefaultMinutes * 60)],
+    @["--seconds=" & $(DefaultMinutes * 60)],
+    @["--ticks", $DefaultDurationTicks],
+    @["--ticks=" & $DefaultDurationTicks]
+  ]:
+    options = parseCommon(flags, defaults = defaults)
+    doAssert options.durationOverride
+    doAssert options.maximumTicks == defaults.maximumTicks
+  options = parseCommon(@[
+    "--minutes", "5", "--seconds=90", "--ticks", "480"
+  ])
+  doAssert options.durationOverride
+  doAssert options.maximumTicks == 480
+  doAssert options.seconds == 480 div SharedTickRate
 
 echo "Testing that a leading -- is ignored"
 block:

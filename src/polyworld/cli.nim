@@ -3,8 +3,9 @@
 ## Every game understands `--bot`, `--player`, `--replay`, `--record`,
 ## `--seed`, `--play`, `--speed`, `--windowSize`, `--vsync`, `--seconds`,
 ## `--minutes`, `--ticks`, `--mute`, and `--unmute`. Headless BASIC games
-## also accept `--resume-step`. Duration flags all write
-## `maximumTicks`; audio uses saved levels unless explicitly overridden.
+## also accept `--resume-step`. Duration flags all write `maximumTicks`
+## and mark an explicit override; resumed games otherwise keep the replay's
+## duration. Audio uses saved levels unless explicitly overridden.
 ## Each game runs its own argument loop, farms those flags through
 ## `takeCommonFlag`, and handles the rest itself.
 
@@ -31,6 +32,8 @@ type
     maximumTicks*: int32
       ## Match length in simulation ticks. `--seconds`, `--minutes`, and
       ## `--ticks` all write this field.
+    durationOverride*: bool
+      ## True when a duration flag explicitly replaces the replay's limit.
     speed*: int32
       ## Graphical simulation speed multiplier.
     verbose*: bool
@@ -193,6 +196,7 @@ proc takeDurationFlag(
     options.setMaximumTicks(count)
   else:
     return false
+  options.durationOverride = true
   true
 
 proc takePlayerFlag(options: var GameOptions, argument: string): bool =

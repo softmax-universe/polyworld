@@ -1,4 +1,5 @@
 import
+  std/sequtils,
   bassy,
   polyworld/[tapes, mailboxes],
   ../[bots, maps, replays, sim]
@@ -169,5 +170,130 @@ doAssert full.replayPlayer.actionIndex == 1
 discard full.inboxes[0].pop()
 doAssert full.sendChat(0, 0, "retry") == 1
 doAssert full.replayPlayer.actionIndex == 2
+
+echo "Testing GOTA duration changes preserve recorded history"
+for cutoff in [0, 6, 12]:
+  for maximum in [12, 18]:
+    let branch = newGame(map, 240, 0, true, tape)
+    branch.loadBotSources([Original, Original])
+    branch.replayPlayer = initReplayPlayer(tape)
+    branch.historyPlayback = true
+    branch.warmingPolicies = true
+    branch.applyReplayActions(0)
+    for tick in 1 .. cutoff:
+      branch.tickWorld(proc() = branch.runBotDecisions())
+      doAssert branch.stateHash() == tape.hashes[tick - 1]
+    branch.recorder = ReplayRecorder(data: replayPrefix(tape, cutoff.uint32))
+    if maximum != branch.maximumTicks():
+      branch.recorder.record(ReplayAction(
+        kind: ActionDuration, tick: cutoff.uint32 + 1,
+        first: maximum.int32))
+      branch.world.maximumTicks = maximum.int32
+    branch.recorder.data.config.maxTicks = maximum.int32
+    branch.historyPlayback = false
+    branch.replayMode = false
+    branch.warmingPolicies = false
+    while not branch.finished():
+      branch.tickWorld(proc() = branch.runBotDecisions())
+    doAssert branch.world.tick == maximum.int32
+    doAssert branch.recorder.data.hashes[0 ..< 12] == tape.hashes
+    let commands = branch.recorder.data.actions.filterIt(
+      it.kind != ActionDuration)
+    doAssert commands[0 ..< tape.actions.len] == tape.actions
+    let
+      extended = decodeReplay(encodeReplay(branch.recorder.data))
+      playback = newGame(map, 240, 0, true, extended)
+    playback.replayPlayer = initReplayPlayer(extended)
+    playback.historyPlayback = true
+    for tick in 1 .. maximum:
+      playback.tickWorld(nil)
+      doAssert playback.stateHash() == extended.hashes[tick - 1]
+      if cutoff == 12 and maximum == 18 and tick == 12:
+        doAssert playback.finished()
+        doAssert not playback.replayEnded(),
+          "The viewer must reach the extension after the old time limit"
+    doAssert playback.hashCheck.mismatches == 0
+    doAssert playback.replayEnded()
+    branch.world.gameOver = true
+    branch.recorder.data.config.maxTicks = maximum.int32 + 10
+    doAssert branch.finished(), "Extending time must preserve a decided match"
+    branch.tickWorld(proc() = branch.runBotDecisions())
+    doAssert branch.world.tick == maximum.int32
+
+const DurationPolicy = """
+total = total + matchInfo(1)
+accepted = walkTo(selfX + total mod 5, selfY)
+"""
+
+proc branchDuration(data: ReplayData, cutoff: int, maximum = 0): ReplayData =
+  ## Replays duration observations before warming policies and branching again.
+  let branch = newGame(map, 240, 0, true, data)
+  branch.loadBotSources([DurationPolicy, DurationPolicy])
+  branch.replayPlayer = initReplayPlayer(data)
+  branch.historyPlayback = true
+  branch.warmingPolicies = true
+  for tick in 1 .. cutoff:
+    branch.tickWorld(proc() = branch.runBotDecisions())
+    doAssert branch.stateHash() == data.hashes[tick - 1]
+  branch.recorder = ReplayRecorder(data: replayPrefix(data, cutoff.uint32))
+  branch.recorder.data.config.maxTicks = branch.maximumTicks()
+  if maximum > 0 and maximum != branch.maximumTicks():
+    branch.recorder.record(ReplayAction(
+      kind: ActionDuration, tick: cutoff.uint32 + 1, first: maximum.int32))
+    branch.world.maximumTicks = maximum.int32
+    branch.recorder.data.config.maxTicks = maximum.int32
+  branch.historyPlayback = false
+  branch.replayMode = false
+  branch.warmingPolicies = false
+  while not branch.finished():
+    branch.tickWorld(proc() = branch.runBotDecisions())
+  result = decodeReplay(encodeReplay(branch.recorder.data))
+  let playback = newGame(map, 240, 0, true, result)
+  playback.replayPlayer = initReplayPlayer(result)
+  playback.historyPlayback = true
+  for tick in 1 .. result.hashes.len:
+    playback.tickWorld(nil)
+    doAssert playback.stateHash() == result.hashes[tick - 1]
+
+echo "Testing GOTA nested branches preserve matchInfo duration observations"
+block:
+  let live = newGame(map, 240, 2, false, ReplayData(), drafting = false)
+  live.loadBotSources([DurationPolicy, DurationPolicy])
+  live.recorder = initReplayRecorder(live.currentSetup(12), map.preset)
+  while not live.finished():
+    live.tickWorld(proc() = live.runBotDecisions())
+  let
+    source = live.recorder.data
+    extended = source.branchDuration(6, 18)
+    repeated = extended.branchDuration(12)
+    earlier = extended.branchDuration(3)
+    longer = extended.branchDuration(12, 24)
+  doAssert extended.header.setup.maximumTicks == 12
+  doAssert extended.config.maxTicks == 18
+  doAssert extended.hashes.len == 18
+  doAssert repeated.hashes == extended.hashes
+  doAssert repeated.actions == extended.actions
+  doAssert earlier.config.maxTicks == 12
+  doAssert earlier.hashes == source.hashes
+  doAssert earlier.actions == source.actions
+  doAssert longer.hashes.len == 24
+  doAssert longer.hashes[0 ..< 12] == extended.hashes[0 ..< 12]
+  doAssert longer.actions.countIt(it.kind == ActionDuration) == 2
+
+echo "Testing GOTA rejects unreachable or retroactive duration actions"
+for action in [
+  ReplayAction(kind: ActionDuration, tick: 0, first: 18),
+  ReplayAction(kind: ActionDuration, tick: 8, first: 7),
+  ReplayAction(kind: ActionDuration, tick: 14, first: 18)
+]:
+  var invalid = tape
+  invalid.actions = @[action]
+  invalid.hashes.setLen(18)
+  invalid.config.maxTicks = action.first
+  try:
+    invalid.validate()
+    doAssert false, "Invalid duration action was accepted"
+  except ReplayError:
+    discard
 
 echo "PASS GOTA replay warm-up preserves policy feedback and ordered chat"

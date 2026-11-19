@@ -1,6 +1,6 @@
 ## Network inputs only change the table until their relay action arrives.
 import vmath
-import ../src/play, ../src/core/[replays, sim], ../src/scene/table
+import ../play, ../core/[replays, sim], ../scene/table
 
 proc poses(player, count: int): seq[CardPose] =
   ## Supplies a harmless pose for every card in a headless table.

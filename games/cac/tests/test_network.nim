@@ -1,7 +1,8 @@
 import
+  std/os,
   polyworld/[rooms, relays, roomclients, mailboxes],
-  ../src/core/[battlesetup, replays, sim],
-  ../src/net/multiplayer
+  ../core/[battlesetup, replays, sim],
+  ../net/multiplayer
 
 var
   relay = Relay()
@@ -473,8 +474,9 @@ for ready in [true, false, true]:
   doAssert not relay.guest(owner.participant).ready
 let
   invalidRemoteSource = "THIS IS NOT VALID BASIC @@@"
-  mage = readFile("games/cac/players/mage.bas")
-  archer = readFile("games/cac/players/archer.bas")
+  players = currentSourcePath().parentDir.parentDir / "players"
+  mage = readFile(players / "mage.bas")
+  archer = readFile(players / "archer.bas")
 block:
   var rejected = false
   try:

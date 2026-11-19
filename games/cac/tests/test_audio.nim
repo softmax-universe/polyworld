@@ -1,7 +1,7 @@
 ## Semantic sound checks without opening a window or an audio device.
 import
   polyworld/soundassets,
-  ../src/audios, ../src/core/[replays, sim]
+  ../audios, ../core/[replays, sim]
 
 proc fixture(): GameState =
   ## Starts a deterministic match whose state can be checked after observation.

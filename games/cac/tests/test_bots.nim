@@ -1,6 +1,6 @@
 import
   std/strutils,
-  ../src/core/[bots, sim]
+  ../core/[bots, sim]
 
 echo "Testing decisions beyond the previous instruction budget"
 block:

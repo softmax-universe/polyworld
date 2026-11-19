@@ -5,7 +5,7 @@
 ## nim r tools/stage_card_art.nim SOURCE_ART_DIR STAGED_ART_DIR
 import std/os
 import pixie
-import ../src/ui/cardfaces
+import ../ui/cardfaces
 
 proc stageCardArt*(source, destination: string): int =
   ## Writes every PNG in source cropped to the art window, and copies the

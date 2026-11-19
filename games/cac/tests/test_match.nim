@@ -1,7 +1,7 @@
 ## Headless bot matches, their replays, and replay playback.
 import std/[os, random, sequtils, unittest]
 import polyworld/mailboxes
-import ../src/core/[sim, bots, match, replays]
+import ../core/[sim, bots, match, replays]
 
 const ArcherBot = staticRead("../players/archer.bas")
 

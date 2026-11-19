@@ -2,12 +2,12 @@
 import
   std/[os, sequtils],
   polyworld/[mailboxes, player],
-  ../src/[replayer, play],
-  ../src/core/[bots, match, replays, sim],
-  ../src/modes/multiplayer,
-  ../src/modes/headless as headless,
-  ../src/scene/table,
-  ../src/vfx/vfxrenderer
+  ../[replayer, play],
+  ../core/[bots, match, replays, sim],
+  ../modes/multiplayer,
+  ../modes/headless as headless,
+  ../scene/table,
+  ../vfx/vfxrenderer
 
 const ArcherBot = staticRead("../players/archer.bas")
 

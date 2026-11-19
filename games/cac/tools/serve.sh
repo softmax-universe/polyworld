@@ -2,7 +2,7 @@
 set -euo pipefail
 
 project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-web_dir="${CAC_WEB_DIR:-$project_dir/build/web}"
+web_dir="${CAC_WEB_DIR:-$project_dir/emscripten}"
 port="${CAC_PORT:-8080}"
 
 if [[ "$web_dir" != /* ]]; then

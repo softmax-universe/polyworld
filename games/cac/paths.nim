@@ -5,8 +5,8 @@ import
 const CacMusicPath* = DataRoot & "/music/cac/tavern-dance.ogg"
 
 when not defined(emscripten):
-  # This file is in games/cac/src: the repository is three folders up.
-  const SourceRepo = currentSourcePath().parentDir.parentDir.parentDir.parentDir
+  # This file is in games/cac; the repository is two folders up.
+  const SourceRepo = currentSourcePath().parentDir.parentDir.parentDir
 
 proc artworkRoot*(): string =
   ## Locate CaC artwork in the shared Polyworld data folder.
@@ -22,6 +22,6 @@ proc menuArtworkRoot*(): string =
     DataRoot / "cac/ui/menu"
   else:
     const SourceMenu =
-      currentSourcePath().parentDir.parentDir / "assets/menu"
+      currentSourcePath().parentDir / "assets/menu"
     let bundled = getAppDir() / "assets/menu"
     if fileExists(bundled / "button-primary.png"): bundled else: SourceMenu

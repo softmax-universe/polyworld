@@ -1,6 +1,6 @@
 import
   std/[options, strutils, unittest],
-  ../src/cac, ../src/core/explanations
+  ../cac, ../core/explanations
 
 proc leads(game: var GameState, heroClass: HeroClass): int =
   ## Hands the turn to the seat of that class and returns it. Card tests

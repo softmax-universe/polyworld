@@ -1,6 +1,6 @@
 import
   std/[options, sequtils, strutils],
-  ../src/core/[bots, eventtext, match, replays, ruletree, sim]
+  ../core/[bots, eventtext, match, replays, ruletree, sim]
 
 proc ready(owner, id: int, card: Card): MinionState =
   ## Creates an existing minion ready to attack in a regression fixture.

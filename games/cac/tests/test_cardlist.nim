@@ -1,7 +1,7 @@
 ## The card reference on the command line: --cards, --cards:CLASS and
 ## --card:NAME. Needs no window.
 import std/[options, sequtils, strutils, unittest]
-import ../src/core/[core, cardset, cardlist]
+import ../core/[core, cardset, cardlist]
 
 suite "CaC card reference":
   test "a card prints one field per line, in order":

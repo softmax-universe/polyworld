@@ -9,8 +9,8 @@
 import std/[json, os, sequtils, sets, strutils, unittest]
 import jsony
 import polyworld/cli
-import ../src/core/[sim, sessions, bots, match, replays]
-import ../src/modes/headless
+import ../core/[sim, sessions, bots, match, replays]
+import ../modes/headless
 
 const
   Root = currentSourcePath().parentDir.parentDir.parentDir.parentDir
@@ -197,7 +197,9 @@ suite "headless runner flags":
 suite "browser and replay viewer flags":
   test "the replay viewer passes --replay, or nothing":
     let page = readFile(Root / "src/polyworld/replay.html")
-    check "arguments: replayUri ? ['--replay', '/episode.replay'] : []," in page
+    check "const commandArguments = replayUri ? " &
+      "['--replay', '/episode.replay'] : [];" in page
+    check "arguments: commandArguments," in page
     check parseSessionOptions(["--replay", "/episode.replay"]).replayPath ==
       "/episode.replay"
     check parseSessionOptions([]).replayPath == ""

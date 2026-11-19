@@ -2,7 +2,7 @@
 import
   vmath,
   polyworld/soundassets,
-  ../src/[audios, play], ../src/core/[replays, sim], ../src/scene/table
+  ../[audios, play], ../core/[replays, sim], ../scene/table
 
 proc poses(player, count: int): seq[CardPose] =
   ## Supplies a harmless pose for every presented card.

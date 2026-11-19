@@ -2,7 +2,7 @@
 import
   std/math,
   vmath,
-  ../src/scene/[towerarena, table, courtyard], ../src/play
+  ../scene/[towerarena, table, courtyard], ../play
 
 const Tolerance = 0.0002'f
 

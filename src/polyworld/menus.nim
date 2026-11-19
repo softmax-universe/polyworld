@@ -105,9 +105,6 @@ when defined(emscripten):
     const value = new URLSearchParams(window.location.search).get(UTF8ToString(name));
     stringToUTF8(value || '', output, length);
   });
-  EM_JS(void, polyworldCopyInvite, (const char* text), {
-    navigator.clipboard.writeText(UTF8ToString(text));
-  });
   EM_JS(void, polyworldSaveReplay, (const char* bytes, int length), {
     const blob = new Blob([HEAPU8.slice(bytes, bytes + length)],
       {type: 'application/octet-stream'});
@@ -123,7 +120,6 @@ when defined(emscripten):
   proc polyworldParameter(
     name, output: cstring, length: cint
   ) {.importc, nodecl.}
-  proc polyworldCopyInvite(text: cstring) {.importc, nodecl.}
   proc polyworldSaveReplay(bytes: cstring, length: cint) {.importc, nodecl.}
 
 proc saveReplayFile*(bytes: string) =
@@ -284,10 +280,7 @@ proc inviteParameter*(name: string): string =
 
 proc copyInvite*(text: string) =
   ## Copies an invitation using the platform clipboard.
-  when defined(emscripten):
-    polyworldCopyInvite(text.cstring)
-  else:
-    setClipboardString(text)
+  setClipboardString(text)
 
 proc menuLabel*(
     sk: Silky, text: string, position: Vec2,

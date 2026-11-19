@@ -1,33 +1,78 @@
-## Local crew and imposter policies using evidence and Polyworld paths.
+## Bounded BASIC policies with visible observations and queued game inputs.
 
 import
-  std/[random, strutils],
-  polyworld/pathing,
-  sim, maps
+  bassy,
+  polyworld/[policyhosts, pathing, rngs],
+  sim, maps, replays
 
-const DiscussionRounds = 3
+const
+  DefaultBotName* = "base.bas"
+  DefaultBotSource* = staticRead("players/base.bas")
+  BotDataNames = [
+    "selfSlot", "worldTick", "phase", "myX", "myY", "myAlive", "myRole",
+    "myKillCooldown", "playerTotal", "taskTotal", "assignmentTotal",
+    "bodyTotal", "chatTotal", "meetingCaller", "meetingKind", "voteTimer",
+    "voteDuration", "voteFinalize", "chatCooldown", "myLastChatTick",
+    "myVote", "myCursor", "killRange", "reportRange", "tickRate",
+    "routeStuck", "routeLength"
+  ]
 
 type
   Bot* = object
+    runtime*: Runtime
     path*: seq[MapPoint]
-    waypoint*: int
-    task*: int
-    stuck*: int
-    previous*: MapPoint
-    suspects*: array[MaxPlayers, int]
-    suspectRooms*: array[MaxPlayers, string]
-    location*: string
-    seenBodies*: int
-    meeting*: int
-    vote*: int
-    suspect*: int
-    accuser*: int
-    chatRound*: int
+    waypoint*, stuck*: int
+    previous*, goal*: MapPoint
+    hasGoal*: bool
+    rng*: Rng
+    failed*: bool
+    lastError*: string
+    decisions*: int
+    lastWork*, lastInstructions*: int64
     chat*: string
+    choice*: int
+    output: InputState
+    searched: bool
+    dataIds: array[BotDataNames.len, int32]
   Navigator* = object
     layer*: QuadLayer
     parents: seq[int32]
     queue: seq[int32]
+
+var
+  activeBot: ptr Bot
+  activeWorld: ptr SimServer
+  activeNav: ptr Navigator
+  activeSlot: int
+  previousInput: InputState
+  visibleBodies: seq[int]
+
+template world(): untyped = activeWorld[]
+template own(): untyped = activeWorld[].players[activeSlot]
+
+proc botLimits*(): Limits =
+  ## Bounds each policy's source, persistent memory, and per-tick work.
+  result = defaultLimits()
+  result.maxSourceBytes = 128 * 1024
+  result.maxCodeInstructions = 50_000
+  result.maxArrays = 32
+  result.maxArrayElements = 4096
+  result.maxGlobals = 512
+  result.maxHostData = 64
+  result.maxHostFunctions = 96
+  result.maxRoutines = 64
+  result.maxParameters = 8
+  result.maxRegisters = 256
+  result.maxCallDepth = 16
+  result.maxSyntaxDepth = 32
+  result.maxStrings = 512
+  result.maxStringLength = 4096
+  result.maxStringBytes = 128 * 1024
+  result.maxMemoryBytes = 2 * 1024 * 1024
+  result.maxInstructions = 50_000
+  result.maxWorkUnits = 100_000
+  result.maxPrintBytes = 4096
+  result.maxPrintEvents = 64
 
 proc findPath*(
   nav: var Navigator,
@@ -96,199 +141,257 @@ proc findPath*(
     result.add reversed[i]
 
 proc roomName(sim: SimServer, x, y: int): string =
-  ## Names the room containing a sighting or the connecting corridor.
+  ## Names a public map room or its connecting corridor.
   for room in sim.rooms:
     if x >= room.x and x < room.x + room.w and
       y >= room.y and y < room.y + room.h:
         return room.name
   "the corridor"
 
-proc observe(bot: var Bot, sim: SimServer, slot: int) =
-  ## Remembers visible body sightings and the bot's own task location.
-  if sim.phase != Playing:
-    return
-  let own = sim.players[slot]
-  bot.location = sim.roomName(own.x, own.y)
-  if sim.bodies.len < bot.seenBodies:
-    bot.seenBodies = 0
-  for i in bot.seenBodies ..< sim.bodies.len:
-    let body = sim.bodies[i]
-    if not sim.visibleFrom(slot, body.x, body.y):
-      continue
-    for j, player in sim.players:
-      if j == slot or not player.alive or
-        not sim.visibleFrom(slot, player.x, player.y):
-          continue
-      let distance = distSq(player.x, player.y, body.x, body.y)
-      if distance <= KillRange * KillRange and
-        sim.tickCount - body.killTick <= 2:
-          bot.suspects[j] += 3
-          bot.suspectRooms[j] = sim.roomName(body.x, body.y)
-      elif distance <= ReportRange * ReportRange * 4:
-        bot.suspects[j] = max(bot.suspects[j], 1)
-        bot.suspectRooms[j] = sim.roomName(body.x, body.y)
-  bot.seenBodies = sim.bodies.len
+proc validPlayer(index: int32): bool =
+  ## Rejects a policy's out-of-range roster index.
+  index >= 0 and index.int < world().players.len
 
-proc beginDiscussion(bot: var Bot, sim: SimServer, slot: int) =
-  ## Chooses an evidence-based suspect or an imposter's false accusation.
-  bot.meeting = sim.voteState.voteTimer + sim.tickCount
-  bot.vote = sim.players.len
-  bot.suspect = -1
-  bot.accuser = -1
-  bot.chatRound = 0
-  var evidence = 0
-  for i, player in sim.players:
-    if player.alive and i != slot and bot.suspects[i] > evidence:
-      evidence = bot.suspects[i]
-      bot.suspect = i
-  if evidence >= 3:
-    bot.vote = bot.suspect
-  if sim.players[slot].role == Imposter:
-    var best = high(int)
-    let own = sim.players[slot]
-    for i, player in sim.players:
-      if not player.alive or player.role != Crewmate:
-        continue
-      let distance = distSq(own.x, own.y, player.x, player.y)
-      if distance < best:
-        best = distance
-        bot.suspect = i
-    if bot.suspect >= 0:
-      bot.vote = bot.suspect
+proc visiblePlayer(index: int32): bool =
+  ## Keeps hidden players out of all position and life-state queries.
+  if not validPlayer(index):
+    return false
+  let player = world().players[index]
+  world().phase != Playing or index.int == activeSlot or
+    (player.alive and world().visibleFrom(activeSlot, player.x, player.y))
 
-proc discussionMessage(bot: Bot, sim: SimServer, slot: int): string =
-  ## Supplies reports, accusations, alibis, rebuttals, and voting conclusions.
-  let
-    caller = sim.meetingCallCallerIndex()
-    own = sim.players[slot]
-    location = if bot.location.len > 0: bot.location else: "the corridor"
-  case bot.chatRound
-  of 0:
-    if slot == caller and sim.voteState.callKind == VoteCalledBody:
-      var found = "the corridor"
-      for body in sim.bodies:
-        if body.slotId == sim.voteState.bodySlotId:
-          found = sim.roomName(body.x, body.y)
-      result = "I found " & playerColorText(sim.voteState.bodyColor) &
-        " in " & found & "."
-      if own.role == Crewmate and bot.suspect >= 0:
-        result.add " I suspect " &
-          playerColorText(sim.players[bot.suspect].color) &
-          "; I saw them next to the body."
-      else:
-        result.add " Who was nearby?"
-      return
-    if bot.suspect >= 0:
-      let name = playerColorText(sim.players[bot.suspect].color)
-      if own.role == Imposter:
-        return "I suspect " & name &
-          ". They were hanging around instead of doing tasks."
-      if bot.suspects[bot.suspect] >= 3:
-        return "I saw " & name & " beside a fresh body in " &
-          bot.suspectRooms[bot.suspect] & ". I suspect " & name & "."
-      return "I suspect " & name & ". I saw them near the body in " &
-        bot.suspectRooms[bot.suspect] & ". Did anyone else see them?"
-    case slot mod 3
-    of 0:
-      return "I was working on tasks in " & location &
-        ". Who was with the victim?"
-    of 1:
-      return "I was in " & location &
-        " doing tasks. Did anyone see who left the body?"
-    else:
-      return "I came from " & location &
-        ". I didn't see the kill. Where was everyone else?"
-  of 1:
-    if bot.accuser >= 0:
-      return playerColorText(sim.players[bot.accuser].color) &
-        ", that wasn't me. I was doing tasks in " & location &
-        ". Being nearby doesn't prove a kill."
-    if bot.suspect >= 0:
-      return playerColorText(sim.players[bot.suspect].color) &
-        ", where were you before the report? Can anyone confirm your story?"
-    if caller >= 0 and caller != slot:
-      case slot mod 3
-      of 0:
-        return "Being near a body isn't enough. Did anyone see a kill or a vent?"
-      of 1:
-        return playerColorText(sim.players[caller].color) &
-          ", did you see anyone leave? I can't confirm a killer."
-      else:
-        return "Can someone confirm who was doing tasks? We need a witness."
-    return "Please share what you actually saw. Who can confirm an alibi?"
+proc validTask(index: int32): bool =
+  ## Rejects a policy's out-of-range public station index.
+  index >= 0 and index.int < world().tasks.len
+
+proc bodyIndex(index: int32): int =
+  ## Maps only a visible-body index to the authoritative body list.
+  if index >= 0 and index.int < visibleBodies.len:
+    visibleBodies[index]
   else:
-    if bot.vote < sim.players.len:
-      return "I'm voting for " &
-        playerColorText(sim.players[bot.vote].color) &
-        (if own.role == Imposter: ". Their story doesn't add up."
-         else: ". I saw them beside the fresh body.")
-    if bot.suspect >= 0:
-      return "I'm suspicious of " &
-        playerColorText(sim.players[bot.suspect].color) &
-        ", but I didn't see a kill. Skipping without stronger evidence."
-    return "I haven't seen enough evidence. I'll skip and keep doing tasks."
+    -1
 
-proc discuss(bot: var Bot, sim: SimServer, slot: int): bool =
-  ## Staggers three chat rounds before allowing the bot to cast its vote.
-  if bot.meeting != sim.voteState.voteTimer + sim.tickCount and
-    sim.voteState.finalizeTimer == 0:
-      bot.beginDiscussion(sim, slot)
-  let own = sim.players[slot]
-  for message in sim.chatMessages:
-    if message.slotId == own.joinOrder:
-      continue
-    if message.text.toLowerAscii().contains(
-      "i suspect " & playerColorText(own.color)
-    ):
-      for i, player in sim.players:
-        if player.joinOrder == message.slotId:
-          bot.accuser = i
-  var
-    living = 0
-    rank = 0
-  let caller = sim.meetingCallCallerIndex()
-  for i, player in sim.players:
-    if player.alive:
-      inc living
-      if i < slot and i != caller:
-        inc rank
-  if caller >= 0 and sim.players[caller].alive:
-    if slot == caller:
-      rank = 0
-    else:
-      inc rank
+proc validChat(index: int32): bool =
+  ## Restricts transcript queries to the public meeting feed.
+  world().phase == Voting and index >= 0 and
+    index.int < world().chatMessages.len
+
+proc navigate(x, y: int32): int32 =
+  ## Follows a requested public map point without choosing a destination.
+  if world().phase != Playing or x < 0 or x >= MapWidth or
+    y < 0 or y >= MapHeight or not world().isWalkable(x.int, y.int):
+      return 0
+  let point = MapPoint(x: x.int, y: y.int)
+  if not activeBot[].hasGoal or activeBot[].goal != point or
+    activeBot[].path.len == 0 or activeBot[].stuck > TargetFps * 2:
+      if activeBot[].searched:
+        return 0
+      activeBot[].searched = true
+      activeBot[].goal = point
+      activeBot[].hasGoal = true
+      activeBot[].waypoint = 0
+      activeBot[].stuck = 0
+      if not own().alive:
+        activeBot[].path = @[point]
+      else:
+        activeBot[].path = activeNav[].findPath(
+          world(), MapPoint(x: own().x, y: own().y), point
+        )
+  if activeBot[].path.len == 0:
+    return 0
+  while activeBot[].waypoint < activeBot[].path.high and
+    distSq(own().x, own().y, activeBot[].path[activeBot[].waypoint].x,
+      activeBot[].path[activeBot[].waypoint].y) <= 9:
+      inc activeBot[].waypoint
+  let target = activeBot[].path[activeBot[].waypoint]
+  activeBot[].output.left = target.x < own().x - 1
+  activeBot[].output.right = target.x > own().x + 1
+  activeBot[].output.up = target.y < own().y - 1
+  activeBot[].output.down = target.y > own().y + 1
+  1
+
+proc buildBotHost*(slot = -1): Host =
+  ## Exposes private observations and queued commands for one running policy.
+  result = initPolicyHost(slot)
+  for name in BotDataNames:
+    discard result.addData(name)
+  template number(name: string, arity, cost: int, body: untyped) =
+    let callback: HostProc = proc(args {.inject.}: openArray[int32]): int32 =
+      ## Evaluates one bounded numeric observation or queued input.
+      body
+    discard result.addFunction(name, arity, callback, cost)
+  template text(name: string, arity, cost: int, body: untyped) =
+    let callback: NumericHostProc = proc(
+      values: openArray[Value]
+    ): Value =
+      ## Copies a permitted observation into this runtime's string storage.
+      var args {.inject.}: array[1, int32]
+      if values.len > 0:
+        args[0] = values[0].asInt
+      let value: string = body
+      activeBot[].runtime.putString(value)
+    discard result.addFunction(name, arity, callback, cost)
+
+  number("playerVisible", 1, 100):
+    int32(visiblePlayer(args[0]))
+  number("playerAlive", 1, 100):
+    if visiblePlayer(args[0]): int32(world().players[args[0]].alive)
+    else: -1
+  number("playerRole", 1, 4):
+    if not validPlayer(args[0]): -1
+    elif args[0].int == activeSlot: own().role.ord.int32
+    elif own().role == Imposter and
+      world().players[args[0]].role == Imposter: Imposter.ord.int32
+    else: -1
+  number("playerX", 1, 100):
+    if visiblePlayer(args[0]): world().players[args[0]].x.int32
+    else: -1
+  number("playerY", 1, 100):
+    if visiblePlayer(args[0]): world().players[args[0]].y.int32
+    else: -1
+  text("playerName$", 1, 8):
+    if validPlayer(args[0]): playerColorText(world().players[args[0]].color)
+    else: ""
+  number("assignedTask", 1, 4):
+    if args[0] >= 0 and args[0].int < own().assignedTasks.len:
+      own().assignedTasks[args[0]].int32
+    else: -1
+  number("taskX", 1, 100):
+    if validTask(args[0]): world().taskPoint(args[0].int).x.int32
+    else: -1
+  number("taskY", 1, 100):
+    if validTask(args[0]): world().taskPoint(args[0].int).y.int32
+    else: -1
+  number("taskDone", 1, 20):
+    if validTask(args[0]) and args[0].int in own().assignedTasks:
+      int32(world().tasks[args[0]].completed[activeSlot])
+    else: -1
+  number("atTask", 1, 4):
+    if not validTask(args[0]):
+      return 0
+    let station = world().tasks[args[0]]
+    int32(own().x >= station.x and own().x < station.x + station.w and
+      own().y >= station.y and own().y < station.y + station.h)
+  number("bodyId", 1, 4):
+    let index = bodyIndex(args[0])
+    if index >= 0: world().bodies[index].slotId.int32 else: -1
+  number("bodyX", 1, 4):
+    let index = bodyIndex(args[0])
+    if index >= 0: world().bodies[index].x.int32 else: -1
+  number("bodyY", 1, 4):
+    let index = bodyIndex(args[0])
+    if index >= 0: world().bodies[index].y.int32 else: -1
+  number("bodyAge", 1, 4):
+    let index = bodyIndex(args[0])
+    if index >= 0: int32(world().tickCount - world().bodies[index].killTick)
+    else: -1
+  text("bodyRoom$", 1, 30):
+    let index = bodyIndex(args[0])
+    if index >= 0:
+      let body = world().bodies[index]
+      world().roomName(body.x, body.y)
+    else: ""
+  number("chatSender", 1, 20):
+    if validChat(args[0]):
+      let identity = world().chatMessages[args[0]].slotId
+      for index, player in world().players:
+        if player.joinOrder == identity:
+          return index.int32
+    -1
+  text("chatText$", 1, VoteChatMaxChars):
+    if validChat(args[0]): world().chatMessages[args[0]].text else: ""
+  text("ownRoom$", 0, 30):
+    world().roomName(own().x, own().y)
+  text("meetingBodyName$", 0, 8):
+    if world().phase == Voting and
+      world().voteState.callKind == VoteCalledBody:
+        playerColorText(world().voteState.bodyColor)
+    else: ""
+  text("meetingBodyRoom$", 0, 50):
+    var name = ""
+    if world().phase == Voting and
+      world().voteState.callKind == VoteCalledBody:
+        for body in world().bodies:
+          if body.slotId == world().voteState.bodySlotId:
+            name = world().roomName(body.x, body.y)
+    name
+  number("randomInt", 1, 4):
+    activeBot[].rng.below(args[0])
+
+  number("setInput", 1, 4):
+    if args[0] < 0 or args[0] > 127:
+      return 0
+    activeBot[].output = readInput(args[0].uint8)
+    1
+  number("pressUse", 0, 4):
+    activeBot[].output.attack = not previousInput.attack
+    int32(activeBot[].output.attack)
+  number("holdUse", 0, 4):
+    activeBot[].output.attack = true
+    1
+  number("moveTo", 2, 10_000):
+    navigate(args[0], args[1])
+  number("voteFor", 1, 8):
+    if world().phase != Voting or not own().alive or args[0] < 0 or
+      args[0].int > world().players.len or
+      world().voteState.votes[activeSlot] != -1:
+        return 0
+    if args[0].int < world().players.len and
+      not world().players[args[0]].alive:
+        return 0
+    activeBot[].output.attack = not previousInput.attack
+    if activeBot[].output.attack:
+      activeBot[].choice = args[0].int
+      return 1
+    0
+  let sendChat: NumericHostProc = proc(args: openArray[Value]): Value =
+    ## Queues one legal meeting message without modifying the world.
+    if args[0].asInt != -2 or world().phase != Voting or not own().alive or
+      activeBot[].chat.len > 0 or
+      world().tickCount - own().lastChatTick <
+        world().config.messageCooldownTicks:
+          return 0
+    activeBot[].runtime.withString(args[1], message):
+      if message.len == 0 or message.len > VoteChatMaxChars:
+        return 0
+      var copy = newString(message.len)
+      for index, character in message:
+        copy[index] = character
+      activeBot[].chat = cleanChatMessage(copy)
+    int32(activeBot[].chat.len > 0)
+  discard result.addFunction("sendChat", 2, sendChat, VoteChatMaxChars)
+
+proc initBots*(sources: openArray[string], seed: int): seq[Bot] =
+  ## Compiles each distinct source once and isolates every slot's VM and RNG.
   let
-    interval = max(6, min(TargetFps,
-      sim.config.voteTimerTicks div (max(1, living) * 4)))
-    roundTicks = max(sim.config.messageCooldownTicks + 1, living * interval)
-    elapsed = sim.config.voteTimerTicks - sim.voteState.voteTimer
-    scheduled = TargetFps div 2 + rank * interval +
-      bot.chatRound * roundTicks
-    voteAfter = min(sim.config.voteTimerTicks - TargetFps * 2,
-      max(TargetFps * 18, DiscussionRounds * roundTicks + TargetFps))
-  if bot.chatRound < DiscussionRounds and elapsed >= scheduled and
-    sim.tickCount - own.lastChatTick >= sim.config.messageCooldownTicks:
-      bot.chat = bot.discussionMessage(sim, slot)
-      inc bot.chatRound
-  elapsed >= voteAfter
-
-proc chooseTask(bot: var Bot, sim: var SimServer, slot: int): int =
-  ## Selects a nearby unfinished assignment or an imposter's cover station.
-  let player = sim.players[slot]
-  result = -1
-  var best = high(int)
-  if player.role == Imposter:
-    return sim.rng.rand(sim.tasks.high)
-  for task in player.assignedTasks:
-    if sim.tasks[task].completed[slot]:
+    limits = botLimits()
+    schema = buildBotHost()
+  var
+    compiledSources: seq[string]
+    programs: seq[Program]
+  result.setLen(sources.len)
+  for slot, source in sources:
+    result[slot].choice = -1
+    if source.len == 0:
       continue
-    let point = sim.taskPoint(task)
-    if point.x < 0:
-      continue
-    let distance = distSq(player.x, player.y, point.x, point.y)
-    if distance < best:
-      best = distance
-      result = task
+    try:
+      var program: Program
+      for index, previous in compiledSources:
+        if source == previous:
+          program = programs[index]
+          break
+      if program == nil:
+        program = compile(source, schema, limits)
+        compiledSources.add source
+        programs.add program
+      result[slot].runtime = initRuntime(program, buildBotHost(slot), limits)
+      result[slot].rng = initRng(
+        0, cast[uint64](seed.int64) xor ((slot.uint64 + 1) * 1_000_003)
+      )
+      for index, name in BotDataNames:
+        result[slot].dataIds[index] = program.hostDataIndex(name)
+    except BasicError as error:
+      raise newException(BasicError, "Bot " & $(slot + 1) & ": " & error.msg)
 
 proc decideBot*(
   bot: var Bot,
@@ -297,65 +400,64 @@ proc decideBot*(
   slot: int,
   previous: InputState
 ): InputState =
-  ## Supplies original movement and edge-triggered interaction buttons.
-  bot.observe(sim, slot)
+  ## Runs one bounded decision and returns only validated queued inputs.
+  bot.output = InputState()
+  bot.searched = false
+  bot.chat.setLen(0)
+  bot.choice = -1
+  if bot.runtime == nil or bot.failed:
+    return
+  activeBot = bot.addr
+  activeWorld = sim.addr
+  activeNav = nav.addr
+  activeSlot = slot
+  previousInput = previous
+  defer:
+    activeBot = nil
+    activeWorld = nil
+    activeNav = nil
+    visibleBodies.setLen(0)
+  visibleBodies.setLen(0)
   let player = sim.players[slot]
-  if sim.phase == Voting:
-    if not player.alive:
-      return
-    if bot.discuss(sim, slot) and sim.voteState.votes[slot] == -1:
-      if sim.voteState.cursor[slot] == bot.vote:
-        result.attack = not previous.attack
-      else:
-        result.down = not previous.down
-    return
-  if sim.phase != Playing:
-    return
-  for body in sim.bodies:
-    if player.alive and sim.visibleFrom(slot, body.x, body.y) and
-      distSq(player.x, player.y, body.x, body.y) <= ReportRange * ReportRange:
-        result.attack = not previous.attack
-        return
-  if player.role == Imposter and player.alive and player.killCooldown == 0:
-    for target in sim.players:
-      if target.alive and target.role == Crewmate and
-        sim.visibleFrom(slot, target.x, target.y) and
-        distSq(player.x, player.y, target.x, target.y) <= KillRange * KillRange:
-          result.attack = not previous.attack
-          return
-  if bot.previous.x == player.x and bot.previous.y == player.y:
-    inc bot.stuck
-  else:
-    bot.stuck = 0
-  bot.previous = MapPoint(x: player.x, y: player.y)
-  if bot.task < 0 or bot.path.len == 0 or bot.stuck > TargetFps * 2 or
-    (player.role == Crewmate and sim.tasks[bot.task].completed[slot]):
-      bot.task = bot.chooseTask(sim, slot)
-      bot.path.setLen(0)
-      bot.waypoint = 0
+  if sim.phase == Playing:
+    if bot.previous == MapPoint(x: player.x, y: player.y):
+      inc bot.stuck
+    else:
       bot.stuck = 0
-      if bot.task < 0:
-        return
-      let point = sim.taskPoint(bot.task)
-      if not player.alive:
-        bot.path = @[point]
-      else:
-        bot.path = nav.findPath(sim, bot.previous, point)
-  if bot.path.len == 0:
-    return
-  let station = sim.tasks[bot.task]
-  if player.x >= station.x and player.x < station.x + station.w and
-    player.y >= station.y and player.y < station.y + station.h:
-      result.attack = true
-      if player.role == Imposter:
-        bot.task = -1
-      return
-  while bot.waypoint < bot.path.high and
-    distSq(player.x, player.y, bot.path[bot.waypoint].x,
-      bot.path[bot.waypoint].y) <= 9:
-      inc bot.waypoint
-  let target = bot.path[bot.waypoint]
-  result.left = target.x < player.x - 1
-  result.right = target.x > player.x + 1
-  result.up = target.y < player.y - 1
-  result.down = target.y > player.y + 1
+    bot.previous = MapPoint(x: player.x, y: player.y)
+    for index, body in sim.bodies:
+      if sim.visibleFrom(slot, body.x, body.y):
+        visibleBodies.add index
+  let
+    voting = sim.phase == Voting
+    values = [
+      slot, sim.tickCount, sim.phase.ord, player.x, player.y, player.alive.int,
+      player.role.ord, player.killCooldown, sim.players.len, sim.tasks.len,
+      player.assignedTasks.len, visibleBodies.len,
+      (if voting: sim.chatMessages.len else: 0),
+      (if voting: sim.meetingCallCallerIndex() else: -1),
+      (if voting: sim.voteState.callKind.ord else: 0),
+      sim.voteState.voteTimer, sim.config.voteTimerTicks,
+      sim.voteState.finalizeTimer, sim.config.messageCooldownTicks,
+      player.lastChatTick,
+      (if voting: sim.voteState.votes[slot] else: -1),
+      (if voting: sim.voteState.cursor[slot] else: -1),
+      sim.config.killRange, sim.config.reportRange, TargetFps,
+      bot.stuck, bot.path.len
+    ]
+  try:
+    bot.runtime.restart()
+    for index, value in values:
+      bot.runtime.setData(bot.dataIds[index], value.int32)
+    discard bot.runtime.run()
+    inc bot.decisions
+    result = bot.output
+  except BasicError as error:
+    bot.failed = true
+    bot.lastError = error.msg
+    bot.output = InputState()
+    bot.chat.setLen(0)
+    bot.choice = -1
+    echo "Crewrift bot ", slot + 1, " BASIC error: ", error.msg
+  bot.lastWork = bot.runtime.workUsed
+  bot.lastInstructions = bot.runtime.instructionsUsed

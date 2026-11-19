@@ -7,8 +7,8 @@ Run from the Polyworld repository root, with the usual dependencies and sibling
 nim r games/crewrift/crewrift.nim
 ```
 
-The default match has eight players, with one human and seven local bots. Roles
-are random. To choose a role or watch the bots:
+The default match has eight players, with one human and seven local Bassy BASIC
+bots. Roles are random. To choose a role or watch the bots:
 
 ```sh
 nim r games/crewrift/crewrift.nim --role:imp
@@ -53,8 +53,10 @@ crew. Click a visible living crew member's portrait to follow them.
 The top-left **Room names** button shows or hides the large white room labels.
 Room labels start visible and retain their setting while seeking or looping.
 Use `--name:"Andre von Houck"` to name your human-controlled slot. Local bots
-are labeled `bots.nim`. New replays retain the names for each slot. Older
-recordings without identities show `Unknown`.
+are labeled `base.bas`, or the filename supplied with `--bot PATH[:N]`. See the
+[BASIC bot guide](../games/crewrift/docs/bots.md) for custom policies and the
+host API. New replays retain the names for each slot. Older recordings without
+identities show `Unknown`.
 Meetings put discussion in the main column with vote choices alongside it.
 Bots take turns reporting bodies, sharing sightings, accusing suspects,
 questioning alibis, and defending themselves before voting. Crewmates rely on

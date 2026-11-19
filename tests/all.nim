@@ -12,6 +12,7 @@ import determinism
 import
   test_cli,
   ../games/crewrift/tests/test_sim as TestCrewrift,
+  ../games/crewrift/tests/test_bots as TestCrewriftBots,
   ../games/crewrift/tests/test_skins as TestCrewriftSkins,
   test_annotations,
   test_policy_hosts,

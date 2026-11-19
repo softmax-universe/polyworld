@@ -26,11 +26,13 @@ proc usage() =
   echo "  --player                Control the first hero; supply 3 bots."
   echo "  --player:N              Control hero N (1-4); supply 3 bots."
   echo "  --replay PATH           Play recorded actions instead of bots."
+  echo "  --resume-step N         Watch with supplied bots through N, then play."
   echo "  --record PATH           Record bot actions to a replay."
   echo "  --seed NUMBER           Live dungeon seed."
   echo "  --seconds NUMBER        Duration in seconds (default 1200)."
   echo "  --minutes NUMBER        Duration in minutes (default 20)."
   echo "  --ticks NUMBER          Duration in ticks (default 28800)."
+  echo "                          Explicit durations override the resume limit."
   echo "  --headless-tick-rate N   Wall-clock ticks per second, 0 is unlimited."
   echo "  --llm-mode:async|barrier Wait for all requests between headless ticks."
   echo "  --speed NUMBER          Graphical start speed: 1, 2, 4, or 16."
@@ -199,6 +201,8 @@ proc decideHeroSlot(game: Game, slot: int32) =
   if not actor.alive or actor.busy:
     return
   if game.historyPlayback:
+    if game.warmingPolicies:
+      runBotDecisions(game, slot)
     if game.recorder != nil:
       game.replayPlayer.data = game.recorder.data
     var action: ReplayAction
@@ -207,8 +211,10 @@ proc decideHeroSlot(game: Game, slot: int32) =
         actor.id,
         action
     ):
-      if action.kind != ActionChat:
-        # Mailboxes were consumed by private VMs; only their commands replay.
+      if action.kind == ActionChat:
+        if game.warmingPolicies:
+          game.deliverChat(action)
+      else:
         discard game.applyHeroAction(slot, action)
     return
   if isPlayerIndex(options.playerSlot, slot):
@@ -226,6 +232,8 @@ proc verifyTick(game: Game) =
 
 proc advanceGame*() =
   ## Advances the live expedition by one tick and verifies it when replaying.
+  if run.historyPlayback and run.recorder != nil:
+    run.replayPlayer.data = run.recorder.data
   run.tickWorld(decideHeroSlot)
   if run.historyPlayback:
     run.verifyTick()
@@ -247,6 +255,29 @@ proc saveRecording*(path = options.recordPath) =
   saveReplay(path, run.recorder.data)
   echo &"replay saved: {path} " &
     &"({run.recorder.data.actions.len} actions)"
+
+proc resumeReplay() =
+  ## Gives the warmed policies control after the verified replay prefix.
+  if run.warmingPolicies and run.world.tick == options.resumeStep:
+    run.hashCheck.requireReplayComplete(
+      uint32(run.world.tick), options.resumeStep.int
+    )
+    run.recorder = initReplayRecorder(
+      run.replayData.replayPrefix(uint32(run.world.tick)))
+    run.recorder.data.config.players = localGameConfig(options, PartySize).players
+    if not options.durationOverride:
+      options.maximumTicks = int32(run.world.setup.maximumTicks)
+    elif options.maximumTicks < run.world.tick or
+        options.maximumTicks > MaxReplayHashes:
+      fail("resume duration must cover the replay prefix and fit replay limits")
+    elif options.maximumTicks > run.world.tick and
+      uint32(options.maximumTicks) != run.world.setup.maximumTicks and
+      run.world.phase notin {EscapedPhase, WipedPhase}:
+        run.recorder.recordDuration(
+          uint32(run.world.tick + 1), options.maximumTicks)
+    run.warmingPolicies = false
+    run.historyPlayback = false
+    run.replayMode = false
 
 proc summarize*(game: Game) =
   ## Prints the current expedition outcome and surviving party state.
@@ -328,13 +359,15 @@ proc runHeadless*() =
     reported = 0
     pacer = initTickPacer(options.headlessTickRate)
     pollers: seq[RequestPoll]
-  if options.waitForLlm and not run.replayMode:
+  if options.waitForLlm and (not run.replayMode or run.warmingPolicies):
     for vm in run.heroVms:
       if vm != nil:
         pollers.add vm.pollRequests
+  resumeReplay()
   while run.world.tick < options.maximumTicks and
       run.world.phase notin {EscapedPhase, WipedPhase}:
     advanceGame()
+    resumeReplay()
     waitForRequests(pollers)
     pacer.pace()
     if profileShouldDump(run.world.tick):
@@ -393,7 +426,12 @@ if options.replayPath.len > 0:
   profileBlock "replay":
     replayData = loadReplay(options.replayPath)
   options.seed = replayData.config.seed
-  options.maximumTicks = int32(replayData.hashes.len)
+  options.validateResume(replayData.hashes.len, PartySize)
+  if options.resumeStep < 0 or not options.durationOverride:
+    options.maximumTicks = int32(replayData.hashes.len)
+  elif options.maximumTicks < options.resumeStep or
+      options.maximumTicks > MaxReplayHashes:
+    fail("resume duration must cover the replay prefix and fit replay limits")
   profileBlock "map":
     run = newGame(
       options.seed,
@@ -408,6 +446,11 @@ if options.replayPath.len > 0:
       ReplayError,
       "the replay setup does not match this Call to Adventure build"
     )
+  if options.resumeStep >= 0:
+    loadBots(run, options.botGroups, options.playerSlot)
+    run.warmingPolicies = true
+    for action in replayData.chatsAt(0):
+      run.deliverChat(action)
 else:
   profileBlock "map":
     run =

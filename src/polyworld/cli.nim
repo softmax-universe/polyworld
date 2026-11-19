@@ -2,8 +2,10 @@
 ##
 ## Every game understands `--bot`, `--player`, `--replay`, `--record`,
 ## `--seed`, `--play`, `--speed`, `--windowSize`, `--vsync`, `--seconds`,
-## `--minutes`, `--ticks`, `--mute`, and `--unmute`. Duration flags all write
-## `maximumTicks`; audio uses saved levels unless explicitly overridden.
+## `--minutes`, `--ticks`, `--mute`, and `--unmute`. Headless BASIC games
+## also accept `--resume-step`. Duration flags all write `maximumTicks`
+## and mark an explicit override; resumed games otherwise keep the replay's
+## duration. Audio uses saved levels unless explicitly overridden.
 ## Each game runs its own argument loop, farms those flags through
 ## `takeCommonFlag`, and handles the rest itself.
 
@@ -21,6 +23,8 @@ type
   GameOptions* = object
     botGroups*: seq[BotGroup]
     replayPath*: string
+    resumeStep*: int32 = -1
+      ## Replay through this step while warming bots, then let them act.
     recordPath*: string
     seed*: int32
     seconds*: int32
@@ -28,6 +32,8 @@ type
     maximumTicks*: int32
       ## Match length in simulation ticks. `--seconds`, `--minutes`, and
       ## `--ticks` all write this field.
+    durationOverride*: bool
+      ## True when a duration flag explicitly replaces the replay's limit.
     speed*: int32
       ## Graphical simulation speed multiplier.
     verbose*: bool
@@ -190,6 +196,7 @@ proc takeDurationFlag(
     options.setMaximumTicks(count)
   else:
     return false
+  options.durationOverride = true
   true
 
 proc takePlayerFlag(options: var GameOptions, argument: string): bool =
@@ -263,6 +270,21 @@ proc takeCommonFlag*(
       return true
   except ValueError as error:
     fail(error.msg)
+  if argument == "--resume-step" or
+    argument.startsWith("--resume-step=") or
+    argument.startsWith("--resume-step:"):
+      when not defined(headless):
+        fail("--resume-step requires headless mode")
+      else:
+        let text =
+          if argument == "--resume-step":
+            arguments.argumentValue(index, argument)
+          else:
+            argument[14 .. ^1]
+        options.resumeStep = parseInt32(text, "--resume-step")
+        if options.resumeStep < 0:
+          fail("--resume-step must be nonnegative")
+        return true
   if argument.startsWith("--headless-tick-rate:") or
     argument.startsWith("--headless-tick-rate=") or
     argument == "--headless-tick-rate":
@@ -369,6 +391,13 @@ proc validateGameOptions*(
   when defined(headless):
     if options.playerSlot != 0:
       fail("--player requires the graphical client")
+  if options.resumeStep >= 0:
+    when not defined(headless):
+      fail("--resume-step requires headless mode")
+    else:
+      if options.replayPath.len == 0 or options.botGroups.botCount == 0:
+        fail("--resume-step requires --replay and --bot policies")
+      return
   if options.replayPath.len > 0:
     if options.botGroups.len > 0:
       fail("--replay cannot be used with --bot")
@@ -395,3 +424,13 @@ proc validateGameOptions*(
             " bots; configured " & $count
         )
       fail(liveBotMessage & "; configured " & $count)
+
+proc validateResume*(
+    options: GameOptions, recordedTicks, seatCount: int
+) =
+  ## Checks the requested handoff against the loaded replay and its seats.
+  if options.resumeStep >= 0:
+    if options.resumeStep.int > recordedTicks:
+      fail("--resume-step exceeds the recorded replay length")
+    if options.botGroups.botCount != seatCount:
+      fail("--resume-step requires " & $seatCount & " bot policies")

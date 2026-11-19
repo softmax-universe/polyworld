@@ -34,10 +34,12 @@ proc usage() =
   echo "  --player:N              Control hero N (1-10); supply 9 bots."
   echo "  --player NAME           Save a nonnumeric player display name."
   echo "  --replay PATH           Play an action replay instead of bots."
+  echo "  --resume-step N         Warm supplied bots through replay tick N (headless)."
   echo "  --record PATH           Record bot actions to a replay."
   echo "  --seconds NUMBER        Battle seconds (default 1200)."
   echo "  --minutes NUMBER        Battle minutes (default 20)."
   echo "  --ticks NUMBER          Battle ticks (default 28800)."
+  echo "Explicit duration flags override the replay's limit when resuming."
   echo "Drafting allows 10 seconds per pick, separate from battle time."
   echo "  --seed NUMBER           Match seed for draft order, bot turn order,"
   echo "                          and combat randomness; the arena stays fixed."
@@ -165,7 +167,8 @@ proc initializeMatch*() =
     profileBlock "replay":
       replayData = loadReplay(options.replayPath)
     mapSeed = replayData.config.seed
-    options.maximumTicks = int32(replayData.hashes.len)
+    if options.resumeStep < 0 or not options.durationOverride:
+      options.maximumTicks = int32(replayData.hashes.len)
   var gameMap: MapData
   profileBlock "map":
     gameMap =
@@ -187,6 +190,11 @@ proc initializeMatch*() =
   if replayMode:
     run.replayPlayer = initReplayPlayer(replayData)
     run.historyPlayback = true
+    options.validateResume(replayData.hashes.len, run.world.heroes.len)
+    if options.resumeStep >= 0:
+      run.warmingPolicies = true
+      loadBots(run, options.botGroups)
+      run.applyReplayActions(0)
   else:
     loadBots(run, options.botGroups, options.playerSlot)
     run.recorder = initReplayRecorder(
@@ -361,13 +369,40 @@ when defined(headless):
       steps = 0
       pacer = initTickPacer(options.headlessTickRate)
       pollers: seq[RequestPoll]
-    if options.waitForLlm and not run.replayMode:
+    if options.waitForLlm and (not run.replayMode or run.warmingPolicies):
       for vm in run.heroVms:
         if vm != nil:
           pollers.add vm.pollRequests
-    while (if run.replayMode: steps < run.replayData.hashes.len
-        else: not run.finished()) and
-        run.recordingError.len == 0:
+    while run.recordingError.len == 0:
+      if run.warmingPolicies and run.world.tick == options.resumeStep:
+        run.hashCheck.requireReplayComplete(run.world.tick.uint32,
+          options.resumeStep.int)
+        run.recorder = ReplayRecorder(
+          data: replayPrefix(run.replayData, run.world.tick.uint32))
+        run.recorder.data.config.maxTicks = run.maximumTicks()
+        if options.durationOverride:
+          if options.maximumTicks < run.world.battleTick():
+            fail("duration override ends before --resume-step")
+          if options.maximumTicks > run.world.battleTick() and
+              options.maximumTicks != run.maximumTicks() and
+              not run.world.gameOver:
+            run.recorder.record(ReplayAction(
+              kind: ActionDuration, tick: run.world.tick.uint32 + 1,
+              first: options.maximumTicks))
+            run.world.maximumTicks = options.maximumTicks
+            run.recorder.data.config.maxTicks = options.maximumTicks
+        for i, player in options.localGameConfig(run.world.heroes.len).players:
+          run.recorder.data.config.players[i] = player
+        run.recorder.data.config.playerSlot = 0
+        run.replayMode = false
+        run.historyPlayback = false
+        run.warmingPolicies = false
+        if options.durationOverride and
+            options.maximumTicks == run.world.battleTick():
+          break
+      if (if run.replayMode: steps >= run.replayData.hashes.len
+          else: run.finished()):
+        break
       advanceGame()
       waitForRequests(pollers)
       pacer.pace()

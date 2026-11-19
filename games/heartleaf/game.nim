@@ -26,8 +26,10 @@ Heartleaf, a village dinner-party week between nine BASIC villagers.
   --player         Control villager one; supply eight bots.
   --player:N       Control villager N (1 .. 9); supply eight bots.
   --replay PATH    Play a recorded game instead of running bots.
+  --resume-step N  Warm bots on a replay through tick N, then let them act.
   --record PATH    Record this game to a replay file.
   --days N         Days in the week (default 7).
+  --ticks N        Exact tick limit; --seconds and --minutes also accepted.
   --seed N         Map seed (default 2026).
   --seek-tick N    Fast-forward to an absolute tick (zero is initial state).
   --seek-event S   Fast-forward to day:N:morning|dinner|scorecard.
@@ -49,6 +51,7 @@ proc parseGameOptions(): (GameOptions, int32) =
   ## Reads the command line into a validated game description.
   var options = GameOptions(
     seed: DefaultSeed,
+    maximumTicks: gameLengthTicks(DefaultDayCount),
     speed: 1
   )
   var dayCount = DefaultDayCount
@@ -70,13 +73,18 @@ proc parseGameOptions(): (GameOptions, int32) =
           arguments.argumentValue(index, "--days"), "--days")
         if dayCount > MaxDayCount:
           fail("--days must be at most " & $MaxDayCount)
+        options.setMaximumTicks(gameLengthTicks(dayCount))
+        options.durationOverride = true
       of "--help", "-h":
         usage()
         quit(0)
       else:
         fail("unknown argument: " & argument)
     inc index
-  options.setMaximumTicks(gameLengthTicks(dayCount))
+  if options.maximumTicks > gameLengthTicks(MaxDayCount):
+    fail("duration must not exceed " & $MaxDayCount & " days")
+  options.setMaximumTicks(options.maximumTicks)
+  dayCount = durationDays(options.maximumTicks)
   options.validateGameOptions(
     VillagerCount,
     "a live game requires exactly nine bots"
@@ -114,17 +122,27 @@ block:
       raise newException(ReplayError,
         "this replay was recorded against different game tuning")
     run = newGame(gameMap, dayCount)
+    run.world.maximumTicks = int32(replayData.header.setup.maximumTicks)
     run.maximumTicks = int32(replayData.hashes.len)
     run.replayMode = true
     run.replayData = replayData
     run.replayPlayer = initReplayPlayer(replayData)
     run.historyPlayback = true
+    if options.resumeStep >= 0:
+      options.validateResume(replayData.hashes.len, VillagerCount)
+      if options.durationOverride and options.maximumTicks < options.resumeStep:
+        fail("duration must not be less than --resume-step")
+      loadBots(run, options.botGroups.expandBotSources(
+        controllerKinds(VillagerCount, 0)))
+      run.warmingPolicies = true
   else:
     var gameMap: MapData
     profileBlock "map":
       gameMap = generateMap(mapSeed)
     gameMap.validateMap()
     run = newGame(gameMap, dayCount)
+    run.maximumTicks = options.maximumTicks
+    run.world.maximumTicks = options.maximumTicks
     let
       kinds = controllerKinds(VillagerCount, options.playerSlot)
       expanded = options.botGroups.expandBotSources(kinds)
@@ -135,7 +153,7 @@ block:
       gridTiles: uint16(GridSide),
       decisionTicks: uint16(DecisionTicks),
       dayCount: uint16(dayCount),
-      maximumTicks: uint32(gameLengthTicks(dayCount)),
+      maximumTicks: uint32(options.maximumTicks),
       mapHash: gameMap.hash,
       contentHash: contentHash()
     ))
@@ -143,11 +161,20 @@ block:
     run.recorder.data.config.dayCount = dayCount
     run.replayPlayer = ReplayPlayer(data: run.recorder.data)
 
-startupTarget.validate(run.world.dayCount, run.maximumTicks)
+block:
+  let maximumTicks =
+    if options.resumeStep >= 0:
+      if options.durationOverride: options.maximumTicks
+      else: run.replayData.durationAt(uint32(options.resumeStep))
+    else:
+      run.maximumTicks
+  startupTarget.validate(durationDays(maximumTicks), maximumTicks)
 
 proc decide(w: World) =
   ## Supplies one decision tick's commands from whichever source owns them.
   if run.historyPlayback:
+    if run.warmingPolicies:
+      runBotDecisions(run)
     if run.recorder != nil:
       run.replayPlayer.data = run.recorder.data
     var action: ReplayAction
@@ -168,19 +195,46 @@ proc verifyTick(game: Game) =
     game.hashCheck
   )
 
+proc resumeGame() =
+  ## Hands warmed policies control immediately after the requested replay tick.
+  if not run.warmingPolicies or run.world.tick != options.resumeStep:
+    return
+  run.hashCheck.requireReplayComplete(
+    uint32(run.world.tick), int(options.resumeStep))
+  let data = replayPrefix(run.replayData, uint32(run.world.tick))
+  run.recorder = ReplayRecorder(data: data)
+  run.recorder.data.config.players = localGameConfig(options, VillagerCount).players
+  run.recorder.data.config.maxTicks = run.world.maximumTicks
+  run.recorder.data.config.dayCount = run.world.dayCount
+  run.maximumTicks =
+    if options.durationOverride: options.maximumTicks
+    else: run.world.maximumTicks
+  if run.maximumTicks > run.world.tick and
+      run.maximumTicks != run.world.maximumTicks:
+    run.recorder.recordAction(
+      uint32(run.world.tick + 1), 0, ActionDuration, run.maximumTicks)
+    run.recorder.data.config.maxTicks = run.maximumTicks
+    run.recorder.data.config.dayCount = durationDays(run.maximumTicks)
+  run.historyPlayback = false
+  run.replayMode = false
+  run.warmingPolicies = false
+
 proc advanceGame*() =
   ## Advances the live world by one tick and verifies it when replaying.
+  resumeGame()
+  run.applyReplayDuration()
   run.world.tickWorld(decide)
   if run.historyPlayback:
     run.verifyTick()
   elif run.recorder != nil:
     run.recorder.recordHash(run.stateHash())
+  resumeGame()
 
 proc seekStartup*(afterTick: proc() {.closure.} = nil) =
   if startupTarget.kind == NoSeek:
     return
   while not startupTarget.reached(run.world):
-    if run.world.over or run.world.tick >= run.maximumTicks:
+    if run.replayEnded() or run.world.tick >= run.maximumTicks:
       fail("seek target was not reached before this recording ended")
     advanceGame()
     if afterTick != nil:
@@ -225,8 +279,11 @@ proc runHeadless*() =
     finishGameProfile()
   let started = epochTime()
   seekStartup()
-  while startupTarget.kind == NoSeek and
-      run.world.tick < run.maximumTicks and not run.world.over:
+  while startupTarget.kind == NoSeek:
+    resumeGame()
+    run.applyReplayDuration()
+    if run.world.tick >= run.maximumTicks or run.world.over:
+      break
     advanceGame()
     if profileShouldDump(run.world.tick):
       finishGameProfile()

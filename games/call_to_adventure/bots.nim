@@ -7,7 +7,7 @@
 import
   bassy,
   polyworld/[policyhosts, llms, mailboxes, bodies, metrics, cli, controllers,
-    pathing, profiles],
+    pathing, profiles, tapes],
   content,
   sim,
   replays
@@ -79,6 +79,15 @@ proc issueHeroAction(action: ReplayAction): int32 =
     return 0
   if not action.validReplayPayload():
     return 0
+  if activeGame.warmingPolicies:
+    let player = activeGame.replayPlayer
+    if player != nil and
+        player.data.actions.takeMatchingAction(player.actionIndex, action):
+      return int32(activeGame.applyHeroAction(
+        activeHeroSlot, player.data.actions[player.actionIndex - 1]))
+    return 0
+  if activeGame.historyPlayback:
+    return 0
   if activeGame.recorder != nil:
     activeGame.recorder.recordAction(
       action.tick,
@@ -115,13 +124,37 @@ proc heroLimits(): Limits =
   result.maxPrintBytes = 4 * 1024
   result.maxPrintEvents = 256
 
+proc deliverChat*(game: Game, action: ReplayAction): int32 {.discardable.} =
+  ## Delivers recorded chat to its original recipients during policy warm-up.
+  for recipient, inbox in game.inboxes:
+    if inbox != nil and (action.recipients and (1'u8 shl recipient)) != 0:
+      if inbox.push(action.target, action.text):
+        inc result
+
 proc sendChat*(
   game: Game, sender, target: int, text: openArray[char]
 ): int32 =
   ## Records nearby broadcasts in command order before delivering mailboxes.
-  if game == nil or game.replayMode or game.historyPlayback or
+  if game == nil or
       sender notin 0 ..< game.inboxes.len or target != -2 or
       text.len == 0 or text.len > MaxChatBytes:
+    return 0
+  if game.warmingPolicies:
+    let player = game.replayPlayer
+    if player != nil and not player.finished:
+      let action = player.data.actions[player.actionIndex]
+      if action.kind == ActionChat and
+          action.tick == uint32(game.world.tick) and
+          action.heroId == int32(100 + sender) and
+          action.target == int32(target) and
+          action.text.toOpenArray(0, action.text.high) == text:
+        result = game.deliverChat(action)
+        # Failed sends are absent from the tape and may precede this retry.
+        if result > 0:
+          inc player.actionIndex
+        return
+    return 0
+  if game.replayMode or game.historyPlayback:
     return 0
   let origin = game.world.actors[sender].home
   var recipients = 0'u8

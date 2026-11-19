@@ -2777,7 +2777,7 @@ proc runGraphics*(
         elif run.recorder != nil: int32(run.recorder.data.hashes.len)
         else: int32(run.replayPlayer.data.hashes.len)
       transport.durationTicks = run.durationTicks()
-      transport.sync(int32(run.world.tick), recorded, run.finished())
+      transport.sync(int32(run.world.tick), recorded, run.replayEnded())
       run.world.keepDraftPlaying(transport)
       if network != nil:
         connection.pump()
@@ -2850,12 +2850,12 @@ proc runGraphics*(
         except RoomsError as error:
           network.abort(error.msg)
         connection.pump()
-        transport.sync(run.world.tick, run.world.tick, run.finished())
+        transport.sync(run.world.tick, run.world.tick, run.replayEnded())
       else:
         if spectatorStream != nil:
           connection.pump()
           spectatorStream.receive()
-          transport.sync(run.world.tick, spectatorStream.receivedEnd, run.finished())
+          transport.sync(run.world.tick, spectatorStream.receivedEnd, run.replayEnded())
           if quitToMenu and network.client.snapshot.room.len == 0:
             leaveMatch = true
         let restoreTick = transport.takeRestore()
@@ -2863,7 +2863,7 @@ proc runGraphics*(
           restoreTo(restoreTick)
           transport.durationTicks = run.durationTicks()
           transport.sync(int32(run.world.tick),
-            if spectatorStream != nil: spectatorStream.receivedEnd else: recorded, run.finished())
+            if spectatorStream != nil: spectatorStream.receivedEnd else: recorded, run.replayEnded())
         run.world.keepDraftPlaying(transport)
         feedGotaActions(observeTick = true)
         transport.startFrame(dt, TickRate)
@@ -2885,7 +2885,7 @@ proc runGraphics*(
               elif run.recorder != nil: int32(run.recorder.data.hashes.len)
               else: int32(run.replayPlayer.data.hashes.len)
             transport.durationTicks = run.durationTicks()
-            transport.sync(int32(run.world.tick), recordedNow, run.finished())
+            transport.sync(int32(run.world.tick), recordedNow, run.replayEnded())
       for event in rewardAudio.takeRewardSound(epochTime(), audioEnabled):
         playSound(event.cue)
       updateMatchResults()

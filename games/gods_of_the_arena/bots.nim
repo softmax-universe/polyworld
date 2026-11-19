@@ -298,6 +298,24 @@ proc sendChat*(
     game: Game, sender, target: int, text: openArray[char]
 ): int32 =
   ## Sends local mailbox traffic or queues it for authoritative delivery.
+  if game.warmingPolicies:
+    if sender notin 0 ..< game.inboxes.len or
+      target < -2 or target >= game.inboxes.len or
+      text.len == 0 or text.len > MaxChatBytes:
+        return 0
+    var message = newString(text.len)
+    for i, c in text:
+      message[i] = c
+    let
+      player = game.replayPlayer
+      action = ReplayAction(
+        tick: uint32(game.world.tick), kind: ActionPolicyChat,
+        heroId: game.world.heroes[sender].id, first: target.int32,
+        text: message)
+    if player.data.actions.takeMatchingAction(player.actionIndex, action):
+      return game.deliverPolicyChat(sender, target,
+        player.data.actions[player.actionIndex - 1].text)
+    return 0
   if game.networked:
     if sender notin 0 ..< game.world.heroes.len or
       target < -2 or target >= game.world.heroes.len or
@@ -419,7 +437,7 @@ proc infoFunctions(host: var Host, heroId: int32) =
       team = world.heroById(heroId).team
     case args[0]
     of 0: world.battleTick()
-    of 1: activeGame.config.maxTicks
+    of 1: activeGame.maximumTicks()
     of 2: cast[int32](activeGame.config.seed)
     of 3: world.spawnTimerTicks
     of 4: world.spawnIntervalTicks
@@ -484,6 +502,13 @@ proc publishActionResult*(game: Game, heroId: int32, accepted: bool) =
 
 proc requestAction(action: ReplayAction): bool =
   ## Preserves immediate offline results and queue-only multiplayer results.
+  if activeGame.warmingPolicies:
+    let player = activeGame.replayPlayer
+    if player.data.actions.takeMatchingAction(player.actionIndex, action):
+      result = activeGame.applyReplayCommand(
+        player.data.actions[player.actionIndex - 1])
+      finishStructuredAction(action.heroId, result)
+    return
   try:
     result = activeGame.submitAction(action)
   except ReplayError as error:
@@ -1001,6 +1026,15 @@ proc runHeroScript(game: Game, index: int) =
   let
     hero = game.world.heroes[index]
     vm = game.heroVms[index]
+  defer:
+    if game.warmingPolicies:
+      let player = game.replayPlayer
+      while player.actionIndex < player.data.actions.len:
+        let action = player.data.actions[player.actionIndex]
+        if action.tick != uint32(game.world.tick) or action.heroId != hero.id:
+          break
+        inc player.actionIndex
+        discard game.applyReplayCommand(action)
   if vm == nil or vm.failed:
     return
   try:
@@ -1096,6 +1130,6 @@ proc runBotDecisions*(game: Game) {.measure.} =
   for offset in 0 ..< game.world.heroes.len:
     let index = (game.world.heroTurnStart + offset) mod game.world.heroes.len
     runHeroScript(game, index)
-  if not game.networked:
+  if not game.networked and not game.warmingPolicies:
     game.world.heroTurnStart =
       (game.world.heroTurnStart + 1) mod game.world.heroes.len

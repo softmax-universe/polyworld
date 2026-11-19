@@ -15,7 +15,7 @@ const
   ReplayFormatVersion* = 3'u16
   ## This client supports only this gameplay version. Bump it when rules change.
   ## Older replays use their archived client; never add compatibility branches.
-  ReplayGameVersion* = 8'u16
+  ReplayGameVersion* = 9'u16
 
   ActionMove* = 1'u8
   ActionGather* = 2'u8
@@ -26,7 +26,8 @@ const
   ActionExitHouse* = 7'u8
   ActionStop* = 8'u8
   ActionTalk* = 9'u8
-  ActionKindHigh* = ActionTalk
+  ActionDuration* = 10'u8
+  ActionKindHigh* = ActionDuration
 
   MaxReplayBytes* = 64 * 1024 * 1024
   MaxReplayActions* = 4_000_000
@@ -65,6 +66,7 @@ type
       ##   ExitHouse   unused, unused
       ##   Stop        unused, unused
       ##   Talk        target slot, unused
+      ##   Duration    maximum ticks, unused
 
   ReplayHeader* = TapeHeader[Setup]
   ReplayData* = ActionTape[Setup, ReplayAction]
@@ -74,6 +76,19 @@ type
 proc fail(message: string) {.noreturn.} =
   ## Raises one Heartleaf replay error.
   raise newException(ReplayError, message)
+
+proc durationDays*(maximumTicks: int32): int32 =
+  ## Returns the days needed for an exact tick duration.
+  (maximumTicks - 1) div gameLengthTicks(1) + 1
+
+proc durationAt*(data: ReplayData, tick: uint32): int32 =
+  ## Reads the configured duration after all actions through this tick.
+  result = int32(data.header.setup.maximumTicks)
+  for action in data.actions:
+    if action.tick > tick:
+      break
+    if action.kind == ActionDuration:
+      result = action.first
 
 proc initReplayData*(setup: Setup): ReplayData =
   ## Creates a replay containing the match setup, config, and action tape.
@@ -126,7 +141,9 @@ proc recordAction*(
 
 proc recordHash*(recorder: ReplayRecorder, hash: uint64) =
   ## Appends the canonical simulation hash for one completed tick.
-  recordHash(recorder, hash, MaxReplayHashes)
+  if recorder != nil:
+    recorder.data.hashes.appendHash(
+      hash, uint32(recorder.data.config.maxTicks), MaxReplayHashes)
 
 proc validateSetup(setup: Setup) =
   ## Validates the immutable game description.
@@ -138,8 +155,8 @@ proc validateSetup(setup: Setup) =
     fail("replay setup has an unsupported decision interval")
   if setup.dayCount == 0 or setup.dayCount > uint16(MaxDayCount):
     fail("replay setup has an invalid day count")
-  if setup.maximumTicks !=
-      uint32(gameLengthTicks(int32(setup.dayCount))):
+  if setup.maximumTicks == 0 or setup.maximumTicks > MaxGameTicks or
+      durationDays(int32(setup.maximumTicks)) != int32(setup.dayCount):
     fail("replay setup duration disagrees with its day count")
   if setup.mapHash == 0:
     fail("replay setup has no deterministic map fingerprint")
@@ -154,6 +171,13 @@ proc validateAction(action: ReplayAction, setup: Setup) =
     fail("replay action kind is invalid")
   if int(action.playerId) >= VillagerCount:
     fail("replay action names an unknown villager")
+  if action.kind == ActionDuration:
+    if action.tick == 0 or action.tick > setup.maximumTicks + 1 or
+        action.first < int64(action.tick) or
+        action.first > int64(MaxGameTicks) or action.playerId != 0 or
+        action.second != 0 or action.offset != FixedVec2Zero:
+      fail("replay duration change is invalid")
+    return
   if action.tick > setup.maximumTicks:
     fail("replay action exceeds the configured duration")
   if action.tick == 0 or action.tick mod uint32(setup.decisionTicks) != 0:
@@ -183,23 +207,18 @@ proc validateAction(action: ReplayAction, setup: Setup) =
 proc validate*(data: ReplayData) =
   ## Validates versions, setup bounds, command payloads, and hash coverage.
   data.config.validateConfig(VillagerCount)
-  if data.config.seed != data.header.setup.mapSeed or
-    data.config.maxTicks != int32(data.header.setup.maximumTicks):
-      fail("replay configuration does not match its simulation setup")
-  if data.config.dayCount != int32(data.header.setup.dayCount):
-    fail("replay configuration has a different day count")
+  if data.config.seed != data.header.setup.mapSeed:
+    fail("replay configuration does not match its simulation setup")
   data.header.requireTapeVersion(
     ReplayFormatVersion,
     ReplayGameVersion
   )
-  let setup = data.header.setup
+  var setup = data.header.setup
   setup.validateSetup()
   if data.actions.len > MaxReplayActions:
     fail("replay action limit exceeded")
   if data.hashes.len > MaxReplayHashes:
     fail("replay hash limit exceeded")
-  if data.hashes.len > int(setup.maximumTicks):
-    fail("replay hashes exceed the configured duration")
   var lastTick = 0'u32
   for index, action in data.actions:
     if action.tick > uint32(data.hashes.len):
@@ -207,7 +226,17 @@ proc validate*(data: ReplayData) =
     if index > 0 and action.tick < lastTick:
       fail("replay actions move backward in time")
     action.validateAction(setup)
+    if action.kind == ActionDuration:
+      if index > 0 and action.tick == lastTick:
+        fail("replay duration change must be first in its tick")
+      setup.maximumTicks = uint32(action.first)
+      setup.dayCount = uint16(durationDays(action.first))
     lastTick = action.tick
+  if data.hashes.len > int(setup.maximumTicks):
+    fail("replay hashes exceed the configured duration")
+  if data.config.maxTicks != int32(setup.maximumTicks) or
+      data.config.dayCount != int32(setup.dayCount):
+    fail("replay configuration does not match its final duration")
 
 proc encodeReplay*(data: ReplayData): string =
   ## Encodes a validated replay using the shared Flatty envelope.

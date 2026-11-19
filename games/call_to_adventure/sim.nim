@@ -42,6 +42,8 @@ type
     hashCheck*: ReplayHashCheck
     historyPlayback*: bool
     replayMode*: bool
+    warmingPolicies*: bool
+      ## Runs selected policies while recorded actions remain authoritative.
     heroVms*: array[PartySize, HeroVm]
     inboxes*: array[PartySize, Mailbox]
 
@@ -3092,6 +3094,17 @@ proc tickWorld*(
   ## One authoritative simulation step.
   if game.world.phase in {EscapedPhase, WipedPhase}:
     return
+  var duration: ReplayAction
+  if game.historyPlayback:
+    if game.replayPlayer != nil and not game.replayPlayer.finished:
+      duration = game.replayPlayer.data.actions[game.replayPlayer.actionIndex]
+  elif game.recorder != nil and game.recorder.data.actions.len > 0:
+    duration = game.recorder.data.actions[^1]
+  if duration.kind == ActionDuration and
+      duration.tick == uint32(game.world.tick + 1):
+    game.world.setup.maximumTicks = uint32(duration.first)
+    if game.historyPlayback:
+      inc game.replayPlayer.actionIndex
   inc game.world.tick
   profileBlock "vision":
     game.world.rebuildVision()

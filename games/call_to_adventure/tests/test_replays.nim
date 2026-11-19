@@ -233,6 +233,34 @@ block:
   for inbox in capped.inboxes:
     doAssert inbox.count == 0
 
+echo "Testing CTA duration-event ordering and bounds"
+block:
+  let recorder = initReplayRecorder(data)
+  recorder.recordDuration(MatchTicks + 1, MatchTicks + 3)
+  recorder.recordHash(0)
+  recorder.data.validate()
+  template invalidDuration(change: untyped) =
+    ## Rejects malformed duration events through the public validator.
+    block:
+      var candidate {.inject.} = recorder.data
+      change
+      rejects:
+        candidate.validate()
+  invalidDuration: candidate.actions[^1].tick = 0
+  invalidDuration: candidate.actions[^1].first = MatchTicks
+  invalidDuration: candidate.actions[^1].first = MaxReplayHashes + 1
+  invalidDuration: candidate.actions[^1].heroId = 100
+  invalidDuration: candidate.actions[^1].second = 1
+  invalidDuration: candidate.actions[^1].text = "unexpected"
+  invalidDuration: candidate.config.maxTicks = MatchTicks
+  invalidDuration:
+    candidate.actions[^1].tick = MatchTicks
+  invalidDuration:
+    candidate.actions[^1].tick = MatchTicks + 2
+    candidate.hashes.add(0)
+  rejects:
+    recorder.recordDuration(MatchTicks + 1, MatchTicks + 4)
+
 echo "Testing CTA chat after a command makes its sender busy"
 block:
   const BusyProgram = """

@@ -410,5 +410,15 @@ proc runBotDecisions*(game: Game) {.measure.} =
   activeGame = game
   let first = (game.world.tick div DecisionTicks) mod int32(VillagerCount)
   for offset in 0'i32 ..< int32(VillagerCount):
-    game.runDecision((first + offset) mod int32(VillagerCount))
+    let slot = (first + offset) mod int32(VillagerCount)
+    game.runDecision(slot)
+    if game.warmingPolicies and game.replayPlayer != nil:
+      let player = game.replayPlayer
+      while player.actionIndex < player.data.actions.len:
+        let action = player.data.actions[player.actionIndex]
+        if action.tick != uint32(game.world.tick) or
+            int32(action.playerId) != slot:
+          break
+        game.world.applyReplayAction(action)
+        inc player.actionIndex
   activeGame = nil

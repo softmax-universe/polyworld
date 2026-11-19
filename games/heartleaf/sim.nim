@@ -122,6 +122,8 @@ type
     hashCheck*: ReplayHashCheck
     historyPlayback*: bool
     replayMode*: bool
+    warmingPolicies*: bool
+      ## Runs selected policies while recorded actions remain authoritative.
     brains*: array[VillagerCount, VillagerVm]
     mapSeed*: int32
     maximumTicks*: int32
@@ -696,6 +698,44 @@ proc startScoreScreen(w: World) =
   w.phase = ScorePhase
   w.phaseTicks = ScoreScreenTicks
 
+proc setMaximumTicks*(w: World, maximumTicks: int32) =
+  ## Changes the time budget, beginning another morning after a timed end.
+  let timedOut = w.over and w.phase == GameOverPhase and
+    w.tick == w.maximumTicks
+  w.maximumTicks = maximumTicks
+  w.dayCount = durationDays(maximumTicks)
+  if timedOut and w.tick < maximumTicks:
+    w.over = false
+    dec w.day
+    w.startDay()
+
+proc pendingDuration(game: Game): ReplayAction =
+  ## Reads a control for the next tick without changing the completed state.
+  if game.historyPlayback and game.replayPlayer != nil:
+    let player = game.replayPlayer
+    if player.actionIndex >= player.data.actions.len:
+      return
+    result = player.data.actions[player.actionIndex]
+  elif game.recorder != nil and game.recorder.data.actions.len > 0:
+    result = game.recorder.data.actions[^1]
+  if result.kind != ActionDuration or
+      result.tick != uint32(game.world.tick + 1):
+    result = ReplayAction()
+
+proc replayEnded*(game: Game): bool =
+  ## Allows playback to cross a recorded extension after a timed ending.
+  game.world.over and game.pendingDuration().kind != ActionDuration
+
+proc applyReplayDuration*(game: Game) =
+  ## Applies a duration control before advancing its tick, including endings.
+  let action = game.pendingDuration()
+  if action.kind != ActionDuration:
+    return
+  if game.historyPlayback:
+    inc game.replayPlayer.actionIndex
+  game.world.setMaximumTicks(action.first)
+  game.dayCount = game.world.dayCount
+
 ## Commands
 ##
 ## Each of these is the single validator for one command kind, and every one
@@ -965,57 +1005,106 @@ proc record(game: Game, kind: uint8, player: int32,
   game.recorder.recordAction(
     uint32(game.world.tick), player, kind, first, second, offset)
 
+proc replayCommand(game: Game, kind: uint8, player: int32,
+    first = 0'i32, second = 0'i32, offset = FixedVec2Zero): bool =
+  ## Applies only the next recorded command, preserving its return value.
+  if game.replayPlayer == nil:
+    return false
+  let action = ReplayAction(
+    tick: uint32(game.world.tick), playerId: uint8(player), kind: kind,
+    first: first, second: second, offset: offset)
+  result = game.replayPlayer.data.actions.takeMatchingAction(
+    game.replayPlayer.actionIndex, action)
+  if result:
+    game.world.applyReplayAction(action)
+
 proc applyMove*(game: Game, player, x, y: int32,
     offset = FixedVec2Zero): bool =
   ## Walks a villager and records the command when accepted.
+  if game.warmingPolicies:
+    return game.replayCommand(ActionMove, player, x, y, offset)
+  if game.historyPlayback:
+    return false
   result = game.world.applyMove(player, x, y, offset)
   if result:
     game.record(ActionMove, player, x, y, offset)
 
 proc applyGather*(game: Game, player, garden: int32): bool =
   ## Gathers a garden and records the command when accepted.
+  if game.warmingPolicies:
+    return game.replayCommand(ActionGather, player, garden)
+  if game.historyPlayback:
+    return false
   result = game.world.applyGather(player, garden)
   if result:
     game.record(ActionGather, player, garden)
 
 proc applyTalk*(game: Game, player, target: int32): bool =
   ## Records an accepted conversation offer or response.
+  if game.warmingPolicies:
+    return game.replayCommand(ActionTalk, player, target)
+  if game.historyPlayback:
+    return false
   result = game.world.applyTalk(player, target)
   if result:
     game.record(ActionTalk, player, target)
 
 proc applyInvite*(game: Game, player, target: int32): bool =
   ## Invites a villager and records the command when accepted.
+  if game.warmingPolicies:
+    return game.replayCommand(ActionInvite, player, target)
+  if game.historyPlayback:
+    return false
   result = game.world.applyInvite(player, target)
   if result:
     game.record(ActionInvite, player, target)
 
 proc applyAccept*(game: Game, player, host: int32): bool =
   ## Accepts an invitation and records the command when accepted.
+  if game.warmingPolicies:
+    return game.replayCommand(ActionAccept, player, host)
+  if game.historyPlayback:
+    return false
   result = game.world.applyAccept(player, host)
   if result:
     game.record(ActionAccept, player, host)
 
 proc applyDecline*(game: Game, player, host: int32): bool =
   ## Declines an invitation and records the command when accepted.
+  if game.warmingPolicies:
+    return game.replayCommand(ActionDecline, player, host)
+  if game.historyPlayback:
+    return false
   result = game.world.applyDecline(player, host)
   if result:
     game.record(ActionDecline, player, host)
 
 proc applyEnterHouse*(game: Game, player, house: int32): bool =
   ## Enters a house and records the command when accepted.
+  if game.warmingPolicies:
+    return game.replayCommand(ActionEnterHouse, player, house)
+  if game.historyPlayback:
+    return false
   result = game.world.applyEnterHouse(player, house)
   if result:
     game.record(ActionEnterHouse, player, house)
 
 proc applyExitHouse*(game: Game, player: int32): bool =
   ## Exits a house and records the command when accepted.
+  if game.warmingPolicies:
+    return game.replayCommand(ActionExitHouse, player)
+  if game.historyPlayback:
+    return false
   result = game.world.applyExitHouse(player)
   if result:
     game.record(ActionExitHouse, player)
 
 proc applyStop*(game: Game, player: int32): bool =
   ## Stops a villager and records the command when accepted.
+  if game.warmingPolicies:
+    return game.replayCommand(ActionStop, player)
+  if game.historyPlayback:
+    return false
   result = game.world.applyStop(player)
   if result:
     game.record(ActionStop, player)

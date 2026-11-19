@@ -1988,7 +1988,7 @@ proc runGraphics*(network: NetworkMatch = nil,
     if existsEnv("SIM_SECONDS"):
       let wanted = int32(getEnv("SIM_SECONDS").parseFloat * TickRate.float64)
       while run.world.tick < wanted and
-          run.world.tick < run.maximumTicks and not run.world.over:
+          run.world.tick < run.maximumTicks and not run.replayEnded():
         advanceGame()
       sceneDirty = true
     if primaryId == NoEntity:
@@ -2089,7 +2089,7 @@ proc runGraphics*(network: NetworkMatch = nil,
       let recorded =
         if run.recorder != nil: int32(run.recorder.data.hashes.len)
         else: int32(run.replayPlayer.data.hashes.len)
-      transport.sync(run.world.tick, recorded, run.world.over)
+      transport.sync(run.world.tick, recorded, run.replayEnded())
       if network != nil:
         connection.stats.tickRate = int(TickRate)
         connection.pump()
@@ -2126,12 +2126,12 @@ proc runGraphics*(network: NetworkMatch = nil,
           selectedIds.setLen(0)
           primaryId = NoEntity
           cancelGameplayGestures()
-        transport.sync(run.world.tick, run.world.tick, run.world.over)
+        transport.sync(run.world.tick, run.world.tick, run.replayEnded())
       else:
         let restoreTick = transport.takeRestore()
         if restoreTick >= 0:
           restoreTo(restoreTick)
-          transport.sync(run.world.tick, recorded, run.world.over)
+          transport.sync(run.world.tick, recorded, run.replayEnded())
         feedLvdActions(observeTick = true)
         transport.startFrame(dt, TickRate)
         let frameStart = epochTime()
@@ -2145,7 +2145,7 @@ proc runGraphics*(network: NetworkMatch = nil,
             let recordedNow =
               if run.recorder != nil: int32(run.recorder.data.hashes.len)
               else: int32(run.replayPlayer.data.hashes.len)
-            transport.sync(run.world.tick, recordedNow, run.world.over)
+            transport.sync(run.world.tick, recordedNow, run.replayEnded())
       let active = simulationActive(transport)
       harvesting.updateHarvest(run.world, dt, viewer = -1, paused = not active)
       currentSight = run.world.renderVisibilityValues(viewMode, CurrentSightMask)
@@ -2177,7 +2177,7 @@ proc runGraphics*(network: NetworkMatch = nil,
       feedLvdActions()
       actionCam.direct(
         cameraTarget, cameraDistance, viewingDt,
-        run.world.over or transport.tick >= transport.timelineEnd,
+        run.replayEnded() or transport.tick >= transport.timelineEnd,
         transport.repeating,
         window.size.x.float32 / max(window.size.y.float32, 1),
         RtsFollowLift

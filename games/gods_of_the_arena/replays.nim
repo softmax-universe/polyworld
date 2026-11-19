@@ -15,7 +15,7 @@ const
   ReplayFormatVersion* = 8'u16
   ## This client supports only this gameplay version. Bump it when rules change.
   ## Older replays use their archived client; never add compatibility branches.
-  ReplayGameVersion* = 84'u16
+  ReplayGameVersion* = 85'u16
   ActionWalkTo* = 1'u8
   ActionAttackTarget* = 2'u8
   ActionBuyItem* = 3'u8
@@ -36,6 +36,7 @@ const
   ActionHumanChat* = 25'u8
   ActionPolicyChat* = 26'u8
   ActionSystemNotice* = 27'u8
+  ActionDuration* = 28'u8
   MaxReplayBytes* = 64 * 1024 * 1024
   MaxReplayActions* = 10_000_000
   MaxReplayHashes* = 100_000_000
@@ -71,7 +72,7 @@ type
       ## Movement and ground aim offsets from the named tile center.
     slot*: int32
     first*: int32
-      ## Chat audience is -2 for all, -1 for team, or a mailbox index.
+      ## Chat audience or the new battle limit for duration actions.
     second*: int32
     text*: string
       ## Human chat, policy chat, and local notices share the action order.
@@ -164,7 +165,12 @@ proc validateChat(setup: Setup, action: ReplayAction) =
 
 proc validateAction(setup: Setup, action: ReplayAction) =
   ## Rejects unknown kinds and mismatched gameplay or chat payload fields.
-  if action.isChatAction:
+  if action.kind == ActionDuration:
+    if action.tick == 0 or action.first <= 0 or action.heroId != 0 or
+        action.slot != 0 or action.second != 0 or action.text.len != 0 or
+        action.offset != FixedVec2Zero:
+      fail("replay duration action is invalid")
+  elif action.isChatAction:
     setup.validateChat(action)
   elif action.isGameplayAction:
     if action.text.len != 0:
@@ -374,9 +380,9 @@ proc recordBuyback*(
     kind: ActionBuyback
   )
 
-proc maximumReplayTicks(setup: Setup): uint64 =
+proc maximumReplayTicks(setup: Setup, maximumTicks: uint32): uint64 =
   ## Bounds the tape by battle time, all pick deadlines, and preparation.
-  result = setup.maximumTicks.uint64
+  result = maximumTicks.uint64
   if setup.drafting:
     result += setup.heroes.len.uint64 * DraftPickTicks.uint64 +
       PreparationTicks.uint64
@@ -385,7 +391,8 @@ proc recordHash*(recorder: ReplayRecorder, hash: uint64) =
   ## Appends the canonical simulation hash for one completed tick.
   if recorder == nil:
     return
-  let maximum = recorder.data.header.setup.maximumReplayTicks()
+  let maximum = recorder.data.header.setup.maximumReplayTicks(
+    recorder.data.config.maxTicks.uint32)
   if maximum > MaxReplayHashes.uint64:
     fail("replay setup duration exceeds the hash limit")
   recorder.data.hashes.appendHash(hash, maximum.uint32, MaxReplayHashes)
@@ -409,8 +416,7 @@ proc validate*(data: ReplayData) =
     data.config.mapPreset.validate()
   except MapgenError as error:
     fail(error.msg)
-  if data.config.seed != data.header.setup.mapSeed or
-    data.config.maxTicks != int32(data.header.setup.maximumTicks):
+  if data.config.seed != data.header.setup.mapSeed:
       fail("replay configuration does not match its simulation setup")
   if data.config.spawnIntervalTicks !=
     int32(data.header.setup.spawnIntervalTicks):
@@ -421,7 +427,7 @@ proc validate*(data: ReplayData) =
   )
   let
     setup = data.header.setup
-    totalTicks = setup.maximumReplayTicks()
+    totalTicks = setup.maximumReplayTicks(data.config.maxTicks.uint32)
   if setup.tickRate != uint16(TickRate):
     fail("replay setup has an unsupported tick rate")
   if setup.gridTiles.int != data.config.mapPreset.mapSize:
@@ -432,7 +438,8 @@ proc validate*(data: ReplayData) =
     fail("replay setup has an invalid duration")
   if setup.spawnIntervalTicks > uint32(int32.high):
     fail("replay setup spawn interval is too large")
-  if totalTicks > uint64(MaxReplayHashes):
+  if totalTicks > uint64(MaxReplayHashes) or
+      setup.maximumReplayTicks(setup.maximumTicks) > MaxReplayHashes.uint64:
     fail("replay setup duration exceeds the hash limit")
   if setup.heroes.len == 0 or setup.heroes.len > MaxReplayHeroes:
     fail("replay setup has an invalid hero count")
@@ -465,6 +472,7 @@ proc validate*(data: ReplayData) =
     lastTick = 0'u32
     chatCount = 0
     chatBytes = 0
+    maximumTicks = setup.maximumTicks
   for i, action in data.actions:
     if action.tick > uint32(data.hashes.len):
       fail("replay action exceeds the recorded duration")
@@ -473,6 +481,16 @@ proc validate*(data: ReplayData) =
     if action.tick.uint64 > totalTicks:
       fail("replay action exceeds the configured duration")
     setup.validateAction(action)
+    if action.kind == ActionDuration:
+      if i > 0 and action.tick == lastTick:
+        fail("replay duration action must precede the tick's other actions")
+      if action.tick.uint64 > setup.maximumReplayTicks(maximumTicks) + 1:
+        fail("replay duration action follows an expired time limit")
+      if not setup.drafting and action.first.uint32 < action.tick:
+        fail("replay duration action ends before its tick")
+      maximumTicks = action.first.uint32
+      if setup.maximumReplayTicks(maximumTicks) > MaxReplayHashes.uint64:
+        fail("replay duration action exceeds the hash limit")
     action.countChat(chatCount, chatBytes)
     if action.isGameplayAction:
       var knownHero = false
@@ -483,6 +501,8 @@ proc validate*(data: ReplayData) =
       if not knownHero:
         fail("replay action references an unknown hero")
     lastTick = action.tick
+  if maximumTicks != data.config.maxTicks.uint32:
+    fail("replay duration actions do not match the final configuration")
   try:
     data.metrics.validate(
       setup.heroes.len,

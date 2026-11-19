@@ -188,4 +188,56 @@ block:
   except ReplayError as error:
     doAssert error.msg.contains("first at tick 2")
 
+echo "Testing policy feedback consumes only the next recorded command"
+block:
+  let actions = @[
+    TapeAction(tick: 1, kind: 1), TapeAction(tick: 1, kind: 2),
+    TapeAction(tick: 2, kind: 1)
+  ]
+  var index = 0
+  doAssert not actions.takeMatchingAction(index, actions[1])
+  doAssert index == 0
+  doAssert actions.takeMatchingAction(index, actions[0])
+  doAssert not actions.takeMatchingAction(index, actions[0])
+  doAssert index == 1
+  var action: TapeAction
+  doAssert actions.takeActionAt(index, 1, action) and action == actions[1]
+  doAssert not actions.takeMatchingAction(index, actions[0])
+  doAssert actions.takeMatchingAction(index, actions[2])
+  doAssert not actions.takeMatchingAction(index, actions[2])
+
+echo "Testing resume prefixes preserve setup and exclude future actions"
+block:
+  type
+    ResumeTape = object
+      maximumTicks: int
+      hashes: seq[uint64]
+      actions: seq[TapeAction]
+  let original = ResumeTape(
+    maximumTicks: 100,
+    hashes: @[1'u64, 2, 3],
+    actions: @[
+      TapeAction(tick: 0, kind: 2), TapeAction(tick: 1),
+      TapeAction(tick: 2, kind: 2), TapeAction(tick: 2),
+      TapeAction(tick: 3)
+    ]
+  )
+  var prefix = original.replayPrefix(2)
+  doAssert prefix.maximumTicks == 100
+  doAssert prefix.hashes == @[1'u64, 2]
+  doAssert prefix.actions == original.actions[0 .. 3]
+  prefix.hashes.add 99
+  prefix.actions.add TapeAction(tick: 3, kind: 9)
+  doAssert original.hashes == @[1'u64, 2, 3]
+  doAssert original.actions[^1].kind == 0
+  let start = original.replayPrefix(0)
+  doAssert start.hashes.len == 0
+  doAssert start.actions == @[original.actions[0]]
+  doAssert original.replayPrefix(3).hashes == original.hashes
+  try:
+    discard original.replayPrefix(4)
+    doAssert false, "A handoff cannot pass the recorded end"
+  except ReplayError:
+    discard
+
 echo "Tape tests passed"

@@ -1,5 +1,5 @@
 import jsony
-import polyworld/[rooms, roomclients, tapes]
+import polyworld/[rooms, roomclients, tapes, metrics]
 import ../[content, maps, multiplayer, replays, sim]
 
 let config = parseConfig("{\"maxTicks\":48,\"draftMode\":\"open\"}")
@@ -49,10 +49,32 @@ while not first.finished:
   first.applyPacket(packet)
   second.applyPacket(packet)
   doAssert first.game.stateHash() == second.game.stateHash()
+  if tick == 12:
+    # Save a live sparse match through the same telemetry path as the menu.
+    first.game.sampleMetrics(true)
+    var paused = first.game.recorder.data
+    paused.metrics = first.game.history.replayMetrics()
+    doAssert paused.config.players.len == HeroClassCount
+    doAssert paused.header.setup.heroes.len == 2
+    doAssert paused.metrics.final.len == 2
+    let restored = decodeReplay(encodeReplay(paused))
+    doAssert restored.actions == paused.actions
+    doAssert restored.hashes == paused.hashes
+    doAssert restored.metrics == paused.metrics
+    var invalid = paused
+    invalid.metrics.final.setLen(HeroClassCount)
+    var rejected = false
+    try:
+      discard encodeReplay(invalid)
+    except ReplayError:
+      rejected = true
+    doAssert rejected, "Replay telemetry must match active heroes, not empty slots"
   doAssert tick < uint32(100 + PreparationTicks)
 doAssert botCommands > 0, "An actual sparse bot must submit commands"
+first.game.recorder.data.metrics = first.game.history.replayMetrics()
 let data = decodeReplay(encodeReplay(first.game.recorder.data))
 data.validate()
+doAssert data.metrics.final.len == data.header.setup.heroes.len
 let replay = newGame(generateMap(data.config.seed, data.config.mapPreset),
   data.config.spawnIntervalTicks, 0, true, data)
 replay.historyPlayback = true

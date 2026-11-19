@@ -485,7 +485,7 @@ proc validate*(data: ReplayData) =
     lastTick = action.tick
   try:
     data.metrics.validate(
-      data.config.players.len,
+      setup.heroes.len,
       int32(data.header.setup.tickRate),
       data.hashes.len
     )

@@ -7,6 +7,7 @@ import
   ../games/gods_of_the_arena/tests/test_human_chat_network as TestGotaHumanChat,
   ../games/gods_of_the_arena/tests/test_policy_chat_replay as TestGotaPolicyChat,
   ../games/gods_of_the_arena/tests/test_spectator as TestGotaSpectator,
+  ../games/gods_of_the_arena/tests/test_sparse_match as TestGotaSparseReplay,
   ../games/light_vs_dark/tests/test_replays as TestLvdReplays,
   ../games/light_vs_dark/tests/test_replay_chat as TestLvdChat,
   ../games/light_vs_dark/tests/test_human_communication as TestLvdCommunication,

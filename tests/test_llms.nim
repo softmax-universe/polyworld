@@ -238,7 +238,7 @@ block:
   var chatHost = initHost()
   chatClient.addFunctions(chatHost)
   let chatSource = readFile(
-    currentSourcePath().parentDir / "../games/inference/chat.bas"
+    currentSourcePath().parentDir / "../examples/inference/chat.bas"
   )
   var chatRuntime = initRuntime(compile(chatSource, chatHost), chatHost)
   chatClient.bindRuntime(chatRuntime)
@@ -258,7 +258,7 @@ block:
       directory = createTempDir("polyworld-mailbox-llm-", "")
       idle = directory / "idle.bas"
       responder = currentSourcePath().parentDir /
-        "../games/inference/mailbox_llm.bas"
+        "../examples/inference/mailbox_llm.bas"
       settings = [
         ("COWORLD_LLM_ENDPOINT", config.baseUrl),
         ("COGAME_LLM", "on"),
@@ -640,7 +640,7 @@ block:
   scriptClient.addFunctions(host)
   for name in ["chat", "jev", "request"]:
     let source = readFile(currentSourcePath().parentDir /
-      "../games/inference" / (name & ".bas"))
+      "../examples/inference" / (name & ".bas"))
     discard compile(source, host)
 
 echo "Testing wall-clock pacing and unlimited speed"

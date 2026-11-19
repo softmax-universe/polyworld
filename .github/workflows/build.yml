@@ -37,7 +37,7 @@ jobs:
       - name: Run release tests and all-game determinism
         run: nim r -d:release -d:audioTest -d:bassyNativeStrict -d:replayEvents tests/all.nim
       - name: Test headless replay policy handoff
-        run: python tests/test_resume.py
+        run: nim r -d:release -d:headless -d:bassyNativeStrict tests/test_resume.nim
       - name: Test display settings
         run: nim r -d:release tests/test_displays.nim
       - name: Test lockstep training API

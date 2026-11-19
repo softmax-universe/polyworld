@@ -750,17 +750,15 @@ proc runFrontend*(app: App, connection: var Connection,
           if previousSeed != frontendState.setup.seed or
             previousLimit != frontendState.setup.maxActions:
               configDirty = online
-          sk.lobbyLabel(
-            if online and not validName(matchName): "Enter a room name."
-            elif online and matchName.len > 96: "Room name is too long."
-            else: "Two to seven players. Empty slots sit out.",
-            options + vec2(0, 382), width, tint = LobbyMuted)
-          sk.lobbyLabel(if occupied <= 2: "Map: Tower Arena"
-            else: "Map: Ring Arena",
-            options + vec2(0, 422), width, tint = LobbyMuted)
-          sk.lobbyLabel(if online: "Ready is optional. The host can start anytime."
-            else: "Clear your human slot to watch the bots.",
-            options + vec2(0, 462), width, tint = LobbyMuted)
+          if online:
+            if not validName(matchName) or matchName.len > 96:
+              sk.lobbyLabel(
+                if not validName(matchName): "Enter a room name."
+                else: "Room name is too long.",
+                options + vec2(0, 382), width, tint = LobbyMuted)
+          else:
+            sk.lobbyLabel("Clear your human slot to watch the bots.",
+              options + vec2(0, 462), width, tint = LobbyMuted)
           if online:
             configDirty = frontendState.setup.encodeBattleSetup() !=
               snapshot.payload or matchName != snapshot.name

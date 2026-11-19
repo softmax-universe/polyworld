@@ -1,5 +1,5 @@
 ## Crowd contacts yield visibly without letting moving bodies pass through.
-import trafficfixture, ../demos/pathingscenarios
+import trafficfixture, pathingscenarios
 
 block overlappingIdleBodies:
   let
@@ -40,7 +40,7 @@ block stationaryUnitYields:
 for scenario in [OpposingStreams, CrossingStreams, NarrowChoke]:
   let scene = createScene(scenario)
   var deepContacts = 0
-  for tick in 0 ..< DemoDurationTicks:
+  for tick in 0 ..< PathingDurationTicks:
     scene.world.tickWorld(nil)
     for i, unit in scene.world.units:
       for j in i + 1 ..< scene.world.units.len:
@@ -49,7 +49,7 @@ for scenario in [OpposingStreams, CrossingStreams, NarrowChoke]:
             (unit.body.radius + peer.body.radius) / 2:
           inc deepContacts
   echo ScenarioNames[scenario], " deep contact pair-ticks: ", deepContacts
-  doAssert deepContacts < DemoUnitCount div 2,
+  doAssert deepContacts < PathingUnitCount div 2,
     "Crowd pressure must prevent sustained deep body interpenetration"
 
 echo "Crowd contact pressure passed"

@@ -2,7 +2,8 @@
 
 import
   std/[os, strutils],
-  polyworld/cli,
+  bassy,
+  polyworld/[cli, policies],
   sim, maps, bots, replays
 
 type
@@ -12,10 +13,12 @@ type
     soundMuted*: bool = true
     role*, name*, record*, replay*, screenshot*: string
     width*, height*, captureTicks*: int
+    botGroups*: seq[BotGroup]
   Game* = ref object
     world*: SimServer
     ship*: ShipMap
     bots*: seq[Bot]
+    botSources*: seq[string]
     nav: Navigator
     previous*: seq[InputState]
     input*: InputState
@@ -35,6 +38,8 @@ proc usage() =
   echo "  --player:N        Control slot N (1-16, default 1)."
   echo "  --name:NAME       Human player's name in the roster and replay."
   echo "  --spectate        Let local bots play every slot."
+  echo "  --bot PATH[:N]    Use a BASIC program for N bot slots (default 1)."
+  echo "  --bot:PATH[:N]    Equivalent compact form; other slots use base.bas."
   echo "  --role:crew|imp   Choose your role, or omit for random roles."
   echo "  --players:N       Roster size (8-16, default 8)."
   echo "  --seed:N          Match seed (default 2026)."
@@ -48,6 +53,41 @@ proc usage() =
   echo "  --unmute          Start with sound enabled."
   echo "Compile with -d:headless to run and verify without graphics."
 
+proc addBotOption(groups: var seq[BotGroup], specification: string) =
+  ## Validates the shared bot syntax using Crewrift's error boundary.
+  var path = specification
+  let separator = specification.rfind(':')
+  if separator >= 0 and separator < specification.high:
+    let suffix = specification[separator + 1 .. ^1]
+    var numeric = true
+    for character in suffix:
+      if character notin {'0' .. '9'}:
+        numeric = false
+        break
+    if numeric:
+      path = specification[0 ..< separator]
+      let count = parseBiggestInt(suffix)
+      if count < 1 or count > MaxPlayers:
+        raise newException(CrewriftError,
+          "Bot count must be between 1 and " & $MaxPlayers & ".")
+  if path.len == 0:
+    raise newException(CrewriftError, "--bot requires a BASIC source path.")
+  groups.addBotSpec(specification)
+
+proc validateBots(options: Options) =
+  ## Rejects bot groups that cannot fit the live roster before reading files.
+  if options.replay.len > 0:
+    return
+  let available = options.players - int(options.player >= 0)
+  var count = 0
+  for group in options.botGroups:
+    if group.path.len == 0 or group.count < 1:
+      raise newException(CrewriftError, "Invalid BASIC bot group.")
+    if group.count > available - count:
+      raise newException(CrewriftError,
+        "Too many bots for " & $available & " available slots.")
+    count += group.count
+
 proc parseOptions*(arguments = commandLineParams()): Options =
   ## Parses the shared native and headless command surface.
   result = Options(
@@ -57,7 +97,10 @@ proc parseOptions*(arguments = commandLineParams()): Options =
   )
   when defined(headless):
     result.player = -1
-  for argument in arguments:
+  var index = 0
+  while index < arguments.len:
+    let argument = arguments[index]
+    inc index
     let
       parts = argument.split(':', 1)
       flag = parts[0]
@@ -65,7 +108,18 @@ proc parseOptions*(arguments = commandLineParams()): Options =
     try:
       if result.soundMuted.takeSoundFlag(argument):
         continue
+      if argument == "--bot":
+        if index >= arguments.len:
+          raise newException(CrewriftError,
+            "--bot requires a BASIC source path.")
+        result.botGroups.addBotOption(arguments[index])
+        inc index
+        continue
+      if argument.startsWith("--bot="):
+        result.botGroups.addBotOption(argument[6 .. ^1])
+        continue
       case flag
+      of "--bot": result.botGroups.addBotOption(value)
       of "--seed": result.seed = parseInt(value)
       of "--players": result.players = parseInt(value)
       of "--ticks": result.ticks = parseInt(value)
@@ -105,6 +159,43 @@ proc parseOptions*(arguments = commandLineParams()): Options =
     raise newException(CrewriftError, "Choose recording or replay playback.")
   if result.name.len > 128 or result.name != cleanChatMessage(result.name):
     raise newException(CrewriftError, "Player name must be printable text.")
+  result.validateBots()
+
+proc loadBotSources(game: Game, options: Options) =
+  ## Caches source and roster names so rewinding never reopens policy files.
+  options.validateBots()
+  game.botSources = newSeq[string](options.players)
+  game.recording.playerNames = newSeq[string](options.players)
+  for slot in 0 ..< options.players:
+    if slot == options.player:
+      game.recording.playerNames[slot] =
+        if options.name.len > 0: options.name else: "You"
+    else:
+      game.botSources[slot] = DefaultBotSource
+      game.recording.playerNames[slot] = DefaultBotName
+  var slot = 0
+  for group in options.botGroups:
+    var source: string
+    try:
+      source = readPolicyBytes(group.path)
+    except PolicyError as error:
+      raise newException(CrewriftError, error.msg)
+    if source.isPackage():
+      raise newException(CrewriftError,
+        "Crewrift bots require plain BASIC source: " & group.path)
+    if source.len == 0:
+      raise newException(CrewriftError,
+        "BASIC source is empty: " & group.path)
+    let name = group.path[group.path.rfind({'/', '\\'}) + 1 .. ^1]
+    if name.len == 0 or name.len > 128 or name != cleanChatMessage(name):
+      raise newException(CrewriftError,
+        "Bot filename must be printable text up to 128 bytes.")
+    for _ in 0 ..< group.count:
+      if slot == options.player:
+        inc slot
+      game.botSources[slot] = source
+      game.recording.playerNames[slot] = name
+      inc slot
 
 proc rewind*(game: Game) =
   ## Restores the resolved match setup while retaining the input tape.
@@ -118,10 +209,13 @@ proc rewind*(game: Game) =
   game.world.startGame()
   game.ship = game.world.buildShipMap()
   game.nav = Navigator(layer: game.ship.layer)
-  game.bots = newSeq[Bot](config.minPlayers)
-  for bot in game.bots.mitems:
-    bot.task = -1
-    bot.vote = -1
+  if game.playback:
+    game.bots = newSeq[Bot](config.minPlayers)
+  else:
+    try:
+      game.bots = initBots(game.botSources, game.world.config.seed)
+    except BasicError as error:
+      raise newException(CrewriftError, "Cannot load BASIC bot: " & error.msg)
   game.previous = newSeq[InputState](config.minPlayers)
   game.input = InputState()
   game.choice = -1
@@ -148,12 +242,7 @@ proc newGame*(options: Options): Game =
       version: ReplayVersion, config: config,
       players: config.minPlayers
     )
-    for i in 0 ..< config.minPlayers:
-      result.recording.playerNames.add(
-        if i == options.player:
-          if options.name.len > 0: options.name else: "You"
-        else: "bots.nim"
-      )
+    result.loadBotSources(options)
   result.rewind()
   result.recording.config = result.world.config
 
@@ -208,7 +297,9 @@ proc advance*(game: Game, player = -1, record = false) =
         inputs[i] = game.bots[i].decideBot(
           game.nav, game.world, i, game.previous[i]
         )
+        choice = game.bots[i].choice
         chat = cleanChatMessage(game.bots[i].chat)
+        game.bots[i].choice = -1
         game.bots[i].chat.setLen(0)
       frame.actions.add ReplayAction(
         kind: InputAction, slot: i, mask: inputs[i].inputMask()

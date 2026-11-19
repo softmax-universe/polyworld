@@ -3,6 +3,7 @@
 {.warning[UnusedImport]: off.}
 import
   test_sim,
+  test_bots,
   test_skins
 
 echo "Game tests passed"

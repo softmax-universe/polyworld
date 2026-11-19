@@ -3,7 +3,7 @@
 ## Writes to build/vfx-gallery (ignored), never into polyworld_art.
 import std/[os, strformat]
 import opengl, pixie, vmath, windy
-import ../src/core/core, ../src/paths, ../src/vfx/vfxrenderer
+import ../core/core, ../paths, ../vfx/vfxrenderer
 
 const
   Width = 1536

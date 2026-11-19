@@ -1,7 +1,7 @@
 import
   std/[os, strutils],
   pixie,
-  ../src/baseset, ../src/ui/cardfaces, ../src/paths,
+  ../baseset, ../ui/cardfaces, ../paths,
   ../tools/stage_card_art
 
 proc testAssets() =

@@ -6,7 +6,7 @@ import ../games/gods_of_the_arena/replays as gota
 import ../games/call_to_adventure/replays as cta
 import ../games/light_vs_dark/replays as lvd
 import ../games/heartleaf/replays as heartleaf
-import ../games/cac/src/core/replays as cac
+import ../games/cac/core/replays as cac
 
 const
   Root = currentSourcePath().parentDir.parentDir
@@ -386,7 +386,7 @@ proc testResume() =
     heartleaf.loadReplay, directory
   )
   testGame(
-    "cac", "cac/src/cac.nim", 2, @["--ticks", "24"],
+    "cac", "cac/cac.nim", 2, @["--ticks", "24"],
     cac.loadReplay, directory
   )
   echo "All BASIC games passed headless resume tests in ",

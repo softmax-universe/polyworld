@@ -2,7 +2,7 @@
 import
   std/options,
   vmath,
-  ../src/play as tableplay, ../src/core/sim, ../src/scene/table
+  ../play as tableplay, ../core/sim, ../scene/table
 
 const PointerRay = (origin: vec3(0, 10, 0), direction: vec3(0, -1, 0))
 

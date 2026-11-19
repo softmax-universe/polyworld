@@ -2,8 +2,8 @@
 
 import
   std/[os, strutils],
-  jsony, vmath,
-  polyworld/pathing,
+  bassy, jsony, vmath,
+  polyworld/[pathing, rngs],
   ../[bots, game, maps, replays, sim]
 
 const AuditJson = staticRead("../data/map1-audit.json")
@@ -19,6 +19,43 @@ type
     candidateTiles: int
     tiles: seq[AuditTile]
     blockedLinks: seq[AuditLink]
+  BotSnapshot = object
+    path: seq[MapPoint]
+    waypoint, stuck: int
+    previous, goal: MapPoint
+    hasGoal: bool
+    rng: Rng
+    failed: bool
+    lastError: string
+    decisions: int64
+    numbers: seq[int32]
+    texts: seq[string]
+
+proc botSnapshots(game: Game): seq[BotSnapshot] =
+  ## Copies policy memory and navigation state independently of VM handles.
+  for bot in game.bots:
+    var snapshot = BotSnapshot(
+      waypoint: bot.waypoint,
+      stuck: bot.stuck,
+      previous: bot.previous,
+      goal: bot.goal,
+      hasGoal: bot.hasGoal,
+      rng: bot.rng,
+      failed: bot.failed,
+      lastError: bot.lastError,
+      decisions: int64(bot.decisions)
+    )
+    for point in bot.path:
+      snapshot.path.add point
+    if bot.runtime != nil:
+      for name in ["task", "meeting", "vote", "suspect", "accuser", "chatRound"]:
+        snapshot.numbers.add bot.runtime.getGlobal(name)
+      snapshot.texts.add bot.runtime.getStringGlobal("location$")
+      for i in 0'i32 ..< MaxPlayers.int32:
+        snapshot.numbers.add bot.runtime.getArray("suspects", i)
+        snapshot.numbers.add bot.runtime.getArray("seenBodies", i)
+        snapshot.texts.add bot.runtime.getStringArray("suspectRooms$", i)
+    result.add snapshot
 
 proc testOptions(seed = 2026): Options =
   ## Builds a deterministic eight-player local match for rule checks.
@@ -159,7 +196,7 @@ block:
     baseline = newGame(testOptions(17))
     path = "tmp/test-crewrift-identities.json"
   doAssert named.rosterName(3) == "Pink (Andre von Houck)"
-  doAssert named.rosterName(0) == "Red (bots.nim)"
+  doAssert named.rosterName(0) == "Red (base.bas)"
   doAssert named.world.gameHash() == baseline.world.gameHash()
   named.rewind()
   doAssert named.rosterName(3) == "Pink (Andre von Houck)"
@@ -309,7 +346,7 @@ block:
     witness,
     InputState()
   )
-  doAssert game.bots[witness].suspects[killer] >= 3
+  doAssert game.bots[witness].runtime.getArray("suspects", killer.int32) >= 3
   game.world.startVote(
     VoteCalledBody,
     witness,
@@ -502,7 +539,7 @@ block:
     expectedHash = game.world.gameHash()
     expectedPlayers = game.world.players
     expectedChats = game.world.chatMessages
-    expectedBots = game.bots
+    expectedBots = game.botSnapshots()
     expectedRng = game.world.rng
   game.rewind()
   doAssert game.frame == 0
@@ -512,7 +549,7 @@ block:
   doAssert game.world.gameHash() == expectedHash
   doAssert game.world.players == expectedPlayers
   doAssert game.world.chatMessages == expectedChats
-  doAssert game.bots == expectedBots
+  doAssert game.botSnapshots() == expectedBots
   doAssert game.world.rng == expectedRng
   doAssert game.recording.frames.len == 2500
   let baseline = newGame(testOptions(17))
@@ -533,7 +570,7 @@ block:
   let
     expectedHash = game.world.gameHash()
     expectedPlayers = game.world.players
-    expectedBots = game.bots
+    expectedBots = game.botSnapshots()
     expectedRng = game.world.rng
   game.rewind()
   for i in 0 ..< 1500:
@@ -541,7 +578,7 @@ block:
     game.advance(player = 0, record = true)
   doAssert game.world.gameHash() == expectedHash
   doAssert game.world.players == expectedPlayers
-  doAssert game.bots == expectedBots
+  doAssert game.botSnapshots() == expectedBots
   doAssert game.world.rng == expectedRng
   let completed = newGame(testOptions(17))
   while not completed.finished():

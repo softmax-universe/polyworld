@@ -4,8 +4,8 @@ import
   std/[os, strformat, times],
   opengl, pixie, silky, windy,
   polyworld/[actioncam, pathing, player],
-  ../[controls, demo_pathing, game, graphics],
-  ../demos/pathingscenarios
+  ../[controls, game, graphics],
+  pathinggraphics, pathingscenarios
 
 const
   Scenarios = [OpenField, OpposingStreams, CrossingStreams,
@@ -32,7 +32,7 @@ var
 proc checkTopology() =
   ## Checks that replacing blockers also installs the new rendered terrain.
   let scenario = Scenarios[scenarioIndex]
-  doAssert run.world.units.len == DemoUnitCount
+  doAssert run.world.units.len == PathingUnitCount
   doAssert layers.len == 1
   doAssert cast[pointer](layers[0]) ==
     cast[pointer](run.world.map.terrain[0])
@@ -64,7 +64,7 @@ proc captureScene() =
   echo "Hidden switched scene: ", path
 
 proc nextScenario() =
-  ## Sends the actual demo shortcut after leaving stale presentation intent.
+  ## Sends the actual manual test shortcut after leaving stale presentation intent.
   previousGame = run
   selectedIds = @[run.world.units[0].id]
   primaryId = selectedIds[0]
@@ -79,7 +79,7 @@ options.windowWidth = 1600
 options.windowHeight = 1000
 options.playerSlot = 0
 options.viewMode = 0
-options.maximumTicks = DemoDurationTicks
+options.maximumTicks = PathingDurationTicks
 options.recordPath = ""
 options.pauseOnStart = true
 options.vsync = false

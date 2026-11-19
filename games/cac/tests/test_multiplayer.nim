@@ -1,8 +1,8 @@
 ## The multiplayer preview is a scene harness: these checks need no window.
 import std/[math, random, sequtils, unittest]
 import vmath
-import ../src/scene/courtyard, ../src/modes/multiplayer, ../src/core/sim,
-  ../src/core/sessions, ../src/core/bots
+import ../scene/courtyard, ../modes/multiplayer, ../core/sim,
+  ../core/sessions, ../core/bots
 
 const Tolerance = 0.0002'f32
 

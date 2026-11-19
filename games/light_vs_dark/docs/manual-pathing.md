@@ -1,17 +1,19 @@
-# Pathing demo
+# Manual pathing test
 
 Run from the repository root:
 
 ```sh
-nim r games/light_vs_dark/demo_pathing.nim
+nim r games/light_vs_dark/tests/manual_pathing.nim
 ```
 
-The demo runs 100 friendly units through the production simulation and standard
-LvD renderer, including animated models, terrain, buildings, trees, selection,
-path overlays, and the playback bar. It opens a 1600 by 1000 window with a camera
-framed around the action. The fixtures use a flat map and preset movement orders.
+The manual test runs 100 friendly units through the production simulation and
+standard LvD renderer, including animated models, terrain, buildings, trees,
+selection, path overlays, and the playback bar. It opens a 1600 by 1000 window
+with a camera framed around the action. The fixtures use a flat map and preset
+movement orders.
 Keys 1–5 switch scenes inside the loaded renderer without a loading splash.
-Switching restarts the selected scene and keeps the current pause and speed settings.
+Switching restarts the selected scene and keeps the current pause and speed
+settings.
 
 | Key | Scenario |
 | --- | --- |
@@ -25,14 +27,14 @@ Space pauses, R replays, S changes speed, P toggles the game's path overlay,
 and F restores the scenario's camera framing. Scroll to zoom and use the normal
 game camera controls to pan. The playback bar also supports seeking and stepping.
 Scenarios loop after 1800 ticks. Escape opens the ordinary game menu; choosing
-Return to menu exits the demo. F12 saves the current game frame under
-`output/lvd-pathing-demo/`.
+Return to menu exits the test. F12 saves the current game frame under
+`output/lvd-manual-pathing/`.
 
 Start on a particular scenario with `--scenario=5`; add `--pause` to start paused.
 To save a deterministic frame and exit without opening a visible window:
 
 ```sh
-nim r games/light_vs_dark/demo_pathing.nim --scenario=5 --ticks=400 --capture=output/lvd-pathing.png
+nim r games/light_vs_dark/tests/manual_pathing.nim --scenario=5 --ticks=400 --capture=output/lvd-pathing.png
 ```
 
 Capture mode uses a hidden window and an offscreen color/depth framebuffer.

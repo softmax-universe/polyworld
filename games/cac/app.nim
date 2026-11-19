@@ -132,8 +132,8 @@ proc initApp*(sessionOptions: SessionOptions): App =
     let appDir = "/"
     setCurrentDir("/")
   else:
-    # The project folder (with players/), one up from src/.
-    const sourceDir = currentSourcePath().parentDir.parentDir
+    # The game folder contains the bundled player programs.
+    const sourceDir = currentSourcePath().parentDir
     let
       appDir =
         if dirExists(getAppDir() / "players"): getAppDir()

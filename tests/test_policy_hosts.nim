@@ -1,7 +1,7 @@
 ## Non-LLM games expose exactly the same optional policy capabilities.
 import bassy
 import ../games/heartleaf/bots as heartleafBots
-import ../games/cac/src/core/bots as cacBots
+import ../games/cac/core/bots as cacBots
 
 for host in [heartleafBots.buildVillagerHost(0), cacBots.botSchema()]:
   let program = compile("""

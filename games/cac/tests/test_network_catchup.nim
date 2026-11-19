@@ -1,7 +1,7 @@
 import
   polyworld/[rooms, roomclients],
-  ../src/core/[battlesetup, replays, sim],
-  ../src/net/multiplayer
+  ../core/[battlesetup, replays, sim],
+  ../net/multiplayer
 
 proc fixture(bot = false, automaticBots = true): NetworkMatch =
   ## Starts an owned acting seat with an unanswered initial history request.

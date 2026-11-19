@@ -2,7 +2,7 @@
 ## nim c -r --out:build/render-hud tools/render_hud.nim
 import std/[math, os, strformat, tables]
 import chroma, opengl, pixie, silky, vmath, windy
-import ../src/core/sim, ../src/paths, ../src/ui/hud
+import ../core/sim, ../paths, ../ui/hud
 import polyworld/[assets, chrome, viewers]
 
 

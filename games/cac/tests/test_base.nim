@@ -1,6 +1,6 @@
 import
   std/[options, sequtils, strutils],
-  ../src/core/[bots, match, replays, sim]
+  ../core/[bots, match, replays, sim]
 
 const
   ArcherBot = staticRead("../players/archer.bas")

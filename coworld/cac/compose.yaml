@@ -7,4 +7,4 @@ services:
       dockerfile: coworld/Dockerfile
       args:
         GAME: cac
-        ENTRY: src/cac
+        ENTRY: cac

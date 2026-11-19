@@ -1,15 +1,15 @@
-## Demo scenes exercise real paths, legal footprints, and deterministic resets.
+## Pathing scenes exercise real paths, legal footprints, and deterministic resets.
 
-import polyworld/pathing, ../demos/pathingscenarios
+import polyworld/pathing, pathingscenarios
 
 for scenario in PathingScenario:
   let
     scene = createScene(scenario)
     repeated = createScene(scenario)
-  doAssert scene.world.units.len == DemoUnitCount
-  doAssert scene.starts.len == DemoUnitCount
-  doAssert scene.goals.len == DemoUnitCount
-  doAssert scene.groups.len == DemoUnitCount
+  doAssert scene.world.units.len == PathingUnitCount
+  doAssert scene.starts.len == PathingUnitCount
+  doAssert scene.goals.len == PathingUnitCount
+  doAssert scene.groups.len == PathingUnitCount
   let terrain = scene.world.map.terrain[0]
   doAssert terrain.originX + scene.world.map.side.int div 2 == GridTiles div 2
   doAssert terrain.originZ + scene.world.map.side.int div 2 == GridTiles div 2
@@ -26,11 +26,11 @@ for scenario in PathingScenario:
           let building = scene.world.buildingIndex(scene.world.blocker[index])
           doAssert building >= 0
           doAssert scene.world.buildings[building].state == BuildingComplete
-  doAssert scene.world.pathQueue.len == DemoUnitCount
+  doAssert scene.world.pathQueue.len == PathingUnitCount
   doAssert Game(world: scene.world).stateHash() ==
     Game(world: repeated.world).stateHash()
-  var reached = newSeq[bool](DemoUnitCount)
-  for tick in 0 ..< DemoDurationTicks:
+  var reached = newSeq[bool](PathingUnitCount)
+  for tick in 0 ..< PathingDurationTicks:
     scene.world.tickWorld(nil)
     repeated.world.tickWorld(nil)
     doAssert not scene.world.over
@@ -38,7 +38,7 @@ for scenario in PathingScenario:
       Game(world: repeated.world).stateHash()
     for i, unit in scene.world.units:
       doAssert not unit.orderFailed,
-        ScenarioNames[scenario] & ": a demo order failed"
+        ScenarioNames[scenario] & ": a pathing order failed"
       doAssert unit.body.pos.x >= fixed(scene.bounds.x)
       doAssert unit.body.pos.x < fixed(scene.bounds.x + scene.bounds.width)
       doAssert unit.body.pos.y >= fixed(scene.bounds.y)
@@ -56,7 +56,7 @@ for scenario in PathingScenario:
       ScenarioNames[scenario] & ": unit " & $i & " never reached its goal"
     if length(unit.body.pos - scene.goals[i]) <= 0.4'fx:
       inc settled
-  echo ScenarioNames[scenario], ": all ", DemoUnitCount,
+  echo ScenarioNames[scenario], ": all ", PathingUnitCount,
     " reached; ", settled, " settled; identical reset hashes"
 
-echo "Pathing demo scenes passed"
+echo "Manual pathing test scenes passed"

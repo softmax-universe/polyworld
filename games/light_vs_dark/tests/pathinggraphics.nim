@@ -1,65 +1,27 @@
-## Run: nim r games/light_vs_dark/demo_pathing.nim
-## Uses the standard LvD renderer, units, terrain, HUD, and replay transport.
-## Keys: 1-5 scenes, Space pause, R replay, S speed, P paths, F frame, Esc menu.
-## Capture: --scenario=5 --ticks=240 --capture=output/lvd-pathing.png
+## Shared renderer hooks for manual pathing and scenario-switch tests.
 
 import
-  std/[os, strformat, strutils, times],
+  std/[os, strformat, times],
   chroma, opengl, pixie, silky, vmath, windy,
-  polyworld/[actioncam, chrome, cli, menus, player, rtscameras, tapes],
-  demos/pathingscenarios,
-  game, graphics, replays
+  polyworld/[actioncam, chrome, player, rtscameras],
+  ../[game, graphics, replays],
+  pathingscenarios
 
 const
   SceneKeys = [Key1, Key2, Key3, Key4, Key5]
   SceneLabels = "1 Open field   2 Opposing   3 Crossing   4 Choke   5 Buildings"
 
-type
-  DemoOptions = object
-    scenario: PathingScenario
-    capture: string
-    ticks: int32
-    pause, help: bool
-    soundMuted, soundOverride: bool
-
-proc readOptions(): DemoOptions =
-  ## Reads scene and capture options without invoking the match CLI parser.
-  result.ticks = 240
-  for argument in commandLineParams():
-    if result.soundMuted.takeSoundFlag(argument):
-      result.soundOverride = true
-    elif argument in ["--help", "-h"]:
-      result.help = true
-    elif argument == "--pause":
-      result.pause = true
-    elif argument.startsWith("--scenario="):
-      let index = parseInt(argument.split('=', 1)[1])
-      if index notin 1 .. 5:
-        raise newException(ValueError, "Scenario must be 1 through 5")
-      result.scenario = PathingScenario(index - 1)
-    elif argument.startsWith("--ticks="):
-      let ticks = parseInt(argument.split('=', 1)[1])
-      if ticks notin 0 .. DemoDurationTicks:
-        raise newException(ValueError, "Capture ticks must be 0 through 1800")
-      result.ticks = ticks.int32
-    elif argument.startsWith("--capture="):
-      result.capture = argument.split('=', 1)[1]
-      if result.capture.len == 0:
-        raise newException(ValueError, "Capture needs an output PNG path")
-    else:
-      raise newException(ValueError, "Unknown demo option: " & argument)
-
-proc prepareMatch(scene: DemoScene) =
+proc prepareMatch(scene: PathingScene) =
   ## Gives the fixture normal metrics and a tape for pause, seek, and replay.
   let map = scene.world.map
-  run = newGame(map, DemoDurationTicks)
+  run = newGame(map, PathingDurationTicks)
   run.world = scene.world
   var setup = Setup(
     mapSeed: map.seed,
     tickRate: TickRate.uint16,
     gridTiles: map.side.uint16,
     decisionTicks: DecisionTicks.uint16,
-    maximumTicks: DemoDurationTicks.uint32,
+    maximumTicks: PathingDurationTicks.uint32,
     mapHash: map.hash,
     contentHash: contentHash()
   )
@@ -68,11 +30,11 @@ proc prepareMatch(scene: DemoScene) =
       id: i.int32, startX: origin.x.int32, startY: origin.y.int32
     )
   run.recorder = initReplayRecorder(setup)
-  run.recorder.data.config.players[0].name = "Pathing demo"
+  run.recorder.data.config.players[0].name = "Manual pathing test"
   run.recorder.data.config.players[1].name = "Reserve"
   run.replayPlayer = ReplayPlayer(data: run.recorder.data)
 
-proc frameScene(scene: DemoScene, scenario: PathingScenario) =
+proc frameScene(scene: PathingScene, scenario: PathingScenario) =
   ## Frames the interaction closely, with the normal game camera and zoom.
   let
     bounds = scene.bounds
@@ -100,7 +62,7 @@ proc captureFrame(path: string) =
   capture.writeFile(path)
   echo "Captured ", path
 
-proc drawDemoOverlay(scenario: PathingScenario) =
+proc drawPathingOverlay(scenario: PathingScenario) =
   ## Labels the five fixtures while retaining the ordinary game HUD.
   let
     size = window.size.vec2 / sk.uiScale
@@ -111,7 +73,7 @@ proc drawDemoOverlay(scenario: PathingScenario) =
     detailFont = if sk.uiScale < 1: "WorldName" else: "Default"
   sk.drawRect(at, vec2(width, 84 * unit), rgbx(18, 25, 35, 245))
   sk.drawLabel(
-    &"Pathing demo / {ScenarioNames[scenario]} / {DemoUnitCount} units",
+    &"Manual pathing test / {ScenarioNames[scenario]} / {PathingUnitCount} units",
     at + vec2(12, 3) * unit, vec2(width - 24 * unit, 25 * unit),
     font = titleFont
   )
@@ -123,7 +85,7 @@ proc drawDemoOverlay(scenario: PathingScenario) =
 
 proc pathingHooks*(first = OpenField, capture = "",
     ticks = 240'i32): GraphicsHooks =
-  ## Keeps demo commands and scene replacements inside one renderer session.
+  ## Keeps test commands and scene replacements inside one renderer session.
   var
     scenario = first
     scene = createScene(scenario)
@@ -137,7 +99,7 @@ proc pathingHooks*(first = OpenField, capture = "",
       ## Starts close to the scenario instead of an offscreen town hall.
       camera.takeManual()
       frameScene(scene, scenario)
-      window.title = "Light vs Dark - Pathing demo"
+      window.title = "Light vs Dark - Manual pathing test"
       if capture.len > 0:
         doAssert not window.visible, "Screenshot window must stay hidden"
         transport.repeating = false
@@ -156,7 +118,7 @@ proc pathingHooks*(first = OpenField, capture = "",
       true
     ,
     key: proc(button: Button, camera: var ActionCam): bool =
-      ## Reserves demo shortcuts and leaves camera and selection intact.
+      ## Reserves test shortcuts and leaves camera and selection intact.
       for i, key in SceneKeys:
         if button == key:
           requested = PathingScenario(i)
@@ -175,7 +137,7 @@ proc pathingHooks*(first = OpenField, capture = "",
         camera.takeManual()
         frameScene(scene, scenario)
       of KeyF12:
-        screenshot = "output/lvd-pathing-demo/" & $scenario & "-" &
+        screenshot = "output/lvd-manual-pathing/" & $scenario & "-" &
           $epochTime().int64 & ".png"
       else:
         return false
@@ -183,7 +145,7 @@ proc pathingHooks*(first = OpenField, capture = "",
     ,
     overlay: proc() =
       ## Adds scenario context without replacing the normal game controls.
-      drawDemoOverlay(scenario)
+      drawPathingOverlay(scenario)
     ,
     frame: proc(): bool =
       ## Captures completed game frames without interrupting the renderer.
@@ -199,33 +161,3 @@ proc pathingHooks*(first = OpenField, capture = "",
         screenshot = ""
       false
   )
-
-proc main() =
-  ## Loads the standard renderer once and switches fixtures in place.
-  let demo = readOptions()
-  if demo.help:
-    echo """Light vs Dark pathing demo (standard game renderer).
-Run: nim r games/light_vs_dark/demo_pathing.nim
-1-5: scenario / Space: pause / R: replay / S: speed / P: paths
-F: frame scenario / Scroll: zoom / Middle drag or arrows: pan
-F12: screenshot / Escape: game menu
-Options: --scenario=1..5 --pause --ticks=240 --capture=output/demo.png
-Audio: saved volumes by default; --mute[=BOOL], --unmute"""
-    return
-  options.soundMuted = demo.soundMuted
-  options.soundOverride = demo.soundOverride
-  configureSoundLaunch(demo.soundMuted, demo.soundOverride)
-  options.windowWidth = 1600
-  options.windowHeight = 1000
-  options.playerSlot = 0
-  options.viewMode = 0
-  options.maximumTicks = DemoDurationTicks
-  options.recordPath = ""
-  options.pauseOnStart = demo.pause or demo.capture.len > 0
-  if demo.capture.len > 0:
-    options.vsync = false
-  runGraphics(hooks = pathingHooks(demo.scenario, demo.capture, demo.ticks),
-    hidden = demo.capture.len > 0)
-
-when isMainModule:
-  main()

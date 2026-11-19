@@ -5,7 +5,8 @@ and a string, limited to 1024 bytes. Sending to a full inbox does nothing;
 unread messages remain until the player pulls them.
 
 Each game defines `sendChat` and its BASIC callbacks in its own `bots.nim`.
-The examples use these routing rules:
+The [BASIC mailbox example](../examples/mailboxes/chat.bas) uses these routing
+rules:
 
 | Game | Global (`-2`) | Team (`-1`) | DM (player ID) |
 | --- | --- | --- | --- |
@@ -49,7 +50,8 @@ Delivery follows script execution order. A later player can read a message
 in the same tick. Players can send and pull multiple times per decision,
 within their normal BASIC instruction and string limits. Inboxes persist
 across decisions and are replaced when policies are loaded for a new run.
-Chat text is not recorded in replays and has no graphical chat panel.
+Recorded matches store chat in the same ordered command stream as gameplay
+actions. Replay playback consumes those commands without rerunning the bots.
 
 `mailboxes.nim` is only a bounded inbox: an array of IDs, an array of reserved
 strings, and read/count fields. It has no BASIC dependency. Each game owns

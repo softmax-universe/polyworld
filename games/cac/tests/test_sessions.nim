@@ -1,5 +1,5 @@
 import std/[json, options, strutils, unittest]
-import ../src/core/sessions
+import ../core/sessions
 
 suite "session options":
   test "defaults":
@@ -317,7 +317,7 @@ suite "owned game snapshots":
     check game.players[0].board.len == 5
 
 import std/os
-import ../src/core/bots
+import ../core/bots
 
 suite "bots and cards that offer a choice":
   proc overchargeGame(life = StartingLife): (GameState, int, int) =

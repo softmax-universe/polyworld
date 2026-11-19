@@ -1,7 +1,7 @@
 ## Screen-space ambient occlusion for clients that draw straight to the
 ## window.
 ##
-## Ported from CaC's post pass (games/cac/src/scene/post.nim): the same
+## Ported from CaC's post pass (games/cac/scene/post.nim): the same
 ## 16-tap spiral around a depth-reconstructed normal, at half resolution,
 ## the same depth-aware blur and the same tinted multiply. Three changes fit
 ## it to a game that keeps drawing into the window's multisampled buffer:

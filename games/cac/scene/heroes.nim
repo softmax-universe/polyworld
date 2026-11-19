@@ -8,7 +8,6 @@ import
   ../core/core
 
 const
-  HeroRoster = ChargenLibrary & "/lvd.json"
   HeroHeight* = 1.95'f32
   HeroSeats* = 2
   HeroKinds: array[HeroClass, string] = ["ArcherUnit", "SoldierUnit", "MageUnit"]
@@ -28,11 +27,11 @@ type
 
   HeroPresets* = array[HeroSeats, array[HeroClass, Preset]]
 
-proc readHeroPresets*(): HeroPresets =
+proc readHeroPresets*(root = ChargenLibrary): HeroPresets =
   ## Picks the archer, swordsman and mage looks for both seats.
   let roster =
     try:
-      readFile(HeroRoster).fromJson(Roster)
+      readFile(root / "lvd.json").fromJson(Roster)
     except IOError, JsonError, ValueError:
       raise newException(
         ChargenError, "Cannot read hero roster: " & getCurrentExceptionMsg()
@@ -86,19 +85,19 @@ proc loadHeroModel*(
     node.visible = visibility[name]
     node.baseVisible = node.visible
 
-proc heroAssetFiles*(): seq[string] =
-  ## Lists the CharGen files the heroes load, relative to ChargenLibrary.
+proc heroAssetFiles*(root = ChargenLibrary): seq[string] =
+  ## Lists the CharGen files the heroes load, relative to the library root.
   let
-    manifest = readManifest(ChargenLibrary)
-    presets = readHeroPresets()
+    manifest = readManifest(root)
+    presets = readHeroPresets(root)
   var files: HashSet[string]
   for path in ["lvd.json", "manifest.json", manifest.skinPalette,
       manifest.hairPalette, manifest.pupilPalette, manifest.hatPalette,
       manifest.rig]:
     files.incl path
   for category in manifest.categories:
-    for path in walkFiles(ChargenLibrary / category.directory / "*.json"):
-      files.incl path.relativePath(ChargenLibrary)
+    for path in walkFiles(root / category.directory / "*.json"):
+      files.incl path.relativePath(root)
   for seat in presets:
     for heroClass, preset in seat:
       for category in manifest.presetManifest(preset).categories:

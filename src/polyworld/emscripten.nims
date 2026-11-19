@@ -3,21 +3,43 @@
 import
   std/[hashes, os, strformat, strutils]
 
-proc setupEmscripten*(gameDir: string, game = "") =
+proc setupEmscripten*(
+  gameDir: string,
+  game = "",
+  output = "",
+  shell = "",
+  preJsFiles: seq[string] = @[],
+  preloadMounts: seq[tuple[path, mount: string]] = @[],
+  loadingLogo = "loading-logo.png",
+  logoWidth = 320,
+  logoHeight = 240,
+  minimumWebglVersion = 1,
+  linkOptions = ""
+) =
   ## Configures the wasm backend and writes the bundle next to the game.
+  ## Packers write art to stage/, browser files to public/, and additional
+  ## preload roots below their cache directory.
   when defined(emscripten):
     let
       repoDir = gameDir / ".." / ".."
       dataDir = getEnv("POLYWORLD_ART", repoDir / ".." / "polyworld_art")
-      outputDir = gameDir / "emscripten"
-      shellTemplate = repoDir / "src" / "polyworld" /
-        (if defined(replayViewer): "replay.html" else: "emscripten.html")
+      outputDir =
+        if output.len > 0: absolutePath(output)
+        else: gameDir / "emscripten"
+      shellTemplate =
+        if defined(replayViewer):
+          repoDir / "src" / "polyworld" / "replay.html"
+        elif shell.len > 0:
+          shell
+        else:
+          repoDir / "src" / "polyworld" / "emscripten.html"
       shellFile = outputDir / "shell.html"
-    let preJs =
-      if defined(replayViewer):
-        ""
-      else:
-        "--pre-js " & repoDir / "src" / "polyworld" / "webinputs.js"
+    var preJs = ""
+    when not defined(replayViewer):
+      preJs = "--pre-js " & quoteShell(
+        repoDir / "src" / "polyworld" / "webinputs.js")
+      for path in preJsFiles:
+        preJs.add " --pre-js " & quoteShell(path)
     var preload = "--preload-file " & quoteShell(dataDir & "@/polyworld_art")
     var logo = ""
     if not dirExists(outputDir):
@@ -36,16 +58,22 @@ proc setupEmscripten*(gameDir: string, game = "") =
         quoteShell(gameDir / "pack_assets.nim")
       exec quoteShell(packer) & " " & quoteShell(dataDir) &
         " " & quoteShell(cache)
+      if dirExists(cache / "public"):
+        cpDir(cache / "public", outputDir)
       let
-        logoFile = outputDir / "loading-logo.png"
-        logoData = readFile(cache / "loading-logo.png")
+        logoFile = outputDir / loadingLogo
+        logoData = readFile(cache / loadingLogo)
       if not fileExists(logoFile) or readFile(logoFile) != logoData:
         writeFile(logoFile, logoData)
       logo = "<img id=\"loading-logo\" alt=\"Game logo\" " &
-        "width=\"320\" height=\"240\" src=\"loading-logo.png?v=" &
+        "width=\"" & $logoWidth & "\" height=\"" & $logoHeight &
+        "\" src=\"" & loadingLogo & "?v=" &
         $hash(logoData) & "\" " &
         "fetchpriority=\"high\">"
       preload = "--preload-file " & quoteShell(cache / "stage" & "@/polyworld_art")
+      for asset in preloadMounts:
+        preload.add " --preload-file " & quoteShell(
+          cache / asset.path & "@" & asset.mount)
     if game in ["gota", "lvd"]:
       let bots =
         if game == "gota":
@@ -61,9 +89,9 @@ proc setupEmscripten*(gameDir: string, game = "") =
         "_main,_malloc,_free,_windy_websocket_open_callback," &
         "_windy_websocket_message_callback,_windy_websocket_error_callback," &
         "_windy_websocket_close_callback")
-    let shell = readFile(shellTemplate).replace("<!-- GAME_LOGO -->", logo)
-    if not fileExists(shellFile) or readFile(shellFile) != shell:
-      writeFile(shellFile, shell)
+    let shellData = readFile(shellTemplate).replace("<!-- GAME_LOGO -->", logo)
+    if not fileExists(shellFile) or readFile(shellFile) != shellData:
+      writeFile(shellFile, shellData)
     switch("nimcache", outputDir / "tmp")
     switch("threads", "off")
     --os:linux
@@ -93,20 +121,21 @@ proc setupEmscripten*(gameDir: string, game = "") =
     switch(
       "passL",
       (&"""
-      -o {outputDir / projectName()}.html
+      -o {quoteShell(outputDir / (projectName() & ".html"))}
       {preload}
       {preJs}
-      --shell-file {shellFile}
+      --shell-file {quoteShell(shellFile)}
       -s ASYNCIFY
       -s FETCH
       -s EXIT_RUNTIME=1
       -s USE_WEBGL2=1
       -s MAX_WEBGL_VERSION=2
-      -s MIN_WEBGL_VERSION=1
+      -s MIN_WEBGL_VERSION={minimumWebglVersion}
       -s FULL_ES3=1
       -s GL_ENABLE_GET_PROC_ADDRESS=1
       -s ALLOW_MEMORY_GROWTH
       --profiling
+      {linkOptions}
       """).replace("\n", " ")
     )
     if paramStr(1) == "run" or paramStr(1) == "r":

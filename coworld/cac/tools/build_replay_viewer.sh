@@ -2,7 +2,7 @@
 # Builds CaC's static replay viewer into OUTPUT, like
 # coworld/tools/build_replay_viewer.nim does for the other games: pinned
 # dependencies, the pinned art revision, and index.html beside the bundle.
-# CaC stages its own browser assets with games/cac/tools/build_web.sh.
+# CaC uses the shared browser build through games/cac/tools/build_web.sh.
 set -euo pipefail
 output="${1:?Usage: build_replay_viewer.sh OUTPUT}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -34,4 +34,4 @@ for suffix in js wasm data; do
   cp "$build/cac.$suffix" "$output/cac.$suffix"
 done
 cp "$build/cac.html" "$output/index.html"
-cp "$root/games/cac/web/loading/cnc-wordmark.svg" "$output/loading-logo.svg"
+cp "$build/loading-logo.svg" "$output/loading-logo.svg"

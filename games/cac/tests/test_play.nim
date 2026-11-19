@@ -2,8 +2,8 @@
 ## is in the middle of doing, with no window and no scene.
 import std/[options, sequtils, unittest]
 import vmath
-import ../src/play, ../src/core/[bots, replays, sim], ../src/scene/table,
-  ../src/vfx/vfxrenderer
+import ../play, ../core/[bots, replays, sim], ../scene/table,
+  ../vfx/vfxrenderer
 
 let twoWays = Card(name: "Two Ways", energyCost: 0, kind: Spell,
   rules: rules(choose(

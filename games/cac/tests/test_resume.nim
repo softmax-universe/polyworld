@@ -1,5 +1,5 @@
 import polyworld/mailboxes
-import ../src/core/[bots, match, replays, sim]
+import ../core/[bots, match, replays, sim]
 
 const
   SetupSource = """

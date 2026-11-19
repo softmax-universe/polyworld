@@ -288,23 +288,11 @@ proc deliverChat*(
     var message = newString(text.len)
     for i in 0 ..< text.len:
       message[i] = text[i]
-    game.recorder.recordChat(ReplayChat(
+    game.recorder.record(ReplayAction(
       tick: uint32(if tick >= 0: tick else: game.world.tick),
-      kind: PolicyReplayChat, sender: game.world.heroes[sender].id,
-      target: target.int32, text: message))
-  let id = int32(if target < 0: target else: sender)
-  for recipient in 0 ..< game.inboxes.len:
-    case target
-    of -2:
-      discard
-    of -1:
-      if game.world.heroes[recipient].team != game.world.heroes[sender].team:
-        continue
-    else:
-      if recipient != target:
-        continue
-    if game.inboxes[recipient].push(id, text):
-      inc result
+      kind: ActionPolicyChat, heroId: game.world.heroes[sender].id,
+      first: target.int32, text: message))
+  game.deliverPolicyChat(sender, target, text)
 
 proc sendChat*(
     game: Game, sender, target: int, text: openArray[char]
@@ -315,7 +303,8 @@ proc sendChat*(
   if game.networked:
     if sender notin 0 ..< game.world.heroes.len or
       target < -2 or target >= game.world.heroes.len or
-      text.len > MaxChatBytes or game.submissions.len >= 1024:
+      text.len == 0 or text.len > MaxChatBytes or
+      game.submissions.len >= 1024:
         return 0
     var message = newString(text.len)
     for i in 0 ..< text.len:
@@ -328,17 +317,6 @@ proc sendChat*(
     )
     return 1
   game.deliverChat(sender, target, text)
-
-proc replayMailboxes*(game: Game, tick: uint32) =
-  ## Delivers recorded policy messages at their tick boundary during warm-up.
-  while game.replayChatIndex < game.replayData.events.len:
-    let message = game.replayData.events[game.replayChatIndex]
-    if message.tick > tick:
-      break
-    inc game.replayChatIndex
-    if message.kind == PolicyReplayChat:
-      discard game.deliverChat(game.world.heroIndex(message.sender),
-        message.target.int, message.text, message.tick.int32)
 
 proc infoFunctions(host: var Host, heroId: int32) =
   ## Exposes ordinary scalar facts shared by BASIC and neural policies.

@@ -388,10 +388,10 @@ type
     replayData*: ReplayData
     replayPlayer*: ReplayPlayer
     chatView*: ReplayChatView
+    countedReplayActions, replayCommands: int
     hashCheck*: ReplayHashCheck
     historyPlayback*: bool
     watchingPolicies*: bool
-    replayChatIndex*: int
     replayMode*: bool
     recordingError*: string
     networked*: bool
@@ -5554,6 +5554,68 @@ proc applyReplayAction*(world: World, action: ReplayAction): bool {.discardable.
   else:
     raise newException(ReplayError, "replay action kind is invalid")
 
+proc deliverPolicyChat*(
+    game: Game, sender, target: int, text: openArray[char]
+): int32 =
+  ## Routes a recorded mailbox command without running a policy or recording it.
+  if sender notin 0 ..< game.world.heroes.len or
+    target < -2 or target >= game.world.heroes.len or
+    text.len == 0 or text.len > MaxChatBytes:
+      return 0
+  if game.inboxes.len == 0:
+    for hero in game.world.heroes:
+      game.inboxes.add newMailbox()
+  let id = int32(if target < 0: target else: sender)
+  for recipient in 0 ..< game.inboxes.len:
+    case target
+    of -2:
+      discard
+    of -1:
+      if game.world.heroes[recipient].team != game.world.heroes[sender].team:
+        continue
+    else:
+      if recipient != target:
+        continue
+    if game.inboxes[recipient].push(id, text):
+      inc result
+
+proc applyReplayCommand*(game: Game, action: ReplayAction): bool =
+  ## Consumes one ordered command while counting only accepted gameplay actions.
+  case action.kind
+  of ActionHumanChat, ActionSystemNotice:
+    discard
+  of ActionPolicyChat:
+    # Watching policies consume recorded messages through their normal inboxes.
+    if not game.historyPlayback or game.watchingPolicies:
+      discard game.deliverPolicyChat(
+        game.world.heroIndex(action.heroId), int(action.first), action.text)
+  else:
+    result = game.world.applyReplayAction(action)
+    if result:
+      game.metrics.command(game.world.heroIndex(action.heroId), game.world.tick)
+
+proc applyReplayActions*(game: Game, tick: uint32) =
+  ## Consumes gameplay and messages once through the same ordered tape cursor.
+  if game.recorder != nil:
+    game.replayPlayer.data = game.recorder.data
+  var action: ReplayAction
+  while game.replayPlayer.takeActionAt(tick, action):
+    discard game.applyReplayCommand(action)
+
+proc replayCommandCount*(game: Game): int =
+  ## Counts consumed gameplay commands without counting chat or notice entries.
+  if game.replayPlayer == nil:
+    return 0
+  let stop = game.replayPlayer.actionIndex
+  if game.countedReplayActions > stop:
+    game.countedReplayActions = 0
+    game.replayCommands = 0
+  while game.countedReplayActions < stop:
+    if game.replayPlayer.data.actions[game.countedReplayActions].isGameplayAction:
+      inc game.replayCommands
+    inc game.countedReplayActions
+  game.replayCommands
+
 proc submitAction*(game: Game, action: ReplayAction): bool =
   ## Queues multiplayer intents or executes and records offline commands.
   if game.networked:
@@ -5570,10 +5632,9 @@ proc applyNetworkActions(game: Game) =
   ## Applies the same validated, ordered tick commands on every client.
   for action in game.networkActions:
     game.recorder.record(action)
-    let accepted = game.world.applyReplayAction(action)
-    game.actionResults.add (action, accepted)
-    if accepted:
-      game.metrics.command(game.world.heroIndex(action.heroId), game.world.tick)
+    let accepted = game.applyReplayCommand(action)
+    if action.isGameplayAction:
+      game.actionResults.add (action, accepted)
   game.networkActions.setLen(0)
 
 proc nearestEnemy(
@@ -6270,6 +6331,9 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
   world.syncBuildings()
   if game.finished():
     return
+  if game.historyPlayback and world.tick == 0:
+    game.applyReplayActions(0)
+
   if game.replayMode and
       world.tick >= game.replayData.hashes.len:
     return
@@ -6285,12 +6349,7 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
     if game.watchingPolicies and decide and onHeroTurn != nil:
       onHeroTurn()
     if game.historyPlayback:
-      if game.recorder != nil:
-        game.replayPlayer.data = game.recorder.data
-      var action: ReplayAction
-      while game.replayPlayer.takeActionAt(uint32(world.tick), action):
-        if world.applyReplayAction(action):
-          game.metrics.command(world.heroIndex(action.heroId), world.tick)
+      game.applyReplayActions(uint32(world.tick))
     elif game.networked:
       game.applyNetworkActions()
     elif decide and onHeroTurn != nil:
@@ -6336,12 +6395,7 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
         onHeroTurn != nil:
       onHeroTurn()
     if game.historyPlayback:
-      if game.recorder != nil:
-        game.replayPlayer.data = game.recorder.data
-      var action: ReplayAction
-      while game.replayPlayer.takeActionAt(uint32(world.tick), action):
-        if applyReplayAction(world, action):
-          game.metrics.command(heroIndex(world, action.heroId), world.tick)
+      game.applyReplayActions(uint32(world.tick))
     if game.networked:
       game.applyNetworkActions()
     dec world.heroTurnTicks

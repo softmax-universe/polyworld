@@ -55,7 +55,7 @@ proc encodeSubmission*(action: ReplayAction): string =
 proc decodeSubmission*(bytes: string): ReplayAction =
   var reader = PacketReader(data: bytes)
   let kind = reader.get32()
-  if kind < uint32(ActionMove) or kind > uint32(ActionKindHigh):
+  if kind < uint32(ActionMove) or kind > uint32(ActionDeposit):
     reject("Unknown LvD action")
   result.kind = uint8(kind)
   result.playerId = cast[int32](reader.get32())
@@ -284,8 +284,9 @@ proc applyPacket*(session: NetworkMatch, packet: RoomMessage) =
   if not session.started or session.finished or packet.kind != TickPacket or
     packet.match != client.match or packet.tick != uint32(game.world.tick + 1):
       reject("LvD received an unexpected simulation tick")
-  var actions: seq[ReplayAction]
-  var chats: seq[ChatSubmission]
+  var
+    actions: seq[ReplayAction]
+    chatCount = game.recorder.chatCount
   for command in packet.commands:
     # The relay authenticates ownership when accepting each command. Later
     # roster snapshots must never invalidate an earlier accepted command.
@@ -297,7 +298,15 @@ proc applyPacket*(session: NetworkMatch, packet: RoomMessage) =
       if chat.player != int32(session.playerForSeat(int(command.seat))) or chat.target < -2 or
         chat.target == -1 or chat.target >= game.world.players.len:
           reject("Invalid LvD mailbox sender or target")
-      chats.add chat
+      if chat.text.len > 0:
+        let action = ReplayAction(kind: ActionChat, tick: packet.tick,
+          playerId: chat.player, target: chat.target, text: chat.text)
+        try:
+          action.validateAction(game.recorder.data.header.setup)
+        except ReplayError as error:
+          reject(error.msg)
+        actions.add action
+        inc chatCount
       continue
     var action = decodeSubmission(command.payload)
     action.tick = packet.tick
@@ -315,27 +324,27 @@ proc applyPacket*(session: NetworkMatch, packet: RoomMessage) =
           game.world.buildingOwner(action.entityId) != action.playerId):
             reject("LvD entity belongs to another player")
     actions.add action
-  var recordedChats = game.recorder.data.chats.len
-  for chat in chats:
-    if chat.text.len > 0:
-      inc recordedChats
-  if recordedChats > MaxReplayChats:
+  if chatCount > MaxReplayChats:
     reject("LvD replay chat limit exceeded")
-  for chat in chats:
-    discard game.deliverChat(
-      int(chat.player), int(chat.target), chat.text, int32(packet.tick)
-    )
+  if game.recorder.data.actions.len + actions.len > MaxReplayActions:
+    reject("LvD replay action limit exceeded")
   game.networkActions.add actions
   proc apply(w: World) =
     for pending in game.networkActions:
       var action = pending
-      action.tick = uint32(w.tick)
-      if w.applyReplayAction(action):
-        game.recorder.record(action)
-        game.metrics.command(int(action.playerId), w.tick)
-      w.retireProductionReservation(action)
+      action.tick = packet.tick
+      if action.kind == ActionChat:
+        discard game.deliverChat(int(action.playerId), int(action.target),
+          action.text, int32(packet.tick))
+      else:
+        if w.applyReplayAction(action):
+          game.recorder.record(action)
+          game.metrics.command(int(action.playerId), w.tick)
+        w.retireProductionReservation(action)
     game.networkActions.setLen(0)
   game.world.tickWorld(apply)
+  if packet.tick mod uint32(DecisionTicks) != 0:
+    apply(game.world)
   if uint32(game.world.tick) != packet.tick:
     reject("LvD failed to execute authoritative tick")
   game.recorder.recordHash(game.stateHash())

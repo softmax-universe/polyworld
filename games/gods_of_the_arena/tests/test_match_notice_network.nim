@@ -1,7 +1,7 @@
 ## Real relay packets stay opaque while each client derives its own warning.
 import jsony
 import polyworld/[rooms, roomclients, relays]
-import ../[chats, content, matchtiming, multiplayer, presets, replays, sim]
+import ../[chats, content, matchnotices, matchtiming, multiplayer, presets, replays, sim]
 import std/importutils
 privateAccess(NetworkMatch)
 
@@ -51,6 +51,13 @@ proc run(limit: int32, pickEarly: bool, mode = UniqueDraft, seed = 54'i32) =
     clients[i].events.setLen(0)
   exchange()
   let room = relay.room(clients[0].snapshot.room)
+  proc noticeActions(session: NetworkMatch): int =
+    ## Counts the warning in the single canonical replay action stream.
+    for action in session.game.recorder.data.actions:
+      if action.kind == ActionSystemNotice:
+        inc result
+        doAssert action.heroId == 0 and action.first == -2
+        doAssert action.text == ThreeMinuteNotice
   var expected = 0'u32
   var captured: seq[RoomMessage]
   var beforeNotice: World
@@ -110,9 +117,12 @@ proc run(limit: int32, pickEarly: bool, mode = UniqueDraft, seed = 54'i32) =
     if limit <= 180 * TickRate and room.tick > 2 * DraftPickTicks.uint32 + PreparationTicks.uint32 + 2: break
   if limit <= 180 * TickRate:
     doAssert sessions[0].humanChat.len == 0
+    doAssert sessions[0].noticeActions() == 0
   else:
     doAssert reconnected
     doAssert sessions[0].humanChat.len == 1
+    doAssert sessions[0].noticeActions() == 1
+    doAssert sessions[1].noticeActions() == 1
     doAssert sessions[0].humanChat[0].system
     doAssert sessions[0].humanChat[0].text == "3 minutes remain"
     doAssert sessions[0].humanChat[0].tick == expected
@@ -132,6 +142,7 @@ proc run(limit: int32, pickEarly: bool, mode = UniqueDraft, seed = 54'i32) =
       clients[2].appliedTick(packet.tick)
       exchange()
     doAssert late.humanChat == sessions[0].humanChat
+    doAssert late.noticeActions() == 1
     doAssert late.game.networkHash() == sessions[0].game.networkHash()
     # Fresh local history playback derives the same game-owned warning.
     let watcher = prepareNetworkMatch(clients[1], [])
@@ -140,10 +151,13 @@ proc run(limit: int32, pickEarly: bool, mode = UniqueDraft, seed = 54'i32) =
     watcher.spectator = true
     for packet in captured: watcher.applyPacket(packet, localPlayback = true)
     doAssert watcher.humanChat == sessions[0].humanChat
+    doAssert watcher.noticeActions() == 1
     doAssert watcher.game.networkHash() == sessions[0].game.networkHash()
     watcher.game.world.restore(beforeNotice)
     watcher.applyPacket(captured[int(expected) - 1], localPlayback = true)
     doAssert watcher.humanChat.len == 1, "Seek may not duplicate the local notice"
+    doAssert watcher.noticeActions() == 1,
+      "Seek may not append another system action to the replay"
   echo "Local notice with real relay: limit=", limit, " early=", pickEarly,
     " mode=", mode, " seed=", seed, " tick=", expected
 

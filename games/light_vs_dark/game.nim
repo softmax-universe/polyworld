@@ -198,7 +198,6 @@ var
     seconds: DefaultMinutes * 60, speed: 1)
   run*: Game
   optionsInitialized = false
-  resumeChat = 0
 
 proc initializeOptions*() =
   ## Menu startup parses options without constructing terrain or policy VMs.
@@ -317,13 +316,18 @@ proc initializeLocalMatch*(config: LvdConfig, sources: openArray[string]) =
 proc decide(w: World) =
   ## Supplies one decision tick's commands from whichever source owns them.
   if run.historyPlayback:
-    if options.resumeStep >= 0:
+    if options.resumeStep >= 0 and w.tick > 0 and
+        w.tick mod DecisionTicks == 0:
       runBotDecisions(run)
     if run.recorder != nil:
       run.replayPlayer.data = run.recorder.data
     var action: ReplayAction
     while run.replayPlayer.takeActionAt(uint32(w.tick), action):
-      if w.applyReplayAction(action):
+      if action.kind == ActionChat:
+        if options.resumeStep >= 0:
+          discard run.deliverChat(int(action.playerId), int(action.target),
+            action.text, int32(action.tick))
+      elif w.applyReplayAction(action):
         run.metrics.command(int(action.playerId), w.tick)
   else:
     flushPlayerCommands(run)
@@ -340,24 +344,17 @@ proc verifyTick(game: Game) =
     game.hashCheck
   )
 
-proc replayInbox() =
-  ## Delivers historical messages at their completed tick boundary.
-  while resumeChat < run.replayData.chats.len and
-      run.replayData.chats[resumeChat].tick <= uint32(run.world.tick):
-    let chat = run.replayData.chats[resumeChat]
-    discard run.deliverChat(int(chat.playerId), int(chat.target),
-      chat.text, int32(chat.tick))
-    inc resumeChat
-
 proc resumeIfReady() =
   ## Hands control to the warmed policies after the verified replay prefix.
   if options.resumeStep >= 0 and run.historyPlayback and
       run.world.tick == options.resumeStep:
     run.hashCheck.requireReplayComplete(uint32(run.world.tick),
       int(options.resumeStep))
-    replayInbox()
     run.recorder = ReplayRecorder(data: run.replayData.replayPrefix(
       uint32(run.world.tick)))
+    for action in run.recorder.data.actions:
+      if action.kind == ActionChat:
+        inc run.recorder.chatCount
     run.recorder.data.config.players =
       localGameConfig(options, run.world.players.len).players
     run.historyPlayback = false
@@ -365,12 +362,20 @@ proc resumeIfReady() =
 
 proc advanceGame*() =
   ## Advances the live world by one tick and verifies it when replaying.
+  if run.historyPlayback and run.world.tick == 0:
+    if run.recorder != nil:
+      run.replayPlayer.data = run.recorder.data
+    if options.resumeStep >= 0:
+      decide(run.world)
+    else:
+      run.replayPlayer.syncCursor(0)
   resumeIfReady()
   run.world.tickWorld(decide)
   if run.historyPlayback:
+    if run.world.tick mod DecisionTicks != 0:
+      # Messages can arrive between decisions and share the same tape cursor.
+      decide(run.world)
     run.verifyTick()
-    if options.resumeStep >= 0:
-      replayInbox()
   elif run.recorder != nil:
     run.recorder.recordHash(run.stateHash())
   run.sampleMetrics(run.world.over or run.world.tick >= run.maximumTicks)
@@ -473,5 +478,5 @@ proc runHeadless*() =
   else:
     saveRecording()
     if options.recordPath.len > 0:
-      echo &"  recorded {run.recorder.data.actions.len} commands to " &
+      echo &"  recorded {run.recorder.data.commandCount()} commands to " &
         options.recordPath

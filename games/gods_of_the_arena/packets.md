@@ -1,6 +1,6 @@
 # GotA packets
 
-Payload protocol **5**, gameplay **83**, outer protocol **5**.
+Payload protocol **5**, gameplay **84**, outer protocol **5**.
 [Outer packets](../../docs/gameserver-packets.md) carry these blobs unchanged.
 
 ## Identity
@@ -10,7 +10,7 @@ Sent inside Hello; GotA requires ten seats at 24 ticks/second.
 | Field | Nim type | Value |
 | --- | --- | --- |
 | game | `string` | `gods_of_the_arena` |
-| gameplay | `uint32` | 83 |
+| gameplay | `uint32` | 84 |
 | protocol | `uint32` | 5 |
 
 ## Setup payload
@@ -281,7 +281,7 @@ even when delivery is restricted to a team inbox.
 | --- | --- |
 | 1 | Require current match and exactly world.tick + 1. |
 | 2 | Validate every command: seat ownership, complete decoding, valid kind/offsets and matching heroId. |
-| 3 | Record chat at packet.tick, deliver mailbox messages in packet order, and queue actions for packet.tick. |
+| 3 | Record every command at packet.tick in one ordered tape, deliver mailbox messages in packet order, and queue hero actions for packet.tick. |
 | 4 | Run one simulation tick; actions execute in packet order in the action phase. |
 | 5 | Publish action results, sample metrics, send AppliedTick and required hashes. |
 | 6 | Run only locally owned bot decisions and submit their commands. |
@@ -291,7 +291,7 @@ even when delivery is restricted to a team inbox.
 Each client derives the three-minute reminder from its simulated battle clock,
 after drafting and preparation. The relay has no countdown, draft policy,
 announcement payload, or game-specific command category. The reminder is local
-system text and may be retained in the client replay transcript; it is never
+system text retained as a game-owned replay action; it is never
 attributed to the relay or submitted as a network command.
 
 ## Results, pause and hashes
@@ -308,10 +308,28 @@ attributed to the relay or submitted as a network command.
 | Hash lower 32 bits | Existing stateHash: map, draft, RNG, units, navigation, spells, shots and combat stats; exact fields in sim.nim. |
 | Hash exclusions | Private VMs, chat history, mailbox queues, rendering and local performance. Two 32-bit digests, not a cryptographic 64-bit state hash. |
 | Hash timing | Shared setupHash at StartMatch/BeginMatch; ReportHash of simulation at tick 0, 24, 48, etc.; FinishMatch at actual final tick. Comparisons are mandatory. |
-| Replay | Format 7; records hero action attempts, setup, hashes, metrics and a separate chat event stream containing human all/team text, policy broadcast/team/direct messages and locally generated match reminders. Chat retains its tick, order, sender and scope. Outer envelopes are not saved. Wall-clock pauses add no replay ticks. |
+| Replay | Format 8; records setup, hashes, metrics and one ordered tape containing hero action attempts, human all/team text, policy broadcast/team/direct messages and locally generated match reminders. Equal-tick actions preserve their original order. Outer envelopes are not saved. Wall-clock pauses add no replay ticks. |
 | Catch-up | Relay history includes mailbox messages and command ownership/order. Spectators reconstruct without VMs. |
 | Reconnect | Original client retains simulation and private VMs. No state snapshots, VM transfers or automatic desync repair. |
 | Versioning | Exact versions only. Payload changes bump GotaNetworkProtocol; gameplay changes bump ReplayGameVersion. |
+
+## Replay text actions
+
+Text uses the same `ReplayAction` sequence as hero commands. These game-owned
+replay kinds do not add outer relay packet types or change network categories.
+
+| Field | Human chat | Policy chat | Local system notice |
+| --- | --- | --- | --- |
+| `kind` | 25 | 26 | 27 |
+| `heroId` | Sender hero ID | Sender hero ID | 0 |
+| `first` | -2 for all, -1 for team | -2 for all, -1 for team, mailbox index for direct | -2 |
+| `text` | Validated human UTF-8 | Original policy bytes | Validated human UTF-8 |
+| `slot`, `second`, `offset` | Zero | Zero | Zero |
+
+Every text action contains 1 to 1,024 bytes. Gameplay actions have empty text.
+The tape allows at most one million text actions and 64 MiB of total text; the
+complete encoded replay also has a 64 MiB limit. Human replay viewers scan the
+action tape, hide policy messages, and use action indices as message identities.
 
 ## Source
 

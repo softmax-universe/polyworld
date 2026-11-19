@@ -51,12 +51,17 @@ block twoHumans:
     session.start(clients[i].events[0])
     clients[i].events.setLen(0)
   exchange()
+  # Same admitted tick: gameplay, repeated chat, gameplay must remain one order.
+  doAssert sessions[0].game.submitAction(ReplayAction(
+    heroId: sessions[0].game.world.heroes[0].id, kind: ActionStop))
+  sessions[0].flushSubmissions()
   doAssert sessions[0].sendHumanChat("你好 🙂 <b>A</b>")
-  doAssert sessions[1].sendHumanChat("reply :)")
+  doAssert sessions[0].sendHumanChat("你好 🙂 <b>A</b>")
   doAssert sessions[0].game.submitAction(ReplayAction(
     heroId: sessions[0].game.world.heroes[0].id,
     kind: ActionWalkTo, first: 50, second: 50))
   sessions[0].flushSubmissions()
+  doAssert sessions[1].sendHumanChat("reply :)")
   doAssert not sessions[2].sendHumanChat("cannot speak as a bot")
   doAssert not sessions[0].sendHumanChat("   ")
   doAssert not sessions[0].sendHumanChat(repeat("🙂", 257))
@@ -74,35 +79,49 @@ block twoHumans:
     exchange()
   for i in 0 ..< 3: step()
   for session in sessions:
-    doAssert session.humanChat.len == 2
+    doAssert session.humanChat.len == 3
     doAssert session.humanChat[0].sender == "mason :)"
     doAssert session.humanChat[0].text == "你好 🙂 <b>A</b>"
-    doAssert session.humanChat[1].sender == "小明 (guest)"
-    doAssert session.humanChat[1].text == "reply :)"
+    doAssert session.humanChat[1].text == session.humanChat[0].text
+    doAssert session.humanChat[0].ordinal == 1
+    doAssert session.humanChat[1].ordinal == 2,
+      "Repeated identical text occupies a distinct canonical action ordinal"
+    doAssert session.humanChat[2].sender == "小明 (guest)"
+    doAssert session.humanChat[2].text == "reply :)"
+    doAssert session.humanChat[2].ordinal == 4
     doAssert session.game.inboxes[0].count == 0, "Human text is not policy mailbox logs"
+  let pendingBeforeInvalidChat = sessions[0].game.submissions.len
+  doAssert sessions[0].game.sendChat(0, 1, "") == 0
+  doAssert sessions[0].game.sendChat(0, 2, "invalid recipient") == 0
+  doAssert sessions[0].game.submissions.len == pendingBeforeInvalidChat,
+    "Invalid policy chat must not enter the canonical network command queue"
   doAssert sessions[0].game.sendChat(0, 1, "policy preserved") == 1
   sessions[0].flushSubmissions()
   doAssert sessions[0].sendHumanChat("team only", team = true)
+  exchange()
   for i in 0 ..< 3: step()
-  doAssert sessions[1].visibleHumanChat().len == 2, "Opponent must not display team chat"
-  doAssert sessions[0].visibleHumanChat().len == 3
+  doAssert sessions[1].visibleHumanChat().len == 3, "Opponent must not display team chat"
+  doAssert sessions[0].visibleHumanChat().len == 4
   doAssert sessions[0].game.stateHash() == sessions[1].game.stateHash()
   doAssert sessions[1].game.inboxes[1].count == 1
   doAssert sessions[1].game.inboxes[1].messages[0] == "policy preserved"
-  # Chat has its own complete tape without changing gameplay command counts.
-  doAssert sessions[0].game.recorder.data.actions.len == 1
+  # The one tape retains the exact order admitted by the relay, including chat.
   doAssert sessions[0].game.recorder.data.hashes == sessions[1].game.recorder.data.hashes
   let recorded = sessions[0].game.recorder.data
-  doAssert recorded.events.len == 4
-  doAssert recorded.events[0].kind == HumanReplayChat
-  doAssert recorded.events[0].text == "你好 🙂 <b>A</b>"
-  doAssert recorded.events[1].text == "reply :)"
-  doAssert recorded.events[2].kind == PolicyReplayChat
-  doAssert recorded.events[2].text == "policy preserved"
-  doAssert recorded.events[2].target == 1
-  doAssert recorded.events[3].target == -1
+  doAssert recorded.actions.len == 7
+  let expectedKinds = [ActionStop, ActionHumanChat, ActionHumanChat,
+    ActionWalkTo, ActionHumanChat, ActionPolicyChat, ActionHumanChat]
+  for i, action in recorded.actions:
+    doAssert action.kind == expectedKinds[i]
+    doAssert action.tick == (if i < 5: 1'u32 else: 4'u32)
+  doAssert recorded.actions[1].text == "你好 🙂 <b>A</b>"
+  doAssert recorded.actions[2] == recorded.actions[1]
+  doAssert recorded.actions[4].text == "reply :)"
+  doAssert recorded.actions[5].text == "policy preserved"
+  doAssert recorded.actions[5].first == 1
+  doAssert recorded.actions[6].first == -1
   for session in sessions:
-    doAssert session.game.recorder.data.events == recorded.events
+    doAssert session.game.recorder.data.actions == recorded.actions
   let
     tape = decodeReplay(encodeReplay(recorded))
     replay = newGame(sessions[0].game.map, tape.config.spawnIntervalTicks,
@@ -116,15 +135,18 @@ block twoHumans:
     doAssert replay.stateHash() == tape.hashes[tick - 1]
   doAssert replay.hashCheck.mismatches == 0
   doAssert replay.visibleReplayChat() == sessions[2].visibleHumanChat()
-  doAssert replay.visibleReplayChat(1).len == 2
+  doAssert replay.visibleReplayChat(1).len == 3
+  doAssert replay.heroVms.len == 0 and replay.inboxes.len == 0,
+    "File playback consumes recorded policy inputs without rerunning private VMs"
   replay.world.restore(initial)
   replay.replayPlayer.syncCursor(0)
   doAssert replay.visibleReplayChat().len == 0,
     "Rewinding must hide future text even after the transcript is cached"
   for tick in 1 .. tape.hashes.len:
     replay.tickWorld(nil)
-  doAssert replay.visibleReplayChat().len == 3
+  doAssert replay.visibleReplayChat().len == 4
   doAssert replay.hashCheck.mismatches == 0
+  doAssert replay.replayPlayer.data.actions == recorded.actions
   for text in ["\xFF", "hello\nworld", repeat("🙂", 257), "   "]:
     var rejected = false
     try:
@@ -154,10 +176,55 @@ block twoHumans:
       seat: 1, sequence: 101, payload: payload)]))
   except RoomsError: rejected = true
   doAssert rejected and sessions[0].game.world.tick == before
-  doAssert sessions[0].humanChat.len == 3
+  doAssert sessions[0].humanChat.len == 4
   # Game category cannot let even an owned bot speak as a human.
   let humanKind = clients[0].snapshot.seats[1].kind
   clients[0].snapshot.seats[1].kind = BotSeat
   doAssert not sessions[0].sendHumanChat("bot impersonation")
   clients[0].snapshot.seats[1].kind = humanKind
+  # Capacity failures are atomic across the whole admitted batch: a gameplay
+  # command before an overflowing chat must not partially record or simulate.
+  let
+    recorder = sessions[0].game.recorder
+    originalData = recorder.data
+    originalHash = sessions[0].game.stateHash()
+    originalTick = sessions[0].game.world.tick
+    originalApplied = clients[0].applied
+    originalChat = sessions[0].humanChat
+    localHero = sessions[0].game.world.heroes[0].id
+  doAssert sessions[0].game.networkActions.len == 0
+  for byteBound in [false, true]:
+    let
+      count = if byteBound: MaxReplayBytes div MaxChatBytes else: MaxReplayChats
+      text = if byteBound: repeat("x", MaxChatBytes) else: "x"
+    recorder.data.actions = newSeq[ReplayAction](count)
+    for action in recorder.data.actions.mitems:
+      action = ReplayAction(tick: uint32(originalTick), heroId: localHero,
+        kind: ActionHumanChat, first: -2, text: text)
+    let packet = RoomMessage(kind: TickPacket, match: clients[0].match,
+      tick: uint32(originalTick + 1), seats: clients[0].snapshot.seats,
+      commands: @[
+        Command(participant: clients[0].participant, seat: 1,
+          seatKind: HumanSeat, sequence: 102,
+          payload: GameSubmission(action: ReplayAction(heroId: localHero,
+            kind: ActionStop)).encodeSubmission()),
+        Command(participant: clients[0].participant, seat: 1,
+          seatKind: HumanSeat, sequence: 103,
+          payload: GameSubmission(humanChat: true, text: "overflow",
+            action: ReplayAction(heroId: localHero, first: -2)).encodeSubmission())])
+    var failed = false
+    try:
+      sessions[0].applyPacket(packet)
+    except ReplayError:
+      failed = true
+    doAssert failed, "Admitted tick must reject its complete overflowing batch"
+    doAssert sessions[0].game.world.tick == originalTick
+    doAssert sessions[0].game.stateHash() == originalHash
+    doAssert clients[0].applied == originalApplied
+    doAssert recorder.data.actions.len == count
+    doAssert recorder.data.actions[^1].kind == ActionHumanChat
+    doAssert recorder.data.hashes == originalData.hashes
+    doAssert sessions[0].game.networkActions.len == 0
+    doAssert sessions[0].humanChat == originalChat
+    recorder.data = originalData
   echo "Two-human relay chat: exact names/text, team filtering, policy isolation, ownership passed"

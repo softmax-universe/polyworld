@@ -4,6 +4,7 @@
 import
   test_maps,
   test_nav,
+  test_replays,
   test_sim,
   test_skillbar
 

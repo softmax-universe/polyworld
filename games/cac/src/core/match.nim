@@ -19,6 +19,7 @@ type
     recorder*: ReplayRecorder
     warmup*: ReplayData
     resumeStep*: uint32
+    warmupCursor: ReplayCursor
     scriptError*: proc(player: int, message: string)
       ## Called when a seat fails to supply a legal action.
     failed*: bool  ## No valid explicit action was supplied.
@@ -53,8 +54,19 @@ proc nextAction(match: var BotMatch): ReplayAction =
   ## Runs only the acting seat's script and returns its accepted action.
   let player = match.game.actingPlayer()
   let vm = if player < match.bots.len: match.bots[player] else: nil
-  if vm != nil and vm.runDecision(match.game) != BotFailed:
-    return vm.action
+  if vm != nil:
+    let recorder = match.recorder
+    let tick = match.tick
+    vm.onSendChat = proc(sender, target: int,
+        text: openArray[char]): int32 =
+      result = bots.sendChat(sender, target, text)
+      if result > 0:
+        recorder.recordMailbox(tick, sender, target, text)
+    try:
+      if vm.runDecision(match.game) != BotFailed:
+        return vm.action
+    finally:
+      vm.onSendChat = nil
   match.failed = true
   let message =
     if vm == nil: "No BASIC script for acting player " & $player
@@ -70,9 +82,19 @@ proc step*(match: var BotMatch): bool =
   if match.tick < match.resumeStep:
     let vm = match.bots[match.game.actingPlayer()]
     vm.watching = true
-    discard vm.runDecision(match.game, apply = false)
-    vm.watching = false
-    action = match.warmup.actions[match.tick.int]
+    try:
+      discard vm.runDecision(match.game, apply = false)
+    finally:
+      vm.watching = false
+    # Admit this decision's original messages, stopping at its game action.
+    let first = match.warmupCursor.actionIndex
+    match.warmupCursor.inboxes = inboxes
+    if not match.warmup.takeReplayAction(
+      match.warmupCursor, match.tick, action
+    ):
+      raise newException(ReplayError, "Replay gameplay action is missing")
+    for index in first ..< match.warmupCursor.actionIndex - 1:
+      match.recorder.record(match.warmup.actions[index])
     if not match.game.applyAction(action):
       raise newException(ReplayError, "Replay action refused during warm-up")
   else:

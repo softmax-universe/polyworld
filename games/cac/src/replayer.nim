@@ -18,6 +18,7 @@ type
     transport*: Player
     tick*: int32  ## Actions applied to the presented game.
     check*: ReplayHashCheck
+    cursor*: ReplayCursor
     wait: float32
     attackTick: int32  ## A presented attack's tick, checked when it lands.
     actionCam: ActionCam  ## The transport's camera button; CaC's is fixed.
@@ -34,7 +35,10 @@ proc newReplayer*(data: ReplayData): Replayer =
       durationTicks = data.hashes.len.int32,
       repeating = true
     ),
-    actionCam: initActionCam(), attackTick: -1)
+    actionCam: initActionCam(), attackTick: -1,
+    cursor: initReplayCursor(data))
+  data.applyReplayMailboxes(result.cursor, 0)
+  result.transport.sync(0, data.hashes.len.int32, over = data.hashes.len == 0)
   when defined(replayViewer) and defined(emscripten):
     var startTick: int32
     {.emit: """
@@ -44,7 +48,6 @@ proc newReplayer*(data: ReplayData): Replayer =
     });
     """.}
     if startTick >= 0:
-      result.transport.sync(0, data.actions.len.int32, over = false)
       result.transport.seekTo(startTick)
 
 proc timeScale*(replayer: Replayer): float32 =
@@ -75,18 +78,24 @@ proc checkTick(replayer: Replayer, game: GameState, tick: int32) =
     replayer.check)
 
 proc applyInstantly(replayer: Replayer, game: var GameState) =
-  let action = replayer.data.actions[replayer.tick]
-  discard game.applyAction(action)
+  ## Applies one gameplay action and the mail following its completed tick.
+  var action: ReplayAction
+  if not replayer.data.takeReplayAction(replayer.cursor,
+      replayer.tick.uint32, action) or not game.applyAction(action):
+    raise newException(ReplayError, "Replay gameplay action was refused")
   discard game.takeVisualEvents()
   inc replayer.tick
   replayer.checkTick(game, replayer.tick)
+  replayer.data.applyReplayMailboxes(replayer.cursor, replayer.tick.uint32)
 
 proc present(replayer: Replayer, play: var TablePlay, game: var GameState,
     layout: TableLayout) =
   ## Applies the next action with the animations a bot's would get.
-  let
-    action = replayer.data.actions[replayer.tick]
-    name = replayer.playerName(action.playerId.int)
+  var action: ReplayAction
+  if not replayer.data.takeReplayAction(replayer.cursor,
+      replayer.tick.uint32, action):
+    raise newException(ReplayError, "Replay gameplay action is missing")
+  let name = replayer.playerName(action.playerId.int)
   inc replayer.tick
   discard game.takeVisualEvents()
   let before = game.copyGameState()
@@ -120,13 +129,14 @@ proc present(replayer: Replayer, play: var TablePlay, game: var GameState,
     play.statusMessage =
       replayer.playerName(game.currentPlayer) & " is thinking..."
   replayer.checkTick(game, replayer.tick)
+  replayer.data.applyReplayMailboxes(replayer.cursor, replayer.tick.uint32)
 
 proc update*(replayer: Replayer, play: var TablePlay, game: var GameState,
     layout: TableLayout, dt: float32): bool =
   ## Advances playback by one frame of `dt` table time (already scaled by
   ## `timeScale`). True when the table was rebuilt (a seek or a loop), so
   ## the caller can re-aim anything it keeps.
-  let total = replayer.data.actions.len.int32
+  let total = replayer.data.hashes.len.int32
   template transport: untyped = replayer.transport
   let restore = transport.takeRestore()
   if restore >= 0 or
@@ -136,6 +146,8 @@ proc update*(replayer: Replayer, play: var TablePlay, game: var GameState,
       game = replayer.newReplayGame()
       replayer.tick = 0
       replayer.check = ReplayHashCheck()
+      replayer.cursor = initReplayCursor(replayer.data)
+      replayer.data.applyReplayMailboxes(replayer.cursor, 0)
   if transport.targetTick >= 0 or restore >= 0:
     # Restore before syncing: the old tick can otherwise clear the target.
     play.resetTable()
@@ -151,8 +163,12 @@ proc update*(replayer: Replayer, play: var TablePlay, game: var GameState,
       else: replayer.playerName(game.currentPlayer) & "'s turn."
     replayer.wait = ReplayStepSeconds
     return true
-  if play.advanceAttack(game, dt) and replayer.attackTick >= 0:
+  let attackFinished = play.advanceAttack(game, dt)
+  if replayer.attackTick >= 0 and
+      (play.attackDamageApplied or attackFinished):
     replayer.checkTick(game, replayer.attackTick)
+    replayer.data.applyReplayMailboxes(replayer.cursor,
+      replayer.attackTick.uint32)
     replayer.attackTick = -1
   transport.sync(replayer.tick, total, over = replayer.tick >= total)
   if not transport.playing:

@@ -25,10 +25,10 @@ proc recording(maximumTicks = 8'u32): ReplayRecorder =
     result.recordHash(tick.uint64)
 
 proc human(tick = 1'u32, sender = 101'i32, target = -2'i32,
-    text = "hello"): ReplayChat =
-  ## Constructs one ordinary chat event for codec and validation cases.
-  ReplayChat(tick: tick, kind: HumanReplayChat, sender: sender,
-    target: target, text: text)
+    text = "hello"): ReplayAction =
+  ## Constructs one ordinary chat action for codec and validation cases.
+  ReplayAction(tick: tick, kind: ActionHumanChat, heroId: sender,
+    first: target, text: text)
 
 proc rejects(data: ReplayData) =
   ## Requires both the validated writer and untrusted decoder to reject data.
@@ -49,33 +49,37 @@ proc rejects(data: ReplayData) =
 echo "Testing exact transcript bytes, same-tick order, and sender metadata"
 block:
   let recorder = recording()
-  let events = @[
+  let actions = @[
+    ReplayAction(tick: 1, heroId: 101, kind: ActionStop),
     human(text = "你好 🙂 <b>literal</b>"),
     human(sender = 108, target = -1, text = "blue team"),
-    ReplayChat(tick: 1, kind: PolicyReplayChat, sender: 101,
-      target: 0, text: "\x00\xFF\nmail\x1B"),
+    ReplayAction(tick: 1, kind: ActionPolicyChat, heroId: 101,
+      first: 0, text: "\x00\xFF\nmail\x1B"),
     human(sender = 104, text = "all reply"),
-    ReplayChat(tick: 2, kind: SystemReplayChat, sender: 0,
-      target: -2, text: "3 minutes remain"),
+    ReplayAction(tick: 1, heroId: 104, kind: ActionWalkTo, first: 4, second: 5),
+    ReplayAction(tick: 2, kind: ActionSystemNotice, heroId: 0,
+      first: -2, text: "3 minutes remain"),
     human(tick = 3, sender = 101, target = -1, text = "red team")]
-  for event in events:
-    recorder.recordChat(event)
+  for action in actions:
+    recorder.record(action)
   let data = decodeReplay(recorder.data.encodeReplay())
-  doAssert data.events == events
+  doAssert data.actions == actions
   doAssert data.hashes == recorder.data.hashes
-  doAssert data.actions.len == 0
   var view: ReplayChatView
   doAssert view.chatAt(data, 0).len == 0
   let first = view.chatAt(data, 1)
   doAssert first.len == 3, "Private policy traffic must stay out of human UI"
-  doAssert first[0].text == events[0].text
+  doAssert first[0].text == actions[1].text
   doAssert first[0].sender == "Red <lead>" and first[0].senderTeam == 0
   doAssert first[1].text == "blue team" and first[1].team
   doAssert first[1].sender == "蓝队 🙂" and first[1].senderTeam == 1
   doAssert first[2].text == "all reply"
   doAssert first[2].sender == "Ally (guest)"
-  doAssert first[0].ordinal < first[1].ordinal
-  doAssert first[1].ordinal < first[2].ordinal
+  doAssert first[0].ordinal == 1
+  doAssert first[1].ordinal == 2
+  doAssert first[2].ordinal == 4
+  doAssert data.actions[0].kind == ActionStop
+  doAssert data.actions[5].kind == ActionWalkTo
   let complete = view.chatAt(data, 8)
   doAssert complete.len == 5
   doAssert complete[3].system and complete[3].sender.len == 0
@@ -93,14 +97,14 @@ block:
 echo "Testing repeated messages and accepted mailbox audiences"
 block:
   let recorder = recording()
-  recorder.recordChat(human())
-  recorder.recordChat(human())
+  recorder.record(human())
+  recorder.record(human())
   for target in [-2'i32, -1, 0, 1, 2]:
-    recorder.recordChat(ReplayChat(tick: 1, kind: PolicyReplayChat,
-      sender: 108, target: target, text: "raw\xFF"))
-  recorder.recordChat(human(tick = 8, text = repeat("🙂", 256)))
+    recorder.record(ReplayAction(tick: 1, kind: ActionPolicyChat,
+      heroId: 108, first: target, text: "raw\xFF"))
+  recorder.record(human(tick = 8, text = repeat("🙂", 256)))
   let data = decodeReplay(recorder.data.encodeReplay())
-  doAssert data.events == recorder.data.events
+  doAssert data.actions == recorder.data.actions
   var view: ReplayChatView
   let repeated = view.chatAt(data, 1)
   doAssert repeated.len == 2
@@ -112,10 +116,10 @@ echo "Testing full transcript retention and backward/forward seek"
 block:
   let recorder = recording(140)
   for tick in 1'u32 .. 135'u32:
-    recorder.recordChat(human(tick = tick, text = "message " & $tick))
+    recorder.record(human(tick = tick, text = "message " & $tick))
   var view: ReplayChatView
   let data = decodeReplay(recorder.data.encodeReplay())
-  doAssert data.events.len == 135
+  doAssert data.actions.len == 135
   let latest = view.chatAt(data, 135)
   doAssert latest.len == MaxHumanChatMessages
   doAssert latest[0].text == "message 36"
@@ -129,9 +133,9 @@ block:
       doAssert message.tick <= tick, "Seeking must hide future chat"
   doAssert view.chatAt(data, 1)[0].text == "message 1",
     "Display eviction must never erase early replay history"
-  recorder.recordChat(human(tick = 136, text = "new live message"))
+  recorder.record(human(tick = 136, text = "new live message"))
   doAssert view.chatAt(recorder.data, 136)[^1].text == "new live message"
-  doAssert recorder.data.events.len == 136
+  doAssert recorder.data.actions.len == 136
 
 echo "Testing invalid chat metadata and text is rejected at both boundaries"
 block:
@@ -140,62 +144,97 @@ block:
     human(target = -3), human(target = 0), human(target = 3),
     human(text = ""), human(text = "   "), human(text = "bad\nline"),
     human(text = "\xFF"), human(text = repeat("x", MaxChatBytes + 1)),
-    ReplayChat(tick: 1, kind: 0, sender: 101, target: -2, text: "bad kind"),
-    ReplayChat(tick: 1, kind: 255, sender: 101, target: -2, text: "bad kind"),
-    ReplayChat(tick: 1, kind: PolicyReplayChat, sender: 999,
-      target: -2, text: "bad sender"),
-    ReplayChat(tick: 1, kind: PolicyReplayChat, sender: 101,
-      target: -3, text: "bad recipient"),
-    ReplayChat(tick: 1, kind: PolicyReplayChat, sender: 101,
-      target: 3, text: "bad recipient"),
-    ReplayChat(tick: 1, kind: PolicyReplayChat, sender: 101,
-      target: 0, text: ""),
-    ReplayChat(tick: 1, kind: PolicyReplayChat, sender: 101,
-      target: 0, text: repeat("x", MaxChatBytes + 1)),
-    ReplayChat(tick: 1, kind: SystemReplayChat, sender: 101,
-      target: -2, text: "forged sender"),
-    ReplayChat(tick: 1, kind: SystemReplayChat, sender: 0,
-      target: -1, text: "bad audience"),
-    ReplayChat(tick: 1, kind: SystemReplayChat, sender: 0,
-      target: -2, text: "\xFF")]
+    ReplayAction(tick: 1, heroId: 101, kind: ActionStop, text: "ignored text"),
+    ReplayAction(tick: 1, heroId: 101, kind: ActionHumanChat, first: -2,
+      slot: 1, text: "unused slot"),
+    ReplayAction(tick: 1, heroId: 101, kind: ActionHumanChat, first: -2,
+      second: 1, text: "unused field"),
+    ReplayAction(tick: 1, heroId: 101, kind: ActionHumanChat, first: -2,
+      offset: fixedVec2(1, 0), text: "unused aim offset"),
+    ReplayAction(tick: 1, kind: 0, heroId: 101, first: -2, text: "bad kind"),
+    ReplayAction(tick: 1, kind: 255, heroId: 101, first: -2, text: "bad kind"),
+    ReplayAction(tick: 1, kind: ActionPolicyChat, heroId: 999,
+      first: -2, text: "bad sender"),
+    ReplayAction(tick: 1, kind: ActionPolicyChat, heroId: 101,
+      first: -3, text: "bad recipient"),
+    ReplayAction(tick: 1, kind: ActionPolicyChat, heroId: 101,
+      first: 3, text: "bad recipient"),
+    ReplayAction(tick: 1, kind: ActionPolicyChat, heroId: 101,
+      first: 0, text: ""),
+    ReplayAction(tick: 1, kind: ActionPolicyChat, heroId: 101,
+      first: 0, text: repeat("x", MaxChatBytes + 1)),
+    ReplayAction(tick: 1, kind: ActionSystemNotice, heroId: 101,
+      first: -2, text: "forged sender"),
+    ReplayAction(tick: 1, kind: ActionSystemNotice, heroId: 0,
+      first: -1, text: "bad audience"),
+    ReplayAction(tick: 1, kind: ActionSystemNotice, heroId: 0,
+      first: -2, text: "\xFF")]
   for event in invalid:
     let recorder = recording()
     var rejected = false
     try:
-      recorder.recordChat(event)
+      recorder.record(event)
     except ReplayError:
       rejected = true
     doAssert rejected, "The live recorder accepted invalid chat"
-    doAssert recorder.data.events.len == 0
-    recorder.data.events = @[event]
+    doAssert recorder.data.actions.len == 0
+    recorder.data.actions = @[event]
     recorder.data.rejects()
 
-echo "Testing event ordering, duration, and transcript limits"
+echo "Testing canonical action ordering, duration, and chat count limits"
 block:
   let recorder = recording()
-  recorder.recordChat(human(tick = 2))
+  recorder.record(human(tick = 2))
   var rejected = false
   try:
-    recorder.recordChat(human(tick = 1))
+    recorder.record(human(tick = 1))
   except ReplayError:
     rejected = true
-  doAssert rejected and recorder.data.events.len == 1
-  recorder.data.events.add human(tick = 1)
+  doAssert rejected and recorder.data.actions.len == 1
+  recorder.data.actions.add human(tick = 1)
   recorder.data.rejects()
-  recorder.data.events = @[human(tick = 9)]
+  recorder.data.actions = @[human(tick = 9)]
   recorder.data.rejects()
-  recorder.data.events = @[human(tick = 5)]
+  recorder.data.actions = @[human(tick = 5)]
   recorder.data.hashes.setLen(4)
   recorder.data.rejects()
-  recorder.data.events.setLen(MaxReplayChats)
+  recorder.data.actions.setLen(MaxReplayChats)
+  for action in recorder.data.actions.mitems:
+    action = human(tick = 4)
   rejected = false
   try:
-    recorder.recordChat(human(tick = 5))
+    recorder.record(human(tick = 5))
   except ReplayError:
     rejected = true
-  doAssert rejected and recorder.data.events.len == MaxReplayChats
-  recorder.data.events.add human(tick = 5)
+  doAssert rejected and recorder.data.actions.len == MaxReplayChats
+  recorder.data.actions.add human(tick = 5)
   recorder.data.rejects()
+
+echo "Testing aggregate chat text and encoded file byte limits"
+block:
+  let recorder = recording()
+  let text = repeat("x", MaxChatBytes)
+  recorder.data.actions.setLen(MaxReplayBytes div MaxChatBytes)
+  for action in recorder.data.actions.mitems:
+    action = human(text = text)
+  var rejected = false
+  try:
+    recorder.record(human())
+  except ReplayError:
+    rejected = true
+  doAssert rejected, "The recorder must cap aggregate chat bytes"
+  rejected = false
+  try:
+    discard recorder.data.encodeReplay()
+  except ReplayError:
+    rejected = true
+  doAssert rejected, "Metadata and text must fit the encoded replay budget"
+  rejected = false
+  try:
+    discard decodeReplay(repeat("x", MaxReplayBytes + 1))
+  except ReplayError:
+    rejected = true
+  doAssert rejected, "The reader must reject oversized files before parsing"
 
 echo "Testing every chat sender has a configured player name"
 block:
@@ -205,7 +244,7 @@ block:
   for i, hero in recorder.data.header.setup.heroes.mpairs:
     hero = ReplayHero(id: 1000 + i.int32, team: (i mod 2).uint8,
       slot: 0, lane: 0, class: DeathKnight.ord.uint8)
-  recorder.data.events = @[
+  recorder.data.actions = @[
     human(sender = recorder.data.header.setup.heroes[^1].id)]
   recorder.data.rejects()
 

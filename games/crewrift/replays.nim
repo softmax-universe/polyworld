@@ -1,20 +1,23 @@
-## Portable input replays with a fingerprint for every original rule tick.
+## Ordered action replays with a fingerprint for every original rule tick.
 
 import
   std/[os, strutils],
   jsony,
   sim
 
-const ReplayVersion* = 1
+const ReplayVersion* = 2
 
 type
-  ReplayChat* = object
+  ReplayActionKind* = enum
+    InputAction, VoteAction, ChatAction
+  ReplayAction* = object
+    kind*: ReplayActionKind
     slot*: int
+    mask*: uint8
+    choice*: int
     text*: string
   ReplayFrame* = object
-    masks*: seq[uint8]
-    choices*: seq[int]
-    chats*: seq[ReplayChat]
+    actions*: seq[ReplayAction]
     hash*: string
   ReplayData* = object
     version*: int
@@ -58,18 +61,27 @@ proc loadReplay*(path: string): ReplayData =
     if name.len == 0 or name.len > 128 or name != cleanChatMessage(name):
       raise newException(CrewriftError, "Invalid replay player identity.")
   for frame in result.frames:
-    if frame.masks.len != result.players or
-      frame.choices.len != result.players:
-        raise newException(CrewriftError, "Invalid replay input count.")
-    for mask in frame.masks:
-      if mask > 127:
-        raise newException(CrewriftError, "Invalid replay button mask.")
-    for choice in frame.choices:
-      if choice < -1 or choice > result.players:
-        raise newException(CrewriftError, "Invalid replay vote target.")
-    for chat in frame.chats:
-      if chat.slot < 0 or chat.slot >= result.players:
-        raise newException(CrewriftError, "Invalid replay chat slot.")
+    var inputs: array[MaxPlayers, bool]
+    for action in frame.actions:
+      if action.slot < 0 or action.slot >= result.players:
+        raise newException(CrewriftError, "Invalid replay action slot.")
+      case action.kind
+      of InputAction:
+        if action.mask > 127:
+          raise newException(CrewriftError, "Invalid replay button mask.")
+        if inputs[action.slot]:
+          raise newException(CrewriftError, "Duplicate replay input slot.")
+        inputs[action.slot] = true
+      of VoteAction:
+        if action.choice < 0 or action.choice > result.players:
+          raise newException(CrewriftError, "Invalid replay vote target.")
+      of ChatAction:
+        if action.text.len == 0 or
+          action.text != cleanChatMessage(action.text):
+            raise newException(CrewriftError, "Invalid replay chat text.")
+    for slot in 0 ..< result.players:
+      if not inputs[slot]:
+        raise newException(CrewriftError, "Missing replay input slot.")
 
 proc saveReplay*(path: string, data: ReplayData) =
   ## Saves one finished or interrupted local input recording.

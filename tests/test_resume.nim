@@ -76,14 +76,48 @@ proc build(source, target: string) =
     source
   ])
 
+proc chatPolicy(text: string): string =
+  ## Keeps inboxes available and labels outgoing messages for CLI assertions.
+  "while mailboxCount() > 0\n" &
+    "  resumeMessage$ = pullMailbox$()\nwend\n" &
+    "resumeSent = sendChat(-2, \"" & text & "\")\n"
+
+proc isGameplay[A](action: A): bool =
+  ## Separates actual policy decisions from mailbox and presentation actions.
+  when A is gota.ReplayAction:
+    gota.isGameplayAction(action)
+  elif A is cta.ReplayAction:
+    action.kind != cta.ActionChat
+  elif A is lvd.ReplayAction:
+    action.kind != lvd.ActionChat
+  elif A is cac.ReplayAction:
+    action.kind != cac.ActionMailbox
+  else:
+    true
+
+proc prefixLength[T](data: T, cutoff: int): int =
+  ## Stops CaC before messages emitted by the next policy decision.
+  for action in data.actions:
+    when T is cac.ReplayData:
+      if cutoff == 0:
+        return
+      inc result
+      if action.isGameplay() and action.tick == cutoff.uint32:
+        return
+    else:
+      if action.tick > cutoff.uint32:
+        return
+      inc result
+
 proc checkPrefix[T](recorded, resumed: T, cutoff: int) =
   ## Checks that warming replacement policies preserves the entire prefix.
+  let count = recorded.prefixLength(cutoff)
   doAssert resumed.hashes[0 ..< cutoff] == recorded.hashes[0 ..< cutoff]
-  doAssert resumed.actions.filterIt(it.tick <= cutoff.uint32) ==
-    recorded.actions.filterIt(it.tick <= cutoff.uint32)
+  doAssert resumed.prefixLength(cutoff) == count
+  doAssert resumed.actions[0 ..< count] == recorded.actions[0 ..< count]
 
 proc testGotaTakeover(
-    executable, source, directory: string,
+    executable, source, original, directory: string,
     recorded: gota.ReplayData
 ) =
   ## Warms real replacements, then lets both teams play to completion.
@@ -95,7 +129,7 @@ proc testGotaTakeover(
   for replaced in [seats div 2, seats]:
     var bots = @["--bot", players / "rusher.bas" & ":" & $replaced]
     if replaced < seats:
-      bots.add ["--bot", players / "base.bas" & ":" & $(seats - replaced)]
+      bots.add ["--bot", original & ":" & $(seats - replaced)]
     let branch = directory / "gota-rusher-" & $replaced & ".replay"
     run(@[
       executable, "--replay", source, "--resume-step", $cutoff
@@ -146,12 +180,19 @@ proc testGame[T](
   else:
     build(Root / "games" / entry, executable)
   if name == "cac":
-    writeFile(original, CacSetup & "endTurn()\n")
-    writeFile(candidate, CacSetup &
+    writeFile(original, CacSetup & chatPolicy("recorded") & "endTurn()\n")
+    writeFile(candidate, CacSetup & chatPolicy("candidate") &
       "if canPlay(0) then\nplayCard(0)\nelse\nendTurn()\nend if\n")
   else:
-    writeFile(original, readFile(gameDirectory / "players/base.bas"))
-    writeFile(candidate, "stop\n")
+    let baseline = readFile(gameDirectory / "players/base.bas")
+    when T is heartleaf.ReplayData:
+      writeFile(original, baseline)
+      writeFile(candidate, "stop\n")
+    else:
+      let headerEnd = baseline.find('\n')
+      writeFile(original, baseline[0 .. headerEnd] & chatPolicy("recorded") &
+        baseline[headerEnd + 1 .. ^1])
+      writeFile(candidate, chatPolicy("candidate") & "stop\n")
   run(@[executable, "--bot", original & ":" & $seats] & duration &
     @["--record", source])
   let
@@ -160,8 +201,10 @@ proc testGame[T](
     middle = length div 2
     bots = @["--bot", candidate & ":" & $seats]
   doAssert length > 2
+  when T isnot heartleaf.ReplayData:
+    doAssert recorded.actions.anyIt(it.text == "recorded")
   when T is gota.ReplayData:
-    testGotaTakeover(executable, source, directory, recorded)
+    testGotaTakeover(executable, source, original, directory, recorded)
   for (cutoff, mixed) in [
     (0, false), (middle, false), (middle, true), (length, false)
   ]:
@@ -178,7 +221,16 @@ proc testGame[T](
     let resumed = load(branch)
     checkPrefix(recorded, resumed, cutoff)
     if cutoff == middle and not mixed:
-      doAssert resumed.actions != recorded.actions, name
+      doAssert resumed.actions.filterIt(it.isGameplay()) !=
+        recorded.actions.filterIt(it.isGameplay()), name
+    when T isnot heartleaf.ReplayData:
+      let live = resumed.actions[recorded.prefixLength(cutoff) .. ^1]
+      if cutoff < length:
+        doAssert live.anyIt(it.text == "candidate"), name
+        if not mixed:
+          doAssert live.allIt(it.text != "recorded"), name
+      else:
+        doAssert resumed.actions.allIt(it.text != "candidate"), name
     run([executable, "--replay", branch])
   for cutoff in [-1, length + 1]:
     run(@[

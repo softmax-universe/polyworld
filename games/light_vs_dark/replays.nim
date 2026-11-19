@@ -1,4 +1,4 @@
-## Light vs Dark command replay, chat transcript, and playback cursor.
+## Light vs Dark ordered command replay and playback cursor.
 ##
 ## A replay contains the match config, accepted commands, player messages,
 ## and one canonical simulation hash per tick. It never stores bot source.
@@ -13,10 +13,10 @@ export fixxy
 
 const
   ReplayGame* = "light_vs_dark"
-  ReplayFormatVersion* = 8'u16
+  ReplayFormatVersion* = 9'u16
   ## This client supports only this gameplay version. Bump it when rules change.
   ## Older replays use their archived client; never add compatibility branches.
-  ReplayGameVersion* = 49'u16
+  ReplayGameVersion* = 50'u16
 
   ActionMove* = 1'u8
   ActionAttack* = 2'u8
@@ -29,13 +29,14 @@ const
   ActionDiplomacy* = 9'u8
   ActionResearch* = 10'u8
   ActionDeposit* = 11'u8
-  ActionKindHigh* = ActionDeposit
+  ActionChat* = 12'u8
+  ActionKindHigh* = ActionChat
 
   MaxReplayBytes* = 64 * 1024 * 1024
   MaxReplayActions* = 4_000_000
   MaxReplayHashes* = 10_000_000
   MaxReplayChats* = 64 * 1024
-    ## Bounds transcript records; the full file also obeys MaxReplayBytes.
+    ## Bounds chat actions; the full tape also obeys MaxReplayBytes.
   MaxMatchTicks* = uint32(TickRate) * 60 * 60
     ## One hour, an absolute ceiling well above any configured match.
 
@@ -83,12 +84,10 @@ type
       ##   SetRally  x, y, unused
       ##   Cancel    unused, unused, unused
       ##   Diplomacy target player, command kind, offer ID
-
-  ReplayChat* = object
-    tick*: uint32
-    playerId*, target*: int32
-      ## Target is -2 for broadcasts or a zero-based direct recipient.
+    target*: int32
+      ## Chat only: -2 for broadcasts or a zero-based direct recipient.
     text*: string
+      ## Chat only: bounded mailbox bytes, filtered as UTF-8 for public display.
 
   ReplayHeader* = TapeHeader[Setup]
   ReplayData* = object
@@ -97,10 +96,11 @@ type
     actions*: seq[ReplayAction]
     hashes*: seq[uint64]
     metrics*: ReplayMetrics
-    chats*: seq[ReplayChat]
 
   ReplayRecorder* = ref object
     data*: ReplayData
+    chatCount*: int
+      ## Append-only count derived from chat actions, never serialized.
 
   ReplayPlayer* = ref object
     data*: ReplayData
@@ -127,29 +127,27 @@ proc initReplayRecorder*(setup: Setup): ReplayRecorder =
   ## Creates an in-memory recorder owning the complete replay data.
   ReplayRecorder(data: initReplayData(setup))
 
-proc validateChat*(chat: ReplayChat, setup: Setup) =
-  ## Validates message routing and bytes independently of decision ticks.
-  if chat.playerId < 0 or int(chat.playerId) >= setup.players.len:
-    fail("replay chat names an unknown sender")
-  if chat.target < -2 or chat.target == -1 or
-    int(chat.target) >= setup.players.len:
-      fail("replay chat names an unknown target")
-  if chat.text.len == 0 or chat.text.len > MaxChatBytes:
-    fail("replay chat has an invalid message length")
-  if chat.tick > setup.maximumTicks:
-    fail("replay chat exceeds the configured duration")
+proc commandCount*(data: ReplayData): int =
+  ## Counts gameplay commands without including presentation chat actions.
+  for action in data.actions:
+    if action.kind != ActionChat:
+      inc result
 
-proc recordChat*(recorder: ReplayRecorder, chat: ReplayChat) =
-  ## Preserves one authoritative message without reading a bot mailbox.
-  if recorder == nil:
-    return
-  chat.validateChat(recorder.data.header.setup)
-  if recorder.data.chats.len >= MaxReplayChats:
-    fail("replay chat limit exceeded")
-  if recorder.data.chats.len > 0 and
-    chat.tick < recorder.data.chats[^1].tick:
-      fail("replay chats move backward in time")
-  recorder.data.chats.add chat
+proc validateChat(action: ReplayAction, setup: Setup) =
+  ## Validates message routing and bytes independently of decision ticks.
+  if action.playerId < 0 or int(action.playerId) >= setup.players.len:
+    fail("replay chat names an unknown sender")
+  if action.target < -2 or action.target == -1 or
+    int(action.target) >= setup.players.len:
+      fail("replay chat names an unknown target")
+  if action.text.len == 0 or action.text.len > MaxChatBytes:
+    fail("replay chat has an invalid message length")
+  if action.tick > setup.maximumTicks:
+    fail("replay chat exceeds the configured duration")
+  if action.append or action.entityId != NoEntity or
+    action.first != 0 or action.second != 0 or action.third != 0 or
+    action.offset != FixedVec2Zero:
+      fail("replay chat has an invalid command payload")
 
 proc record*(recorder: ReplayRecorder, action: ReplayAction) =
   ## Appends one accepted command in deterministic tick order.
@@ -166,7 +164,15 @@ proc record*(recorder: ReplayRecorder, action: ReplayAction) =
   if action.playerId < 0 or
     int(action.playerId) >= recorder.data.header.setup.players.len:
       fail("replay action names an unknown player")
+  if action.kind == ActionChat:
+    action.validateChat(recorder.data.header.setup)
+    if recorder.chatCount >= MaxReplayChats:
+      fail("replay chat limit exceeded")
+  elif action.target != 0 or action.text.len > 0:
+    fail("replay command has an unexpected chat payload")
   recorder.data.actions.appendAction(action, MaxReplayActions)
+  if action.kind == ActionChat:
+    inc recorder.chatCount
 
 proc recordAction*(
     recorder: ReplayRecorder,
@@ -252,6 +258,11 @@ proc validateAction*(action: ReplayAction, setup: Setup) =
     fail("replay action names an unknown player")
   if action.tick > setup.maximumTicks:
     fail("replay action exceeds the configured duration")
+  if action.kind == ActionChat:
+    action.validateChat(setup)
+    return
+  if action.target != 0 or action.text.len > 0:
+    fail("replay command has an unexpected chat payload")
   if action.tick == 0 or action.tick mod uint32(setup.decisionTicks) != 0:
     fail("replay action did not land on a decision tick")
 
@@ -342,24 +353,20 @@ proc validate*(data: ReplayData) =
     fail("replay hash limit exceeded")
   if data.hashes.len > int(setup.maximumTicks):
     fail("replay hashes exceed the configured duration")
-  if data.chats.len > MaxReplayChats:
-    fail("replay chat limit exceeded")
-  var lastTick = 0'u32
+  var
+    lastTick = 0'u32
+    chatCount = 0
   for index, action in data.actions:
     if action.tick > uint32(data.hashes.len):
       fail("replay action exceeds the recorded duration")
     if index > 0 and action.tick < lastTick:
       fail("replay actions move backward in time")
     action.validateAction(setup)
+    if action.kind == ActionChat:
+      inc chatCount
+      if chatCount > MaxReplayChats:
+        fail("replay chat limit exceeded")
     lastTick = action.tick
-  lastTick = 0
-  for index, chat in data.chats:
-    chat.validateChat(setup)
-    if chat.tick > uint32(data.hashes.len):
-      fail("replay chat exceeds the recorded duration")
-    if index > 0 and chat.tick < lastTick:
-      fail("replay chats move backward in time")
-    lastTick = chat.tick
   try:
     data.metrics.validate(
       data.config.players.len,

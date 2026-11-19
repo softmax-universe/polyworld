@@ -153,11 +153,13 @@ proc decodeSubmission*(bytes: string): ActionSubmission =
   if result.mailbox:
     result.target = cast[int32](reader.get32())
     result.text = reader.getString(MaxChatBytes)
+    if result.text.len == 0:
+      reject("CaC mailbox message is empty")
     if reader.cursor != bytes.len:
       reject("Trailing CaC mailbox bytes")
     return
   let kind = reader.get32()
-  if kind notin ActionPlayCard.uint32 .. ActionKindHigh.uint32:
+  if kind notin ActionPlayCard.uint32 .. ActionGameKindHigh.uint32:
     reject("Unknown CaC action")
   result.action.kind = kind.uint8
   result.action.handIndex = cast[int32](reader.get32())
@@ -394,11 +396,11 @@ proc applyPacket*(session: NetworkMatch, packet: RoomMessage) =
       session.pendingPayload.setLen(0)
     if submission.mailbox:
       if not session.finished:
-        let sender = submission.action.playerId
-        let id = if submission.target == -2: -2'i32 else: sender
-        for recipient, inbox in session.inboxes:
-          if submission.target == -2 or recipient == submission.target.int:
-            discard inbox.push(id, submission.text)
+        let message = ReplayAction(kind: ActionMailbox,
+          tick: session.actionCount, playerId: submission.action.playerId,
+          target: submission.target, text: submission.text)
+        session.recorder.record(message)
+        discard session.inboxes.applyMailbox(message)
       continue
     if session.finished or submission.revision != session.actionCount or
         submission.action.playerId.int != session.game.actingPlayer():

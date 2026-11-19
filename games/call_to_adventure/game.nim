@@ -210,7 +210,11 @@ proc decideHeroSlot(game: Game, slot: int32) =
         actor.id,
         action
     ):
-      discard game.applyHeroAction(slot, action)
+      if action.kind == ActionChat:
+        if options.resumeStep >= 0:
+          game.deliverChat(action)
+      else:
+        discard game.applyHeroAction(slot, action)
     return
   if isPlayerIndex(options.playerSlot, slot):
     flushPlayerCommands(game)
@@ -255,9 +259,8 @@ proc resumeReplay() =
     run.hashCheck.requireReplayComplete(
       uint32(run.world.tick), options.resumeStep.int
     )
-    run.recorder = ReplayRecorder(
-      data: run.replayData.replayPrefix(uint32(run.world.tick))
-    )
+    run.recorder = initReplayRecorder(
+      run.replayData.replayPrefix(uint32(run.world.tick)))
     run.recorder.data.config.players = localGameConfig(options, PartySize).players
     run.historyPlayback = false
     run.replayMode = false
@@ -429,6 +432,8 @@ if options.replayPath.len > 0:
     )
   if options.resumeStep >= 0:
     loadBots(run, options.botGroups, options.playerSlot)
+    for action in replayData.chatsAt(0):
+      run.deliverChat(action)
 else:
   profileBlock "map":
     run =

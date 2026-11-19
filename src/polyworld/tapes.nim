@@ -271,6 +271,18 @@ proc takeActionAt*[T](
   inc actionIndex
   true
 
+proc replayPrefix*[T](data: T, tick: uint32): T =
+  ## Retains the recorded prefix and original setup for a policy handoff.
+  if uint64(tick) > uint64(data.hashes.len):
+    fail("resume step exceeds the recorded replay length")
+  result = data
+  result.hashes.setLen(int(tick))
+  result.actions.setLen(data.actions.actionIndexAfter(tick))
+  when compiles(result.events.len):
+    result.events.setLen(data.events.actionIndexAfter(tick))
+  when compiles(result.chats.len):
+    result.chats.setLen(data.chats.actionIndexAfter(tick))
+
 proc hashAt*(
     hashes: openArray[uint64],
     tick: uint32,

@@ -968,54 +968,72 @@ proc record(game: Game, kind: uint8, player: int32,
 proc applyMove*(game: Game, player, x, y: int32,
     offset = FixedVec2Zero): bool =
   ## Walks a villager and records the command when accepted.
+  if game.historyPlayback:
+    return false
   result = game.world.applyMove(player, x, y, offset)
   if result:
     game.record(ActionMove, player, x, y, offset)
 
 proc applyGather*(game: Game, player, garden: int32): bool =
   ## Gathers a garden and records the command when accepted.
+  if game.historyPlayback:
+    return false
   result = game.world.applyGather(player, garden)
   if result:
     game.record(ActionGather, player, garden)
 
 proc applyTalk*(game: Game, player, target: int32): bool =
   ## Records an accepted conversation offer or response.
+  if game.historyPlayback:
+    return false
   result = game.world.applyTalk(player, target)
   if result:
     game.record(ActionTalk, player, target)
 
 proc applyInvite*(game: Game, player, target: int32): bool =
   ## Invites a villager and records the command when accepted.
+  if game.historyPlayback:
+    return false
   result = game.world.applyInvite(player, target)
   if result:
     game.record(ActionInvite, player, target)
 
 proc applyAccept*(game: Game, player, host: int32): bool =
   ## Accepts an invitation and records the command when accepted.
+  if game.historyPlayback:
+    return false
   result = game.world.applyAccept(player, host)
   if result:
     game.record(ActionAccept, player, host)
 
 proc applyDecline*(game: Game, player, host: int32): bool =
   ## Declines an invitation and records the command when accepted.
+  if game.historyPlayback:
+    return false
   result = game.world.applyDecline(player, host)
   if result:
     game.record(ActionDecline, player, host)
 
 proc applyEnterHouse*(game: Game, player, house: int32): bool =
   ## Enters a house and records the command when accepted.
+  if game.historyPlayback:
+    return false
   result = game.world.applyEnterHouse(player, house)
   if result:
     game.record(ActionEnterHouse, player, house)
 
 proc applyExitHouse*(game: Game, player: int32): bool =
   ## Exits a house and records the command when accepted.
+  if game.historyPlayback:
+    return false
   result = game.world.applyExitHouse(player)
   if result:
     game.record(ActionExitHouse, player)
 
 proc applyStop*(game: Game, player: int32): bool =
   ## Stops a villager and records the command when accepted.
+  if game.historyPlayback:
+    return false
   result = game.world.applyStop(player)
   if result:
     game.record(ActionStop, player)

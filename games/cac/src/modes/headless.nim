@@ -51,8 +51,8 @@ proc checkReplay*(path: string) =
 proc parseHeadlessArgs*(arguments: seq[string]): HeadlessArgs =
   ## `--bot PATH[:COUNT]` once per group of seats (2 to 7 seats), `--seed`,
   ## `--ticks` (or `--seconds`, `--minutes`), `--classes archer,mage,...`
-  ## and `--record PATH`; or `--replay PATH` to verify a recording. The
-  ## shared flags parse as in every Polyworld game; an error quits.
+  ## and `--record PATH`; or `--replay PATH` to verify a recording. Add
+  ## `--resume-step N` and bots to watch through N, then take control.
   result.options = GameOptions(seed: DefaultSessionSeed.int32,
     maximumTicks: DefaultDurationTicks)
   var index = 0
@@ -67,7 +67,7 @@ proc parseHeadlessArgs*(arguments: seq[string]): HeadlessArgs =
     else:
       fail("unknown argument: " & argument)
     inc index
-  # No window: --player is refused, and --replay takes no bots or record.
+  # Resume runs selected bots against the replay before their handoff.
   result.options.validateGameOptions(0, "")
 
 proc runHeadless*() =
@@ -75,12 +75,19 @@ proc runHeadless*() =
   let
     parsed = parseHeadlessArgs(commandLineParams())
     options = parsed.options
-  if options.replayPath.len > 0:
+  if options.replayPath.len > 0 and options.resumeStep < 0:
     checkReplay(options.replayPath)
     return
   let seats = options.botGroups.botCount
   if seats notin 2 .. MaxPlayers:
     fail("supply 2 to " & $MaxPlayers & " bots with --bot PATH[:COUNT]")
+  var warmup: ReplayData
+  if options.resumeStep >= 0:
+    warmup = loadReplay(options.replayPath)
+    options.validateResume(warmup.hashes.len,
+      warmup.header.setup.classes.len)
+    if parsed.classNames.len > 0:
+      fail("--resume-step uses the replay's recorded classes and decks")
   var classOverride: seq[Seat]
   if parsed.classNames.len > 0:
     try:
@@ -96,18 +103,39 @@ proc runHeadless*() =
       players.add PlayerConfig(name: group.path.extractFilename)
   let
     bots = loadBots(sources)
+    seed =
+      if options.resumeStep >= 0: warmup.header.setup.seed
+      else: options.seed
+    maxTicks =
+      if options.resumeStep >= 0: warmup.header.setup.maximumTicks
+      else: options.maximumTicks.uint32
+  for bot in bots:
+    if bot != nil:
+      bot.watching = options.resumeStep >= 0
+  let
+    selected =
+      if classOverride.len == 0 or options.resumeStep >= 0:
+        setupBotSeats(bots, seed.int64, options.resumeStep < 0)
+      else: classOverride
     seated =
-      if classOverride.len > 0: classOverride
-      else: setupBotSeats(bots, options.seed.int64)
+      if options.resumeStep >= 0: warmup.header.setup.seats()
+      elif classOverride.len > 0: classOverride
+      else: selected
     recorder = initReplayRecorder(
-      matchSetup(seated, options.seed, options.maximumTicks.uint32),
-      GameConfig(players: players, seed: options.seed,
-        maxTicks: options.maximumTicks))
+      matchSetup(seated, seed, maxTicks),
+      GameConfig(players: players, seed: seed,
+        maxTicks: maxTicks.int32))
+  for bot in bots:
+    if bot != nil:
+      bot.watching = false
   for player, bot in bots:
     for problem in bot.deckProblems:
       echo "player ", player, " illegal deck: ", problem
-  var played = initBotMatch(seated, options.seed.int64, bots,
-    options.maximumTicks.uint32, recorder)
+  var played = initBotMatch(seated, seed.int64, bots,
+    maxTicks, recorder)
+  if options.resumeStep >= 0:
+    played.warmup = warmup
+    played.resumeStep = options.resumeStep.uint32
   played.scriptError = proc(player: int, message: string) =
     echo "player ", player, " BASIC error: ", message
   played.run()

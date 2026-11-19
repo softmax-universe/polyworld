@@ -390,6 +390,8 @@ type
     chatView*: ReplayChatView
     hashCheck*: ReplayHashCheck
     historyPlayback*: bool
+    watchingPolicies*: bool
+    replayChatIndex*: int
     replayMode*: bool
     recordingError*: string
     networked*: bool
@@ -6280,6 +6282,8 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
     let decide = world.heroTurnTicks <= 0
     if decide:
       world.heroTurnTicks = TickRate div 2
+    if game.watchingPolicies and decide and onHeroTurn != nil:
+      onHeroTurn()
     if game.historyPlayback:
       if game.recorder != nil:
         game.replayPlayer.data = game.recorder.data
@@ -6328,6 +6332,9 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
     discard world.freezeObservations()
     defer:
       world.thawObservations()
+    if game.watchingPolicies and world.heroTurnTicks <= 1 and
+        onHeroTurn != nil:
+      onHeroTurn()
     if game.historyPlayback:
       if game.recorder != nil:
         game.replayPlayer.data = game.recorder.data

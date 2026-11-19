@@ -34,6 +34,7 @@ proc usage() =
   echo "  --player:N              Control hero N (1-10); supply 9 bots."
   echo "  --player NAME           Save a nonnumeric player display name."
   echo "  --replay PATH           Play an action replay instead of bots."
+  echo "  --resume-step N         Warm supplied bots through replay tick N (headless)."
   echo "  --record PATH           Record bot actions to a replay."
   echo "  --seconds NUMBER        Battle seconds (default 1200)."
   echo "  --minutes NUMBER        Battle minutes (default 20)."
@@ -187,6 +188,10 @@ proc initializeMatch*() =
   if replayMode:
     run.replayPlayer = initReplayPlayer(replayData)
     run.historyPlayback = true
+    options.validateResume(replayData.hashes.len, run.world.heroes.len)
+    if options.resumeStep >= 0:
+      run.watchingPolicies = true
+      loadBots(run, options.botGroups)
   else:
     loadBots(run, options.botGroups, options.playerSlot)
     run.recorder = initReplayRecorder(
@@ -210,6 +215,8 @@ proc initializeMatch*() =
 
 proc advanceGame*() =
   ## Advances one tick, including live BASIC decisions.
+  if run.watchingPolicies:
+    run.replayMailboxes(uint32(run.world.tick))
   when defined(gotaTestRoom):
     run.prepareTestTick()
   tickWorld(run, proc() =
@@ -220,6 +227,8 @@ proc advanceGame*() =
       if draftTurn == 0 or draftTurn == run.world.draftHeroId():
         runBotDecisions(run)
   )
+  if run.watchingPolicies:
+    run.replayMailboxes(uint32(run.world.tick))
   if not run.replayMode and not run.historyPlayback and run.matchNoticeDue():
     run.recorder.recordChat(ReplayChat(
       tick: uint32(run.world.tick), kind: SystemReplayChat,
@@ -362,13 +371,26 @@ when defined(headless):
       steps = 0
       pacer = initTickPacer(options.headlessTickRate)
       pollers: seq[RequestPoll]
-    if options.waitForLlm and not run.replayMode:
+    if options.waitForLlm and (not run.replayMode or run.watchingPolicies):
       for vm in run.heroVms:
         if vm != nil:
           pollers.add vm.pollRequests
-    while (if run.replayMode: steps < run.replayData.hashes.len
-        else: not run.finished()) and
-        run.recordingError.len == 0:
+    while run.recordingError.len == 0:
+      if run.watchingPolicies and run.world.tick == options.resumeStep:
+        run.hashCheck.requireReplayComplete(run.world.tick.uint32,
+          options.resumeStep.int)
+        run.replayMailboxes(run.world.tick.uint32)
+        run.recorder = ReplayRecorder(
+          data: replayPrefix(run.replayData, run.world.tick.uint32))
+        for i, player in options.localGameConfig(run.world.heroes.len).players:
+          run.recorder.data.config.players[i] = player
+        run.recorder.data.config.playerSlot = 0
+        run.replayMode = false
+        run.historyPlayback = false
+        run.watchingPolicies = false
+      if (if run.replayMode: steps >= run.replayData.hashes.len
+          else: run.finished()):
+        break
       advanceGame()
       waitForRequests(pollers)
       pacer.pace()

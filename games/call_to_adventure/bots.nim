@@ -75,7 +75,7 @@ proc validReplayPayload(action: ReplayAction): bool =
 
 proc issueHeroAction(action: ReplayAction): int32 =
   ## Records and applies one well-formed VM command attempt.
-  if activeGame == nil or activeHeroSlot < 0:
+  if activeGame == nil or activeHeroSlot < 0 or activeGame.historyPlayback:
     return 0
   if not action.validReplayPayload():
     return 0
@@ -119,7 +119,8 @@ proc sendChat*(
   game: Game, sender, target: int, text: openArray[char]
 ): int32 =
   ## Broadcasts to players within 16 tiles on the sender's level.
-  if sender notin 0 ..< game.inboxes.len or target != -2:
+  if game.historyPlayback or
+      sender notin 0 ..< game.inboxes.len or target != -2:
     return 0
   let origin = game.world.actors[sender].home
   for recipient in 0 ..< game.inboxes.len:

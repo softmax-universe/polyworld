@@ -26,6 +26,7 @@ Heartleaf, a village dinner-party week between nine BASIC villagers.
   --player         Control villager one; supply eight bots.
   --player:N       Control villager N (1 .. 9); supply eight bots.
   --replay PATH    Play a recorded game instead of running bots.
+  --resume-step N  Warm bots on a replay through tick N, then let them act.
   --record PATH    Record this game to a replay file.
   --days N         Days in the week (default 7).
   --seed N         Map seed (default 2026).
@@ -119,6 +120,11 @@ block:
     run.replayData = replayData
     run.replayPlayer = initReplayPlayer(replayData)
     run.historyPlayback = true
+    if options.resumeStep >= 0:
+      options.validateResume(replayData.hashes.len, VillagerCount)
+      run.maximumTicks = int32(replayData.header.setup.maximumTicks)
+      loadBots(run, options.botGroups.expandBotSources(
+        controllerKinds(VillagerCount, 0)))
   else:
     var gameMap: MapData
     profileBlock "map":
@@ -148,6 +154,8 @@ startupTarget.validate(run.world.dayCount, run.maximumTicks)
 proc decide(w: World) =
   ## Supplies one decision tick's commands from whichever source owns them.
   if run.historyPlayback:
+    if options.resumeStep >= 0:
+      runBotDecisions(run)
     if run.recorder != nil:
       run.replayPlayer.data = run.recorder.data
     var action: ReplayAction
@@ -168,13 +176,28 @@ proc verifyTick(game: Game) =
     game.hashCheck
   )
 
+proc resumeGame() =
+  ## Hands warmed policies control immediately after the requested replay tick.
+  if options.resumeStep < 0 or not run.historyPlayback or
+      run.world.tick != options.resumeStep:
+    return
+  run.hashCheck.requireReplayComplete(
+    uint32(run.world.tick), int(options.resumeStep))
+  let data = replayPrefix(run.replayData, uint32(run.world.tick))
+  run.recorder = ReplayRecorder(data: data)
+  run.recorder.data.config.players = localGameConfig(options, VillagerCount).players
+  run.historyPlayback = false
+  run.replayMode = false
+
 proc advanceGame*() =
   ## Advances the live world by one tick and verifies it when replaying.
+  resumeGame()
   run.world.tickWorld(decide)
   if run.historyPlayback:
     run.verifyTick()
   elif run.recorder != nil:
     run.recorder.recordHash(run.stateHash())
+  resumeGame()
 
 proc seekStartup*(afterTick: proc() {.closure.} = nil) =
   if startupTarget.kind == NoSeek:

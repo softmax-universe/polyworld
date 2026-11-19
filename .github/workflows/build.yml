@@ -36,6 +36,8 @@ jobs:
         run: python tests/test_server_boundary.py
       - name: Run release tests and all-game determinism
         run: nim r -d:release -d:audioTest -d:bassyNativeStrict -d:replayEvents tests/all.nim
+      - name: Test headless replay policy handoff
+        run: python tests/test_resume.py
       - name: Test display settings
         run: nim r -d:release tests/test_displays.nim
       - name: Test lockstep training API

@@ -310,6 +310,8 @@ proc sendChat*(
     game: Game, sender, target: int, text: openArray[char]
 ): int32 =
   ## Sends local mailbox traffic or queues it for authoritative delivery.
+  if game.watchingPolicies:
+    return 0
   if game.networked:
     if sender notin 0 ..< game.world.heroes.len or
       target < -2 or target >= game.world.heroes.len or
@@ -326,6 +328,17 @@ proc sendChat*(
     )
     return 1
   game.deliverChat(sender, target, text)
+
+proc replayMailboxes*(game: Game, tick: uint32) =
+  ## Delivers recorded policy messages at their tick boundary during warm-up.
+  while game.replayChatIndex < game.replayData.events.len:
+    let message = game.replayData.events[game.replayChatIndex]
+    if message.tick > tick:
+      break
+    inc game.replayChatIndex
+    if message.kind == PolicyReplayChat:
+      discard game.deliverChat(game.world.heroIndex(message.sender),
+        message.target.int, message.text, message.tick.int32)
 
 proc infoFunctions(host: var Host, heroId: int32) =
   ## Exposes ordinary scalar facts shared by BASIC and neural policies.
@@ -495,6 +508,8 @@ proc publishActionResult*(game: Game, heroId: int32, accepted: bool) =
 
 proc requestAction(action: ReplayAction): bool =
   ## Preserves immediate offline results and queue-only multiplayer results.
+  if activeGame.watchingPolicies:
+    return false
   try:
     result = activeGame.submitAction(action)
   except ReplayError as error:
@@ -1107,6 +1122,6 @@ proc runBotDecisions*(game: Game) {.measure.} =
   for offset in 0 ..< game.world.heroes.len:
     let index = (game.world.heroTurnStart + offset) mod game.world.heroes.len
     runHeroScript(game, index)
-  if not game.networked:
+  if not game.networked and not game.watchingPolicies:
     game.world.heroTurnStart =
       (game.world.heroTurnStart + 1) mod game.world.heroes.len

@@ -188,4 +188,35 @@ block:
   except ReplayError as error:
     doAssert error.msg.contains("first at tick 2")
 
+echo "Testing resume prefixes preserve setup and exclude future actions"
+block:
+  type
+    ResumeTape = object
+      maximumTicks: int
+      hashes: seq[uint64]
+      actions, events: seq[TapeAction]
+  let original = ResumeTape(
+    maximumTicks: 100,
+    hashes: @[1'u64, 2, 3],
+    actions: @[TapeAction(tick: 1), TapeAction(tick: 2), TapeAction(tick: 3)],
+    events: @[TapeAction(tick: 0), TapeAction(tick: 2), TapeAction(tick: 3)]
+  )
+  var prefix = original.replayPrefix(2)
+  doAssert prefix.maximumTicks == 100
+  doAssert prefix.hashes == @[1'u64, 2]
+  doAssert prefix.actions.len == 2 and prefix.events.len == 2
+  prefix.hashes.add 99
+  prefix.actions.add TapeAction(tick: 3, kind: 9)
+  doAssert original.hashes == @[1'u64, 2, 3]
+  doAssert original.actions[^1].kind == 0
+  let start = original.replayPrefix(0)
+  doAssert start.hashes.len == 0 and start.actions.len == 0
+  doAssert start.events.len == 1
+  doAssert original.replayPrefix(3).hashes == original.hashes
+  try:
+    discard original.replayPrefix(4)
+    doAssert false, "A handoff cannot pass the recorded end"
+  except ReplayError:
+    discard
+
 echo "Tape tests passed"

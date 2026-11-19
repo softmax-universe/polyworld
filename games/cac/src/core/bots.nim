@@ -32,6 +32,7 @@ type
   BotVm* = ref object
     runtime*: Runtime
     failed*: bool  ## Compilation or presentation failure stops this script.
+    watching*: bool  ## Replay warm-up suppresses outgoing messages.
     lastError*: string  ## Why the last decision (or the compile) failed.
     output*: PrintProc  ## Where the script's PRINT goes (nil: nowhere).
     onSendChat*: proc(sender, target: int, text: openArray[char]): int32
@@ -320,6 +321,8 @@ proc buildBotHost(playerId: int32, policySlot = -1): Host =
   # Mailboxes, as in the other Polyworld games.
   let sendChatProc: NumericHostProc = proc(args: openArray[Value]): Value =
     ## Sends one explicit message from the owning seat.
+    if activeVm.watching:
+      return toValue(0'i32)
     activeVm.runtime.withString(args[1], text):
       if activeVm.onSendChat == nil:
         result = sendChat(int(playerId), int(args[0].asInt), text)
@@ -1541,7 +1544,8 @@ proc runDecision*(vm: BotVm, game: var GameState,
   of ActionEndTurn: BotEndedTurn
   else: BotFailed
 
-proc setupSeat*(vm: BotVm, seats: int, seed = 0'i64): Seat =
+proc setupSeat*(vm: BotVm, seats: int, seed = 0'i64,
+    requireClass = true): Seat =
   ## Runs the script's pre-match phase before cards are dealt: it picks a
   ## class and lists a deck. An illegal deck still seats the bot, with no
   ## deck, so it is out before the first turn; `deckProblems` and the
@@ -1582,6 +1586,8 @@ proc setupSeat*(vm: BotVm, seats: int, seed = 0'i64): Seat =
   try:
     discard vm.runtime.run(vm.output)
     if vm.selectedClass == -1:
+      if not requireClass:
+        return
       raise newException(BasicError,
         "BASIC setup selected no class; call pickClass(0, 1 or 2)")
     result = Seat(heroClass: HeroClass(vm.selectedClass))
@@ -1600,7 +1606,8 @@ proc setupSeat*(vm: BotVm, seats: int, seed = 0'i64): Seat =
     activeGame = nil
     activeVm = nil
 
-proc setupBotSeats*(bots: openArray[BotVm], seed = 0'i64): seq[Seat] =
+proc setupBotSeats*(bots: openArray[BotVm], seed = 0'i64,
+    requireClass = true): seq[Seat] =
   ## Each script's class and deck, before starting a bot match.
   for bot in bots:
-    result.add bot.setupSeat(bots.len, seed)
+    result.add bot.setupSeat(bots.len, seed, requireClass)

@@ -17,6 +17,8 @@ type
     tick*: uint32  ## Actions taken so far.
     maxTicks*: uint32
     recorder*: ReplayRecorder
+    warmup*: ReplayData
+    resumeStep*: uint32
     scriptError*: proc(player: int, message: string)
       ## Called when a seat fails to supply a legal action.
     failed*: bool  ## No valid explicit action was supplied.
@@ -64,12 +66,25 @@ proc step*(match: var BotMatch): bool =
   ## Plays one tick. False once the match is over.
   if match.outcome != MatchRunning:
     return false
-  var action = match.nextAction()
+  var action: ReplayAction
+  if match.tick < match.resumeStep:
+    let vm = match.bots[match.game.actingPlayer()]
+    vm.watching = true
+    discard vm.runDecision(match.game, apply = false)
+    vm.watching = false
+    action = match.warmup.actions[match.tick.int]
+    if not match.game.applyAction(action):
+      raise newException(ReplayError, "Replay action refused during warm-up")
+  else:
+    action = match.nextAction()
   if action.kind == 0:
     return false
   discard match.game.takeVisualEvents()
   inc match.tick
   action.tick = match.tick
+  if match.tick <= match.resumeStep and
+      match.game.stateHash != match.warmup.hashes[match.tick.int - 1]:
+    raise newException(ReplayError, "Replay hash mismatch during warm-up")
   if match.recorder != nil:
     match.recorder.record(action)
     match.recorder.recordHash(match.game.stateHash)

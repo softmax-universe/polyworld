@@ -335,7 +335,8 @@ proc buildVillagerHost*(slot: int32, policySlot = -1): Host =
   let orderFailedProc: HostProc = proc(arguments: openArray[int32]): int32 =
     ## Reads and clears the flag, so one failure is reported exactly once.
     result = int32(me.orderFailed)
-    me.orderFailed = false
+    if not activeGame.historyPlayback:
+      me.orderFailed = false
   discard result.addFunction("orderFailed", 0, orderFailedProc, 4)
 
 ## Lifecycle

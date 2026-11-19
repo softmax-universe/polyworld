@@ -153,9 +153,19 @@ proc applyActorBody(world: World, slot: int32)
 
 ## Construction
 
+proc invalidateVision() =
+  ## Discards derived sight caches when a world or its map is replaced.
+  visionSkipWorld = nil
+  visionSkipKeys.setLen(0)
+  for level in 0 ..< LevelCount:
+    sightTerrain[level].setLen(0)
+    sightBlockers[level].setLen(0)
+    visionBlockers[level].setLen(0)
+
 proc newWorld*(setup: Setup): World =
   ## Creates the tick-zero world. Pure: no file access, no assets, no command
   ## line. Reads the generated terrain through `maps` but never mutates it.
+  invalidateVision()
   result = World()
   result.stats = newCombatStats(PartySize)
   result.setup = setup
@@ -187,6 +197,7 @@ proc clone*(world: World): World =
 
 proc restore*(world: World, snapshot: World) =
   ## Overwrites in place, keeping the caller's ref identity.
+  invalidateVision()
   world[] = snapshot[]
   world.stats = snapshot.stats.clone()
   world.actors = cloneActors(snapshot.actors)

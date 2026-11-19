@@ -207,7 +207,9 @@ proc decideHeroSlot(game: Game, slot: int32) =
         actor.id,
         action
     ):
-      discard game.applyHeroAction(slot, action)
+      if action.kind != ActionChat:
+        # Mailboxes were consumed by private VMs; only their commands replay.
+        discard game.applyHeroAction(slot, action)
     return
   if isPlayerIndex(options.playerSlot, slot):
     flushPlayerCommands(game)

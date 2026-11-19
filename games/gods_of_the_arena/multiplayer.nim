@@ -18,7 +18,6 @@ type NetworkMatch* = ref object
   heroSeats: seq[int]
   decisionTick: int32 = -1
   humanChat*: seq[HumanChatMessage]
-  noticeDelivered: bool
 
 proc networkHash*(game: Game): uint64 =
   ## Includes immutable configuration alongside the normal replay state hash.
@@ -96,6 +95,8 @@ proc decodeSubmission*(bytes: string): GameSubmission =
   if result.mailbox or result.humanChat:
     result.action.first = cast[int32](reader.get32())
     result.text = reader.getString(MaxChatBytes)
+    if result.mailbox and (result.text.len == 0 or result.action.first < -2):
+      reject("Invalid GotA policy chat")
     if result.humanChat and (not result.text.validHumanChat or
         result.action.first notin [-2'i32, -1'i32]):
       reject("Invalid GotA human chat")
@@ -330,6 +331,9 @@ proc applyPacket*(session: NetworkMatch, packet: RoomMessage, localPlayback = fa
       reject("GotA command hero does not belong to this seat")
     if submission.humanChat and command.seatKind != HumanSeat:
       reject("Human chat requires a human seat")
+    if submission.mailbox and
+        submission.action.first >= int32(game.world.heroes.len):
+      reject("GotA mailbox recipient does not exist")
     submissions.add submission
   # A cached spectator packet is replayed with its mailbox commands as well as
   # actions. Never append duplicate actions/hashes, run policies, or publish ACKs.
@@ -341,46 +345,42 @@ proc applyPacket*(session: NetworkMatch, packet: RoomMessage, localPlayback = fa
     if recorder != nil and int(packet.tick) <= recorder.data.hashes.len:
       game.recorder = ReplayRecorder(data: recorder.data)
       game.recorder.data.actions = @[]
-      game.recorder.data.events = @[]
     game.historyPlayback = false
   defer:
     game.recorder = recorder
     game.historyPlayback = history
-  for ordinal, submission in submissions:
+  var actions: seq[ReplayAction]
+  for submission in submissions:
+    var action = submission.action
+    action.tick = packet.tick
     if submission.humanChat:
-      let index = game.world.heroIndex(submission.action.heroId)
-      game.recorder.recordChat(ReplayChat(
-        tick: packet.tick, kind: HumanReplayChat,
-        sender: submission.action.heroId, target: submission.action.first,
-        text: submission.text))
-      session.humanChat.appendHumanChat(HumanChatMessage(
-        tick: packet.tick, ordinal: ordinal,
-        sender: game.recorder.data.config.players[index].name,
-        text: submission.text, team: submission.action.first == -1,
-        senderTeam: game.world.heroes[index].team.ord))
+      action.kind = ActionHumanChat
+      action.text = submission.text
     elif submission.mailbox:
-      discard game.deliverChat(
-        game.world.heroIndex(submission.action.heroId),
-        int(submission.action.first), submission.text, int32(packet.tick)
-      )
-    else:
-      var action = submission.action
-      action.tick = packet.tick
-      game.networkActions.add action
+      action.kind = ActionPolicyChat
+      action.text = submission.text
+    actions.add action
+  # Reserve a possible local notice before any admitted command changes state.
+  let commandCount = actions.len
+  if packet.tick == game.matchNoticeTick():
+    actions.add ReplayAction(
+      tick: packet.tick, kind: ActionSystemNotice,
+      first: -2, text: ThreeMinuteNotice)
+  game.recorder.checkRecord(actions)
+  actions.setLen(commandCount)
+  game.networkActions = actions
   game.tickWorld(nil)
   if uint32(game.world.tick) != packet.tick:
     reject("GotA failed to execute the authoritative tick")
   # The game clock owns presentation reminders, including during local replay.
   let noticeDue = game.matchNoticeDue()
   if noticeDue:
-    game.recorder.recordChat(ReplayChat(
-      tick: packet.tick, kind: SystemReplayChat,
-      target: -2, text: ThreeMinuteNotice))
-  if noticeDue and not session.noticeDelivered:
-    session.noticeDelivered = true
-    session.humanChat.appendHumanChat(HumanChatMessage(
-      tick: packet.tick, ordinal: -1, system: true,
-      text: ThreeMinuteNotice))
+    game.recorder.record(ReplayAction(
+      tick: packet.tick, kind: ActionSystemNotice,
+      first: -2, text: ThreeMinuteNotice))
+  # This bounded UI cache derives from the original tape, including on rewind.
+  session.humanChat = game.chatView.chatAt(
+    recorder.data, uint32(game.world.tick))
   for outcome in game.actionResults:
     if localPlayback:
       continue

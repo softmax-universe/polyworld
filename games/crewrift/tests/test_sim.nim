@@ -30,6 +30,14 @@ proc enterPlaying(game: Game) =
     game.world.step([], [])
   doAssert game.world.phase == Playing
 
+proc enterVoting(game: Game) =
+  ## Opens a meeting without making unrelated bot decisions.
+  game.enterPlaying()
+  game.world.startVote(VoteCalledUnknown, 0, 0, 0)
+  while game.world.phase == MeetingCall:
+    game.world.step([], [])
+  doAssert game.world.phase == Voting
+
 echo "Testing authored floor, markers, and Polyworld navigation"
 block:
   let game = newGame(testOptions())
@@ -141,7 +149,7 @@ block:
   for player in game.world.players:
     doAssert game.world.canOccupy(player.x, player.y)
 
-echo "Testing roster identities, replay metadata, and legacy recordings"
+echo "Testing roster identities and replay metadata"
 block:
   var options = testOptions(17)
   options.player = 3
@@ -331,9 +339,11 @@ block:
     for player in game.world.players:
       if player.alive:
         doAssert player.x == player.homeX and player.y == player.homeY
-    let chats = game.recording.frames[^1].chats
-    doAssert chats.len <= 1, "Bots should take turns rather than flood chat."
-    for chat in chats:
+    var chatCount = 0
+    for chat in game.recording.frames[^1].actions:
+      if chat.kind != ChatAction:
+        continue
+      inc chatCount
       if counts[chat.slot] > 0:
         doAssert game.world.tickCount - previousChats[chat.slot] >=
           game.world.config.messageCooldownTicks
@@ -343,6 +353,7 @@ block:
       defense = defense or chat.text.contains("that wasn't me")
       report = report or chat.text.contains("I found ")
       doAssert counts[chat.slot] <= 3
+    doAssert chatCount <= 1, "Bots should take turns rather than flood chat."
   doAssert accusation and defense and report
   doAssert counts[victim] == 0
   for i, player in game.world.players:
@@ -378,6 +389,108 @@ block:
   except CrewriftError:
     rejected = true
   doAssert rejected
+  removeFile(path)
+
+echo "Testing live input, vote, and chat recording order"
+block:
+  let game = newGame(testOptions())
+  game.enterVoting()
+  game.choice = 1
+  game.chat = "  Check the Bridge.  "
+  game.advance(player = 0, record = true)
+  let actions = game.recording.frames[0].actions
+  doAssert actions[0] == ReplayAction(
+    kind: InputAction, slot: 0, mask: InputState(attack: true).inputMask()
+  )
+  doAssert actions[1] == ReplayAction(kind: VoteAction, slot: 0, choice: 1)
+  doAssert actions[2] == ReplayAction(
+    kind: ChatAction, slot: 0, text: "Check the Bridge."
+  )
+  doAssert game.world.chatMessages[0].text == "Check the Bridge."
+  doAssert game.world.voteState.votes[0] == 1
+
+echo "Testing ordered mixed replay actions and repeated chat"
+block:
+  let
+    game = newGame(testOptions())
+    expected = newGame(testOptions())
+    path = "tmp/test-crewrift-actions.json"
+  for setup in [game, expected]:
+    setup.recording.config.messageCooldownTicks = 0
+    setup.rewind()
+    setup.enterVoting()
+  var
+    frame = ReplayFrame(actions: @[
+      ReplayAction(kind: InputAction, slot: 0,
+        mask: InputState(attack: true).inputMask()),
+      ReplayAction(kind: VoteAction, slot: 0, choice: 1),
+      ReplayAction(kind: ChatAction, slot: 1, text: "Bridge!"),
+      ReplayAction(kind: InputAction, slot: 1),
+      ReplayAction(kind: VoteAction, slot: 0, choice: 2),
+      ReplayAction(kind: ChatAction, slot: 1, text: "Bridge!"),
+      ReplayAction(kind: ChatAction, slot: 0, text: "On my way.")
+    ])
+    inputs = newSeq[InputState](game.world.players.len)
+  for slot in 2 ..< inputs.len:
+    frame.actions.add ReplayAction(kind: InputAction, slot: slot)
+  inputs[0].attack = true
+  expected.world.voteState.cursor[0] = 2
+  expected.world.addVotingChat(1, "Bridge!")
+  expected.world.addVotingChat(1, "Bridge!")
+  expected.world.addVotingChat(0, "On my way.")
+  expected.world.step(inputs, expected.previous)
+  frame.hash = expected.world.gameHash().toHex(16)
+  game.recording.frames.add frame
+  saveReplay(path, game.recording)
+  let encoded = readFile(path)
+  doAssert encoded.contains("\"actions\":")
+  for field in ["\"chats\":", "\"masks\":", "\"choices\":"]:
+    doAssert not encoded.contains(field)
+  game.recording = loadReplay(path)
+  doAssert game.recording.frames[0] == frame
+  game.playback = true
+  game.advance()
+  doAssert game.world.gameHash() == expected.world.gameHash()
+  doAssert game.world.chatMessages == expected.world.chatMessages
+  doAssert game.world.chatMessages.len == 3
+  doAssert game.world.chatMessages[0] == game.world.chatMessages[1]
+  doAssert game.world.chatMessages[2].text == "On my way."
+  doAssert game.world.voteState.votes[0] == 2
+  let hash = game.world.gameHash()
+  game.world.chatMessages[0].text = "Engine!"
+  doAssert game.world.gameHash() != hash
+  game.world.chatMessages[0].text = "Bridge!"
+  swap(game.world.chatMessages[0], game.world.chatMessages[2])
+  doAssert game.world.gameHash() != hash
+  game.rewind()
+  game.enterVoting()
+  game.advance()
+  doAssert game.world.chatMessages == expected.world.chatMessages
+  doAssert game.world.gameHash() == expected.world.gameHash()
+  for invalid in 0 ..< 7:
+    var tape = encoded.fromJson(ReplayData)
+    case invalid
+    of 0:
+      tape.version = ReplayVersion - 1
+    of 1:
+      tape.frames[0].actions.delete(0)
+    of 2:
+      tape.frames[0].actions.add ReplayAction(kind: InputAction, slot: 0)
+    of 3:
+      tape.frames[0].actions[2].slot = tape.players
+    of 4:
+      tape.frames[0].actions[0].mask = 128
+    of 5:
+      tape.frames[0].actions[1].choice = tape.players + 1
+    else:
+      tape.frames[0].actions[2].text = "\n"
+    saveReplay(path, tape)
+    var rejected = false
+    try:
+      discard loadReplay(path)
+    except CrewriftError:
+      rejected = true
+    doAssert rejected, "Invalid action tape was accepted: " & $invalid
   removeFile(path)
 
 echo "Testing backward seeking and resuming a live tape"

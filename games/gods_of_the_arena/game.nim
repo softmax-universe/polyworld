@@ -221,9 +221,9 @@ proc advanceGame*() =
         runBotDecisions(run)
   )
   if not run.replayMode and not run.historyPlayback and run.matchNoticeDue():
-    run.recorder.recordChat(ReplayChat(
-      tick: uint32(run.world.tick), kind: SystemReplayChat,
-      target: -2, text: ThreeMinuteNotice))
+    run.recorder.record(ReplayAction(
+      tick: uint32(run.world.tick), kind: ActionSystemNotice,
+      first: -2, text: ThreeMinuteNotice))
   when defined(gotaTestRoom):
     run.finishTestTick()
   else:
@@ -270,10 +270,10 @@ proc teamTowerCount(team: Team): int =
       inc result
 
 proc heroVmStatus*(): tuple[active, decisions: int] =
-  ## Reports live VM decisions or consumed replay actions.
+  ## Reports live VM decisions or consumed gameplay commands, excluding chat.
   if run.replayMode:
     result.active = run.world.heroes.len
-    result.decisions = run.replayPlayer.actionIndex
+    result.decisions = run.replayCommandCount()
   else:
     for vm in run.heroVms:
       if vm != nil and not vm.failed:
@@ -342,8 +342,7 @@ when defined(headless):
       &"{teamHeroGold(BlueTeam)} gold"
     echo &"xp: red {teamHeroXps(RedTeam)}, blue {teamHeroXps(BlueTeam)}"
     if run.replayMode:
-      echo &"replay: {vmStatus.decisions}/" &
-        &"{run.replayData.actions.len} actions"
+      echo &"replay: {vmStatus.decisions} gameplay actions"
       if run.hashCheck.mismatches > 0:
         echo &"replay hashes: {run.hashCheck.mismatches} mismatches"
     else:

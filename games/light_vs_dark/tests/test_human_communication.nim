@@ -1,5 +1,5 @@
 ## Native, headless two-human binary relay chat acceptance.
-import std/unicode
+import std/[sequtils, unicode]
 import jsony, polyworld/[rooms, roomclients, relays, mailboxes, tapes]
 import ../[humancommunication, multiplayer, presets, sim, content, replays]
 
@@ -191,12 +191,13 @@ block feedBound:
 
 block replayTranscript:
   let data = decodeReplay(encodeReplay(sessions[0].game.recorder.data))
-  doAssert data.chats == sessions[1].game.recorder.data.chats
-  doAssert data.chats.len == MaxHumanChatLines + 7
-  doAssert data.chats[0].tick == 1, "Use delivery tick, not the preceding tick"
-  doAssert data.chats[0].playerId == 0
-  doAssert data.chats[0].text == "Hi 雪🙂"
-  doAssert data.chats[1].playerId == 1
+  doAssert data.actions == sessions[1].game.recorder.data.actions
+  let chats = data.actions.filterIt(it.kind == ActionChat)
+  doAssert chats.len == MaxHumanChatLines + 7
+  doAssert chats[0].tick == 1, "Use delivery tick, not the preceding tick"
+  doAssert chats[0].playerId == 0
+  doAssert chats[0].text == "Hi 雪🙂"
+  doAssert chats[1].playerId == 1
   let playback = newGame(sessions[0].game.world.map,
     int32(data.header.setup.maximumTicks), data.header.setup.diplomacySettings)
   playback.replayMode = true
@@ -207,7 +208,8 @@ block replayTranscript:
     ## Replays all accepted gameplay commands independently of chat display.
     var action: ReplayAction
     while cursor.takeActionAt(uint32(world.tick), action):
-      doAssert world.applyReplayAction(action)
+      if action.kind != ActionChat:
+        doAssert world.applyReplayAction(action)
   feed.syncChatFeed(playback)
   doAssert feed.feed.len == 0
   for tick in 1 .. data.hashes.len:

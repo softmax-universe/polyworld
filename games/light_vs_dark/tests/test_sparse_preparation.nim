@@ -61,10 +61,12 @@ suite "LvD sparse preparation":
     b.applyPacket(packet)
     check a.game.inboxes[0].count == 1
     check a.game.networkHash() == b.game.networkHash()
-    check a.game.recorder.data.actions.len == 1
+    check a.game.recorder.data.actions.len == 2
     check a.game.recorder.data.actions[0].playerId == 1
-    check a.game.recorder.data.chats == b.game.recorder.data.chats
-    check a.game.recorder.data.chats[0].playerId == 1
+    check a.game.recorder.data.actions == b.game.recorder.data.actions
+    check a.game.recorder.data.actions[0].kind == ActionDiplomacy
+    check a.game.recorder.data.actions[1].kind == ActionChat
+    check a.game.recorder.data.actions[1].playerId == 1
     var feed: HumanCommunication
     feed.observeHumanPacket(b, packet)
     check feed.feed.len == 1

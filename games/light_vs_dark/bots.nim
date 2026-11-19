@@ -340,7 +340,8 @@ proc deliverChat*(
     var copy = newString(text.len)
     for i, ch in text:
       copy[i] = ch
-    game.recorder.recordChat(ReplayChat(
+    game.recorder.record(ReplayAction(
+      kind: ActionChat,
       tick: uint32(if tick < 0: game.world.tick else: tick),
       playerId: int32(sender),
       target: int32(target),
@@ -353,7 +354,8 @@ proc deliverChat*(
 proc sendChat*(game: Game, sender, target: int, text: openArray[char]): int32 =
   ## Networked mailboxes receive only authoritative relay deliveries.
   if game.replayMode or game.historyPlayback or
-    (game.recorder != nil and game.recorder.data.chats.len >= MaxReplayChats):
+    (game.recorder != nil and (game.recorder.chatCount >= MaxReplayChats or
+      game.recorder.data.actions.len >= MaxReplayActions)):
       return 0
   if not game.networked:
     return game.deliverChat(sender, target, text)

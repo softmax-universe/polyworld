@@ -258,6 +258,7 @@ proc initializeMatch*() =
     run.replayMode = true
     run.replayData = replayData
     run.replayPlayer = initReplayPlayer(replayData)
+    run.replayPlayer.syncCursor(0)
     run.historyPlayback = true
   else:
     let playerCount = options.botGroups.botCount + int(options.playerSlot > 0)
@@ -314,7 +315,7 @@ proc decide(w: World) =
       run.replayPlayer.data = run.recorder.data
     var action: ReplayAction
     while run.replayPlayer.takeActionAt(uint32(w.tick), action):
-      if w.applyReplayAction(action):
+      if action.kind != ActionChat and w.applyReplayAction(action):
         run.metrics.command(int(action.playerId), w.tick)
   else:
     flushPlayerCommands(run)
@@ -333,8 +334,16 @@ proc verifyTick(game: Game) =
 
 proc advanceGame*() =
   ## Advances the live world by one tick and verifies it when replaying.
+  if run.historyPlayback and run.world.tick == 0:
+    # Tick-zero messages are display records and have no simulation effects.
+    if run.recorder != nil:
+      run.replayPlayer.data = run.recorder.data
+    run.replayPlayer.syncCursor(0)
   run.world.tickWorld(decide)
   if run.historyPlayback:
+    if run.world.tick mod DecisionTicks != 0:
+      # Messages can arrive between decisions and share the same tape cursor.
+      decide(run.world)
     run.verifyTick()
   elif run.recorder != nil:
     run.recorder.recordHash(run.stateHash())
@@ -437,5 +446,5 @@ proc runHeadless*() =
   else:
     saveRecording()
     if options.recordPath.len > 0:
-      echo &"  recorded {run.recorder.data.actions.len} commands to " &
+      echo &"  recorded {run.recorder.data.commandCount()} commands to " &
         options.recordPath

@@ -1,6 +1,5 @@
 import
   std/strutils,
-  flatty,
   polyworld/tapes
 
 type TapeAction = object
@@ -126,47 +125,48 @@ block:
   player.syncCursor(0)
   doAssert not player.finished
 
-echo "Testing optional events round trip without changing legacy tape bytes"
+echo "Testing mixed game commands keep one replay order"
 block:
   type
     Setup = object
       maximumTicks*: uint32
-    Event = object
+    CommandKind = enum
+      Move, Chat
+    Command = object
       tick*: uint32
+      kind*: CommandKind
+      target*: int
       text*: string
-    LegacyTape = object
-      header*: TapeHeader[Setup]
-      config*: GameConfig
-      actions*: seq[TapeAction]
-      hashes*: seq[uint64]
-    EventTape = ActionTape[Setup, TapeAction, void, GameConfig, Event]
+    CommandTape = ActionTape[Setup, Command]
   let
     setup = Setup(maximumTicks: 2)
-    legacy = initActionTape[Setup, TapeAction](setup, 1, 1)
-    expected = LegacyTape(header: legacy.header, config: legacy.config)
-    recorder = TapeRecorder[
-      Setup, TapeAction, void, GameConfig, Event](data: EventTape(
-        header: TapeHeader[Setup](setup: setup,
-          formatVersion: 2, gameVersion: 1)))
-  doAssert legacy.toFlatty() == expected.toFlatty(),
-    "Existing games must keep the same replay payload layout"
-  recorder.data.events = @[
-    Event(tick: 1, text: "hello 🙂"),
-    Event(tick: 1, text: "team reply")]
-  recorder.data.actions.appendAction(TapeAction(tick: 2, kind: 1), 10)
+    recorder = initTapeRecorder[Setup, Command](setup, 2, 1)
+    commands = @[
+      Command(tick: 0, kind: Chat, text: "opening"),
+      Command(tick: 1, kind: Move, target: 3),
+      Command(tick: 1, kind: Chat, text: "hello 🙂"),
+      Command(tick: 1, kind: Move, target: 7),
+      Command(tick: 1, kind: Chat, text: "hello 🙂"),
+      Command(tick: 2, kind: Chat, text: "team reply")]
+  for command in commands:
+    recorder.data.actions.appendAction(command, 10)
   recorder.recordHash(0x11, 10)
   recorder.recordHash(0x22, 10)
   let
-    bytes = encodeReplayFile("event_test", 1, recorder.data)
-    decoded = decodeReplayFile("event_test", 1, bytes, EventTape)
+    bytes = encodeReplayFile("command_test", 1, recorder.data)
+    decoded = decodeReplayFile("command_test", 1, bytes, CommandTape)
     player = initTapePlayer(decoded)
   doAssert decoded == recorder.data
-  doAssert player.actionsAt(1).len == 0
-  doAssert player.actionsAt(2) == recorder.data.actions
+  doAssert player.actionsAt(0) == commands[0 .. 0]
+  doAssert player.actionsAt(1) == commands[1 .. 4],
+    "Same-tick chat and movement must keep their original interleaving"
+  doAssert player.actionsAt(2) == commands[5 .. 5]
   doAssert player.finished
   player.syncCursor(0)
   doAssert not player.finished
-  doAssert player.data.events == recorder.data.events
+  doAssert player.actionsAt(1) == commands[1 .. 4]
+  player.syncCursor(1)
+  doAssert player.actionsAt(2) == commands[5 .. 5]
   var hash: uint64
   doAssert player.hashAt(2, hash) and hash == 0x22
 

@@ -68,4 +68,6 @@ import
   ../games/cac/tests/test_network as TestCacNetwork,
   ../games/cac/tests/test_network_catchup as TestCacCatchup
 
+import test_ordered_replays
+
 echo "CI tests passed"

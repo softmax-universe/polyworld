@@ -1227,6 +1227,13 @@ proc gameHash*(sim: SimServer): uint64 =
   result.mixHashInt(sim.voteState.resultTimer)
   result.mixHashInt(sim.voteState.voteTimer)
   result.mixHashInt(sim.voteState.ejectedPlayer)
+  result.mixHashInt(sim.chatMessages.len)
+  for chat in sim.chatMessages:
+    result.mixHashInt(chat.slotId)
+    result.mixHashInt(int(chat.color))
+    result.mixHashInt(chat.text.len)
+    for ch in chat.text:
+      result.mixHashInt(ord(ch))
 
 proc isWalkable*(sim: SimServer, x, y: int): bool =
   ## Checks a simulation position against the selected navigation floor.

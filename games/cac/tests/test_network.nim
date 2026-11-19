@@ -192,6 +192,7 @@ proc assertPacketRejected(session: NetworkMatch, commands: seq[Command]) =
     originalHash = session.game.stateHash
     originalTick = session.tick
     originalActions = session.actionCount
+    originalEntries = session.recorder.data.actions.len
   var rejected = false
   try:
     session.applyPacket(RoomMessage(kind: TickPacket,
@@ -203,7 +204,7 @@ proc assertPacketRejected(session: NetworkMatch, commands: seq[Command]) =
   doAssert session.game.stateHash == originalHash
   doAssert session.tick == originalTick
   doAssert session.actionCount == originalActions
-  doAssert session.recorder.data.actions.len.uint32 == originalActions
+  doAssert session.recorder.data.actions.len == originalEntries
 
 proc assertInvalidPackets(session: NetworkMatch) =
   ## Rejects malformed and wrongly attributed actions before any state changes.
@@ -225,6 +226,12 @@ proc assertInvalidPackets(session: NetworkMatch) =
   invalid.payload = "incomplete"
   session.assertPacketRejected(@[valid, invalid])
   invalid.payload = valid.payload & "trailing"
+  session.assertPacketRejected(@[valid, invalid])
+  invalid.payload = ActionSubmission(mailbox: true, target: -2,
+    action: ReplayAction(playerId: player.int32)).encodeSubmission()
+  session.assertPacketRejected(@[valid, invalid])
+  invalid.payload = ActionSubmission(action: ReplayAction(
+    kind: ActionMailbox, playerId: player.int32)).encodeSubmission()
   session.assertPacketRejected(@[valid, invalid])
 
 proc assertInitialHashesMatch() =
@@ -590,11 +597,16 @@ for session in sessions:
   session.assertMailbox(1, @["First remote message"])
   doAssert session.actionCount == 0
   doAssert session.game.stateHash == mailboxGameHash
+  doAssert session.recorder.data.actions.len == 1
+  doAssert session.recorder.data.actions[0] == ReplayAction(
+    kind: ActionMailbox, playerId: 0, target: 1,
+    text: "First remote message", tick: 0)
 for client in clients:
   client.accept(relay.rooms[0].history[0])
 advanceClients()
 for session in sessions:
   session.assertMailbox(1, @["First remote message"])
+  doAssert session.recorder.data.actions.len == 1
 
 relay.disconnect(2)
 clients[1].lost()
@@ -629,6 +641,58 @@ doAssert mailboxWatching.submitMailbox(0, 1, "Spectator message") == 0
 mailboxWatching.assertMailbox(1, @["First remote message",
   "Delivered during reconnect"])
 doAssert mailboxWatching.game.stateHash == mailboxGameHash
+doAssert mailboxWatching.recorder.data.actions == sessions[0].recorder.data.actions
+doAssert mailboxWatching.recorder.data.actions.len == 2
+let mailboxData = mailboxWatching.recorder.data.encodeReplay().decodeReplay()
+var mailboxCursor = mailboxData.initReplayCursor()
+mailboxData.applyReplayMailboxes(mailboxCursor, 0)
+doAssert mailboxCursor.actionIndex == 2
+doAssert mailboxCursor.inboxes[1].count == 2
+
+echo "Testing one relay tick saves action, mailbox, action in admission order"
+createHumanMatch(2, 40)
+let
+  firstPlayer = sessions[0].game.actingPlayer()
+  secondPlayer = 1 - firstPlayer
+doAssert sessions[firstPlayer].submitAction(sessions[firstPlayer].game.endTurnAction())
+exchange()
+doAssert sessions[firstPlayer].submitMailbox(firstPlayer, secondPlayer,
+  "Between accepted actions") == 1
+exchange()
+doAssert clients[secondPlayer].submit(secondPlayer.uint32,
+  ActionSubmission(revision: 1, action: ReplayAction(kind: ActionEndTurn,
+    playerId: secondPlayer.int32)).encodeSubmission())
+exchange()
+step()
+for session in sessions:
+  doAssert session.actionCount == 2
+  let data = session.recorder.data.encodeReplay().decodeReplay()
+  doAssert data.actions.len == 3 and data.hashes.len == 2
+  doAssert data.actions[0].kind == ActionEndTurn and data.actions[0].tick == 1
+  doAssert data.actions[1] == ReplayAction(kind: ActionMailbox,
+    tick: 1, playerId: firstPlayer.int32, target: secondPlayer.int32,
+    text: "Between accepted actions")
+  doAssert data.actions[2].kind == ActionEndTurn and data.actions[2].tick == 2
+  var
+    cursor = data.initReplayCursor()
+    game = newGame(data.header.setup)
+    action: ReplayAction
+  doAssert data.takeReplayAction(cursor, 0, action)
+  doAssert cursor.inboxes[secondPlayer].count == 0
+  doAssert game.applyAction(action)
+  doAssert game.stateHash == data.hashes[0]
+  doAssert data.takeReplayAction(cursor, 1, action)
+  doAssert cursor.inboxes[secondPlayer].count == 1
+  doAssert game.applyAction(action)
+  doAssert game.stateHash == data.hashes[1]
+  doAssert not data.takeReplayAction(cursor, 2, action)
+  doAssert cursor.inboxes[secondPlayer].count == 1
+  doAssert game.stateHash == session.game.stateHash
+for client in clients:
+  client.accept(relay.rooms[0].history[0])
+advanceClients()
+for session in sessions:
+  doAssert session.recorder.data.actions.len == 3
 
 echo "Testing BASIC policy mail crosses independent bot owners"
 resetHarness()
@@ -666,6 +730,11 @@ for session in sessions:
   session.assertMailbox(0, @["From BASIC"], 1)
   session.assertMailbox(1, @["From BASIC"], 0)
   doAssert session.finished and session.actionCount == 2
+  doAssert session.recorder.data.actions.len == 4
+  doAssert session.recorder.data.actions[0].kind == ActionMailbox
+  doAssert session.recorder.data.actions[1].kind == ActionEndTurn
+  doAssert session.recorder.data.actions[2].kind == ActionMailbox
+  doAssert session.recorder.data.actions[3].kind == ActionEndTurn
 
 echo "Testing live ownership transfer preserves admitted commands and setup"
 createHumanMatch(2, 40)

@@ -1,10 +1,11 @@
 ## Animated replay completion, looping, and seeks during attacks.
 import
-  std/sequtils,
-  polyworld/player,
+  std/[os, sequtils],
+  polyworld/[mailboxes, player],
   ../src/[replayer, play],
   ../src/core/[bots, match, replays, sim],
   ../src/modes/multiplayer,
+  ../src/modes/headless as headless,
   ../src/scene/table,
   ../src/vfx/vfxrenderer
 
@@ -48,7 +49,8 @@ proc seek(replay: Replayer, play: var TablePlay, game: var GameState,
     replay.advance(play, game, layout, view, time, 0.0'f)
     if replay.transport.targetTick < 0:
       break
-  doAssert replay.tick == target
+  doAssert replay.tick == target,
+    "Seek wanted " & $target & " but reached " & $replay.tick
   doAssert not play.attackActive
   doAssert play.animations.len == 0
   doAssert play.activeVfx.len == 0
@@ -117,11 +119,11 @@ for seconds in [1.0'f / 60, 1.0'f / 30, 0.1'f, 0.25'f]:
         break
   doAssert finished
   doAssert game.gameOver
-  doAssert replay.tick == data.actions.len.int32
+  doAssert replay.tick == data.hashes.len.int32
   doAssert play.heroDeaths.anyIt(it >= 0)
   for i in 0 ..< 120:
     replay.advance(play, game, layout, view, time, seconds)
-  doAssert replay.tick == data.actions.len.int32
+  doAssert replay.tick == data.hashes.len.int32
 
   echo "Restored living heroes ignore death times from the previous game"
   let restored = replay.newReplayGame()
@@ -146,7 +148,7 @@ for seconds in [1.0'f / 60, 1.0'f / 30, 0.1'f, 0.25'f]:
 
   echo "Backward seek keeps its destination and clears dead heroes"
   replay.transport.repeating = false
-  replay.seek(play, game, layout, view, time, data.actions.len.int32)
+  replay.seek(play, game, layout, view, time, data.hashes.len.int32)
   replay.seek(play, game, layout, view, time, 5)
   doAssert play.heroDeaths.len == 0
   replay.seek(play, game, layout, view, time, 0)
@@ -174,8 +176,158 @@ for forward in [false, true]:
     replay.advance(play, game, layout, view, time, 1.0'f / 60)
     if not replay.transport.playing:
       break
-  doAssert replay.tick == data.actions.len.int32
+  doAssert replay.tick == data.hashes.len.int32
   doAssert game.gameOver
+
+echo "Ordered mailboxes preserve action timing, seek state and loop duration"
+block:
+  var
+    mailedData = data
+    attackTick = 0'u32
+  for action in data.actions:
+    if action.kind == ActionAttack:
+      attackTick = action.tick
+      break
+  doAssert attackTick > 0
+  mailedData.actions = @[
+    ReplayAction(kind: ActionMailbox, tick: 0, playerId: 0, target: 1,
+      text: "Before the first action")]
+  for action in data.actions:
+    if action.tick == attackTick:
+      mailedData.actions.add ReplayAction(kind: ActionMailbox,
+        tick: action.tick - 1, playerId: 0, target: 1,
+        text: "Before the attack")
+    mailedData.actions.add action
+    if action.tick == attackTick:
+      mailedData.actions.add ReplayAction(kind: ActionMailbox,
+        tick: action.tick, playerId: 0, target: 1,
+        text: "After the attack lands")
+  mailedData.actions.add ReplayAction(kind: ActionMailbox,
+    tick: data.hashes.len.uint32, playerId: 0, target: 1,
+    text: "After the final action")
+  mailedData.validate()
+  let replayPath = getTempDir() /
+    ("cac-mailbox-replayer-" & $getCurrentProcessId() & ".replay")
+  saveReplay(replayPath, mailedData)
+  try:
+    headless.checkReplay(replayPath)
+  finally:
+    removeFile(replayPath)
+  doAssert mailedData.hashes == data.hashes
+  doAssert mailedData.actions.len == data.actions.len + 4
+  let replay = newReplayer(mailedData)
+  replay.transport.repeating = false
+  var
+    game = replay.newReplayGame()
+    play = initTablePlay(1)
+    time = 0.0'f
+  proc checkMail(completed: uint32) =
+    ## Checks ordered replay inboxes without consuming the recorded messages.
+    var expected: seq[string]
+    for action in mailedData.actions:
+      if action.kind == ActionMailbox and action.tick <= completed:
+        expected.add action.text
+    doAssert replay.cursor.inboxes.len == mailedData.header.setup.classes.len
+    for player, inbox in replay.cursor.inboxes:
+      if player != 1:
+        doAssert inbox.count == 0
+        continue
+      doAssert inbox.count == expected.len
+      for index, message in expected:
+        let slot = (inbox.first + index) mod MaxMailboxMessages
+        doAssert inbox.ids[slot] == 0
+        doAssert inbox.messages[slot] == message
+  checkMail(0)
+  doAssert replay.transport.durationTicks == data.hashes.len.int32
+  for target in [attackTick - 1, attackTick, data.hashes.len.uint32,
+      attackTick - 1, 0'u32, data.hashes.len.uint32, 0'u32]:
+    replay.seek(play, game, layout, view, time, target.int32)
+    checkMail(target)
+    let eventIndex = replay.cursor.actionIndex
+    for iteration in 0 ..< 5:
+      replay.advance(play, game, layout, view, time, 0.0'f)
+    doAssert replay.cursor.actionIndex == eventIndex
+    checkMail(target)
+
+  echo "Mailbox following a replay attack waits until its damage lands"
+  replay.seek(play, game, layout, view, time, attackTick.int32 - 1)
+  replay.transport.playing = true
+  for iteration in 0 ..< 20_000:
+    replay.advance(play, game, layout, view, time, 1.0'f / 240)
+    if play.attackActive:
+      break
+  doAssert play.attackActive
+  doAssert replay.tick == attackTick.int32
+  checkMail(attackTick - 1)
+  var landed = false
+  for iteration in 0 ..< 2_000:
+    replay.advance(play, game, layout, view, time, 1.0'f / 240)
+    if play.attackDamageApplied:
+      landed = true
+      doAssert game.stateHash == data.hashes[attackTick.int - 1]
+    checkMail(if landed: attackTick else: attackTick - 1)
+    if not play.attackActive:
+      break
+  doAssert landed
+  doAssert not play.attackActive
+  doAssert replay.tick == attackTick.int32
+  doAssert game.stateHash == data.hashes[attackTick.int - 1]
+  checkMail(attackTick)
+
+  echo "Seeking away from a lunge reconstructs mailbox order exactly once"
+  for target in [attackTick - 1, attackTick + 1]:
+    replay.seek(play, game, layout, view, time, attackTick.int32 - 1)
+    replay.transport.playing = true
+    for iteration in 0 ..< 20_000:
+      replay.advance(play, game, layout, view, time, 1.0'f / 240)
+      if play.attackActive:
+        break
+    doAssert play.attackActive
+    checkMail(attackTick - 1)
+    replay.seek(play, game, layout, view, time, target.int32)
+    checkMail(target)
+
+  echo "Looping clears trailing messages and restores tick-zero mail"
+  replay.seek(play, game, layout, view, time, data.hashes.len.int32)
+  checkMail(data.hashes.len.uint32)
+  replay.transport.repeating = true
+  replay.transport.playing = true
+  for iteration in 0 ..< 100:
+    replay.advance(play, game, layout, view, time, 0.25'f)
+    if replay.tick == 0:
+      break
+  doAssert replay.tick == 0
+  doAssert replay.transport.durationTicks == data.hashes.len.int32
+  doAssert game.stateHash == replay.newReplayGame().stateHash
+  checkMail(0)
+
+echo "Mailbox-only replay keeps tick-zero delivery without gameplay ticks"
+block:
+  var mailboxOnly = data
+  mailboxOnly.actions = @[
+    ReplayAction(kind: ActionMailbox, playerId: 0, target: 1,
+      text: "No gameplay actions")]
+  mailboxOnly.hashes = @[]
+  mailboxOnly = decodeReplay(mailboxOnly.encodeReplay())
+  let replay = newReplayer(mailboxOnly)
+  var
+    game = replay.newReplayGame()
+    play = initTablePlay(1)
+    time = 0.0'f
+  for iteration in 0 ..< 4:
+    replay.seek(play, game, layout, view, time, 0)
+    doAssert replay.tick == 0
+    doAssert replay.transport.durationTicks == 0
+    doAssert replay.cursor.actionIndex == 1
+    doAssert replay.cursor.inboxes[1].count == 1
+    doAssert replay.cursor.inboxes[1].messages[0] == "No gameplay actions"
+  let replayPath = getTempDir() /
+    ("cac-mailbox-only-" & $getCurrentProcessId() & ".replay")
+  saveReplay(replayPath, mailboxOnly)
+  try:
+    headless.checkReplay(replayPath)
+  finally:
+    removeFile(replayPath)
 
 echo "Replay playback passed"
 

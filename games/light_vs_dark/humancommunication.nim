@@ -46,23 +46,23 @@ proc addMatchNotice(state: var HumanCommunication, game: Game, tick: uint32) =
   state.feed.add HumanChatLine(player: -1, name: "Match",
     text: "3 minutes remain", localNotice: true)
 
-proc publicChat(chat: ReplayChat, players: int): bool =
+proc publicChat(chat: ReplayAction, players: int): bool =
   ## Keeps direct messages and invalid display text out of the public feed.
-  chat.target == -2 and chat.playerId >= 0 and
+  chat.kind == ActionChat and chat.target == -2 and chat.playerId >= 0 and
     int(chat.playerId) < players and chat.text.len > 0 and
     validateUtf8(chat.text) == -1
 
 proc syncChatFeed(
     state: var HumanCommunication,
     game: Game,
-    chats: openArray[ReplayChat]
+    actions: openArray[ReplayAction]
 ) =
   ## Restores visible history on rewind, otherwise appends newly due messages.
   let
     tick = uint32(max(0'i32, game.world.tick))
     players = game.config.players.len
     rebuild = state.chatGame != game or tick < state.chatTick or
-      state.chatIndex > chats.len
+      state.chatIndex > actions.len
     clearFeed = state.chatGame != nil or game.replayMode or game.historyPlayback
   state.chatGame = game
   state.chatTick = tick
@@ -72,10 +72,10 @@ proc syncChatFeed(
       state.feed.setLen(0)
     var
       first = 0
-      last = chats.len
+      last = actions.len
     while first < last:
       let middle = first + (last - first) div 2
-      if chats[middle].tick <= tick:
+      if actions[middle].tick <= tick:
         first = middle + 1
       else:
         last = middle
@@ -83,11 +83,11 @@ proc syncChatFeed(
     var remaining = MaxHumanChatLines
     while state.chatIndex > 0 and remaining > 0:
       dec state.chatIndex
-      if chats[state.chatIndex].publicChat(players):
+      if actions[state.chatIndex].publicChat(players):
         dec remaining
-  while state.chatIndex < chats.len and
-    chats[state.chatIndex].tick <= tick:
-      let chat = chats[state.chatIndex]
+  while state.chatIndex < actions.len and
+    actions[state.chatIndex].tick <= tick:
+      let chat = actions[state.chatIndex]
       inc state.chatIndex
       if chat.publicChat(players):
         state.addMatchNotice(game, chat.tick)
@@ -99,9 +99,9 @@ proc syncChatFeed*(state: var HumanCommunication, game: Game) =
   if game == nil or game.world == nil:
     return
   if game.recorder != nil:
-    state.syncChatFeed(game, game.recorder.data.chats)
+    state.syncChatFeed(game, game.recorder.data.actions)
   else:
-    state.syncChatFeed(game, game.replayData.chats)
+    state.syncChatFeed(game, game.replayData.actions)
 
 proc chatRune*(state: var HumanCommunication, rune: Rune): bool =
   if not state.typing: return false

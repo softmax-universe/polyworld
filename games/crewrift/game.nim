@@ -187,41 +187,50 @@ proc advance*(game: Game, player = -1, record = false) =
     return
   var
     inputs = newSeq[InputState](game.world.players.len)
-    frame = ReplayFrame(choices: newSeq[int](inputs.len))
+    frame: ReplayFrame
   let history = game.frame < game.recording.frames.len
-  for choice in frame.choices.mitems:
-    choice = -1
   if not game.playback:
     for i in 0 ..< inputs.len:
+      var
+        choice = -1
+        chat: string
       if i == player:
         inputs[i] = game.input
+        if not history:
+          if game.choice >= 0 and game.world.phase == Voting:
+            choice = game.choice
+            inputs[i].attack = not game.previous[i].attack
+            if inputs[i].attack:
+              game.choice = -1
+          chat = cleanChatMessage(game.chat)
+          game.chat.setLen(0)
       else:
         inputs[i] = game.bots[i].decideBot(
           game.nav, game.world, i, game.previous[i]
         )
-        if game.bots[i].chat.len > 0:
-          frame.chats.add ReplayChat(slot: i, text: game.bots[i].chat)
-          game.bots[i].chat.setLen(0)
-    if player >= 0 and not history:
-      if game.choice >= 0 and game.world.phase == Voting:
-        frame.choices[player] = game.choice
-        inputs[player].attack = not game.previous[player].attack
-        if inputs[player].attack:
-          game.choice = -1
-      if game.chat.len > 0:
-        frame.chats.add ReplayChat(slot: player, text: game.chat)
-        game.chat.setLen(0)
-    for input in inputs:
-      frame.masks.add input.inputMask()
+        chat = cleanChatMessage(game.bots[i].chat)
+        game.bots[i].chat.setLen(0)
+      frame.actions.add ReplayAction(
+        kind: InputAction, slot: i, mask: inputs[i].inputMask()
+      )
+      if choice >= 0:
+        frame.actions.add ReplayAction(
+          kind: VoteAction, slot: i, choice: choice
+        )
+      if chat.len > 0:
+        frame.actions.add ReplayAction(kind: ChatAction, slot: i, text: chat)
   if history:
     frame = game.recording.frames[game.frame]
-    for i, mask in frame.masks:
-      inputs[i] = readInput(mask)
-  for i, choice in frame.choices:
-    if choice >= 0 and game.world.phase == Voting:
-      game.world.voteState.cursor[i] = choice
-  for chat in frame.chats:
-    game.world.addVotingChat(chat.slot, chat.text)
+  for action in frame.actions:
+    case action.kind
+    of InputAction:
+      inputs[action.slot] = readInput(action.mask)
+    of VoteAction:
+      if game.world.phase == Voting:
+        game.world.voteState.cursor[action.slot] = action.choice
+    of ChatAction:
+      game.world.addVotingChat(action.slot, action.text)
+  # Button snapshots are applied simultaneously after ordered side effects.
   game.world.step(inputs, game.previous)
   game.previous = inputs
   if history:

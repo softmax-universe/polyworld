@@ -32,18 +32,18 @@ block independentClocks:
   games[1].world.tick = 4
   feeds[1].syncChatFeed(games[1])
   doAssert feeds[1].feed == feeds[0].feed
-  doAssert games[0].replayData.chats.len == 0
+  doAssert games[0].replayData.actions.len == 0
   echo "PASS independent applied clocks, local attribution and deduplication"
 
 block replayAndNewMatch:
   let game = clockGame(Duration)
   game.replayMode = true
   game.historyPlayback = true
-  game.replayData.chats = @[
-    ReplayChat(tick: 2, playerId: 0, target: -2, text: "before"),
-    ReplayChat(tick: 6, playerId: 0, target: -2, text: "after")
+  game.replayData.actions = @[
+    ReplayAction(kind: ActionChat, tick: 2, playerId: 0, target: -2, text: "before"),
+    ReplayAction(kind: ActionChat, tick: 6, playerId: 0, target: -2, text: "after")
   ]
-  let transcript = game.replayData.chats
+  let transcript = game.replayData.actions
   var feed: HumanCommunication
   game.world.tick = 7
   feed.syncChatFeed(game)
@@ -58,7 +58,7 @@ block replayAndNewMatch:
   feed.syncChatFeed(game)
   feed.syncChatFeed(game)
   doAssert feed.feed.len == 2 and feed.feed[1].localNotice
-  doAssert game.replayData.chats == transcript, "The warning is never recorded"
+  doAssert game.replayData.actions == transcript, "The warning is never recorded"
   let fresh = clockGame(Duration)
   feed.syncChatFeed(fresh)
   doAssert feed.feed.len == 0
@@ -86,7 +86,7 @@ block shortAndFinishedGames:
 block boundedFeed:
   let game = clockGame(Duration)
   for index in 0 ..< MaxHumanChatLines + 5:
-    game.replayData.chats.add ReplayChat(tick: uint32(index + 5),
+    game.replayData.actions.add ReplayAction(kind: ActionChat, tick: uint32(index + 5),
       playerId: 0, target: -2, text: "later " & $index)
   game.world.tick = MaxHumanChatLines + 10
   var feed: HumanCommunication

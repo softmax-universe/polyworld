@@ -37,13 +37,19 @@ proc checkReplay*(path: string) =
     game = newGame(data.header.setup)
     check: ReplayHashCheck
     tick = 0'u32
-  for action in data.actions:
+    cursor = initReplayCursor(data)
+  data.applyReplayMailboxes(cursor, tick)
+  while tick < data.hashes.len.uint32:
+    var action: ReplayAction
+    if not data.takeReplayAction(cursor, tick, action):
+      raise newException(ReplayError, "Replay gameplay action is missing")
     if not game.applyAction(action):
       raise newException(ReplayError,
         "replay action at tick " & $action.tick & " was refused")
     discard game.takeVisualEvents()
     tick = action.tick
     data.hashes.checkReplayHash(tick, game.stateHash, check)
+    data.applyReplayMailboxes(cursor, tick)
   check.requireReplayComplete(tick, data.hashes.len)
   echo "Replay verified: ", data.hashes.len, " ticks, ",
     data.header.setup.classes.len, " players."

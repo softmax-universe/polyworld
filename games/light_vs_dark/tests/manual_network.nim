@@ -128,24 +128,28 @@ proc main() =
         let data = loadReplay(replayFile)
         require(data.hashes.len == ticks, "Recording does not cover every tick")
         var playerActions: array[2, int]
-        for action in data.actions: inc playerActions[action.playerId]
+        for action in data.actions:
+          if action.kind != ActionChat:
+            inc playerActions[action.playerId]
         require(playerActions[0] > 0 and playerActions[1] > 0,
           "Both separately owned bots must contribute accepted actions")
         let
           playback = newGame(session.game.world.map, int32(ticks),
             data.header.setup.diplomacySettings)
           cursor = initReplayPlayer(data)
+        cursor.syncCursor(0)
         proc replay(world: World) =
           var action: ReplayAction
           while cursor.takeActionAt(uint32(world.tick), action):
-            require(world.applyReplayAction(action), "Replay action was rejected")
+            if action.kind != ActionChat:
+              require(world.applyReplayAction(action), "Replay action was rejected")
         for tick in 1 .. data.hashes.len:
           playback.world.tickWorld(replay)
           require(playback.stateHash() == data.hashes[tick - 1],
             "Replay hash mismatch at tick " & $tick)
         require(playback.stateHash() == session.game.stateHash(), "Replay final hash differs")
         report = Result(name: name, participant: client.participant, seat: seat,
-          tick: int(session.game.world.tick), actions: data.actions.len,
+          tick: int(session.game.world.tick), actions: data.commandCount(),
           replayTicks: data.hashes.len, hash: session.game.stateHash(),
           networkHash: session.game.networkHash(), reconnected: reconnected)
         writeFile(resultFile, report.toJson())

@@ -1,6 +1,6 @@
 import
   std/[strutils, times],
-  bumpy, chroma, silky, vmath, windy,
+  bumpy, chroma, pixie, silky, vmath, windy,
   chrome, homes, lobbies, replaylibraries, sounds, tapes
 
 const ReplayRowHeight* = 104.0'f
@@ -22,6 +22,14 @@ type
     entries*: seq[ReplayEntry]
     folder*, message*: string
     refreshRequested*: bool
+  ReplayBrowserStyle* = object
+    title*: string = "REPLAYS"
+    titleColor*: ColorRGBX = rgbx(240, 237, 225, 255)
+    accentColor*: ColorRGBX = LobbyGreen
+    mutedColor*: ColorRGBX = LobbyMuted
+    centerTitle*: bool
+    navigationIcons*: bool = true
+    background*: proc(sk: Silky, window: Window)
   ReplayBrowserLayout* = object
     panel*, rows*: Rect
     back*, importButton*, folderButton*, refresh*: Rect
@@ -86,7 +94,7 @@ when not defined(emscripten):
       browser.message = error.msg
       result = ReplayBrowserResult()
 
-proc replayBrowserLayout*(view: Vec2): ReplayBrowserLayout =
+proc replayBrowserLayout*(view: Vec2, folderWidth = 236.0'f): ReplayBrowserLayout =
   ## Keeps the list and controls within the current logical desktop viewport.
   let
     width = min(1240.0'f, max(480.0'f, view.x - 48))
@@ -96,8 +104,9 @@ proc replayBrowserLayout*(view: Vec2): ReplayBrowserLayout =
   result.rows = rect(left + 20, 188, width - 40, result.panel.h - 76)
   result.back = rect(left, bottom - 44, 160, 44)
   result.importButton = rect(left, 76, 194, 44)
-  result.folderButton = rect(left + 208, 76, 236, 44)
   result.refresh = rect(left + width - 154, 76, 154, 44)
+  result.folderButton = rect(left + 208, 76,
+    min(max(236.0'f, folderWidth), result.refresh.x - left - 220), 44)
 
 proc folderButtonLabel*(): string =
   ## Names the desktop's file manager without exposing command syntax.
@@ -158,7 +167,7 @@ proc drawReplayBrowser*(
   sk: Silky, window: Window, ui: var ReplayBrowserUi,
   entries: openArray[ReplayEntry], folder: string,
   gameVersion: uint16, tickRate: int, message = "",
-  lengthDisplay = ReplayDuration
+  lengthDisplay = ReplayDuration, style = ReplayBrowserStyle()
 ): ReplayBrowserResult =
   ## Draws the library and returns file actions for the frontend to perform.
   doAssert tickRate > 0
@@ -172,20 +181,27 @@ proc drawReplayBrowser*(
   sk.textStyle = "LobbyBody"
   let
     view = window.size.vec2 / sk.uiScale
-    layout = replayBrowserLayout(view)
+    layout = replayBrowserLayout(view,
+      sk.getTextSize("LobbyBody", folderButtonLabel()).x + 20)
     rowWidth = layout.rows.w - 16
-  sk.drawHomeBackground(window)
-  sk.drawLabel("REPLAYS", vec2(layout.panel.x, 14),
-    vec2(layout.panel.w, 56), rgbx(240, 237, 225, 255), "LobbyTitle")
+  if style.background != nil:
+    style.background(sk, window)
+  else:
+    sk.drawHomeBackground(window)
+  sk.drawLabel(style.title, vec2(layout.panel.x, 14),
+    vec2(layout.panel.w, 56), style.titleColor, "LobbyTitle",
+    if style.centerTitle: CenterAlign else: LeftAlign)
   if sk.lobbyButton("Import replay", layout.importButton.xy,
     layout.importButton.w):
       result.action = ImportReplayFile
   if sk.lobbyButton(folderButtonLabel(), layout.folderButton.xy,
     layout.folderButton.w):
       result.action = OpenReplayFolder
-  if sk.lobbyButton("Refresh", layout.refresh.xy, layout.refresh.w, "loop"):
+  if sk.lobbyButton("Refresh", layout.refresh.xy, layout.refresh.w,
+    if style.navigationIcons: "loop" else: ""):
     result.action = RefreshReplays
-  if sk.lobbyButton("Back", layout.back.xy, layout.back.w, "arrow_left") or
+  if sk.lobbyButton("Back", layout.back.xy, layout.back.w,
+    if style.navigationIcons: "arrow_left" else: "") or
     window.buttonPressed[KeyEscape]:
       result.action = BackFromReplays
   sk.lobbyPanel(layout.panel.xy, layout.panel.wh)
@@ -221,13 +237,13 @@ proc drawReplayBrowser*(
       at = layout.rows.xy +
         vec2(0, index.float32 * ReplayRowHeight - ui.scroll.scrollPos.y)
       size = vec2(rowWidth, ReplayRowHeight - 8)
-      ink = if entry.playable: sk.theme.defaultTextColor else: LobbyMuted
+      ink = if entry.playable: sk.theme.defaultTextColor else: style.mutedColor
       labelWidth = rowWidth - 180
     if at.y + size.y <= layout.rows.y or at.y >= layout.rows.y + layout.rows.h:
       continue
     sk.lobbyPanel(at, size, true)
     if index == selected:
-      sk.drawRect(at + vec2(0, 2), vec2(4, size.y - 4), LobbyGreen)
+      sk.drawRect(at + vec2(0, 2), vec2(4, size.y - 4), style.accentColor)
     if sk.interact(rect(at, vec2(labelWidth + 20, size.y)),
       entry.playable) == Released:
         ui.selectedPath = entry.path
@@ -235,19 +251,19 @@ proc drawReplayBrowser*(
     sk.lobbyLabel(sk.fittedLabel(entry.name, labelWidth, "LobbyBold"),
       at + vec2(14, 0), labelWidth, "LobbyBold", ink)
     sk.lobbyLabel(replayDetails(entry, tickRate, lengthDisplay),
-      at + vec2(14, 28), labelWidth, tint = LobbyMuted)
+      at + vec2(14, 28), labelWidth, tint = style.mutedColor)
     let detail = if entry.playable: "Ready to watch" else: entry.problem
     sk.lobbyLabel(sk.fittedLabel(detail, labelWidth, "LobbyBody"),
       at + vec2(14, 56), labelWidth,
-      tint = if entry.playable: LobbyGreen else: LobbyMuted)
+      tint = if entry.playable: style.accentColor else: style.mutedColor)
     if sk.lobbyButton("Watch", at + vec2(rowWidth - 144, 26), 128,
-      "arrow_right", entry.playable):
+      (if style.navigationIcons: "arrow_right" else: ""), entry.playable):
         result = ReplayBrowserResult(action: PlayReplay, path: entry.path)
   if entries.len == 0:
     sk.lobbyLabel("No saved replays yet.", layout.rows.xy + vec2(20, 38),
       rowWidth - 40, "LobbyHeading")
     sk.lobbyLabel("Enable Save replay in game setup, or import a replay file.",
-      layout.rows.xy + vec2(20, 82), rowWidth - 40, tint = LobbyMuted)
+      layout.rows.xy + vec2(20, 82), rowWidth - 40, tint = style.mutedColor)
   sk.popClipRect()
   if selected >= 0 and window.buttonPressed[KeyEnter]:
     result = ReplayBrowserResult(action: PlayReplay, path: entries[selected].path)
@@ -256,12 +272,13 @@ proc drawReplayBrowser*(
     if message.len > 0: message else: folder,
     layout.panel.w - 180, "LobbyBody"
   ), footer, layout.panel.w - 180,
-    tint = if message.len > 0: sk.theme.defaultTextColor else: LobbyMuted)
+    tint = if message.len > 0: sk.theme.defaultTextColor else: style.mutedColor)
 
 proc drawReplayBrowser*(
   sk: Silky, window: Window, browser: var ReplayBrowserState,
-  gameVersion: uint16, tickRate: int, lengthDisplay = ReplayDuration
+  gameVersion: uint16, tickRate: int, lengthDisplay = ReplayDuration,
+  style = ReplayBrowserStyle()
 ): ReplayBrowserResult =
   ## Renders the same controller state for every desktop replay library.
   sk.drawReplayBrowser(window, browser.ui, browser.entries, browser.folder,
-    gameVersion, tickRate, browser.message, lengthDisplay)
+    gameVersion, tickRate, browser.message, lengthDisplay, style)

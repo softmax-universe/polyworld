@@ -1,8 +1,8 @@
 # Desktop replay libraries
 
-GotA, Light vs Dark, and Cards and Casters use the same desktop replay library
-components. Game setup defaults to **Save replay** enabled. The choice belongs
-to the local player and is stored separately from multiplayer match settings.
+GotA, Light vs Dark, Cards and Casters, and Galcon use the same desktop replay
+library components. Game setup defaults to **Save replay** enabled. The choice
+belongs to the local player and is stored separately from multiplayer match settings.
 The replay menu, import dialog, folder button, and save controls are excluded
 from browser builds.
 
@@ -13,7 +13,8 @@ from browser builds.
   game supplies a `ReplayLibrary` descriptor and its payload validator.
 - `polyworld/replaymenus.nim` owns the replay list, selection, scrolling,
   disabled incompatible entries, and browser actions. Games handle launching
-  and leaving their own playback sessions.
+  and leaving their own playback sessions. Galcon supplies its space background,
+  original fonts, flat widgets, and green highlights to the shared renderer.
 - `polyworld/replaysettings.nim` owns the recording preference format and
   persistence. Game wrappers supply their existing configuration namespace.
 - `polyworld/replaysaves.nim` owns save deduplication, completion attempts,
@@ -22,6 +23,9 @@ from browser builds.
 Games retain their own recording and playback logic, including deterministic
 state checks and ordered chat actions. GotA and LvD display elapsed time; CaC
 displays action counts because its replay advances by accepted game actions.
+Galcon supplies an opaque-payload descriptor because its existing recording
+format uses only the outer Polyworld version header. Its decoder still
+validates the complete payload before a replay becomes playable.
 
 ## Save behavior
 
@@ -46,6 +50,7 @@ or replay versions remain visible but disabled, and selecting a playable
 entry revalidates it before playback.
 
 Shared behavior tests live in `tests/test_replaysettings.nim`,
-`tests/test_replaysaves.nim`, and `tests/test_replay_browser.nim`.
+`tests/test_replaysaves.nim`, `tests/test_replaylibraries.nim`, and
+`tests/test_replay_browser.nim`.
 Each game's tests retain coverage of its actual
 recording, save/load, replay hashes, and native menu rendering.

@@ -19,6 +19,7 @@ import
   test_tapes,
   test_replaysettings,
   test_replaysaves,
+  test_replaylibraries,
   test_replay_browser,
   test_policy_packages,
   test_tensors,

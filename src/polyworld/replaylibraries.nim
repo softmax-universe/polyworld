@@ -3,6 +3,8 @@ import
   tapes
 
 type
+  ReplayPayloadHeader* = enum
+    TapePayloadHeader, OpaquePayloadHeader
   ReplayEntry* = object
     path*, name*: string
     modified*: Time
@@ -15,6 +17,7 @@ type
     game*: string
     gameVersion*, tapeVersion*: uint16
     maxBytes*: int
+    payloadHeader*: ReplayPayloadHeader
   ReplayInspector* = proc(bytes: string): int
     ## Validates a current game payload and returns its recorded tick count.
   ReplayLibrary* = object
@@ -88,6 +91,8 @@ proc inspectVersions(
     entry.problem = "Game version " & $header.gameVersion &
       " (requires " & $format.gameVersion & ")"
     return
+  if format.payloadHeader == OpaquePayloadHeader:
+    return true
   let offset = ReplayMagic.len + 6 + header.game.len
   if bytes.len < offset + 4:
     raise newException(ReplayError, "The replay payload is incomplete.")

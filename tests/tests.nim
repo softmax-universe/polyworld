@@ -107,6 +107,7 @@ import
   test_tapes,
   test_replaysettings,
   test_replaysaves,
+  test_replaylibraries,
   test_replay_browser,
   test_terrains,
   test_terrainmaps,

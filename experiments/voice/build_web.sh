@@ -30,5 +30,5 @@ fi
 
 nim c --hints:off -d:emscripten "$@" "$voice_dir/voice.nim"
 printf 'Built %s\n' "$voice_dir/emscripten/voice.html"
-printf 'Run: python3 %s/serve.py\n' "$voice_dir"
+printf 'Run: nim r %s/serve.nim\n' "$voice_dir"
 printf 'Open: http://localhost:8001/\n'

@@ -120,7 +120,7 @@ Install Emscripten, then run from the repository root:
 
 ```sh
 ./experiments/voice/build_web.sh
-python3 experiments/voice/serve.py --port 8001
+nim r experiments/voice/serve.nim --port 8001
 ```
 
 Open <http://localhost:8001/> on the computer running the server. The same
@@ -146,6 +146,22 @@ OpenAI over a WebSocket. This is an experiment server bound to loopback, not a
 public hosting service. For a remote work computer, forward its port over SSH
 and still open a localhost URL in your browser.
 
+For private HTTPS access through Tailscale, run a separate server with your
+machine's Tailscale DNS name:
+
+```sh
+nim r experiments/voice/serve.nim --port 8002 \
+  --origin https://YOUR-MACHINE.YOUR-TAILNET.ts.net:8443
+tailscale serve --bg --https=8443 http://127.0.0.1:8002
+```
+
+Open that HTTPS address from a device allowed by your Tailscale permissions.
+These visitors can use the server's configured OpenAI key. Keep the backend
+bound to loopback and use Tailscale Serve for private access. To additionally
+restrict the app to one account, add `--tailscale-user YOUR-LOGIN`; this checks
+the identity headers supplied by Tailscale Serve. To remove this proxy, run
+`tailscale serve --https=8443 off`.
+
 The browser uses its selected input/output devices. Browser permission, autoplay,
 and background-tab scheduling rules apply. Microphone capture uses AudioWorklet
 and needs localhost or HTTPS. Headphones help when evaluating acoustic feedback;
@@ -162,7 +178,7 @@ Offline browser transport and local-server regressions:
 
 ```sh
 node experiments/voice/tests/test_browser_transport.mjs
-python3 experiments/voice/tests/test_web_server.py
+nim r experiments/voice/tests/test_web_server.nim
 ```
 
 The live browser tests require Playwright and use billable OpenAI requests:
@@ -218,8 +234,8 @@ nim r --out:experiments/voice/build/tests_conversation_controls \
   experiments/voice/tests/tests_conversation_controls.nim
 nim r --out:experiments/voice/build/tests_devices \
   experiments/voice/tests/tests_devices.nim
-python3 experiments/voice/tests/test_launches.py
-python3 experiments/voice/tests/test_signings.py
+nim r experiments/voice/tests/test_launches.nim
+nim r experiments/voice/tests/test_signings.nim
 ```
 
 The macOS launcher check opens two short offline windows. It verifies argument

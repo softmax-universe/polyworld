@@ -1,5 +1,5 @@
 bassy 0.1.0 https://github.com/treeform/bassy a9effcaab13abc9dfe42d7658cf87ee4783b0e14
-curly 1.1.1 https://github.com/treeform/curly 29558e2d2b76244a2c65fea08e9f4efff16c1997
+curly 1.1.1 https://github.com/treeform/curly bab28778114b5f5c82a65a28627f5cc264d2ad13
 libcurl 1.0.0 https://github.com/Araq/libcurl eecbfc31e17ae2f09f0b6d2aaefcfb970c7d2be4
 fixxy 0.1.0 https://github.com/treeform/fixxy 05e5446dffb70093056cebb0c57721a60deaf52a
 silky 0.2.0 https://github.com/treeform/silky a68b2524d5e21e06f8098f19e78b145237f3f8f2
@@ -30,4 +30,4 @@ gltf 0.2.0 https://github.com/treeform/gltf 0673a92c515966852c91f9f987bb899d0f67
 webby 0.2.1 https://github.com/treeform/webby fe515be4ab5d02695289f88fca0d27f703a05599
 noisy 0.4.5 https://github.com/treeform/noisy 9625ee0a9dbdae44c427df95a4f8de006c061150
 benchy 0.1.0 https://github.com/treeform/benchy 6425417b578dc54008285aad020625b4b4f61f7b
-mummy 0.4.8 https://github.com/treeform/mummy 01deb1ff694988635c7bf0f24f6088a0bdf6db5d
+mummy 0.4.8 https://github.com/treeform/mummy 649146cf391bd8eeff1796f6fc62d54a13c1d635

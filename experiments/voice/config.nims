@@ -41,6 +41,6 @@ when defined(emscripten):
   switch("passL", "-sEXPORTED_RUNTIME_METHODS=ccall,UTF8ToString")
   if paramStr(1) in ["run", "r"]:
     setCommand("c")
-    echo "Serve this build with python3 experiments/voice/serve.py"
+    echo "Serve this build with nim r experiments/voice/serve.nim"
 else:
   switch("define", "ssl")

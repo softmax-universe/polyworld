@@ -53,6 +53,13 @@ jobs:
         run: |
           node tests/test_webinputs.js
           node tests/test_replay_audio.js
+      - name: Test Voice Lab browser transport and local server
+        run: |
+          node experiments/voice/tests/test_browser_transport.mjs
+          nim r experiments/voice/tests/test_web_server.nim
+      - name: Test Voice Lab signing selection
+        if: runner.os != 'Windows'
+        run: nim r experiments/voice/tests/test_signings.nim
       - name: Test browser relay protocol
         shell: bash
         run: |

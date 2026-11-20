@@ -3,7 +3,15 @@
 A native Polyworld prototype about teaching one creature through conversation.
 Moss uses the Light versus Dark Elemental as its temporary appearance.
 
-Run from the Polyworld repository:
+Use Nim 2.2.10 or newer and the dependencies pinned in `nimby.lock`.
+In a fresh workspace, run `nimby create` and `nimby sync polyworld/nimby.lock`
+from the directory containing the `polyworld` checkout. If you already have
+those dependencies, set `POLYWORLD_DEPS` to the directory containing them.
+The window and hidden captures also load models, fonts, and textures from
+the sibling `polyworld_art` checkout with its Git LFS files present.
+See [local setup](../../readme.md#run-locally).
+
+Run from the Polyworld repository root:
 
 ```sh
 nim r games/monster/monster.nim
@@ -19,8 +27,8 @@ inspection. It never gives an order.
 The chat has two modes: `Text` and `Conversation`. It starts in Text with no
 microphone or voice connection. Conversation requires an OpenAI API key.
 Select it once, allow microphone access, and speak naturally. Semantic turn
-detection decides when you have finished speaking; there is no Talk/Finish
-button or recording time limit. You can interrupt Moss while he speaks.
+detection ends each turn after a natural pause. If the transcript still
+has not arrived after 30 seconds, the HUD asks you to say it again. You can interrupt Moss while he speaks.
 Text mode stops the microphone, voice output, and voice connection. Leaving
 the game window pauses listening; returning resumes the selected Conversation
 mode. The typed editor remains available in both modes.
@@ -30,7 +38,8 @@ typed commands. Moss speaks new replies with the Voice Lab realtime model and
 a low, warm, gravelly `cedar` voice. Saved conversations are not read aloud on
 startup. The voice model performs Moss's approved dialogue; the existing
 creature model still makes plans and learns lessons. Complete spoken turns
-keep their order while Moss is thinking; a spoken stop cancels queued orders.
+keep their order while Moss is thinking. One transcript can wait for the
+planner with eight more queued behind it. A spoken stop clears that queue.
 Connection or microphone failures return to Text. Select Conversation again
 to reconnect. On macOS, the microphone and speaker share Apple's voice
 processing audio engine for echo cancellation during simultaneous playback
@@ -46,12 +55,19 @@ simulation do not open voice connections or microphones. On macOS the normal
 Nim command launches a local Monster app so its microphone permission belongs
 to the game.
 
-Try this sequence:
+Configure the [planner](#model-setup), then try these in Text or Conversation.
+Wait for Moss to finish each trip before issuing the next physical order.
+A new nonempty plan replaces the rest of the previous one.
 
 1. `Walk to the village.`
 2. `Remember: when helping people, gather wild berries. Leave their farm alone.`
 3. `Bring the villagers some food.`
 4. `Go home and rest.`
+
+“The village” means Willow. Look for arrival at its hall, then a berry
+delivery in the world events and a rest at the home glade. The teaching
+turn can record a preference without moving Moss. The wording and plan
+depend on the model and the supplies available in this save.
 
 The model returns a short reply, physical actions, and any new lasting lessons.
 The simulation validates the actions and reports their actual results back to
@@ -145,8 +161,10 @@ delivery helps its village. Witnessed violence sharply increases fear and
 damages trust. Frightened residents flee and remember their fear after the
 immediate panic ends. Inspect a villager to see their attitude, trust, and fear.
 
-Typing exactly `stop` or `stop attacking` interrupts Moss immediately, even
-while a model reply is pending. A canceled reply cannot restart the attack.
+Typing `stop` or `stop attacking` interrupts Moss immediately, even offline
+or while a model reply is pending. Both accept mixed case, surrounding
+spaces, and an optional final period or exclamation mark. A canceled
+reply cannot restart the attack.
 Other commands use the normal conversation and action planning loop.
 
 The bottom-left minimap shows the region, settlements, villagers, and Moss.
@@ -166,15 +184,22 @@ panel to its first stat.
 
 Try `Bring fish to Ada`, `Bring pine wood to Weaver's hut`, or
 `Take stone and oak to Mason's hut so they can repair it`. Ask Moss about
-the village to get an account of the current needs.
+the village to get an account of the current needs. Gathering fills the
+remaining space from one source, and giving unloads everything. If the
+first source fills Moss’s six slots, stone and oak take separate trips.
 
 When an action fails, Moss receives its actual result and explains the problem
 in conversation. Blocked routes and unavailable resources stay in its memory
 as internal feedback. The explanation does not start another plan or create a
 new lesson. Connection and save errors remain visible as technical problems.
 
-The game uses an existing nonempty API key from the environment first. For
-the native OpenAI connection, if no key is set, it reads the raw key from
+## Model setup
+
+Apart from the local stop command, typed and spoken instructions need
+a planner that accepts
+`POST /v1/responses` with structured JSON output. Text mode leaves the
+microphone off. For the native OpenAI connection, Monster checks
+`OPENAI_API_KEY` first, then reads the raw key from
 `~/secrets/openai.key`, or the path supplied by `MONSTER_KEY_FILE`. File
 fallback also retries the same instruction once if OpenAI rejects the
 environment key with HTTP 401 and the file contains a different key. The
@@ -184,17 +209,21 @@ not apply to the sidecar or custom non-OpenAI connections.
 The model defaults to `gpt-6-sol`. Set `OPENAI_API_KEY` for the native OpenAI
 connection, or use the existing Polyworld sidecar with `COWORLD_LLM_ENDPOINT`.
 An explicit `--model:ID` selects a model available through that endpoint.
-Existing `COGAME_LLM_KEY`, `OPENROUTER_API_KEY`, and `COGAME_LLM_BASE_URL`
-configuration is supported by the shared transport. Conversation uses the
-Responses API and requires structured JSON output support. `COGAME_LLM=off`
+The sidecar takes precedence over direct credentials. The shared transport
+also accepts `COGAME_LLM_BASE_URL` and checks `COGAME_LLM_KEY` before
+`OPENROUTER_API_KEY`. `COGAME_LLM=off`
 or `--offline` disables model calls and leaves the scene available for viewing.
 Credentials stay in memory and are never saved with the creature.
 
 Conversation, lessons, and physical progress save automatically in the user
 data directory under `polyworld/monster/<seed>`. Use `--save-dir:PATH` for a
 separate creature. `--seed:N` selects a seeded landscape and a separate default
-save. Full conversation is retained up to the explicit memory and request
-limits. Reaching a limit displays an error. Sleep does not compact memory yet.
+save. Memory holds up to 256 messages (including world events and feedback)
+and 64 lessons. Each instruction can use up to 4096 bytes. A full model
+request, including history and the current observation, must fit in 64 KiB,
+so a save can reach the request limit before the message limit. Start a fresh
+save directory to continue after exhausting memory. Sleep does not compact
+memory yet.
 Unfinished creature orders stop when a saved game is reopened. Villagers
 choose new work from their saved needs and supplies. Earlier food-only and
 single-village saves migrate automatically; Willow's progress, conversation,
@@ -202,7 +231,10 @@ and lessons are preserved while the neighboring settlements are added.
 Older saves initialize newly added health and relationship fields. Health,
 fear, trust, and permanent destruction persist in current saves.
 
-Validation:
+## Local validation
+
+The main Monster suite exercises planning, lesson persistence, and action
+feedback with loopback fixtures.
 
 ```sh
 nim check games/monster/monster.nim
@@ -227,25 +259,41 @@ recovery from a shortage rather than relying on the starting stockpile.
 
 The opt-in `nim r games/monster/tests/manual_voice.nim --live` check sends
 synthetic speech through the real voice connection and game planner without
-opening a microphone or speaker. It uses a temporary save. The offline
-`nim r games/monster/tests/manual_voice_ui.nim` preview captures the voice HUD.
+opening a microphone or speaker. It uses a temporary save.
+
+To preview the voice HUD offline with scripted messages and a simulated
+listening indicator, run:
+
+```sh
+nim r games/monster/tests/manual_voice_ui.nim tmp/monster-voice-preview.png
+```
 
 Run one real model instruction and its resulting actions without a window:
 
 ```sh
 nim r -d:headless games/monster/monster.nim \
-  --save-dir:build/monster-smoke --prompt:'Walk to the village.'
+  --save-dir:tmp/monster-smoke --prompt:'Walk to the village.'
 ```
 
-Capture the rendered game in a hidden window:
+For a headless check without a service, use the local stop command. It
+prints `Moss: I stopped.` and saves the turn in the specified directory.
 
 ```sh
-nim r games/monster/monster.nim --screenshot:output/monster.png
+nim r -d:headless games/monster/monster.nim --offline \
+  --save-dir:tmp/monster-offline --prompt:stop
 ```
 
-Add `--prompt:'Walk to the village.'` to wait for the model and resulting
-actions before capture. `--frames:N` sets the minimum rendered frame count.
-Use `--save-dir:build/monster-capture` to keep capture progress separate.
+Capture the rendered game in a hidden window with a separate save:
+
+```sh
+nim r games/monster/monster.nim --offline --save-dir:tmp/monster-capture \
+  --screenshot:tmp/monster-capture.png
+```
+
+For a model-directed capture, omit `--offline`, configure the planner, and
+add `--prompt:'Walk to the village.'`. Capture waits for the reply and its
+actions. A request error exits with a diagnostic. `--frames:N` sets the
+minimum rendered frame count.
 
 The shared `nim r -d:takeScreenshot games/monster/monster.nim` option also
 captures in a hidden window, defaulting to `output/monster.png`. Set

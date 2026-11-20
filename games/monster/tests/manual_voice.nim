@@ -101,7 +101,6 @@ proc run() =
   var
     lastTick = getMonoTime()
     accumulator = 0.0
-    arrived = false
     accepted = false
   let initialPosition = world.creature.position
   while true:
@@ -115,13 +114,10 @@ proc run() =
       accumulator -= 1.0 / TickRate.float64
     if world.receive(brain):
       accepted = true
-    for text in world.events:
-      if text == "Arrived at village.":
-        arrived = true
     world.outcomes(brain, directory / "world.json")
     voice.observe(brain.messages)
     doAssert brain.failure.len == 0, brain.failure
-    if accepted and arrived and not world.active and
+    if accepted and not world.active and
       world.actions.len == 0 and not brain.pending and
       not brain.explanationPending and pcm.len > 0 and
       not voice.client.responseActive:

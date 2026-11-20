@@ -43,9 +43,11 @@ replay.
 
 ## Compatibility
 
-Recordings remain under the user's application data folder in
-`Polyworld/<game name>/Replays`. Existing configuration namespaces, filenames,
-and replay formats remain unchanged. Imports copy the source file. Old game
+Recordings live under the user's application data folder in
+`Polyworld/<game name>/Replays`. Each game defines its versioned recording
+format. Galcon accepts only its matching format and has no historical simulation
+modes; older recordings require the corresponding archived game build.
+Imports copy the source file. Old game
 or replay versions remain visible but disabled, and selecting a playable
 entry revalidates it before playback.
 

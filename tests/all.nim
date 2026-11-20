@@ -67,6 +67,8 @@ import
   ../games/gods_of_the_arena/tests/test_auto_seats as TestGotaAutoSeats,
   ../games/gods_of_the_arena/tests/test_match_notice_network as TestGotaLocalNotices,
   ../games/light_vs_dark/tests/test_live_slots as TestLvdLiveSlots,
+  ../games/light_vs_dark/tests/test_replay_library as TestLvdReplayLibrary,
+  ../games/light_vs_dark/tests/test_recording_library as TestLvdRecordingLibrary,
   ../games/light_vs_dark/tests/test_match_clock as TestLvdLocalNotices,
   ../games/cac/tests/test_network as TestCacNetwork,
   ../games/cac/tests/test_network_catchup as TestCacCatchup

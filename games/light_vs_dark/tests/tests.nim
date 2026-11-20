@@ -17,6 +17,8 @@ import
   test_maps,
   test_players,
   test_replays,
+  test_replay_library,
+  test_recording_library,
   test_replay_chat,
   test_research,
   test_research_network,

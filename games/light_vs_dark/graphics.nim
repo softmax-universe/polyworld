@@ -29,6 +29,9 @@ import
 when defined(takeScreenshot):
   import std/[os, strutils]
 
+when not defined(emscripten):
+  import replaylibraries
+
 const
   DefaultCameraDistance = 17.0'f
   WindowTitle = "Light vs Dark"
@@ -407,7 +410,8 @@ proc close(target: var CaptureTarget) =
 proc runGraphics*(network: NetworkMatch = nil,
     connection: Connection = nil,
     hooks = GraphicsHooks(),
-    hidden = defined(takeScreenshot)): bool {.discardable.} =
+    hidden = defined(takeScreenshot),
+    autoSaveReplay = false): bool {.discardable.} =
   ## Owns match resources; the application window survives returning to the main menu.
   initializeGraphics(visible = not hidden)
   var captureTarget: CaptureTarget
@@ -451,6 +455,24 @@ proc runGraphics*(network: NetworkMatch = nil,
     matchMenu = HiddenMatchMenu
     preferences = readLvdPreferences()
     saveError: string
+  when not defined(emscripten):
+    var
+      libraryHashes = -1
+      libraryActions = -1
+      libraryPath: string
+      replaySaved = false
+      automaticSaveAttempted = false
+
+    proc saveToLibrary() =
+      ## Saves each recorded state once across manual and automatic exports.
+      let data = recordingData()
+      if libraryPath.len == 0 or libraryHashes != data.hashes.len or
+        libraryActions != data.actions.len:
+          libraryPath = saveLibraryReplay(data)
+          libraryHashes = data.hashes.len
+          libraryActions = data.actions.len
+      replaySaved = true
+      saveError = ""
   preferences.applyPreferences(window, configureDisplay = not hidden)
   window.updateCursorConfinement(preferences.edgeScrolling)
   let previousBindings = customBindingsEnabled
@@ -2146,6 +2168,15 @@ proc runGraphics*(network: NetworkMatch = nil,
               if run.recorder != nil: int32(run.recorder.data.hashes.len)
               else: int32(run.replayPlayer.data.hashes.len)
             transport.sync(run.world.tick, recordedNow, run.world.over)
+      when not defined(emscripten):
+        if autoSaveReplay and not run.replayMode and
+          not automaticSaveAttempted and
+          (run.world.over or run.world.tick >= run.maximumTicks):
+            automaticSaveAttempted = true
+            try:
+              saveToLibrary()
+            except CatchableError as error:
+              saveError = "Cannot save replay: " & error.msg
       let active = simulationActive(transport)
       harvesting.updateHarvest(run.world, dt, viewer = -1, paused = not active)
       currentSight = run.world.renderVisibilityValues(viewMode, CurrentSightMask)
@@ -2340,8 +2371,10 @@ proc runGraphics*(network: NetworkMatch = nil,
         elif matchMenu == MatchSettings:
           menuOrigin = sk.beginOverlay(window, vec2(768, 488)) + vec2(24)
         else:
-          let panel = sk.beginOverlay(window, vec2(512, 488))
-          sk.lobbyPanel(panel, vec2(512, 488))
+          let
+            panelHeight = when defined(emscripten): 488.0'f else: 572.0'f
+            panel = sk.beginOverlay(window, vec2(512, panelHeight))
+          sk.lobbyPanel(panel, vec2(512, panelHeight))
           menuOrigin = panel + vec2(24)
         let beforeHud = transport
         if matchMenu == HiddenMatchMenu:
@@ -2384,10 +2417,12 @@ proc runGraphics*(network: NetworkMatch = nil,
               if sk.lvdSettingsPanel(window, preferences, "Polyworld LvD", origin):
                 matchMenu = PauseMenu
             else:
-              let paused = if network == nil: not transport.playing
-                else: network.client.snapshot.flag
-              let activeMatch = network == nil or
-                network.client.snapshot.phase in {rooms.Playing, Waiting}
+              let
+                paused = if network == nil: not transport.playing
+                  else: network.client.snapshot.flag
+                activeMatch = network == nil or
+                  network.client.snapshot.phase in {rooms.Playing, Waiting}
+                exitY = when defined(emscripten): 220.0'f else: 276.0'f
               var controller = network == nil
               if network != nil:
                 for seat in network.client.snapshot.seats:
@@ -2406,12 +2441,16 @@ proc runGraphics*(network: NetworkMatch = nil,
                     match: network.client.match, flag: not paused))
               if sk.lobbyButton("Settings", origin + vec2(0, 164), 464):
                 matchMenu = MatchSettings
+              when not defined(emscripten):
+                if sk.lobbyButton("Save replay", origin + vec2(0, 220), 464,
+                  enabled = run.recorder != nil and not run.replayMode):
+                    saveToLibrary()
               if network == nil or network.client.snapshot.phase in {rooms.Ended, Desynced, Lobby}:
                 if sk.lobbyButton(if network == nil: "Return to menu" else: "Return to lobby",
-                  origin + vec2(0, 220), 464):
+                  origin + vec2(0, exitY), 464):
                   leaveMatch = returnToMatchLobby(network)
               if network != nil and sk.lobbyButton("Quit to main menu",
-                origin + vec2(0, if activeMatch: 220 else: 276), 464):
+                origin + vec2(0, if activeMatch: exitY else: exitY + 56), 464):
                 quitToMenu = true
                 if network == nil: leaveMatch = true
                 elif controller and activeMatch:
@@ -2421,19 +2460,37 @@ proc runGraphics*(network: NetworkMatch = nil,
                   leaveRequested = true
               sk.menuLabel(if network == nil: "Use Pause match to stop the game."
                 else: "Unused slots join next match; existing kingdoms can change controllers.",
-                origin + vec2(0, 332), 464)
+                origin + vec2(0, exitY + 112), 464)
               sk.menuLabel("Drag: select group / Shift: add / Ctrl+A: all units",
-                origin + vec2(0, 368), 464)
+                origin + vec2(0, exitY + 148), 464)
               sk.menuLabel("Right drag: formation / A: attack / Shift: queue",
-                origin + vec2(0, 404), 464)
+                origin + vec2(0, exitY + 184), 464)
           except CatchableError as error:
             saveError = error.msg
-          if saveError.len > 0: sk.menuLabel(saveError, origin + vec2(0, 340), 464)
+          when not defined(emscripten):
+            if matchMenu == PauseMenu:
+              if saveError.len > 0:
+                sk.menuLabel(saveError, origin + vec2(0, 500), 464, MenuAccent)
+              elif replaySaved:
+                sk.menuLabel("Replay saved to your library.",
+                  origin + vec2(0, 500), 464, MenuAccent)
+            elif saveError.len > 0:
+              sk.menuLabel(saveError, origin + vec2(0, 340), 464)
+          else:
+            if saveError.len > 0:
+              sk.menuLabel(saveError, origin + vec2(0, 340), 464)
         if matchMenu == HiddenMatchMenu and hooks.overlay != nil:
           hooks.overlay()
         sk.endUi()
         if matchMenu == HiddenMatchMenu:
           drawStatsOverlay(sk, window, teamColors)
+          when not defined(emscripten):
+            if autoSaveReplay and matchResultsVisible():
+              sk.beginUi(window, window.size)
+              sk.menuLabel(if saveError.len > 0: saveError
+                elif replaySaved: "Replay saved to your library." else: "",
+                vec2(24, 24), 1000, MenuAccent)
+              sk.endUi()
         # Silky ends rune capture when no editable field was submitted. Restore
         # chat capture after ALL UI passes, without interfering with Settings.
         if matchMenu == HiddenMatchMenu:
@@ -2625,7 +2682,15 @@ proc runGraphics*(network: NetworkMatch = nil,
   window.onButtonRelease = nil
   shortcutState.resetShortcut()
   endShortcutEditing()
-  saveRecording()
+  var recordingFailure: string
+  if not run.replayMode:
+    try:
+      saveRecording()
+      when not defined(emscripten):
+        if autoSaveReplay:
+          saveToLibrary()
+    except CatchableError as error:
+      recordingFailure = "Cannot save replay: " & error.msg
   clickMarks.closeClickMarks()
   attackClickMarks.closeClickMarks()
   worldShapes.closeShapeRenderer()
@@ -2634,4 +2699,6 @@ proc runGraphics*(network: NetworkMatch = nil,
   particles.closeParticles()
   harvestBars.closeWorldBarRenderer()
   finishGameProfile()
+  if recordingFailure.len > 0:
+    raise newException(MenusError, recordingFailure)
   result = quitToMenu

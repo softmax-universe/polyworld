@@ -350,6 +350,18 @@ proc advanceGame*() =
   run.sampleMetrics(run.world.over or run.world.tick >= run.maximumTicks)
   run.metrics.finishTick(run.world.tick)
 
+proc recordingData*(): ReplayData =
+  ## Captures the full recorded timeline, including ticks after a rewind.
+  if run == nil or run.recorder == nil or run.replayMode:
+    raise newException(ReplayError, "There is no live match replay to save.")
+  if run.world.tick > run.recorder.data.hashes.len:
+    raise newException(ReplayError,
+      "The recording is missing the latest simulation tick.")
+  if run.world.tick == run.recorder.data.hashes.len:
+    run.sampleMetrics(true)
+  result = run.recorder.data
+  result.metrics = run.history.replayMetrics()
+
 proc saveRecording*(path = options.recordPath) =
   ## Saves every recorded tick, keeping the original match setup.
   ## Creates the destination directory before writing the tape.
@@ -358,10 +370,7 @@ proc saveRecording*(path = options.recordPath) =
   let directory = path.parentDir
   if directory.len > 0:
     createDir(directory)
-  if run.world.tick == run.recorder.data.hashes.len:
-    run.sampleMetrics(true)
-  run.recorder.data.metrics = run.history.replayMetrics()
-  saveReplay(path, run.recorder.data)
+  saveReplay(path, recordingData())
 
 proc describeResult*(): string =
   ## One line naming the outcome and the score behind it.

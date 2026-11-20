@@ -6,6 +6,9 @@ import
   content, controls, game, graphics, homes, lobbies, multiplayer, presets,
   rosterstate, participantcontext, lobbyreadiness, joiningseats
 
+when not defined(emscripten):
+  import polyworld/tapes, replaylibraries, replaymenus, replays, replaysettings
+
 const AppName = "Polyworld LvD"
 
 proc bundledBot(name, file: string): LocalPolicy =
@@ -54,8 +57,44 @@ proc runFrontend*() =
     playerName: string
     editingPlayer: bool
     connectRequested: bool
+  when not defined(emscripten):
+    var
+      replayPreferences = ReplayPreferences()
+      browsingReplays = false
+      replayRefreshRequested = false
+      replayFolder = replayDirectory()
+      replayEntries: seq[ReplayEntry]
+      replayUi: ReplayBrowserUi
+      replayAction: ReplayBrowserResult
+      replayMessage: string
+      unsavedReplays: seq[ReplayData]
+      retryReplaySave: bool
+
+    proc retainUnsavedReplay() =
+      ## Keeps failed automatic exports available for retry on the menu.
+      window.closeRequested = false
+      if replayPreferences.saveReplay and run != nil and
+        run.recorder != nil and not run.replayMode:
+          try:
+            unsavedReplays.add(recordingData())
+          except ReplayError:
+            discard
+
+    proc drawReplayRetry() =
+      ## Offers a retry without losing the recording when the disk is full.
+      if unsavedReplays.len > 0:
+        if sk.lobbyButton("Retry saving replay", vec2(24, 64), 280):
+          retryReplaySave = true
+
+  template automaticReplaySave(): bool =
+    ## Enables automatic recording only for desktop games.
+    when defined(emscripten): false
+    else: replayPreferences.saveReplay
+
   try:
     preferences = readLvdPreferences()
+    when not defined(emscripten):
+      replayPreferences = readReplayPreferences()
   except MenusError, IOError, OSError:
     error = getCurrentExceptionMsg()
   preferences = effectivePreferences(preferences, inviteServer, serverAddress)
@@ -81,6 +120,9 @@ proc runFrontend*() =
       window.updateWindowSettings()
     launchLocal = false
     launchNetwork = false
+    when not defined(emscripten):
+      replayAction = ReplayBrowserResult()
+      retryReplaySave = false
     if connectRequested and not editingPlayer and
       confirmedPlayerName(preferences.name):
         connectRequested = false
@@ -173,7 +215,17 @@ proc runFrontend*() =
       options.recordPath = ""
       options.pauseOnStart = false
       options.speed = 1
-      let quitToMenu = runGraphics(prepared, connection)
+      var
+        quitToMenu = false
+        matchError: string
+      try:
+        quitToMenu = runGraphics(prepared, connection,
+          autoSaveReplay = automaticReplaySave())
+      except CatchableError as problem:
+        matchError = problem.msg
+        quitToMenu = connection.client.snapshot.room.len == 0
+        when not defined(emscripten):
+          retainUnsavedReplay()
       preferences = effectivePreferences(
         readLvdPreferences(), inviteServer, serverAddress
       )
@@ -191,6 +243,8 @@ proc runFrontend*() =
       preparedRevision = 0
       clearPlayerCommands()
       run = nil
+      if matchError.len > 0:
+        error = matchError
       continue
 
     window.onButtonPress = proc(button: Button) =
@@ -264,10 +318,18 @@ proc runFrontend*() =
           window.presentFrame(framePaceHz)
           reportReplayFrame(0, 0)
           return
+      when not defined(emscripten):
+        if browsingReplays:
+          replayAction = sk.drawReplayBrowser(window, replayUi,
+            replayEntries, replayFolder, replayMessage)
+          sk.endUi()
+          window.presentFrame(framePaceHz)
+          reportReplayFrame(0, 0)
+          return
       if page == HomeMenu:
         case sk.drawLvdHome(window, homeFocus)
-        of StayHome: discard
-        of PlaySingle:
+        of LvdStayHome: discard
+        of LvdPlaySingle:
           roster = RosterState()
           localPolicies.setLen(config.playerCount)
           if humanSeat >= config.playerCount: humanSeat = -1
@@ -276,7 +338,7 @@ proc runFrontend*() =
           lobbyUi.scroll = 0
           lobbyUi.selectedSeat = -1
           rosterScroll.scrollPos = vec2(0)
-        of PlayMultiplayer:
+        of LvdPlayMultiplayer:
           config.playerSlot = 0
           page = MultiplayerMenu
           connectRequested = preferences.server.strip().len > 0 and
@@ -284,12 +346,19 @@ proc runFrontend*() =
             (connection == nil or not connection.client.connected)
           lobbyUi.scroll = 0
           lobbyUi.selectedSeat = -1
-        of OpenSettings: page = SettingsMenu
-        of ExitGame:
+        of LvdOpenReplays:
+          when not defined(emscripten):
+            browsingReplays = true
+            replayRefreshRequested = true
+            replayMessage = ""
+        of LvdOpenSettings: page = SettingsMenu
+        of LvdExitGame:
           when not defined(emscripten):
             window.closeRequested = true
         if error.len > 0:
           sk.menuLabel(error, vec2(24, 24), color = rgbx(245, 151, 139, 255))
+        when not defined(emscripten):
+          drawReplayRetry()
         sk.endUi()
         window.presentFrame(framePaceHz)
         reportReplayFrame(0, 0)
@@ -670,6 +739,17 @@ proc runFrontend*() =
             sk.lobbyLabel(if humanSeat < 0: "Spectating bots"
               else: "Playing seat " & $(humanSeat + 1),
               layout.left + vec2(22, layout.panelHeight - 74), 800, tint = LobbyMuted)
+          when not defined(emscripten):
+            let previousSave = replayPreferences.saveReplay
+            sk.at = layout.left + vec2(22, layout.panelHeight - 38)
+            if not modal:
+              checkBox "Save replay", replayPreferences.saveReplay
+            else:
+              sk.lobbyLabel("Save replay: " &
+                (if replayPreferences.saveReplay: "On" else: "Off"),
+                sk.at, 280, tint = LobbyMuted)
+            if previousSave != replayPreferences.saveReplay:
+              replayPreferences.saveReplayPreferences()
           let selectedSeat = lobbyUi.selectedSeat
           let choice =
             if modal and not contextBlocked and lobbyUi.selectedSeat >= 0:
@@ -744,12 +824,76 @@ proc runFrontend*() =
           editingPlayer = true
       if error.len > 0:
         sk.lobbyLabel(error, vec2(24, 0), 1400, tint = rgbx(245, 151, 139, 255))
+      when not defined(emscripten):
+        drawReplayRetry()
       sk.textStyle = "Default"
       sk.endUi()
       window.presentFrame(framePaceHz)
       reportReplayFrame(0, 0)
     pollEvents()
     waitForDisplay()
+    when not defined(emscripten):
+      if retryReplaySave:
+        try:
+          while unsavedReplays.len > 0:
+            discard saveLibraryReplay(unsavedReplays[0])
+            unsavedReplays.delete(0)
+          error = ""
+          replayRefreshRequested = true
+        except CatchableError as problem:
+          error = "Cannot save replay: " & problem.msg
+      if browsingReplays:
+        try:
+          case replayAction.action
+          of StayReplayBrowser:
+            discard
+          of BackFromReplays:
+            browsingReplays = false
+            replayMessage = ""
+          of RefreshReplays:
+            replayRefreshRequested = true
+            replayMessage = ""
+          of OpenReplayFolder:
+            openUrl(ensureReplayDirectory())
+          of ImportReplayFile:
+            let source = openFileDialog("Import replay", @[
+              FileDialogFilter(name: "Polyworld replay", extensions: "replay")
+            ], defaultPath = ensureReplayDirectory())
+            if source.len > 0:
+              replayUi.selectedPath = importReplay(source)
+              replayRefreshRequested = true
+              replayMessage = "Replay imported."
+          of PlayReplay:
+            let entry = inspectReplay(replayAction.path)
+            if not entry.playable:
+              raise newException(MenusError, entry.problem)
+            let previousOptions = options
+            try:
+              window.onFrame = nil
+              options.replayPath = entry.path
+              options.recordPath = ""
+              options.playerSlot = 0
+              options.viewMode = 0
+              options.pauseOnStart = false
+              options.speed = 1
+              initializeMatch()
+              runGraphics()
+              preferences = effectivePreferences(
+                readLvdPreferences(), inviteServer, serverAddress
+              )
+              replayMessage = ""
+            finally:
+              options = previousOptions
+              clearPlayerCommands()
+              run = nil
+              replayRefreshRequested = true
+          if replayRefreshRequested:
+            replayRefreshRequested = false
+            replayFolder = ensureReplayDirectory()
+            replayEntries = listReplays(replayFolder)
+        except CatchableError as problem:
+          replayMessage = problem.msg
+        continue
     if launchLocal:
       connection.close()
       connection = nil
@@ -766,12 +910,14 @@ proc runFrontend*() =
       try:
         config.playerSlot = int32(humanSeat + 1)
         initializeLocalMatch(config, sources)
-        runGraphics()
+        runGraphics(autoSaveReplay = automaticReplaySave())
         preferences = effectivePreferences(
           readLvdPreferences(), inviteServer, serverAddress
         )
       except CatchableError as problem:
         error = problem.msg
+        when not defined(emscripten):
+          retainUnsavedReplay()
       page = HomeMenu
       run = nil
   window.onFrame = nil

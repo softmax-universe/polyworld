@@ -10,7 +10,7 @@ import
   polyworld/actioncam, polyworld/assets, polyworld/characters,
   polyworld/clickmarks, polyworld/fxshapes, polyworld/weapontrails,
   polyworld/chargen, polyworld/common, polyworld/pathing,
-  polyworld/tapes, polyworld/toon, polyworld/metrics,
+  polyworld/tapes, polyworld/toon,
   polyworld/particles, polyworld/particleshaders, polyworld/player,
   polyworld/profiles, polyworld/sounds,
   polyworld/quadterrain,
@@ -21,6 +21,8 @@ import
 
 when defined(emscripten):
   {.emit: "#include <emscripten.h>".}
+else:
+  import replaylibraries
 
 when defined(takeScreenshot):
   import std/os
@@ -313,7 +315,8 @@ proc initializeGraphics*() =
     ## Restores the pointer before closing the game window.
     releaseCursorConfinement()
 proc runGraphics*(
-    network: NetworkMatch = nil, connection: Connection = nil
+    network: NetworkMatch = nil, connection: Connection = nil,
+    autoSaveReplay = false
 ): bool {.discardable.} =
   ## Runs one match on the existing window and releases match-owned resources.
   initializeGraphics()
@@ -339,6 +342,24 @@ proc runGraphics*(
     preferences = Preferences()
     saveError: string
     chat: ChatEditor
+  when not defined(emscripten):
+    var
+      libraryHashes = -1
+      libraryActions = -1
+      libraryPath: string
+      replaySaved = false
+      automaticSaveAttempted = false
+
+    proc saveToLibrary() =
+      ## Saves each recorded state once, sharing manual and automatic saves.
+      let data = recordingData()
+      if libraryPath.len == 0 or libraryHashes != data.hashes.len or
+        libraryActions != data.actions.len:
+          libraryPath = saveLibraryReplay(data)
+          libraryHashes = data.hashes.len
+          libraryActions = data.actions.len
+      replaySaved = true
+      saveError = ""
   let chatHooks = window.installChatInput(addr chat)
   defer: window.restoreChatInput(chatHooks)
   try:
@@ -1340,6 +1361,13 @@ proc runGraphics*(
     ## Holds every completed live match until the player leaves its results.
     if run.replayMode or not run.finished():
       return
+    when not defined(emscripten):
+      if autoSaveReplay and not automaticSaveAttempted:
+        automaticSaveAttempted = true
+        try:
+          saveToLibrary()
+        except CatchableError as error:
+          saveError = "Cannot save replay: " & error.msg
     transport.repeating = false
     transport.pause()
     transport.restoreTick = -1
@@ -3501,11 +3529,11 @@ proc runGraphics*(
                   matchMenu = MatchPlayers
                 if sk.lobbyButton("Save replay", origin + vec2(0, 256),
                   (if network != nil: 204.0'f else: 416.0'f),
-                  enabled = run.recorder != nil and
-                    run.world.tick == run.recorder.data.hashes.len):
-                      run.sampleMetrics(true)
-                      run.recorder.data.metrics = run.history.replayMetrics()
-                      saveReplayFile(run.recorder.data.encodeReplay())
+                  enabled = run.recorder != nil and not run.replayMode):
+                      when defined(emscripten):
+                        saveReplayFile(recordingData().encodeReplay())
+                      else:
+                        saveToLibrary()
                       saveError = ""
                 if sk.lobbyButton(
                   if network == nil: "Return to menu"
@@ -3544,6 +3572,11 @@ proc runGraphics*(
               saveError = error.msg
             if saveError.len > 0:
               sk.menuLabel(saveError, origin + vec2(0, 528), 416, MenuAccent)
+            else:
+              when not defined(emscripten):
+                if replaySaved:
+                  sk.menuLabel("Replay saved to your library.",
+                    origin + vec2(0, 528), 416, MenuAccent)
           if matchMenu == HiddenMatchMenu:
             sk.drawHumanChat(window.size.vec2 / sk.uiScale, chat,
               (if network != nil: network.visibleHumanChat()
@@ -3574,6 +3607,13 @@ proc runGraphics*(
           if not window.buttonDown[MouseLeft] and
             not window.buttonPressed[MouseLeft]:
               resultsInputReady = true
+          when not defined(emscripten):
+            if autoSaveReplay:
+              sk.beginUi(window, window.size)
+              sk.menuLabel(if saveError.len > 0: saveError
+                elif replaySaved: "Replay saved to your library." else: "",
+                vec2(24, 24), 1000, MenuAccent)
+              sk.endUi()
       when defined(takeScreenshot) and ActiveTracePath.len == 0:
         captureScreenshot(
           window,
@@ -3616,8 +3656,15 @@ proc runGraphics*(
   window.onFrame = nil
   window.onButtonPress = nil
   clearPlayerCommands()
+  var recordingFailure: string
   if not run.replayMode:
-    saveRecording()
+    try:
+      saveRecording()
+      when not defined(emscripten):
+        if autoSaveReplay:
+          saveToLibrary()
+    except CatchableError as error:
+      recordingFailure = "Cannot save replay: " & error.msg
   occlusion.closeScreenOcclusion()
   clickMarks.closeClickMarks()
   attackMarks.closeClickMarks()
@@ -3633,4 +3680,6 @@ proc runGraphics*(
   clearSceneProps()
   grove.trees.closePropPack()
   grove.rocks.closePropPack()
+  if recordingFailure.len > 0:
+    raise newException(MenusError, recordingFailure)
   result = quitToMenu

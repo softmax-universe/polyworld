@@ -2,9 +2,12 @@ import
   std/[os, random, strutils, uri],
   bumpy, chroma, jsony, silky, vmath, windy,
   polyworld/[displays, chrome, connections, menus, roomclients, rooms, policies,
-    sounds, viewers],
+    sounds, tapes, viewers],
   content, controls, game, graphics, homes, lobbies, multiplayer, playernames,
   pointers, presets, replays, settings, joiningseats
+
+when not defined(emscripten):
+  import replaylibraries, replaymenus
 
 const AppName = "Polyworld GotA"
 
@@ -51,8 +54,38 @@ proc runFrontend*() =
     editingPlayer: bool
     connectRequested: bool
     localLaunchRequested: bool
+    replayPreferences = ReplayPreferences()
+  when not defined(emscripten):
+    var
+      browsingReplays = false
+      replayRefreshRequested = false
+      replayFolder = replayDirectory()
+      replayEntries: seq[ReplayEntry]
+      replayUi: ReplayBrowserUi
+      replayAction: ReplayBrowserResult
+      replayMessage: string
+      unsavedReplays: seq[ReplayData]
+      retryReplaySave: bool
+
+    proc retainUnsavedReplay() =
+      ## Keeps failed automatic exports available for retry on the menu.
+      window.closeRequested = false
+      if replayPreferences.saveReplay and run != nil and
+        run.recorder != nil and not run.replayMode:
+          try:
+            unsavedReplays.add(recordingData())
+          except ReplayError:
+            discard
+
+    proc drawReplayRetry() =
+      ## Offers a retry without losing the recording when the disk is full.
+      if unsavedReplays.len > 0:
+        if sk.lobbyButton("Retry saving replay", vec2(24, 64), 280):
+          retryReplaySave = true
   try:
     preferences = readGotaPreferences()
+    when not defined(emscripten):
+      replayPreferences = readReplayPreferences()
   except MenusError, IOError, OSError:
     error = getCurrentExceptionMsg()
   roomName = defaultGameName(preferences.name)
@@ -90,6 +123,9 @@ proc runFrontend*() =
       window.updateWindowSettings()
     launchLocal = false
     launchNetwork = false
+    when not defined(emscripten):
+      replayAction = ReplayBrowserResult()
+      retryReplaySave = false
     if connectRequested and eligiblePlayerName(preferences.name):
         connectRequested = false
         try:
@@ -177,7 +213,17 @@ proc runFrontend*() =
       options.recordPath = ""
       options.pauseOnStart = false
       options.speed = 1
-      let quitToMenu = runGraphics(prepared, connection)
+      var
+        quitToMenu = false
+        matchError: string
+      try:
+        quitToMenu = runGraphics(prepared, connection,
+          autoSaveReplay = replayPreferences.saveReplay)
+      except CatchableError as problem:
+        matchError = problem.msg
+        quitToMenu = connection.client.snapshot.room.len == 0
+        when not defined(emscripten):
+          retainUnsavedReplay()
       for i in 0 ..< min(networkPolicies.len, prepared.sources.len):
         networkPolicies[i].bytes = prepared.sources[i]
         if i < connection.client.snapshot.seats.len:
@@ -207,6 +253,8 @@ proc runFrontend*() =
       preparedRevision = 0
       clearPlayerCommands()
       run = nil
+      if matchError.len > 0:
+        error = matchError
       continue
 
     window.onButtonPress = proc(button: Button) =
@@ -274,26 +322,41 @@ proc runFrontend*() =
           window.presentFrame(framePaceHz)
           reportReplayFrame(0, 0)
           return
+      when not defined(emscripten):
+        if browsingReplays:
+          replayAction = sk.drawReplayBrowser(window, replayUi,
+            replayEntries, replayFolder, replayMessage)
+          sk.endUi()
+          window.presentFrame(framePaceHz)
+          reportReplayFrame(0, 0)
+          return
       if page == HomeMenu:
-        case sk.drawHome(window, homeFocus)
-        of StayHome: discard
-        of PlaySingle:
+        case sk.drawGotaHome(window, homeFocus)
+        of GotaStayHome: discard
+        of GotaPlaySingle:
           page = SingleMenu
           lobbyUi.scroll = 0
           lobbyUi.selectedSeat = -1
-        of PlayMultiplayer:
+        of GotaPlayMultiplayer:
           page = MultiplayerMenu
           connectRequested = preferences.server.strip().len > 0 and
             not connection.connecting() and
             (connection == nil or not connection.client.connected)
           lobbyUi.scroll = 0
           lobbyUi.selectedSeat = -1
-        of OpenSettings: page = SettingsMenu
-        of ExitGame:
+        of GotaOpenReplays:
+          when not defined(emscripten):
+            browsingReplays = true
+            replayRefreshRequested = true
+            replayMessage = ""
+        of GotaOpenSettings: page = SettingsMenu
+        of GotaExitGame:
           when not defined(emscripten):
             window.closeRequested = true
         if error.len > 0:
           sk.menuLabel(error, vec2(24, 24), color = rgbx(245, 151, 139, 255))
+        when not defined(emscripten):
+          drawReplayRetry()
         sk.endUi()
         window.presentFrame(framePaceHz)
         reportReplayFrame(0, 0)
@@ -652,6 +715,17 @@ proc runFrontend*() =
             sk.lobbyLabel(if humanSeat < 0: "Spectating bots"
               else: "Playing seat " & $(humanSeat + 1),
               layout.left + vec2(22, layout.panelHeight - 74), 800, tint = LobbyMuted)
+          when not defined(emscripten):
+            let previousSave = replayPreferences.saveReplay
+            sk.at = layout.left + vec2(22, layout.panelHeight - 38)
+            if not modal:
+              checkBox "Save replay", replayPreferences.saveReplay
+            else:
+              sk.lobbyLabel("Save replay: " &
+                (if replayPreferences.saveReplay: "On" else: "Off"),
+                sk.at, 280, tint = LobbyMuted)
+            if previousSave != replayPreferences.saveReplay:
+              replayPreferences.saveReplayPreferences()
           let selectedSeat = lobbyUi.selectedSeat
           let choice =
             if lobbyUi.selectedSeat >= 0: sk.seatPicker(window, lobbyUi, bots)
@@ -719,12 +793,73 @@ proc runFrontend*() =
           editingPlayer = true
       if error.len > 0:
         sk.lobbyLabel(error, vec2(24, 0), 1400, tint = rgbx(245, 151, 139, 255))
+      when not defined(emscripten):
+        drawReplayRetry()
       sk.textStyle = "Default"
       sk.endUi()
       window.presentFrame(framePaceHz)
       reportReplayFrame(0, 0)
     pollEvents()
     waitForDisplay()
+    when not defined(emscripten):
+      if retryReplaySave:
+        try:
+          while unsavedReplays.len > 0:
+            discard saveLibraryReplay(unsavedReplays[0])
+            unsavedReplays.delete(0)
+          error = ""
+          replayRefreshRequested = true
+        except CatchableError as problem:
+          error = "Cannot save replay: " & problem.msg
+      if browsingReplays:
+        try:
+          case replayAction.action
+          of StayReplayBrowser:
+            discard
+          of BackFromReplays:
+            browsingReplays = false
+            replayMessage = ""
+          of RefreshReplays:
+            replayRefreshRequested = true
+            replayMessage = ""
+          of OpenReplayFolder:
+            openUrl(ensureReplayDirectory())
+          of ImportReplayFile:
+            let source = openFileDialog("Import replay", @[
+              FileDialogFilter(name: "Polyworld replay", extensions: "replay")
+            ], defaultPath = ensureReplayDirectory())
+            if source.len > 0:
+              replayUi.selectedPath = importReplay(source)
+              replayRefreshRequested = true
+              replayMessage = "Replay imported."
+          of PlayReplay:
+            let entry = inspectReplay(replayAction.path)
+            if not entry.playable:
+              raise newException(MenusError, entry.problem)
+            let previousOptions = options
+            try:
+              window.onFrame = nil
+              options.replayPath = entry.path
+              options.recordPath = ""
+              options.playerSlot = 0
+              options.pauseOnStart = false
+              options.speed = 1
+              initializeMatch()
+              runGraphics()
+              preferences = readGotaPreferences()
+              replayMessage = ""
+            finally:
+              options = previousOptions
+              clearPlayerCommands()
+              run = nil
+              replayRefreshRequested = true
+          if replayRefreshRequested:
+            replayRefreshRequested = false
+            replayFolder = ensureReplayDirectory()
+            replayEntries = listReplays(replayFolder)
+        except CatchableError as problem:
+          replayMessage = problem.msg
+        continue
     if launchLocal:
       connection.close()
       connection = nil
@@ -740,10 +875,12 @@ proc runFrontend*() =
           config.players[i].name = policy.name
       try:
         initializeLocalMatch(config, sources, humanSeat)
-        runGraphics()
+        runGraphics(autoSaveReplay = replayPreferences.saveReplay)
         preferences = readGotaPreferences()
       except CatchableError as problem:
         error = problem.msg
+        when not defined(emscripten):
+          retainUnsavedReplay()
       page = HomeMenu
       run = nil
   window.onFrame = nil

@@ -28,6 +28,8 @@ import
   ../games/gods_of_the_arena/tests/test_observations as TestGotaObservations,
   ../games/gods_of_the_arena/tests/test_targets as TestGotaTargets,
   ../games/gods_of_the_arena/tests/test_replays as TestGotaReplays,
+  ../games/gods_of_the_arena/tests/test_replay_library as TestGotaReplayLibrary,
+  ../games/gods_of_the_arena/tests/test_recording_library as TestGotaRecordingLibrary,
   ../games/gods_of_the_arena/tests/test_attacks as TestGotaAttacks,
   ../games/gods_of_the_arena/tests/test_decisions as TestGotaDecisions,
   ../games/gods_of_the_arena/tests/test_events as TestGotaEvents,

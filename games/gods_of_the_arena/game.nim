@@ -291,14 +291,22 @@ proc startReplayRecording*(maximumTicks: uint32) =
   run.recorder.data.config = config
   run.replayPlayer = ReplayPlayer(data: run.recorder.data)
 
+proc recordingData*(): ReplayData =
+  ## Captures the complete recorded timeline even when viewing an earlier tick.
+  if run == nil or run.recorder == nil or run.replayMode:
+    raise newException(ReplayError, "There is no live match replay to save.")
+  if run.recordingError.len > 0:
+    raise newException(ReplayError, run.recordingError)
+  if run.world.tick == run.recorder.data.hashes.len:
+    run.sampleMetrics(true)
+  result = run.recorder.data
+  result.metrics = run.history.replayMetrics()
+
 proc saveRecording*(path = options.recordPath) =
   ## Finalizes and saves a requested action replay.
   if run.recorder == nil or path.len == 0:
     return
-  if run.world.tick == run.recorder.data.hashes.len:
-    run.sampleMetrics(true)
-  run.recorder.data.metrics = run.history.replayMetrics()
-  saveReplay(path, run.recorder.data)
+  saveReplay(path, recordingData())
   echo &"replay saved: {path} " &
     &"({run.recorder.data.actions.len} actions)"
 

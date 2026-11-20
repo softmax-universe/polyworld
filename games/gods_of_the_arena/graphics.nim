@@ -3499,6 +3499,11 @@ proc runGraphics*(
                            else: network.client.snapshot.flag
                   activeMatch = network == nil or
                     network.client.snapshot.phase in {rooms.Playing, Waiting}
+                  exitY =
+                    when defined(emscripten):
+                      if network == nil: 256.0'f else: 312.0'f
+                    else:
+                      312.0'f
                 var controller = network == nil
                 if network != nil:
                   for seat in network.client.snapshot.seats:
@@ -3524,21 +3529,23 @@ proc runGraphics*(
                       ))
                 if sk.lobbyButton("Settings", origin + vec2(0, 200), 416):
                   matchMenu = MatchSettings
-                if network != nil and sk.lobbyButton("Players",
-                    origin + vec2(218, 256), 198):
-                  matchMenu = MatchPlayers
-                if sk.lobbyButton("Save replay", origin + vec2(0, 256),
-                  (if network != nil: 204.0'f else: 416.0'f),
-                  enabled = run.recorder != nil and not run.replayMode):
-                      when defined(emscripten):
-                        saveReplayFile(recordingData().encodeReplay())
-                      else:
+                when defined(emscripten):
+                  if network != nil and sk.lobbyButton("Players",
+                      origin + vec2(0, 256), 416):
+                    matchMenu = MatchPlayers
+                else:
+                  if network != nil and sk.lobbyButton("Players",
+                      origin + vec2(218, 256), 198):
+                    matchMenu = MatchPlayers
+                  if sk.lobbyButton("Save replay", origin + vec2(0, 256),
+                    (if network != nil: 204.0'f else: 416.0'f),
+                    enabled = run.recorder != nil and not run.replayMode):
                         saveToLibrary()
-                      saveError = ""
+                        saveError = ""
                 if sk.lobbyButton(
                   if network == nil: "Return to menu"
                   elif not activeMatch: "Return to lobby" else: "Leave match",
-                  origin + vec2(0, 312), 416,
+                  origin + vec2(0, exitY), 416,
                   enabled = network == nil or not controller or not activeMatch):
                     if network == nil or not activeMatch:
                       leaveMatch = true
@@ -3546,7 +3553,7 @@ proc runGraphics*(
                       network.client.send(RoomMessage(kind: LeaveRoom))
                       quitToMenu = true
                 if sk.lobbyButton("Quit to main menu",
-                  origin + vec2(0, 368), 416):
+                  origin + vec2(0, exitY + 56), 416):
                     quitToMenu = true
                     if network == nil:
                       leaveMatch = true
@@ -3561,13 +3568,13 @@ proc runGraphics*(
                       "Quitting ends the match for everyone."
                     else:
                       "Playback controls affect only your view.",
-                    origin + vec2(0, 432), 416, sk.theme.disabledTextColor)
+                    origin + vec2(0, exitY + 120), 416, sk.theme.disabledTextColor)
                   sk.menuLabel(network.client.status,
-                    origin + vec2(0, 464), 416, sk.theme.disabledTextColor)
+                    origin + vec2(0, exitY + 152), 416, sk.theme.disabledTextColor)
                 else:
                   sk.menuLabel(if run.world.phase == Drafting:
                     "Drafting cannot be paused." else: "Use Pause match to stop the game.",
-                    origin + vec2(0, 432), 416, sk.theme.disabledTextColor)
+                    origin + vec2(0, exitY + 120), 416, sk.theme.disabledTextColor)
             except CatchableError as error:
               saveError = error.msg
             if saveError.len > 0:

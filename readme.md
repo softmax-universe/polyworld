@@ -6,7 +6,7 @@ and shared UI, with native and browser clients.
 
 ## Games
 
-Three games are built on the engine:
+Games built on the engine include:
 
 - **[Gods of the Arena (GotA)](https://softmax-universe.github.io/polyworld-buff/GOTA/)**:
   `MOBA`: Two teams of five heroes fight through lanes and jungle camps to destroy
@@ -17,6 +17,8 @@ Three games are built on the engine:
 - **[Call to Adventure](https://softmax-universe.github.io/polyworld-buff/CTA/)**:
   `ARPG`: Four heroes explore a dungeon, fight monsters, and collect treasure.
   Surviving heroes compete to return with the most gold.
+- **[Monster](games/monster/notes.md)**: Teach Moss through typed or spoken
+  instructions in a native village simulation.
 
 ## AI research
 

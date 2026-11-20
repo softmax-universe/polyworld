@@ -83,7 +83,7 @@ proc options(): Options =
             echo "Camera: right-drag to pan, wheel to zoom, F to find Moss."
             echo "Click or drag the minimap to look around; click Moss to follow."
             echo "Left-click a villager, house, or stash to inspect it."
-            echo "Conversation: Enter to speak, Escape to release focus."
+            echo "Chat: Enter sends typed text. Escape switches chat/camera focus."
             quit(0)
           else:
             raise newException(MonsterError, "Unknown option: " & key)
@@ -341,6 +341,8 @@ else:
       if capturing and frame >= settings.frames and
         not brain.pending and not brain.explanationPending and
         not world.active and world.actions.len == 0:
+          if settings.prompt.len > 0 and brain.failure.len > 0:
+            raise newException(MonsterError, "Creature request failed: " & brain.failure)
           window.capture(settings.screenshot)
           echo "Saved ", settings.screenshot
           break

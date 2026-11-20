@@ -3,6 +3,7 @@
 import std/[math, options, os, random, strformat, times]
 when defined(takeScreenshot):
   import std/strutils
+when not defined(emscripten) or defined(takeScreenshot):
   import ../core/replays
 import opengl, pixie, silky, vmath, windy
 import ../core/sim, ../core/sessions, ../core/bots, ../core/eventtext
@@ -82,6 +83,8 @@ proc drawCardReadingView(
 proc runDuel*(app: App) =
   ## Presents a duel using public replay names when they are available.
   bindApp(app)
+  when not defined(emscripten):
+    app.useReplayRecording()
   app.setBattlefield(2)
   let names = if app.replay != nil: app.replay.playerNames() else: @[]
   var
@@ -105,6 +108,8 @@ proc runDuel*(app: App) =
     uiCapturesMouse = false  ## The pointer is over a tuning window.
     battleInputEnabled = true
     chooseCanceled = false  ## The choose screen's button, clicked last frame.
+  when not defined(emscripten):
+    var setupMessages: seq[ReplayAction]
 
   template gamePressed(button: Button): bool =
     ## A press the board should react to (not one meant for a window).
@@ -118,7 +123,7 @@ proc runDuel*(app: App) =
     else:
       if sessionOptions.seedGiven:
         return sessionOptions.seed
-      result = seedRng.rand(high(int)).int64
+      result = seedRng.rand(high(int32)).int64
       echo "CaC seed ", result, " (replay with --seed ", result, ")"
 
   proc cameraPlayer(): int =
@@ -161,12 +166,30 @@ proc runDuel*(app: App) =
   proc botSeat(player: int, seed: int64): Seat =
     ## A bot's own class and deck; an illegal deck is reported and seats
     ## it with none.
+    when not defined(emscripten):
+      let previous = botVms[player].onSendChat
+      botVms[player].onSendChat = proc(sender, target: int,
+          text: openArray[char]): int32 =
+        ## Retains admitted setup messages until the exact decks are known.
+        result = sendChat(sender, target, text)
+        if result > 0:
+          var message = ""
+          for character in text:
+            message.add character
+          setupMessages.add ReplayAction(kind: ActionMailbox,
+            playerId: sender.int32, target: target.int32, text: message)
+      defer:
+        botVms[player].onSendChat = previous
     result = botVms[player].setupSeat(PlayerCount, seed)
     for problem in botVms[player].deckProblems:
       stderr.writeLine "Player ", player + 1, " has an illegal deck: ", problem
 
   proc startDuel(seats: openArray[Seat], seed: int64) =
+    ## Deals the exact setup that the local replay will reproduce.
     game = newGame(seats, seed, recordEvents = true)
+    when not defined(emscripten):
+      play.recorder = app.beginReplayRecording(seats, seed, setupMessages)
+      setupMessages.setLen(0)
     play.resetTable()
     phase = PlayGame
     play.addOpeningHands(game, duelLayout)
@@ -191,9 +214,7 @@ proc runDuel*(app: App) =
   when defined(takeScreenshot):
     var screenshotFrame = 0
   if getEnv("CAC_AUTOSTART") == "1":
-    game = newGame(Archer, Mage, 20260904)
-    phase = PlayGame
-    play.addOpeningHands(game, duelLayout)
+    startDuel([precon(Archer), precon(Mage)], 20260904)
     play.statusMessage =
       &"Player {game.currentPlayer + 1} begins."
   if app.replay != nil:
@@ -953,7 +974,12 @@ proc runDuel*(app: App) =
                else: "END TURN"), canFinish):
             play.audio.queueSound(ClickSound)
             play.selectedAttacker = 0
+            when not defined(emscripten):
+              let player = game.currentPlayer
             game.finishTurn()
+            when not defined(emscripten):
+              play.recordAccepted(game, ReplayAction(
+                kind: ActionEndTurn, playerId: player.int32))
             botClock.wait = 1.2'f32
             play.statusMessage = "Your opponent is thinking..."
             play.pendingTargeting = false
@@ -1011,6 +1037,9 @@ proc runDuel*(app: App) =
         play.presentationIdle(game) and not play.attackActive)
       for cue in play.audio.takeSounds():
         playSound(cue)
+    when not defined(emscripten):
+      if phase == PlayGame:
+        app.updateReplaySaving(game.gameOver)
     menu.draw(app)
     sk.endUi()
     sk.drawHudFaces()
@@ -1051,3 +1080,5 @@ proc runDuel*(app: App) =
     window.onFrame = nil
     window.onButtonPress = nil
     duelLayout = TableLayout()
+    when not defined(emscripten):
+      app.finishReplayRecording()

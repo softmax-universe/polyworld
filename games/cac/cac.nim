@@ -121,6 +121,36 @@ when not defined(headless):
           let selected = app.runFrontend(connection, returnToLobby)
           if selected.kind == ExitFrontend:
             break
+          when not defined(emscripten):
+            if selected.kind == ReplayFrontend:
+              let previousOptions = app.options
+              try:
+                app.network = nil
+                app.connection = nil
+                app.configuredSeats = @[]
+                app.configuredBotSources = @[]
+                app.configuredHumanSeat = -1
+                app.playerNames = @[]
+                app.replay = newReplayer(loadReplay(selected.replayPath))
+                app.options.replayPath = selected.replayPath
+                app.options.botPaths = @[]
+                app.options.humanDeckPath = ""
+                app.options.human = false
+                app.options.playerCount = app.replay.classes.len
+                if app.options.playerCount > PlayerCount:
+                  app.runMultiplayer()
+                else:
+                  app.runDuel()
+              except CatchableError as problem:
+                app.preferenceError = problem.msg
+                app.window.closeRequested = false
+              finally:
+                app.window.onFrame = nil
+                app.window.onButtonPress = nil
+                app.options = previousOptions
+                app.replay = nil
+              returnToLobby = false
+              continue
           app.connection = connection
           app.network = selected.network
           app.configuredSeats = selected.seats

@@ -6,6 +6,8 @@ import
 const ReplayRowHeight* = 104.0'f
 
 type
+  ReplayLengthDisplay* = enum
+    ReplayDuration, ReplayActionCount
   ReplayBrowserAction* = enum
     StayReplayBrowser, BackFromReplays, ImportReplayFile, OpenReplayFolder,
     RefreshReplays, PlayReplay
@@ -38,14 +40,20 @@ proc folderButtonLabel*(): string =
   elif defined(windows): "Open in File Explorer"
   else: "Open replay folder"
 
-proc replayDetails(entry: ReplayEntry, tickRate: int): string =
-  ## Shows recording time and version without pretending old files can play.
+proc replayDetails(entry: ReplayEntry, tickRate: int,
+    lengthDisplay: ReplayLengthDisplay): string =
+  ## Shows a recording's version and supported time or action-count measure.
   result = entry.modified.local.format("yyyy-MM-dd  HH:mm") &
     "  |  Game v" & $entry.gameVersion
   if entry.playable:
-    let seconds = entry.ticks div tickRate
-    result.add("  |  " & $(seconds div 60) & ":" &
-      align($(seconds mod 60), 2, '0'))
+    case lengthDisplay
+    of ReplayDuration:
+      let seconds = entry.ticks div tickRate
+      result.add("  |  " & $(seconds div 60) & ":" &
+        align($(seconds mod 60), 2, '0'))
+    of ReplayActionCount:
+      result.add("  |  " & $entry.ticks &
+        (if entry.ticks == 1: " action" else: " actions"))
 
 proc chooseReplay(ui: var ReplayBrowserUi, entries: openArray[ReplayEntry],
     direction: int): int =
@@ -66,7 +74,8 @@ proc chooseReplay(ui: var ReplayBrowserUi, entries: openArray[ReplayEntry],
 proc drawReplayBrowser*(
   sk: Silky, window: Window, ui: var ReplayBrowserUi,
   entries: openArray[ReplayEntry], folder: string,
-  gameVersion: uint16, tickRate: int, message = ""
+  gameVersion: uint16, tickRate: int, message = "",
+  lengthDisplay = ReplayDuration
 ): ReplayBrowserResult =
   ## Draws the library and returns file actions for the frontend to perform.
   doAssert tickRate > 0
@@ -142,8 +151,8 @@ proc drawReplayBrowser*(
         selected = index
     sk.lobbyLabel(sk.fittedLabel(entry.name, labelWidth, "LobbyBold"),
       at + vec2(14, 0), labelWidth, "LobbyBold", ink)
-    sk.lobbyLabel(replayDetails(entry, tickRate), at + vec2(14, 28), labelWidth,
-      tint = LobbyMuted)
+    sk.lobbyLabel(replayDetails(entry, tickRate, lengthDisplay),
+      at + vec2(14, 28), labelWidth, tint = LobbyMuted)
     let detail = if entry.playable: "Ready to watch" else: entry.problem
     sk.lobbyLabel(sk.fittedLabel(detail, labelWidth, "LobbyBody"),
       at + vec2(14, 56), labelWidth,

@@ -76,6 +76,10 @@ type
     submitAction*: proc(action: ReplayAction): bool
       ## Queues a human action for a network match instead of changing its
       ## confirmed game state. Nil keeps local play immediate.
+    recorder*: ReplayRecorder
+      ## Captures completed local actions; network and replay tables leave it nil.
+    pendingReplayAction: ReplayAction
+      ## Keeps a permanent's original hand index until its targets are settled.
     pendingTargeting*: bool
     pendingCardIndex*: int
     pendingSourceId*: int
@@ -181,6 +185,20 @@ proc initTablePlay*(visualSeed: int64): TablePlay =
 proc initTablePlay*(): TablePlay =
   TablePlay(pendingCardIndex: -1, attackTarget: Canceled,
     attackForward: true, visualRng: initRand())
+
+proc recordAccepted*(play: var TablePlay, game: GameState,
+    action: ReplayAction) =
+  ## Records one completed local action and its resulting canonical state.
+  if play.recorder == nil:
+    return
+  if play.recorder.data.hashes.len >= MaxReplayHashes or
+    play.recorder.data.actions.len >= MaxReplayActions:
+      raise newException(ReplayError, "The replay recording is full.")
+  var recorded = action
+  recorded.tick = play.recorder.data.hashes.len.uint32 + 1
+  let hash = game.stateHash()
+  play.recorder.record(recorded)
+  play.recorder.recordHash(hash)
 
 proc silenceAudioThrough*(play: var TablePlay, game: GameState) =
   ## Silences queued history without discarding its visual presentation.
@@ -583,6 +601,7 @@ proc resetTable*(play: var TablePlay) =
   play = TablePlay(
     audio: TableAudio(silent: play.audio.silent),
     submitAction: play.submitAction,
+    recorder: play.recorder,
     pendingCardIndex: -1,
     attackTarget: Canceled,
     attackForward: true,
@@ -708,6 +727,7 @@ proc playHandCard*(
   ## all targets are chosen. True when the play was accepted, so the hand
   ## stops hovering that card while its action is being resolved.
   let
+    actingPlayer = game.currentPlayer
     player = game.players[game.currentPlayer]
     card = player.hand[handIndex]
   if game.playCost(game.currentPlayer, card) > player.energy:
@@ -790,6 +810,8 @@ proc playHandCard*(
         )
         play.pendingCard = card
         play.pendingCardIndex = -1
+        play.pendingReplayAction = ReplayAction(kind: ActionPlayCard,
+          playerId: actingPlayer.int32, handIndex: handIndex.int32)
         play.pendingSourceId = minionId
         play.pendingPicks.setLen(0)
         play.pendingChoices = game.availableChoices(card)
@@ -807,6 +829,8 @@ proc playHandCard*(
     else:
       play.pendingCard = card
       play.pendingCardIndex = handIndex
+      play.pendingReplayAction = ReplayAction(kind: ActionPlayCard,
+        playerId: actingPlayer.int32, handIndex: handIndex.int32)
       play.pendingSourceId = 0
       play.pendingPicks.setLen(0)
       play.pendingChoices = game.availableChoices(handIndex)
@@ -855,6 +879,10 @@ proc playHandCard*(
           game.currentPlayer, sourcePose)
         play.statusMessage = &"{card.name} resolves."
         result = true
+  if result and play.submitAction == nil and not play.pendingTargeting:
+    play.recordAccepted(game, ReplayAction(kind: ActionPlayCard,
+      playerId: actingPlayer.int32, handIndex: handIndex.int32,
+      choices: @[NoTarget].toReplay))
 
 proc updateTossPicking*(
     play: var TablePlay,
@@ -891,8 +919,15 @@ proc updateTossPicking*(
           if submitted: &"{pending.source}: discard submitted."
           else: "Those discards could not be submitted."
       else:
+        let accepted = game.resolvePendingToss(picks)
+        if accepted:
+          var indices: seq[int32]
+          for index in picks:
+            indices.add index.int32
+          play.recordAccepted(game, ReplayAction(kind: ActionToss,
+            playerId: pending.player.int32, indices: indices))
         play.statusMessage =
-          if game.resolvePendingToss(picks): &"{pending.source}: discarded."
+          if accepted: &"{pending.source}: discarded."
           else: "Those cards can't be discarded."
 
 proc pendingRules(play: TablePlay, game: GameState): Rules =
@@ -981,6 +1016,7 @@ proc takePick*(
     )[play.pendingCardIndex]
   let
     triggerName = game.waitingTriggerName()
+    actingPlayer = game.actingPlayer()
     resolved =
       if play.pendingTrigger:
         game.resolvePendingTrigger(picks)
@@ -993,6 +1029,16 @@ proc takePick*(
     play.holdCastSpell(layout, card.pickedFace(picks, board), spellClass,
       game.currentPlayer, spellSourcePose)
   if resolved:
+    var action =
+      if play.pendingTrigger:
+        ReplayAction(kind: ActionResolveTrigger, playerId: actingPlayer.int32)
+      elif play.pendingReplayAction.kind == ActionPlayCard:
+        play.pendingReplayAction
+      else:
+        ReplayAction(kind: ActionPlayCard, playerId: actingPlayer.int32,
+          handIndex: play.pendingCardIndex.int32)
+    action.choices = picks.toReplay
+    play.recordAccepted(game, action)
     play.statusMessage =
       if play.pendingTrigger:
         &"{triggerName} resolves."
@@ -1006,6 +1052,7 @@ proc takePick*(
   else:
     play.statusMessage = &"{card.name} could not resolve."
   play.pendingTargeting = false
+  play.pendingReplayAction = ReplayAction()
   play.pendingTrigger = false
   play.pendingCardIndex = -1
   play.pendingPreview = none(GameState)
@@ -1039,8 +1086,14 @@ proc updateChoosing*(
     return
   if cancel:
     play.audio.queueSound(CancelSound)
+    if play.pendingCard.kind != Spell and play.submitAction == nil:
+      if game.finishPlay(play.pendingCard, @[NoTarget], play.pendingSourceId):
+        var action = play.pendingReplayAction
+        action.choices = @[NoTarget].toReplay
+        play.recordAccepted(game, action)
     play.statusMessage = &"{play.pendingCard.name} canceled."
     play.pendingTargeting = false
+    play.pendingReplayAction = ReplayAction()
     play.pendingCardIndex = -1
     play.pendingPreview = none(GameState)
     play.pendingPicks.setLen(0)
@@ -1086,12 +1139,16 @@ proc updateTargeting*(
           if submitted: &"{card.name} submitted without a target."
           else: &"{card.name} could not be submitted."
       else:
-        discard game.finishPlay(card, @[NoTarget], play.pendingSourceId)
+        if game.finishPlay(card, @[NoTarget], play.pendingSourceId):
+          var action = play.pendingReplayAction
+          action.choices = @[NoTarget].toReplay
+          play.recordAccepted(game, action)
         play.statusMessage =
           &"{card.name}'s rule finishes without a target."
     else:
       play.statusMessage = &"{card.name} canceled."
     play.pendingTargeting = false
+    play.pendingReplayAction = ReplayAction()
     play.pendingCardIndex = -1
     play.pendingPreview = none(GameState)
     play.pendingPicks.setLen(0)
@@ -1109,6 +1166,7 @@ proc updateTargeting*(
 
 proc stopTargeting*(play: var TablePlay) =
   play.pendingTargeting = false
+  play.pendingReplayAction = ReplayAction()
   play.pendingCardIndex = -1
   play.pendingPreview = none(GameState)
   play.choosePicked = none(int)
@@ -1171,8 +1229,13 @@ proc advanceAttack*(play: var TablePlay, game: var GameState,
   if play.attackForward:
     if play.attackElapsed >= AttackLungeDuration:
       if not play.attackDamageApplied:
-        discard game.attack(play.attackSteps[play.attackIndex],
-          play.attackTarget)
+        let
+          player = game.currentPlayer
+          attacker = play.attackSteps[play.attackIndex]
+        if game.attack(attacker, play.attackTarget):
+          play.recordAccepted(game, ReplayAction(kind: ActionAttack,
+            playerId: player.int32, attacker: attacker.int32,
+            choices: @[play.attackTarget].toReplay))
         play.attackDamageApplied = true
       play.attackForward = false
       play.attackElapsed = 0
@@ -2023,7 +2086,22 @@ proc updateBots*(
           let name = if botName.isNil: "Bot" else: botName(player)
           let before = game.copyGameState()
           clock.scriptFailed = false
-          let decision = vm.runDecision(game, apply = false)
+          let
+            previousChat = vm.onSendChat
+            recorder = play.recorder
+          if recorder != nil:
+            vm.onSendChat = proc(sender, target: int,
+                text: openArray[char]): int32 =
+              ## Records local mailbox admission before the selected action.
+              result = sendChat(sender, target, text)
+              if result > 0:
+                recorder.recordMailbox(recorder.data.hashes.len.uint32,
+                  sender, target, text)
+          var decision: BotDecision
+          try:
+            decision = vm.runDecision(game, apply = false)
+          finally:
+            vm.onSendChat = previousChat
           case decision
           of BotAttacked:
             play.startAttack(game, layout, @[vm.action.attacker.int],
@@ -2031,6 +2109,7 @@ proc updateBots*(
             play.statusMessage = name & " is attacking..."
           of BotPlayedCard, BotResolvedTrigger, BotTossed, BotEndedTurn:
             if game.applyAction(vm.action):
+              play.recordAccepted(game, vm.action)
               play.addActionArrows(layout, before, game, vm.action)
               play.animateTransition(layout, before, game,
                 vm.action.choices.toChoices)

@@ -1,6 +1,6 @@
 ## Local and network matches share Tower Arena or the multiplayer ring.
 import std/math
-import ../core/sim, ../core/bots, ../core/eventtext, ../scene/ring
+import ../core/sim, ../core/bots, ../core/eventtext, ../core/replays, ../scene/ring
 export ring
 
 const
@@ -14,6 +14,10 @@ const
 type
   MultiplayerMatch* = object
     game*: GameState
+    initialSeats*: seq[Seat]
+    seed*: int64
+    when not defined(emscripten):
+      setupMessages*: seq[ReplayAction]
     humanSeat*: int  ## -1 when every seat is a bot and we spectate.
     bots*: seq[BotVm]  ## One per seat; nil for the human's.
 
@@ -44,15 +48,37 @@ proc newMultiplayerMatch*(seats: openArray[Seat], humanSeat: int,
         inc next
   result.bots = loadBots(sources)
   var selected = @seats
+  when not defined(emscripten):
+    var setupMessages: seq[ReplayAction]
   if botsChoose:
     for seat in 0 ..< selected.len:
       if seat != humanSeat and result.bots[seat] != nil:
+        when not defined(emscripten):
+          let
+            bot = result.bots[seat]
+            previous = bot.onSendChat
+          bot.onSendChat = proc(sender, target: int,
+              text: openArray[char]): int32 =
+            ## Retains setup admissions until the selected decks are recorded.
+            result = sendChat(sender, target, text)
+            if result > 0:
+              var message = ""
+              for character in text:
+                message.add character
+              setupMessages.add ReplayAction(kind: ActionMailbox,
+                playerId: sender.int32, target: target.int32, text: message)
+          defer:
+            bot.onSendChat = previous
         selected[seat] = result.bots[seat].setupSeat(selected.len, seed)
         for problem in result.bots[seat].deckProblems:
           stderr.writeLine "Player ", seat + 1, " has an illegal deck: ",
             problem
   for bot in result.bots:
     bot.ensureSeed(seed)
+  result.initialSeats = selected
+  result.seed = seed
+  when not defined(emscripten):
+    result.setupMessages = setupMessages
   result.game = newGame(selected, seed, recordEvents = true)
 
 proc newMultiplayerMatch*(classes: openArray[HeroClass], humanSeat: int,
@@ -133,7 +159,6 @@ when not defined(headless):
   import polyworld/[characters, chrome, connections, menus,
     roomclients, sounds, viewers]
   import polyworld/rooms except Seat
-  import ../core/replays
   import ../replayer
   when defined(emscripten):
     import ../net/web
@@ -230,6 +255,8 @@ when not defined(headless):
     ## Presents two players in Tower Arena and larger matches on the ring.
     ## Each human faces their own seat; spectators follow the active seat.
     bindApp(app)
+    when not defined(emscripten):
+      app.useReplayRecording()
     let
       online = app.network != nil
       playerCount =
@@ -283,8 +310,11 @@ when not defined(headless):
       choosingClasses = false
       match = newMultiplayerMatch(seats,
         humanSeat = if human.isSome: 0 else: -1,
-        seed = seatRng.rand(high(int)).int64, botSources = botSources,
+        seed = seatRng.rand(high(int32)).int64, botSources = botSources,
         botsChoose = true)
+      when not defined(emscripten):
+        play.recorder = app.beginReplayRecording(
+          match.initialSeats, match.seed, match.setupMessages)
       botClock = initBotClock()
       orbit = initSeatOrbit(layout.balconies[match.viewedSeat].yaw)
       play.resetTable()
@@ -300,6 +330,8 @@ when not defined(headless):
     if botSources.len == 0:
       botSources = defaultBotSources(appDir)
     if online:
+      when not defined(emscripten):
+        app.useReplayRecording(app.network.recorder)
       app.network.automaticBots = false
       choosingClasses = false
       match = MultiplayerMatch(game: app.network.game,
@@ -332,11 +364,15 @@ when not defined(headless):
     elif app.configuredSeats.len > 0:
       choosingClasses = false
       let seed = if sessionOptions.seedGiven: sessionOptions.seed
-        else: seatRng.rand(high(int)).int64
+        else: seatRng.rand(high(int32)).int64
       match = MultiplayerMatch(
         game: newGame(app.configuredSeats, seed, recordEvents = true),
+        initialSeats: app.configuredSeats,
+        seed: seed,
         humanSeat: app.configuredHumanSeat,
         bots: loadBots(app.configuredBotSources))
+      when not defined(emscripten):
+        play.recorder = app.beginReplayRecording(match.initialSeats, seed)
       for bot in match.bots:
         bot.ensureSeed(seed)
       orbit = initSeatOrbit(layout.balconies[match.viewedSeat].yaw)
@@ -531,8 +567,16 @@ when not defined(headless):
           if botClock.scriptFailed:
             play.statusMessage = message
         if play.presentationIdle(match.game) and not play.attackActive and
-            match.skipDeadTurn():
-          turnPassed()
+            not match.game.gameOver and not match.game.waitingChoice and
+            match.game.dead(match.current):
+          when not defined(emscripten):
+            let player = match.current
+          let passed = match.skipDeadTurn()
+          when not defined(emscripten):
+            play.recordAccepted(match.game, ReplayAction(
+              kind: ActionEndTurn, playerId: player.int32))
+          if passed:
+            turnPassed()
         for event in terminalLog.readNew(match.game):
           echo event.describe(names)
         orbit.advance(previewDt)
@@ -933,8 +977,15 @@ when not defined(headless):
             if online:
               discard app.network.submitAction(ReplayAction(
                 kind: ActionEndTurn, playerId: match.humanSeat.int32))
-            elif match.endTurn():
-              turnPassed()
+            else:
+              when not defined(emscripten):
+                let player = match.current
+              let passed = match.endTurn()
+              when not defined(emscripten):
+                play.recordAccepted(match.game, ReplayAction(
+                  kind: ActionEndTurn, playerId: player.int32))
+              if passed:
+                turnPassed()
       when defined(emscripten):
         # The same summary as the duel's, one line per seat.
         var summary = &"Multiplayer match: {layout.playerCount} players. " &
@@ -975,6 +1026,10 @@ when not defined(headless):
           play.presentationIdle(match.game) and not play.attackActive)
         for cue in play.audio.takeSounds():
           playSound(cue)
+      when not defined(emscripten):
+        if not choosingClasses:
+          app.updateReplaySaving(match.game.gameOver or
+            (online and app.network.finished))
       menu.draw(app)
       sk.endUi()
       sk.drawHudFaces()
@@ -999,3 +1054,5 @@ when not defined(headless):
       if online:
         app.network.onAction = nil
       networkTable = TableLayout()
+      when not defined(emscripten):
+        app.finishReplayRecording()

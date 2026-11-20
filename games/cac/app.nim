@@ -10,6 +10,10 @@ import core/sim, core/sessions, ui/cardfaces, scene/cardrenderer,
 import polyworld/[assets, characters, chargen, connections,
   menus, viewers]
 
+when not defined(emscripten):
+  import core/replays, replaylibraries, replaysettings
+  export replaysettings
+
 when PostPanelControls:
   import polyworld/common
 
@@ -58,6 +62,13 @@ type
     idleClips*: array[HeroSeats, array[HeroClass, int]]
     deathClips*: array[HeroSeats, array[HeroClass, int]]
     replay*: Replayer  ## Set when watching a recorded match.
+    when not defined(emscripten):
+      replayPreferences*: ReplayPreferences
+      replaySaveError*, replaySavedPath*: string
+      unsavedReplays*: seq[ReplayData]
+      recording*: ReplayRecorder
+      savedHashes, savedActions: int
+      replaySaveRequested, automaticSaveAttempted: bool
 
 const DefaultBots* = ["archer.bas", "warrior.bas", "mage.bas",
     "archer_warrior.bas"]
@@ -196,8 +207,97 @@ proc initApp*(sessionOptions: SessionOptions): App =
   except MenusError, IOError, OSError:
     result.preferenceError = getCurrentExceptionMsg()
     result.preferences = Preferences()
+  when not defined(emscripten):
+    result.replayPreferences = ReplayPreferences()
+    try:
+      result.replayPreferences = readReplayPreferences()
+    except MenusError, IOError, OSError:
+      result.replaySaveError = getCurrentExceptionMsg()
   result.preferences.applyPreferences(window,
     configureDisplay = not defined(takeScreenshot))
+
+when not defined(emscripten):
+  proc useReplayRecording*(app: App, recorder: ReplayRecorder = nil) =
+    ## Starts a fresh recording session without discarding failed prior saves.
+    app.recording = if app.replay == nil: recorder else: nil
+    app.replaySavedPath = ""
+    app.replaySaveError = ""
+    app.savedHashes = -1
+    app.savedActions = -1
+    app.replaySaveRequested = false
+    app.automaticSaveAttempted = false
+
+  proc beginReplayRecording*(app: App, seats: openArray[Seat],
+      seed: int64, messages: openArray[ReplayAction] = []): ReplayRecorder =
+    ## Records the exact decks and public names used to start a local match.
+    app.useReplayRecording()
+    if app.replay != nil:
+      return
+    if seed < low(int32).int64 or seed > high(int32).int64:
+      app.replaySaveError = "This seed is outside the replay format's range."
+      return
+    var config = GameConfig(seed: seed.int32, maxTicks: MaxReplayHashes.int32)
+    for index in 0 ..< seats.len:
+      config.players.add PlayerConfig(name:
+        if index < app.playerNames.len: app.playerNames[index]
+        else: "Player " & $(index + 1))
+    result = initReplayRecorder(
+      matchSetup(seats, seed.int32, MaxReplayHashes.uint32), config)
+    for message in messages:
+      result.record(message)
+    app.recording = result
+
+  proc saveCurrentReplay*(app: App): string =
+    ## Saves a completed action prefix once, sharing manual and automatic saves.
+    if app.replay != nil or app.recording == nil:
+      raise newException(ReplayError, "There is no live match replay to save.")
+    app.replaySaveRequested = true
+    let data = app.recording.data
+    if app.replaySavedPath.len == 0 or not fileExists(app.replaySavedPath) or
+      app.savedHashes != data.hashes.len or app.savedActions != data.actions.len:
+        app.replaySavedPath = saveLibraryReplay(data)
+        app.savedHashes = data.hashes.len
+        app.savedActions = data.actions.len
+    app.replaySaveRequested = false
+    app.replaySaveError = ""
+    app.replaySavedPath
+
+  proc updateReplaySaving*(app: App, completed: bool) =
+    ## Saves a completed match before the player leaves its result screen.
+    if app.replay == nil and app.recording != nil and completed and
+      app.replayPreferences.saveReplay and not app.automaticSaveAttempted:
+        app.automaticSaveAttempted = true
+        try:
+          discard app.saveCurrentReplay()
+        except CatchableError as error:
+          app.replaySaveError = "Cannot save replay: " & error.msg
+
+  proc finishReplayRecording*(app: App) =
+    ## Preserves failed exit saves for retry after the renderer has cleaned up.
+    if app.replay != nil or app.recording == nil or
+      not (app.replayPreferences.saveReplay or app.replaySaveRequested):
+        return
+    try:
+      discard app.saveCurrentReplay()
+    except CatchableError as error:
+      app.replaySaveError = "Cannot save replay: " & error.msg
+      if app.window != nil:
+        app.window.closeRequested = false
+      try:
+        app.recording.data.validate()
+        app.unsavedReplays.add(app.recording.data)
+      except ReplayError:
+        discard
+
+  proc retryPendingReplays*(app: App) =
+    ## Removes retained recordings only after their library writes succeed.
+    try:
+      while app.unsavedReplays.len > 0:
+        discard saveLibraryReplay(app.unsavedReplays[0])
+        app.unsavedReplays.delete(0)
+      app.replaySaveError = ""
+    except CatchableError as error:
+      app.replaySaveError = "Cannot save replay: " & error.msg
 
 proc setBattlefield*(app: App, playerCount: int) =
   ## Uses Tower Arena for two players and the ring for larger matches.

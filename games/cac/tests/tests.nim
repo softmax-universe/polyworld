@@ -20,6 +20,9 @@ import
   test_pile_hover,
   test_play,
   test_replayer,
+  test_replay_library,
+  test_recording_library,
+  test_recording_play,
   test_sessions,
   test_towerarena
 

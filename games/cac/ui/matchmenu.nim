@@ -6,7 +6,9 @@ import
   ../app, ../net/multiplayer, controls
 
 const
-  BattleMenuSize = vec2(520, 560)
+  BattleMenuSize =
+    when defined(emscripten): vec2(520, 560)
+    else: vec2(520, 620)
   BattleMenuInset = vec2(32)
   BattleMenuWidth = 456'f
   BattleMenuGold = rgbx(215, 181, 112, 255)
@@ -138,7 +140,16 @@ proc draw*(menu: var MatchMenu, app: App) =
   if sk.lobbyButton("Settings", origin + vec2(32, 262), BattleMenuWidth,
       "settings", enabled = not menu.waitingToLeave, height = 48):
     menu.page = MenuSettings
-  sk.drawRect(origin + vec2(32, 326), vec2(BattleMenuWidth, 1),
+  when not defined(emscripten):
+    if sk.lobbyButton("Save replay", origin + vec2(32, 322), BattleMenuWidth,
+        enabled = not menu.waitingToLeave and app.replay == nil and
+          app.recording != nil, height = 48):
+      try:
+        discard app.saveCurrentReplay()
+      except CatchableError as error:
+        app.replaySaveError = "Cannot save replay: " & error.msg
+  let replayRow = when defined(emscripten): 0.0'f else: 60.0'f
+  sk.drawRect(origin + vec2(32, 326 + replayRow), vec2(BattleMenuWidth, 1),
     rgbx(215, 181, 112, 60))
   let leaveText =
     if not online: "Return to main menu"
@@ -147,7 +158,7 @@ proc draw*(menu: var MatchMenu, app: App) =
     elif network.client.snapshot.participant == network.client.participant:
       "Return room to lobby"
     else: "Back to multiplayer"
-  if sk.lobbyButton(leaveText, origin + vec2(32, 338), BattleMenuWidth,
+  if sk.lobbyButton(leaveText, origin + vec2(32, 338 + replayRow), BattleMenuWidth,
       "arrow_left", enabled = not menu.waitingToLeave, height = 48,
       tint = rgbx(218, 220, 220, 255)):
     if online:
@@ -168,8 +179,15 @@ proc draw*(menu: var MatchMenu, app: App) =
     elif online and not active: "Return to the lobby to set up another battle."
     elif paused: "Resume when you are ready to continue."
     else: "Use Pause battle to stop the game.",
-    origin + vec2(32, 410), vec2(BattleMenuWidth, 28),
+    origin + vec2(32, 410 + replayRow), vec2(BattleMenuWidth, 28),
     BattleMenuMuted, "Default", CenterAlign)
   sk.drawLabel(menuShortcut() & " closes this menu",
-    origin + vec2(32, 482), vec2(BattleMenuWidth, 24),
+    origin + vec2(32, 482 + replayRow), vec2(BattleMenuWidth, 24),
     BattleMenuGold, "Small", CenterAlign)
+  when not defined(emscripten):
+    let message =
+      if app.replaySaveError.len > 0: app.replaySaveError
+      elif app.replaySavedPath.len > 0: "Replay saved to your library."
+      else: ""
+    sk.menuLabel(sk.fittedLabel(message, BattleMenuWidth, "Default"),
+      origin + vec2(32, 574), BattleMenuWidth, BattleMenuGold)

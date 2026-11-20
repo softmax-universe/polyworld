@@ -2,18 +2,19 @@
 import
   std/[os, strutils, tables, uri],
   bumpy, chroma, opengl, pixie, silky, vmath, windy,
-  polyworld/[chrome, connections, gameuis, homes, lobbies, menus, policies,
+  polyworld/[chrome, connections, homes, lobbies, menus, policies,
     roomclients, rooms, sounds, viewers],
-  app, core/[battlesetup, sim], net/[multiplayer, web], ui/controls
+  app, core/[battlesetup, sim], net/[multiplayer, web], ui/controls,
+  homes as cacHomes
 
 when not defined(emscripten):
-  import polyworld/displays
+  import polyworld/displays, replaylibraries, replaymenus, replaysettings
 
 const ClassChoices = [Archer, Warrior, Mage]
 
 type
   FrontendKind* = enum
-    ExitFrontend, LocalFrontend, NetworkFrontend
+    ExitFrontend, LocalFrontend, NetworkFrontend, ReplayFrontend
   FrontendResult* = object
     kind*: FrontendKind
     seats*: seq[sim.Seat]
@@ -21,6 +22,7 @@ type
     network*: NetworkMatch
     botSources*, playerNames*: seq[string]
     seed*: int64
+    replayPath*: string
   FrontendState = object
     initialized: bool
     setup: BattleSetup
@@ -29,6 +31,7 @@ type
     roomName, roomNameDefault: string
     pendingInvite: string
     publicRoom: bool
+    browsingReplays: bool
 
 var frontendState: FrontendState
 
@@ -72,58 +75,6 @@ proc localSelection(name: string): FrontendResult =
     else:
       continue
     result.seats.add precon(heroClass)
-
-proc drawCacHome(sk: Silky, window: Window, focus: var int): HomeAction =
-  ## Draws illustrated CaC buttons with pointer and keyboard navigation.
-  sk.uiScale = selectedUiScale(max(0.1'f, min(
-    window.size.x.float32 / 760, window.size.y.float32 / 940)),
-    1080.0'f / 940)
-  sk.beginUi(window, window.size)
-  sk.textStyle = "LobbyBody"
-  sk.drawHomeBackground(window)
-  let
-    view = window.size.vec2 / sk.uiScale
-    center = view * 0.5'f
-    at = center - vec2(270, 280)
-    labels = ["Single Player", "Multiplayer", "Settings", "Exit"]
-    count = when defined(emscripten): 3 else: 4
-  sk.drawSprite("home-shade", center - vec2(500, 440), vec2(1000, 880))
-  sk.drawLabel("CARDS AND CASTERS", at - vec2(80, 21), vec2(700, 80),
-    rgbx(8, 16, 25, 230), "HomeTitle", CenterAlign)
-  sk.drawLabel("CARDS AND CASTERS", at - vec2(80, 24), vec2(700, 80),
-    rgbx(245, 225, 181, 255), "HomeTitle", CenterAlign)
-  if window.buttonPressed[KeyUp]:
-    focus = (focus + count - 1) mod count
-    playSound(SelectSound)
-  if window.buttonPressed[KeyDown] or window.buttonPressed[KeyTab]:
-    focus = (focus + 1) mod count
-    playSound(SelectSound)
-  for index in 0 ..< count:
-    let
-      point = at + vec2(30, 142 + index.float32 * 80)
-      size = vec2(480, 76)
-      interaction = sk.interact(rect(point, size), true)
-      hovered = interaction in {Hovered, Pressed, Held, Released}
-    if hovered and window.mouseDelta != ivec2(0):
-      focus = index
-    sk.hoverSound(GameUiPanel(origin: point, size: size))
-    let
-      active = hovered or focus == index
-      pressed = interaction in {Pressed, Held}
-      tint = if pressed: 205'u8 elif active: 255'u8 else: 218'u8
-      inset = if pressed: vec2(2, 1) else: vec2(0)
-      ink = if active: rgbx(255, 240, 202, 255)
-        else: rgbx(225, 221, 200, 255)
-      skin = if index == 0: "home-button-primary" else: "home-button-secondary"
-    sk.drawSprite(skin, point + inset, size - inset * 2,
-      rgbx(tint, tint, tint, 255))
-    sk.drawLabel(labels[index], point + vec2(0, 2), size,
-      rgbx(6, 15, 20, 235), "HomeButton", CenterAlign)
-    sk.drawLabel(labels[index], point, size, ink, "HomeButton", CenterAlign)
-    if interaction == Released or
-      (focus == index and window.buttonPressed[KeyEnter]):
-        result = HomeAction(index + 1)
-        playSound(ClickSound)
 
 proc removePlayerPicker(sk: Silky, window: Window,
     ui: var LobbyUi): SlotChoice =
@@ -207,7 +158,27 @@ proc runFrontend*(app: App, connection: var Connection,
     playerName = preferences.name
     editingPlayer, localLaunchRequested: bool
     launchLocal, launchNetwork: bool
+    launchReplay: bool
     selection: FrontendResult
+  when not defined(emscripten):
+    var
+      replayFolder = replayDirectory()
+      replayEntries: seq[ReplayEntry]
+      replayUi: ReplayBrowserUi
+      replayAction: ReplayBrowserResult
+      replayMessage = if app.replaySaveError.len > 0:
+        app.replaySaveError else: error
+      replayRefreshRequested = frontendState.browsingReplays
+      retryReplaySave: bool
+
+    proc drawReplayRetry() =
+      ## Keeps failed exports available without discarding the completed match.
+      if app.unsavedReplays.len > 0:
+        if sk.lobbyButton("Retry saving replay", vec2(24, 64), 280):
+          retryReplaySave = true
+
+    if app.replaySaveError.len > 0:
+      error = app.replaySaveError
   app.preferenceError = ""
   if initialEntry and not returnToLobby:
     let inviteServer = inviteParameter("server")
@@ -236,6 +207,12 @@ proc runFrontend*(app: App, connection: var Connection,
     of "single": page = SingleMenu
     of "settings": page = SettingsMenu
     of "multiplayer": page = MultiplayerMenu
+    of "replays":
+      when defined(emscripten):
+        raise newException(MenusError, "The replay library is desktop-only")
+      else:
+        frontendState.browsingReplays = true
+        replayRefreshRequested = true
     of "name":
       page = MultiplayerMenu
       preferences.name = ""
@@ -251,9 +228,12 @@ proc runFrontend*(app: App, connection: var Connection,
         max(1, parseInt(getEnv("CAC_CAPTURE_FRAME", "20"))),
         app.appDir / "cac_menu.png")
     window.presentFrame(framePaceHz)
-  while not window.closeRequested and not launchLocal and not launchNetwork:
+  while not window.closeRequested and not launchLocal and not launchNetwork and
+      not launchReplay:
     when not defined(emscripten):
       window.updateWindowSettings()
+      replayAction = ReplayBrowserResult()
+      retryReplaySave = false
     let roomNameDefault = defaultRoomName(preferences.name)
     if frontendState.roomName == frontendState.roomNameDefault:
       frontendState.roomName = roomNameDefault
@@ -433,16 +413,23 @@ proc runFrontend*(app: App, connection: var Connection,
         sk.endUi()
         presentMenuFrame()
         return
+      when not defined(emscripten):
+        if frontendState.browsingReplays:
+          replayAction = sk.drawReplayBrowser(window, replayUi,
+            replayEntries, replayFolder, replayMessage)
+          sk.endUi()
+          presentMenuFrame()
+          return
       if page == HomeMenu:
         case sk.drawCacHome(window, homeFocus)
-        of StayHome: discard
-        of PlaySingle:
+        of CacStayHome: discard
+        of CacPlaySingle:
           page = SingleMenu
           frontendState.localPolicies.setLen(frontendState.setup.classes.len)
           if frontendState.humanSeat >= frontendState.setup.classes.len:
             frontendState.humanSeat = -1
           lobbyUi = LobbyUi()
-        of PlayMultiplayer:
+        of CacPlayMultiplayer:
           page = MultiplayerMenu
           connectRequested = preferences.server.strip().len > 0 and
             (activeConnection == nil or not activeConnection.client.connected)
@@ -451,8 +438,13 @@ proc runFrontend*(app: App, connection: var Connection,
             joinRequested = true
             autoClaim = true
           lobbyUi = LobbyUi()
-        of OpenSettings: page = SettingsMenu
-        of ExitGame:
+        of CacOpenReplays:
+          when not defined(emscripten):
+            frontendState.browsingReplays = true
+            replayRefreshRequested = true
+            replayMessage = ""
+        of CacOpenSettings: page = SettingsMenu
+        of CacExitGame:
           when not defined(emscripten):
             window.closeRequested = true
         if sk.playerButton(window, preferences.name):
@@ -460,6 +452,8 @@ proc runFrontend*(app: App, connection: var Connection,
           editingPlayer = true
         if error.len > 0:
           sk.menuLabel(error, vec2(24, 24), color = LobbyRed)
+        when not defined(emscripten):
+          drawReplayRetry()
         sk.endUi()
         presentMenuFrame()
         return
@@ -761,6 +755,17 @@ proc runFrontend*(app: App, connection: var Connection,
           sk.lobbyLabel(if online: "Ready is optional. The host can start anytime."
             else: "Clear your human slot to watch the bots.",
             options + vec2(0, 462), width, tint = LobbyMuted)
+          when not defined(emscripten):
+            let previousSave = app.replayPreferences.saveReplay
+            sk.at = options + vec2(0, 510)
+            if not modal:
+              checkBox "Save replay", app.replayPreferences.saveReplay
+            else:
+              sk.lobbyLabel("Save replay: " &
+                (if app.replayPreferences.saveReplay: "On" else: "Off"),
+                sk.at, width, tint = LobbyMuted)
+            if previousSave != app.replayPreferences.saveReplay:
+              app.replayPreferences.saveReplayPreferences()
           if online:
             configDirty = frontendState.setup.encodeBattleSetup() !=
               snapshot.payload or matchName != snapshot.name
@@ -896,11 +901,53 @@ proc runFrontend*(app: App, connection: var Connection,
               editingPlayer = true
       if error.len > 0:
         sk.lobbyLabel(error, vec2(24, 0), 1400, tint = LobbyRed)
+      when not defined(emscripten):
+        drawReplayRetry()
       sk.textStyle = "Default"
       sk.endUi()
       presentMenuFrame()
     pollEvents()
     waitForDisplay()
+    when not defined(emscripten):
+      if retryReplaySave:
+        app.retryPendingReplays()
+        error = app.replaySaveError
+        replayRefreshRequested = true
+      if frontendState.browsingReplays:
+        try:
+          case replayAction.action
+          of StayReplayBrowser:
+            discard
+          of BackFromReplays:
+            frontendState.browsingReplays = false
+            replayMessage = ""
+            sk.resetInteractions()
+          of RefreshReplays:
+            replayRefreshRequested = true
+            replayMessage = ""
+          of OpenReplayFolder:
+            openUrl(ensureReplayDirectory())
+          of ImportReplayFile:
+            let source = openFileDialog("Import replay", @[
+              FileDialogFilter(name: "Polyworld replay", extensions: "replay")
+            ], defaultPath = ensureReplayDirectory())
+            if source.len > 0:
+              replayUi.selectedPath = importReplay(source)
+              replayRefreshRequested = true
+              replayMessage = "Replay imported."
+          of PlayReplay:
+            let entry = inspectReplay(replayAction.path)
+            if not entry.playable:
+              raise newException(MenusError, entry.problem)
+            selection = FrontendResult(kind: ReplayFrontend,
+              replayPath: entry.path)
+            launchReplay = true
+          if replayRefreshRequested:
+            replayRefreshRequested = false
+            replayFolder = ensureReplayDirectory()
+            replayEntries = listReplays(replayFolder)
+        except CatchableError as problem:
+          replayMessage = problem.msg
   window.onFrame = nil
   window.onButtonPress = nil
   if launchLocal:

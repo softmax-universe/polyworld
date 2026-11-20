@@ -1,7 +1,7 @@
 import
   std/[strutils, times],
   bumpy, chroma, silky, vmath, windy,
-  chrome, homes, lobbies, replaylibraries, sounds
+  chrome, homes, lobbies, replaylibraries, sounds, tapes
 
 const ReplayRowHeight* = 104.0'f
 
@@ -17,9 +17,74 @@ type
   ReplayBrowserUi* = object
     scroll*: FrameState
     selectedPath*: string
+  ReplayBrowserState* = object
+    ui*: ReplayBrowserUi
+    entries*: seq[ReplayEntry]
+    folder*, message*: string
+    refreshRequested*: bool
   ReplayBrowserLayout* = object
     panel*, rows*: Rect
     back*, importButton*, folderButton*, refresh*: Rect
+
+proc initReplayBrowser*(
+  library: ReplayLibrary, message = "", directory = ""
+): ReplayBrowserState =
+  ## Initializes the desktop library without performing filesystem operations.
+  result.folder = if directory.len > 0: directory else: library.replayDirectory()
+  result.message = message
+  result.refreshRequested = true
+
+proc refreshReplayBrowser*(
+  browser: var ReplayBrowserState, library: ReplayLibrary
+) =
+  ## Reloads the current folder after an import, save, or explicit refresh.
+  browser.refreshRequested = false
+  browser.folder = library.ensureReplayDirectory(browser.folder)
+  browser.entries = library.listReplays(browser.folder)
+
+proc importBrowserReplay*(
+  browser: var ReplayBrowserState, library: ReplayLibrary, source: string
+) =
+  ## Imports a selected file and focuses it without changing its source.
+  if source.len == 0:
+    return
+  browser.ui.selectedPath = library.importReplay(source, browser.folder)
+  browser.refreshRequested = true
+  browser.message = "Replay imported."
+
+when not defined(emscripten):
+  proc updateReplayBrowser*(
+    browser: var ReplayBrowserState, library: ReplayLibrary,
+    action: ReplayBrowserResult
+  ): ReplayBrowserResult =
+    ## Performs desktop file actions after event polling and validates playback.
+    try:
+      case action.action
+      of StayReplayBrowser:
+        discard
+      of BackFromReplays:
+        browser.message = ""
+        return action
+      of RefreshReplays:
+        browser.refreshRequested = true
+        browser.message = ""
+      of OpenReplayFolder:
+        openUrl(library.ensureReplayDirectory(browser.folder))
+      of ImportReplayFile:
+        let source = openFileDialog("Import replay", @[
+          FileDialogFilter(name: "Polyworld replay", extensions: "replay")
+        ], defaultPath = library.ensureReplayDirectory(browser.folder))
+        browser.importBrowserReplay(library, source)
+      of PlayReplay:
+        let entry = library.inspectReplay(action.path)
+        if not entry.playable:
+          raise newException(ReplayError, entry.problem)
+        result = ReplayBrowserResult(action: PlayReplay, path: entry.path)
+      if browser.refreshRequested:
+        browser.refreshReplayBrowser(library)
+    except CatchableError as error:
+      browser.message = error.msg
+      result = ReplayBrowserResult()
 
 proc replayBrowserLayout*(view: Vec2): ReplayBrowserLayout =
   ## Keeps the list and controls within the current logical desktop viewport.
@@ -39,6 +104,24 @@ proc folderButtonLabel*(): string =
   when defined(macosx): "Open in Finder"
   elif defined(windows): "Open in File Explorer"
   else: "Open replay folder"
+
+proc drawReplaySaveOption*(
+  sk: Silky, window: Window, at: Vec2, saveReplay: var bool,
+  enabled = true, width = 280.0'f
+): bool =
+  ## Draws the common recording preference and reports changes for persistence.
+  let previous = saveReplay
+  sk.at = at
+  if enabled:
+    checkBox "Save replay", saveReplay
+  else:
+    sk.lobbyLabel("Save replay: " & (if saveReplay: "On" else: "Off"),
+      at, width, tint = LobbyMuted)
+  previous != saveReplay
+
+proc drawReplaySaveRetry*(sk: Silky, pending: bool): bool =
+  ## Keeps the retry action in the same place on each game's desktop menu.
+  pending and sk.lobbyButton("Retry saving replay", vec2(24, 64), 280)
 
 proc replayDetails(entry: ReplayEntry, tickRate: int,
     lengthDisplay: ReplayLengthDisplay): string =
@@ -174,3 +257,11 @@ proc drawReplayBrowser*(
     layout.panel.w - 180, "LobbyBody"
   ), footer, layout.panel.w - 180,
     tint = if message.len > 0: sk.theme.defaultTextColor else: LobbyMuted)
+
+proc drawReplayBrowser*(
+  sk: Silky, window: Window, browser: var ReplayBrowserState,
+  gameVersion: uint16, tickRate: int, lengthDisplay = ReplayDuration
+): ReplayBrowserResult =
+  ## Renders the same controller state for every desktop replay library.
+  sk.drawReplayBrowser(window, browser.ui, browser.entries, browser.folder,
+    gameVersion, tickRate, browser.message, lengthDisplay)

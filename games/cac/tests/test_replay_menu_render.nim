@@ -140,6 +140,30 @@ proc verifyReplayMenu(size: IVec2, screenshot: string, zoom = 0) =
   input(key = KeyEnter)
   doAssert sk.drawCacHome(window, focus) == CacOpenSettings
   sk.endUi()
+  var saveReplay = false
+
+  proc renderSaveOption(pressed = false, released = false,
+      enabled = true): bool =
+    ## Sends real pointer input through the shared recording preference.
+    input(vec2(90, 90), pressed, released)
+    sk.beginUi(window, window.size)
+    sk.textStyle = "LobbyBody"
+    result = sk.drawReplaySaveOption(window, vec2(80, 80), saveReplay, enabled)
+    sk.endUi()
+
+  sk.resetInteractions()
+  discard renderSaveOption()
+  doAssert not renderSaveOption(pressed = true)
+  doAssert renderSaveOption(released = true)
+  doAssert saveReplay
+  discard renderSaveOption(enabled = false)
+  doAssert not renderSaveOption(pressed = true, enabled = false)
+  doAssert not renderSaveOption(released = true, enabled = false)
+  doAssert saveReplay
+  discard renderSaveOption()
+  doAssert not renderSaveOption(pressed = true)
+  doAssert renderSaveOption(released = true)
+  doAssert not saveReplay
 
 verifyReplayMenu(ivec2(1280, 900),
   getEnv("CAC_REPLAY_MENU_SCREENSHOT", "/tmp/cac-replay-browser.png"))

@@ -13,3 +13,11 @@ proc drawReplayBrowser*(
   sharedReplayMenus.drawReplayBrowser(
     sk, window, ui, entries, folder, ReplayGameVersion, TickRate, message
   )
+
+proc drawReplayBrowser*(
+  sk: Silky, window: Window, browser: var ReplayBrowserState
+): ReplayBrowserResult =
+  ## Supplies LvD's replay metadata to the shared library controller.
+  sharedReplayMenus.drawReplayBrowser(
+    sk, window, browser, ReplayGameVersion, TickRate
+  )

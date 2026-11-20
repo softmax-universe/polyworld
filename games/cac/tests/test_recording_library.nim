@@ -120,5 +120,39 @@ END
   doAssert setupRecorder.data.actions[1].playerId == 1
   setupRecorder.data.encodeReplay().decodeReplay().verify()
 
+proc testManualSaveRecovery() =
+  ## Retains a failed manual save when the automatic-save preference is off.
+  const DataVariable = when defined(windows): "APPDATA" else: "XDG_DATA_HOME"
+  let
+    directory = createTempDir("cac-manual-replay-", "")
+    hadData = existsEnv(DataVariable)
+    previousData = getEnv(DataVariable)
+    blocked = directory / "blocked"
+    app = App(replayPreferences: ReplayPreferences(saveReplay: false))
+  defer:
+    if hadData:
+      putEnv(DataVariable, previousData)
+    else:
+      delEnv(DataVariable)
+    removeDir(directory)
+  writeFile(blocked, "Not a directory")
+  putEnv(DataVariable, blocked)
+  discard app.beginReplayRecording(@[precon(Archer), precon(Mage)], 91)
+  var rejected = false
+  try:
+    discard app.saveCurrentReplay()
+  except ReplayError:
+    rejected = true
+  doAssert rejected
+  app.finishReplayRecording()
+  doAssert app.unsavedReplays.len == 1,
+    "A failed manual save must survive leaving a match with autosave off."
+  putEnv(DataVariable, directory)
+  app.retryPendingReplays()
+  doAssert app.unsavedReplays.len == 0
+  doAssert app.replaySaveError.len == 0
+  doAssert listReplays().len == 1
+
 testLibraryRecording()
+testManualSaveRecovery()
 echo "CaC library save, deduplication, opt-out, and recovery tests passed."

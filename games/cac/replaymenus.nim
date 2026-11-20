@@ -14,3 +14,11 @@ proc drawReplayBrowser*(
     sk, window, ui, entries, folder, ReplayGameVersion, 1, message,
     lengthDisplay = ReplayActionCount
   )
+
+proc drawReplayBrowser*(
+  sk: Silky, window: Window, browser: var ReplayBrowserState
+): ReplayBrowserResult =
+  ## Supplies CaC's action-count metadata to the shared library controller.
+  sharedReplayMenus.drawReplayBrowser(
+    sk, window, browser, ReplayGameVersion, 1, ReplayActionCount
+  )

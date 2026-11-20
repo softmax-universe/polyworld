@@ -11,7 +11,7 @@ import polyworld/[assets, characters, chargen, connections,
   menus, viewers]
 
 when not defined(emscripten):
-  import core/replays, replaylibraries, replaysettings
+  import polyworld/replaysaves, core/replays, replaylibraries, replaysettings
   export replaysettings
 
 when PostPanelControls:
@@ -64,11 +64,10 @@ type
     replay*: Replayer  ## Set when watching a recorded match.
     when not defined(emscripten):
       replayPreferences*: ReplayPreferences
-      replaySaveError*, replaySavedPath*: string
+      replaySaveError*: string
       unsavedReplays*: seq[ReplayData]
       recording*: ReplayRecorder
-      savedHashes, savedActions: int
-      replaySaveRequested, automaticSaveAttempted: bool
+      replaySaving: ReplaySaveState
 
 const DefaultBots* = ["archer.bas", "warrior.bas", "mage.bas",
     "archer_warrior.bas"]
@@ -217,15 +216,15 @@ proc initApp*(sessionOptions: SessionOptions): App =
     configureDisplay = not defined(takeScreenshot))
 
 when not defined(emscripten):
+  proc replaySavedPath*(app: App): string =
+    ## Returns the last successfully saved prefix of the current match.
+    app.replaySaving.savedPath
+
   proc useReplayRecording*(app: App, recorder: ReplayRecorder = nil) =
     ## Starts a fresh recording session without discarding failed prior saves.
     app.recording = if app.replay == nil: recorder else: nil
-    app.replaySavedPath = ""
     app.replaySaveError = ""
-    app.savedHashes = -1
-    app.savedActions = -1
-    app.replaySaveRequested = false
-    app.automaticSaveAttempted = false
+    app.replaySaving.resetReplaySave()
 
   proc beginReplayRecording*(app: App, seats: openArray[Seat],
       seed: int64, messages: openArray[ReplayAction] = []): ReplayRecorder =
@@ -251,22 +250,20 @@ when not defined(emscripten):
     ## Saves a completed action prefix once, sharing manual and automatic saves.
     if app.replay != nil or app.recording == nil:
       raise newException(ReplayError, "There is no live match replay to save.")
-    app.replaySaveRequested = true
+    app.replaySaving.requestReplaySave()
     let data = app.recording.data
-    if app.replaySavedPath.len == 0 or not fileExists(app.replaySavedPath) or
-      app.savedHashes != data.hashes.len or app.savedActions != data.actions.len:
-        app.replaySavedPath = saveLibraryReplay(data)
-        app.savedHashes = data.hashes.len
-        app.savedActions = data.actions.len
-    app.replaySaveRequested = false
+    result = app.replaySaving.saveReplaySnapshot(data,
+      proc(data: ReplayData): string =
+        ## Writes a validated CaC recording to its desktop library.
+        saveLibraryReplay(data)
+    )
     app.replaySaveError = ""
-    app.replaySavedPath
 
   proc updateReplaySaving*(app: App, completed: bool) =
     ## Saves a completed match before the player leaves its result screen.
-    if app.replay == nil and app.recording != nil and completed and
-      app.replayPreferences.saveReplay and not app.automaticSaveAttempted:
-        app.automaticSaveAttempted = true
+    if app.replay == nil and app.recording != nil and
+      app.replaySaving.beginAutomaticReplaySave(
+        app.replayPreferences.saveReplay, completed):
         try:
           discard app.saveCurrentReplay()
         except CatchableError as error:
@@ -275,7 +272,8 @@ when not defined(emscripten):
   proc finishReplayRecording*(app: App) =
     ## Preserves failed exit saves for retry after the renderer has cleaned up.
     if app.replay != nil or app.recording == nil or
-      not (app.replayPreferences.saveReplay or app.replaySaveRequested):
+      not app.replaySaving.shouldSaveReplayOnExit(
+        app.replayPreferences.saveReplay):
         return
     try:
       discard app.saveCurrentReplay()
@@ -292,9 +290,11 @@ when not defined(emscripten):
   proc retryPendingReplays*(app: App) =
     ## Removes retained recordings only after their library writes succeed.
     try:
-      while app.unsavedReplays.len > 0:
-        discard saveLibraryReplay(app.unsavedReplays[0])
-        app.unsavedReplays.delete(0)
+      app.unsavedReplays.retryReplaySaves(
+        proc(data: ReplayData): string =
+          ## Writes a retained CaC recording to its desktop library.
+          saveLibraryReplay(data)
+      )
       app.replaySaveError = ""
     except CatchableError as error:
       app.replaySaveError = "Cannot save replay: " & error.msg

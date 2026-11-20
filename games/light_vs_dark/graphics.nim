@@ -30,7 +30,7 @@ when defined(takeScreenshot):
   import std/[os, strutils]
 
 when not defined(emscripten):
-  import replaylibraries
+  import polyworld/replaysaves, replaylibraries
 
 const
   DefaultCameraDistance = 17.0'f
@@ -456,22 +456,16 @@ proc runGraphics*(network: NetworkMatch = nil,
     preferences = readLvdPreferences()
     saveError: string
   when not defined(emscripten):
-    var
-      libraryHashes = -1
-      libraryActions = -1
-      libraryPath: string
-      replaySaved = false
-      automaticSaveAttempted = false
+    var replaySaving: ReplaySaveState
 
     proc saveToLibrary() =
       ## Saves each recorded state once across manual and automatic exports.
+      replaySaving.requestReplaySave()
       let data = recordingData()
-      if libraryPath.len == 0 or libraryHashes != data.hashes.len or
-        libraryActions != data.actions.len:
-          libraryPath = saveLibraryReplay(data)
-          libraryHashes = data.hashes.len
-          libraryActions = data.actions.len
-      replaySaved = true
+      discard replaySaving.saveReplaySnapshot(data,
+        proc(snapshot: ReplayData): string =
+          ## Writes one validated game snapshot to its replay library.
+          saveLibraryReplay(snapshot))
       saveError = ""
   preferences.applyPreferences(window, configureDisplay = not hidden)
   window.updateCursorConfinement(preferences.edgeScrolling)
@@ -2169,10 +2163,10 @@ proc runGraphics*(network: NetworkMatch = nil,
               else: int32(run.replayPlayer.data.hashes.len)
             transport.sync(run.world.tick, recordedNow, run.world.over)
       when not defined(emscripten):
-        if autoSaveReplay and not run.replayMode and
-          not automaticSaveAttempted and
-          (run.world.over or run.world.tick >= run.maximumTicks):
-            automaticSaveAttempted = true
+        if not run.replayMode and replaySaving.beginAutomaticReplaySave(
+          autoSaveReplay,
+          run.world.over or run.world.tick >= run.maximumTicks
+        ):
             try:
               saveToLibrary()
             except CatchableError as error:
@@ -2471,7 +2465,7 @@ proc runGraphics*(network: NetworkMatch = nil,
             if matchMenu == PauseMenu:
               if saveError.len > 0:
                 sk.menuLabel(saveError, origin + vec2(0, 500), 464, MenuAccent)
-              elif replaySaved:
+              elif replaySaving.savedPath.len > 0:
                 sk.menuLabel("Replay saved to your library.",
                   origin + vec2(0, 500), 464, MenuAccent)
             elif saveError.len > 0:
@@ -2488,7 +2482,8 @@ proc runGraphics*(network: NetworkMatch = nil,
             if autoSaveReplay and matchResultsVisible():
               sk.beginUi(window, window.size)
               sk.menuLabel(if saveError.len > 0: saveError
-                elif replaySaved: "Replay saved to your library." else: "",
+                elif replaySaving.savedPath.len > 0:
+                  "Replay saved to your library." else: "",
                 vec2(24, 24), 1000, MenuAccent)
               sk.endUi()
         # Silky ends rune capture when no editable field was submitted. Restore
@@ -2683,14 +2678,19 @@ proc runGraphics*(network: NetworkMatch = nil,
   shortcutState.resetShortcut()
   endShortcutEditing()
   var recordingFailure: string
+  when not defined(emscripten):
+    var libraryFailure: string
   if not run.replayMode:
     try:
       saveRecording()
-      when not defined(emscripten):
-        if autoSaveReplay:
-          saveToLibrary()
     except CatchableError as error:
       recordingFailure = "Cannot save replay: " & error.msg
+    when not defined(emscripten):
+      if replaySaving.shouldSaveReplayOnExit(autoSaveReplay):
+        try:
+          saveToLibrary()
+        except CatchableError as error:
+          libraryFailure = "Cannot save replay: " & error.msg
   clickMarks.closeClickMarks()
   attackClickMarks.closeClickMarks()
   worldShapes.closeShapeRenderer()
@@ -2699,6 +2699,12 @@ proc runGraphics*(network: NetworkMatch = nil,
   particles.closeParticles()
   harvestBars.closeWorldBarRenderer()
   finishGameProfile()
+  when not defined(emscripten):
+    if libraryFailure.len > 0:
+      raise newException(ReplaySaveError, libraryFailure)
   if recordingFailure.len > 0:
-    raise newException(MenusError, recordingFailure)
+    when defined(emscripten):
+      raise newException(MenusError, recordingFailure)
+    else:
+      raise newException(ReplayExportError, recordingFailure)
   result = quitToMenu

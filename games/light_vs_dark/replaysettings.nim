@@ -1,20 +1,11 @@
-import
-  jsony, windy,
-  polyworld/menus
+import polyworld/replaysettings as sharedSettings
 
-type ReplayPreferences* = object
-  saveReplay*: bool = true
+export sharedSettings.ReplayPreferences
 
 proc readReplayPreferences*(): ReplayPreferences =
-  ## Loads this device's recording choice separately from match configuration.
-  result = ReplayPreferences()
-  let bytes = getConfig("Polyworld LvD", "replays.json")
-  if bytes.len > 0:
-    try:
-      result = bytes.fromJson(ReplayPreferences)
-    except JsonError as error:
-      raise newException(MenusError, "Cannot read replay settings: " & error.msg)
+  ## Reads LvD's recording choice from its existing device configuration.
+  sharedSettings.readReplayPreferences("Polyworld LvD")
 
 proc saveReplayPreferences*(preferences: ReplayPreferences) =
-  ## Remembers recording without changing room rules or other players' choices.
-  setConfig("Polyworld LvD", "replays.json", preferences.toJson())
+  ## Saves LvD's recording choice separately from shared match settings.
+  sharedSettings.saveReplayPreferences(preferences, "Polyworld LvD")

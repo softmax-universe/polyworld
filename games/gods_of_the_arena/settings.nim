@@ -2,7 +2,10 @@
 
 import
   jsony, windy,
-  polyworld/[inputs, menus]
+  polyworld/[inputs, menus],
+  replaysettings
+
+export replaysettings
 
 const
   GotaControlProfile* = block:
@@ -14,9 +17,6 @@ const
       if action != WaterPanelInput:
         profile.actions.add ControlBinding(action: action, label: $action)
     profile
-
-type ReplayPreferences* = object
-  saveReplay*: bool = true
 
 proc migrateGotaBindings*(bindings: var InputBindings) =
   ## Moves untouched debug defaults to F2 while preserving custom shortcuts.
@@ -35,17 +35,3 @@ proc readGotaPreferences*(): Preferences =
   let bytes = getConfig(AppName, "settings.json")
   if bytes.len > 0:
     result.name = bytes.fromJson(Preferences).name
-
-proc readReplayPreferences*(): ReplayPreferences =
-  ## Loads this device's recording choice separately from match configuration.
-  result = ReplayPreferences()
-  let bytes = getConfig("Polyworld GotA", "replays.json")
-  if bytes.len > 0:
-    try:
-      result = bytes.fromJson(ReplayPreferences)
-    except JsonError as error:
-      raise newException(MenusError, "Cannot read replay settings: " & error.msg)
-
-proc saveReplayPreferences*(preferences: ReplayPreferences) =
-  ## Remembers recording without changing room rules or other players' choices.
-  setConfig("Polyworld GotA", "replays.json", preferences.toJson())

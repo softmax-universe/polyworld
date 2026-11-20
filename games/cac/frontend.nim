@@ -32,6 +32,8 @@ type
     pendingInvite: string
     publicRoom: bool
     browsingReplays: bool
+    when not defined(emscripten):
+      replayBrowser: ReplayBrowserState
 
 var frontendState: FrontendState
 
@@ -137,6 +139,8 @@ proc runFrontend*(app: App, connection: var Connection,
     frontendState.setup.seed = int32(app.options.seed and 0x7fffffff)
     frontendState.roomNameDefault = defaultRoomName(preferences.name)
     frontendState.roomName = frontendState.roomNameDefault
+    when not defined(emscripten):
+      frontendState.replayBrowser = initReplayBrowser(Library)
     frontendState.localPolicies.setLen(frontendState.setup.classes.len)
     for index in 1 ..< frontendState.localPolicies.len:
       if bots.len > 0:
@@ -161,21 +165,18 @@ proc runFrontend*(app: App, connection: var Connection,
     launchReplay: bool
     selection: FrontendResult
   when not defined(emscripten):
+    template replayBrowser: untyped = frontendState.replayBrowser
     var
-      replayFolder = replayDirectory()
-      replayEntries: seq[ReplayEntry]
-      replayUi: ReplayBrowserUi
       replayAction: ReplayBrowserResult
-      replayMessage = if app.replaySaveError.len > 0:
-        app.replaySaveError else: error
-      replayRefreshRequested = frontendState.browsingReplays
       retryReplaySave: bool
+    replayBrowser.message = if app.replaySaveError.len > 0:
+      app.replaySaveError else: error
+    replayBrowser.refreshRequested = frontendState.browsingReplays
 
     proc drawReplayRetry() =
       ## Keeps failed exports available without discarding the completed match.
-      if app.unsavedReplays.len > 0:
-        if sk.lobbyButton("Retry saving replay", vec2(24, 64), 280):
-          retryReplaySave = true
+      if sk.drawReplaySaveRetry(app.unsavedReplays.len > 0):
+        retryReplaySave = true
 
     if app.replaySaveError.len > 0:
       error = app.replaySaveError
@@ -212,7 +213,7 @@ proc runFrontend*(app: App, connection: var Connection,
         raise newException(MenusError, "The replay library is desktop-only")
       else:
         frontendState.browsingReplays = true
-        replayRefreshRequested = true
+        replayBrowser.refreshRequested = true
     of "name":
       page = MultiplayerMenu
       preferences.name = ""
@@ -415,8 +416,7 @@ proc runFrontend*(app: App, connection: var Connection,
         return
       when not defined(emscripten):
         if frontendState.browsingReplays:
-          replayAction = sk.drawReplayBrowser(window, replayUi,
-            replayEntries, replayFolder, replayMessage)
+          replayAction = sk.drawReplayBrowser(window, replayBrowser)
           sk.endUi()
           presentMenuFrame()
           return
@@ -441,8 +441,8 @@ proc runFrontend*(app: App, connection: var Connection,
         of CacOpenReplays:
           when not defined(emscripten):
             frontendState.browsingReplays = true
-            replayRefreshRequested = true
-            replayMessage = ""
+            replayBrowser.refreshRequested = true
+            replayBrowser.message = ""
         of CacOpenSettings: page = SettingsMenu
         of CacExitGame:
           when not defined(emscripten):
@@ -756,15 +756,10 @@ proc runFrontend*(app: App, connection: var Connection,
             else: "Clear your human slot to watch the bots.",
             options + vec2(0, 462), width, tint = LobbyMuted)
           when not defined(emscripten):
-            let previousSave = app.replayPreferences.saveReplay
-            sk.at = options + vec2(0, 510)
-            if not modal:
-              checkBox "Save replay", app.replayPreferences.saveReplay
-            else:
-              sk.lobbyLabel("Save replay: " &
-                (if app.replayPreferences.saveReplay: "On" else: "Off"),
-                sk.at, width, tint = LobbyMuted)
-            if previousSave != app.replayPreferences.saveReplay:
+            if sk.drawReplaySaveOption(
+              window, options + vec2(0, 510),
+              app.replayPreferences.saveReplay, not modal, width
+            ):
               app.replayPreferences.saveReplayPreferences()
           if online:
             configDirty = frontendState.setup.encodeBattleSetup() !=
@@ -912,42 +907,19 @@ proc runFrontend*(app: App, connection: var Connection,
       if retryReplaySave:
         app.retryPendingReplays()
         error = app.replaySaveError
-        replayRefreshRequested = true
+        replayBrowser.refreshRequested = true
       if frontendState.browsingReplays:
-        try:
-          case replayAction.action
-          of StayReplayBrowser:
-            discard
-          of BackFromReplays:
-            frontendState.browsingReplays = false
-            replayMessage = ""
-            sk.resetInteractions()
-          of RefreshReplays:
-            replayRefreshRequested = true
-            replayMessage = ""
-          of OpenReplayFolder:
-            openUrl(ensureReplayDirectory())
-          of ImportReplayFile:
-            let source = openFileDialog("Import replay", @[
-              FileDialogFilter(name: "Polyworld replay", extensions: "replay")
-            ], defaultPath = ensureReplayDirectory())
-            if source.len > 0:
-              replayUi.selectedPath = importReplay(source)
-              replayRefreshRequested = true
-              replayMessage = "Replay imported."
-          of PlayReplay:
-            let entry = inspectReplay(replayAction.path)
-            if not entry.playable:
-              raise newException(MenusError, entry.problem)
-            selection = FrontendResult(kind: ReplayFrontend,
-              replayPath: entry.path)
-            launchReplay = true
-          if replayRefreshRequested:
-            replayRefreshRequested = false
-            replayFolder = ensureReplayDirectory()
-            replayEntries = listReplays(replayFolder)
-        except CatchableError as problem:
-          replayMessage = problem.msg
+        let selected = replayBrowser.updateReplayBrowser(Library, replayAction)
+        case selected.action
+        of BackFromReplays:
+          frontendState.browsingReplays = false
+          sk.resetInteractions()
+        of PlayReplay:
+          selection = FrontendResult(kind: ReplayFrontend,
+            replayPath: selected.path)
+          launchReplay = true
+        else:
+          discard
   window.onFrame = nil
   window.onButtonPress = nil
   if launchLocal:

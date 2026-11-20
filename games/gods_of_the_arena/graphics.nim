@@ -22,7 +22,7 @@ import
 when defined(emscripten):
   {.emit: "#include <emscripten.h>".}
 else:
-  import replaylibraries
+  import polyworld/replaysaves, replaylibraries
 
 when defined(takeScreenshot):
   import std/os
@@ -343,22 +343,16 @@ proc runGraphics*(
     saveError: string
     chat: ChatEditor
   when not defined(emscripten):
-    var
-      libraryHashes = -1
-      libraryActions = -1
-      libraryPath: string
-      replaySaved = false
-      automaticSaveAttempted = false
+    var replaySaving: ReplaySaveState
 
     proc saveToLibrary() =
       ## Saves each recorded state once, sharing manual and automatic saves.
+      replaySaving.requestReplaySave()
       let data = recordingData()
-      if libraryPath.len == 0 or libraryHashes != data.hashes.len or
-        libraryActions != data.actions.len:
-          libraryPath = saveLibraryReplay(data)
-          libraryHashes = data.hashes.len
-          libraryActions = data.actions.len
-      replaySaved = true
+      discard replaySaving.saveReplaySnapshot(data,
+        proc(snapshot: ReplayData): string =
+          ## Writes one validated game snapshot to its replay library.
+          saveLibraryReplay(snapshot))
       saveError = ""
   let chatHooks = window.installChatInput(addr chat)
   defer: window.restoreChatInput(chatHooks)
@@ -1362,8 +1356,7 @@ proc runGraphics*(
     if run.replayMode or not run.finished():
       return
     when not defined(emscripten):
-      if autoSaveReplay and not automaticSaveAttempted:
-        automaticSaveAttempted = true
+      if replaySaving.beginAutomaticReplaySave(autoSaveReplay, true):
         try:
           saveToLibrary()
         except CatchableError as error:
@@ -3581,7 +3574,7 @@ proc runGraphics*(
               sk.menuLabel(saveError, origin + vec2(0, 528), 416, MenuAccent)
             else:
               when not defined(emscripten):
-                if replaySaved:
+                if replaySaving.savedPath.len > 0:
                   sk.menuLabel("Replay saved to your library.",
                     origin + vec2(0, 528), 416, MenuAccent)
           if matchMenu == HiddenMatchMenu:
@@ -3618,7 +3611,8 @@ proc runGraphics*(
             if autoSaveReplay:
               sk.beginUi(window, window.size)
               sk.menuLabel(if saveError.len > 0: saveError
-                elif replaySaved: "Replay saved to your library." else: "",
+                elif replaySaving.savedPath.len > 0:
+                  "Replay saved to your library." else: "",
                 vec2(24, 24), 1000, MenuAccent)
               sk.endUi()
       when defined(takeScreenshot) and ActiveTracePath.len == 0:
@@ -3664,14 +3658,19 @@ proc runGraphics*(
   window.onButtonPress = nil
   clearPlayerCommands()
   var recordingFailure: string
+  when not defined(emscripten):
+    var libraryFailure: string
   if not run.replayMode:
     try:
       saveRecording()
-      when not defined(emscripten):
-        if autoSaveReplay:
-          saveToLibrary()
     except CatchableError as error:
       recordingFailure = "Cannot save replay: " & error.msg
+    when not defined(emscripten):
+      if replaySaving.shouldSaveReplayOnExit(autoSaveReplay):
+        try:
+          saveToLibrary()
+        except CatchableError as error:
+          libraryFailure = "Cannot save replay: " & error.msg
   occlusion.closeScreenOcclusion()
   clickMarks.closeClickMarks()
   attackMarks.closeClickMarks()
@@ -3687,6 +3686,12 @@ proc runGraphics*(
   clearSceneProps()
   grove.trees.closePropPack()
   grove.rocks.closePropPack()
+  when not defined(emscripten):
+    if libraryFailure.len > 0:
+      raise newException(ReplaySaveError, libraryFailure)
   if recordingFailure.len > 0:
-    raise newException(MenusError, recordingFailure)
+    when defined(emscripten):
+      raise newException(MenusError, recordingFailure)
+    else:
+      raise newException(ReplayExportError, recordingFailure)
   result = quitToMenu

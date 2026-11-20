@@ -7,7 +7,7 @@ import
   pointers, presets, replays, settings, joiningseats
 
 when not defined(emscripten):
-  import replaylibraries, replaymenus
+  import polyworld/replaysaves, replaylibraries, replaymenus
 
 const AppName = "Polyworld GotA"
 
@@ -58,19 +58,16 @@ proc runFrontend*() =
   when not defined(emscripten):
     var
       browsingReplays = false
-      replayRefreshRequested = false
-      replayFolder = replayDirectory()
-      replayEntries: seq[ReplayEntry]
-      replayUi: ReplayBrowserUi
+      replayBrowser = initReplayBrowser(Library)
       replayAction: ReplayBrowserResult
-      replayMessage: string
       unsavedReplays: seq[ReplayData]
       retryReplaySave: bool
 
-    proc retainUnsavedReplay() =
-      ## Keeps failed automatic exports available for retry on the menu.
+    proc retainUnsavedReplay(problem: ref CatchableError) =
+      ## Keeps failed automatic and manual saves available on the menu.
       window.closeRequested = false
-      if replayPreferences.saveReplay and run != nil and
+      if shouldRetainReplay(replayPreferences.saveReplay, problem) and
+        run != nil and
         run.recorder != nil and not run.replayMode:
           try:
             unsavedReplays.add(recordingData())
@@ -79,9 +76,8 @@ proc runFrontend*() =
 
     proc drawReplayRetry() =
       ## Offers a retry without losing the recording when the disk is full.
-      if unsavedReplays.len > 0:
-        if sk.lobbyButton("Retry saving replay", vec2(24, 64), 280):
-          retryReplaySave = true
+      if sk.drawReplaySaveRetry(unsavedReplays.len > 0):
+        retryReplaySave = true
   try:
     preferences = readGotaPreferences()
     when not defined(emscripten):
@@ -223,7 +219,7 @@ proc runFrontend*() =
         matchError = problem.msg
         quitToMenu = connection.client.snapshot.room.len == 0
         when not defined(emscripten):
-          retainUnsavedReplay()
+          retainUnsavedReplay(problem)
       for i in 0 ..< min(networkPolicies.len, prepared.sources.len):
         networkPolicies[i].bytes = prepared.sources[i]
         if i < connection.client.snapshot.seats.len:
@@ -324,8 +320,7 @@ proc runFrontend*() =
           return
       when not defined(emscripten):
         if browsingReplays:
-          replayAction = sk.drawReplayBrowser(window, replayUi,
-            replayEntries, replayFolder, replayMessage)
+          replayAction = sk.drawReplayBrowser(window, replayBrowser)
           sk.endUi()
           window.presentFrame(framePaceHz)
           reportReplayFrame(0, 0)
@@ -347,8 +342,8 @@ proc runFrontend*() =
         of GotaOpenReplays:
           when not defined(emscripten):
             browsingReplays = true
-            replayRefreshRequested = true
-            replayMessage = ""
+            replayBrowser.refreshRequested = true
+            replayBrowser.message = ""
         of GotaOpenSettings: page = SettingsMenu
         of GotaExitGame:
           when not defined(emscripten):
@@ -716,15 +711,10 @@ proc runFrontend*() =
               else: "Playing seat " & $(humanSeat + 1),
               layout.left + vec2(22, layout.panelHeight - 74), 800, tint = LobbyMuted)
           when not defined(emscripten):
-            let previousSave = replayPreferences.saveReplay
-            sk.at = layout.left + vec2(22, layout.panelHeight - 38)
-            if not modal:
-              checkBox "Save replay", replayPreferences.saveReplay
-            else:
-              sk.lobbyLabel("Save replay: " &
-                (if replayPreferences.saveReplay: "On" else: "Off"),
-                sk.at, 280, tint = LobbyMuted)
-            if previousSave != replayPreferences.saveReplay:
+            if sk.drawReplaySaveOption(
+              window, layout.left + vec2(22, layout.panelHeight - 38),
+              replayPreferences.saveReplay, not modal
+            ):
               replayPreferences.saveReplayPreferences()
           let selectedSeat = lobbyUi.selectedSeat
           let choice =
@@ -804,42 +794,27 @@ proc runFrontend*() =
     when not defined(emscripten):
       if retryReplaySave:
         try:
-          while unsavedReplays.len > 0:
-            discard saveLibraryReplay(unsavedReplays[0])
-            unsavedReplays.delete(0)
+          unsavedReplays.retryReplaySaves(
+            proc(data: ReplayData): string =
+              ## Writes a retained game recording to its desktop library.
+              saveLibraryReplay(data)
+          )
           error = ""
-          replayRefreshRequested = true
+          replayBrowser.refreshRequested = true
         except CatchableError as problem:
           error = "Cannot save replay: " & problem.msg
       if browsingReplays:
         try:
-          case replayAction.action
-          of StayReplayBrowser:
-            discard
+          let selected = replayBrowser.updateReplayBrowser(Library, replayAction)
+          case selected.action
           of BackFromReplays:
             browsingReplays = false
-            replayMessage = ""
-          of RefreshReplays:
-            replayRefreshRequested = true
-            replayMessage = ""
-          of OpenReplayFolder:
-            openUrl(ensureReplayDirectory())
-          of ImportReplayFile:
-            let source = openFileDialog("Import replay", @[
-              FileDialogFilter(name: "Polyworld replay", extensions: "replay")
-            ], defaultPath = ensureReplayDirectory())
-            if source.len > 0:
-              replayUi.selectedPath = importReplay(source)
-              replayRefreshRequested = true
-              replayMessage = "Replay imported."
+            sk.resetInteractions()
           of PlayReplay:
-            let entry = inspectReplay(replayAction.path)
-            if not entry.playable:
-              raise newException(MenusError, entry.problem)
             let previousOptions = options
             try:
               window.onFrame = nil
-              options.replayPath = entry.path
+              options.replayPath = selected.path
               options.recordPath = ""
               options.playerSlot = 0
               options.pauseOnStart = false
@@ -847,18 +822,16 @@ proc runFrontend*() =
               initializeMatch()
               runGraphics()
               preferences = readGotaPreferences()
-              replayMessage = ""
+              replayBrowser.message = ""
             finally:
               options = previousOptions
               clearPlayerCommands()
               run = nil
-              replayRefreshRequested = true
-          if replayRefreshRequested:
-            replayRefreshRequested = false
-            replayFolder = ensureReplayDirectory()
-            replayEntries = listReplays(replayFolder)
+              replayBrowser.refreshRequested = true
+          else:
+            discard
         except CatchableError as problem:
-          replayMessage = problem.msg
+          replayBrowser.message = problem.msg
         continue
     if launchLocal:
       connection.close()
@@ -880,7 +853,7 @@ proc runFrontend*() =
       except CatchableError as problem:
         error = problem.msg
         when not defined(emscripten):
-          retainUnsavedReplay()
+          retainUnsavedReplay(problem)
       page = HomeMenu
       run = nil
   window.onFrame = nil

@@ -17,6 +17,10 @@ type
     maxBytes*: int
   ReplayInspector* = proc(bytes: string): int
     ## Validates a current game payload and returns its recorded tick count.
+  ReplayLibrary* = object
+    gameFolder*, gamePrefix*: string
+    format*: ReplayLibraryFormat
+    inspect*: ReplayInspector
 
 proc replayDirectory*(gameFolder: string): string =
   ## Keeps each game's recordings in the user's application data directory.
@@ -222,3 +226,48 @@ proc importReplay*(
     sameFile(source.absolutePath().parentDir, folder):
       return source.absolutePath()
   storeReplayBytes(bytes, folder, source.splitFile().name.filenamePrefix())
+
+proc replayDirectory*(library: ReplayLibrary): string =
+  ## Returns this game's stable location in the user's application data.
+  replayDirectory(library.gameFolder)
+
+proc libraryDirectory(library: ReplayLibrary, directory: string): string =
+  ## Resolves an optional override without changing the game's default folder.
+  if directory.len > 0:
+    directory
+  else:
+    library.replayDirectory()
+
+proc ensureReplayDirectory*(
+  library: ReplayLibrary, directory = ""
+): string =
+  ## Creates this game's library or an explicitly supplied test directory.
+  ensureReplayDirectory(library.libraryDirectory(directory))
+
+proc inspectReplay*(library: ReplayLibrary, path: string): ReplayEntry =
+  ## Checks a recording with the game's supported versions and payload decoder.
+  inspectReplay(path, library.format, library.inspect)
+
+proc listReplays*(
+  library: ReplayLibrary, directory = ""
+): seq[ReplayEntry] =
+  ## Lists this game's recordings using the shared ordering and validation.
+  listReplays(
+    library.libraryDirectory(directory), library.format, library.inspect
+  )
+
+proc saveLibraryReplay*(
+  library: ReplayLibrary, bytes: string, directory = ""
+): string =
+  ## Stores game-validated bytes under the game's unique filename prefix.
+  saveLibraryReplay(
+    bytes, library.libraryDirectory(directory), library.gamePrefix
+  )
+
+proc importReplay*(
+  library: ReplayLibrary, source: string, directory = ""
+): string =
+  ## Imports through the game's decoder while preserving incompatible versions.
+  importReplay(
+    source, library.libraryDirectory(directory), library.format, library.inspect
+  )

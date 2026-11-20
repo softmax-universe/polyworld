@@ -1,7 +1,7 @@
 import
   std/[os, strutils, tempfiles],
   windy,
-  polyworld/[menus, sounds],
+  polyworld/[replaysaves, sounds],
   ../[game, graphics, presets, replaylibraries, replays, sim]
 
 proc testReplaySaving() =
@@ -94,6 +94,28 @@ proc testReplaySaving() =
   doAssert listReplays(library).len == 2
   echo "LvD disabled automatic saving leaves the library unchanged."
 
+  let blockedExport = directory / "blocked-export"
+  writeFile(blockedExport, "Not a directory")
+  options.recordPath = blockedExport / "requested.replay"
+  initializeLocalMatch(config, ["", ""])
+  var exportRejected = false
+  try:
+    discard runGraphics(hidden = true, autoSaveReplay = true,
+      hooks = GraphicsHooks(frame: proc(): bool =
+        ## Leaves with an unwritable CLI path and a working replay library.
+        setSoundMuted(true)
+        true
+      )
+    )
+  except ReplayExportError:
+    exportRejected = true
+  doAssert exportRejected
+  doAssert listReplays(library).len == 3,
+    "A failed explicit export must not prevent the separate library save."
+  doAssert window.onFrame == nil and window.onButtonPress == nil
+  options.recordPath = ""
+  echo "LvD saves to its library even when a requested CLI export fails."
+
   let blocked = directory / "blocked"
   writeFile(blocked, "Not a directory")
   putEnv(DataVariable, blocked)
@@ -107,13 +129,13 @@ proc testReplaySaving() =
         true
       )
     )
-  except MenusError as error:
+  except ReplaySaveError as error:
     rejected = true
     doAssert "Cannot save replay" in error.msg
   doAssert rejected
   doAssert window.onFrame == nil and window.onButtonPress == nil
   discard recordingData()
-  doAssert listReplays(library).len == 2
+  doAssert listReplays(library).len == 3
   echo "LvD failed saves clean callbacks and preserve the recording for retry."
 
 testReplaySaving()

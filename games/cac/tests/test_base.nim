@@ -40,12 +40,17 @@ block:
 
 echo "The reference players play alike and differ only in their setup"
 block:
-  proc play(source: string): string =
-    ## The script without its title and its setup.
+  proc play(source: string): seq[string] =
+    ## Compare the script lines outside the title and opening setup block.
     let
-      start = source.find("IF selectingClass THEN")
-      finish = source.find("END IF\n", start) + "END IF\n".len
-    source[source.find("'\n") ..< start] & source[finish .. ^1]
+      lines = source.splitLines()
+      titleEnd = lines.find("'")
+      start = lines.find("IF selectingClass THEN")
+      finish = lines.find("END IF")
+    doAssert titleEnd > 0, "Missing separator after reference bot title"
+    doAssert start > titleEnd, "Missing reference bot setup after the title"
+    doAssert finish > start, "Missing END IF for reference bot setup"
+    lines[titleEnd ..< start] & lines[finish + 1 .. ^1]
   for bot in ReferenceBots:
     doAssert bot.play == ArcherBot.play
 

@@ -51,6 +51,8 @@ proc usage() =
   echo "  --play=false            Start the graphical transport paused."
   echo "  --speed NUMBER          Graphical start speed: 1, 2, 4, or 16."
   echo "  --windowSize WxH        Graphical window, such as 1024x576."
+  echo "  --screenshot PATH       Save a hidden frame and exit."
+  echo "  --frames NUMBER         Capture after N rendered frames (default 30)."
   echo "  --vsync:off             Unlock the frame rate (default on)."
   echo "  --mute[=true|false]     Override saved sound levels for this launch."
   echo "  --unmute                Enable sound for this launch."
@@ -130,6 +132,7 @@ proc parseGameOptions(validateMatch: bool): GameOptions =
       else:
         fail("unknown argument: " & argument)
     inc index
+  result.capture.validateCapture()
   if serverAddress.len > 0:
     when defined(headless):
       fail("--server requires the graphical client")

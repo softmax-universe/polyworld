@@ -1,4 +1,5 @@
 import std/[json, options, strutils, unittest]
+import polyworld/screenshots
 import ../core/sessions
 
 suite "session options":
@@ -10,6 +11,43 @@ suite "session options":
     check options.human == false
     check options.soundMuted
     check options.menu
+
+  test "shared screenshot and window flags accept every common spelling":
+    for args in [
+      @["--screenshot", "captures/menu view.png", "--frames", "3",
+        "--windowSize", "800x600"],
+      @["--screenshot=captures/menu view.png", "--frames=3",
+        "--windowSize=800x600"],
+      @["--screenshot:captures/menu view.png", "--frames:3",
+        "--windowSize:800x600"]
+    ]:
+      when defined(headless) or defined(emscripten):
+        expect ScreenshotError:
+          discard parseSessionOptions(args)
+      else:
+        let options = parseSessionOptions(args)
+        check options.capture.path == "captures/menu view.png"
+        check options.capture.frames == 3
+        check options.windowWidth == 800 and options.windowHeight == 600
+        check options.menu
+    let sized = parseSessionOptions(["--windowSize", "1280x900"])
+    check sized.windowWidth == 1280 and sized.windowHeight == 900
+    when not defined(headless) and not defined(emscripten):
+      let direct = parseSessionOptions(["--direct", "--screenshot", "shot.png"])
+      check direct.capture.frames == 30
+      check not direct.menu
+
+  test "invalid screenshot and window values fail before opening a window":
+    for args in [
+      @["--screenshot"], @["--screenshot="],
+      @["--screenshot", "--seed", "42"],
+      @["--screenshot=shot.png", "--frames=0"],
+      @["--screenshot=shot.png", "--frames=bad"],
+      @["--frames"], @["--windowSize=0x600"],
+      @["--windowSize=800"], @["--windowSize", "--seed", "42"]
+    ]:
+      expect ScreenshotError:
+        discard parseSessionOptions(args)
 
   test "menus are the default and direct launches remain available":
     check parseSessionOptions(["--seed=42"]).menu

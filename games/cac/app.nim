@@ -43,8 +43,7 @@ type
     returnToMenu*: bool
     battlefieldPlayers: int
     captureFramebuffer*: GLuint
-    captureTexture, captureDepth: GLuint
-    captureSize: IVec2
+    captureTarget: ScreenshotTarget
     humanSeat*: Option[Seat]
       ## The class and deck the human brought with `--human PATH.bas`;
       ## without one they choose a class and play its precon.
@@ -138,6 +137,9 @@ proc buildUiAtlas*(cardAssets: string): AtlasBuilder =
 
 proc initApp*(sessionOptions: SessionOptions): App =
   ## Opens the window and loads everything the modes draw with.
+  configureCapture(sessionOptions.capture, "cac.png")
+  if captureActive():
+    configureSoundLaunch(true)
   when defined(emscripten):
     let appDir = "/"
     setCurrentDir("/")
@@ -166,7 +168,9 @@ proc initApp*(sessionOptions: SessionOptions): App =
   (window, sk) = initGameWindow(
     WindowTitle,
     atlasPath,
-    ivec2(3200, 2000),
+    (if sessionOptions.windowWidth > 0:
+      ivec2(sessionOptions.windowWidth, sessionOptions.windowHeight)
+    else: ivec2(3200, 2000)),
     vsync = true
   )
 
@@ -213,7 +217,7 @@ proc initApp*(sessionOptions: SessionOptions): App =
     except MenusError, IOError, OSError:
       result.replaySaveError = getCurrentExceptionMsg()
   result.preferences.applyPreferences(window,
-    configureDisplay = not defined(takeScreenshot))
+    configureDisplay = not captureActive() and sessionOptions.windowWidth == 0)
 
 when not defined(emscripten):
   proc replaySavedPath*(app: App): string =
@@ -263,7 +267,7 @@ when not defined(emscripten):
     ## Saves a completed match before the player leaves its result screen.
     if app.replay == nil and app.recording != nil and
       app.replaySaving.beginAutomaticReplaySave(
-        app.replayPreferences.saveReplay, completed):
+        app.replayPreferences.saveReplay and not captureActive(), completed):
         try:
           discard app.saveCurrentReplay()
         except CatchableError as error:
@@ -273,13 +277,13 @@ when not defined(emscripten):
     ## Preserves failed exit saves for retry after the renderer has cleaned up.
     if app.replay != nil or app.recording == nil or
       not app.replaySaving.shouldSaveReplayOnExit(
-        app.replayPreferences.saveReplay):
+        app.replayPreferences.saveReplay and not captureActive()):
         return
     try:
       discard app.saveCurrentReplay()
     except CatchableError as error:
       app.replaySaveError = "Cannot save replay: " & error.msg
-      if app.window != nil:
+      if app.window != nil and not captureActive():
         app.window.closeRequested = false
       try:
         app.recording.data.validate()
@@ -311,47 +315,16 @@ proc setBattlefield*(app: App, playerCount: int) =
 
 proc closeCapture*(app: App) =
   ## Releases the hidden capture target while the window context is alive.
-  if app.captureFramebuffer == 0:
-    return
-  glBindFramebuffer(GL_FRAMEBUFFER, 0)
-  glDeleteFramebuffers(1, app.captureFramebuffer.addr)
-  glDeleteTextures(1, app.captureTexture.addr)
-  glDeleteRenderbuffers(1, app.captureDepth.addr)
+  app.captureTarget.releaseScreenshotTarget()
   app.captureFramebuffer = 0
-  app.captureTexture = 0
-  app.captureDepth = 0
-  app.captureSize = ivec2(0)
 
 proc beginCaptureFrame*(app: App) =
   ## Renders screenshots offscreen without depending on a visible Cocoa drawable.
-  when defined(takeScreenshot):
+  if captureActive():
     when not defined(emscripten):
       doAssert not app.window.visible, "Capture windows must stay hidden"
-    let size = app.window.size
-    if app.captureFramebuffer == 0 or app.captureSize != size:
-      app.closeCapture()
-      glGenFramebuffers(1, app.captureFramebuffer.addr)
-      glBindFramebuffer(GL_FRAMEBUFFER, app.captureFramebuffer)
-      glGenTextures(1, app.captureTexture.addr)
-      glBindTexture(GL_TEXTURE_2D, app.captureTexture)
-      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8.GLint, size.x, size.y,
-        0, GL_RGBA, GL_UNSIGNED_BYTE, nil)
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST.GLint)
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST.GLint)
-      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-        GL_TEXTURE_2D, app.captureTexture, 0)
-      glGenRenderbuffers(1, app.captureDepth.addr)
-      glBindRenderbuffer(GL_RENDERBUFFER, app.captureDepth)
-      glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8,
-        size.x, size.y)
-      glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
-        GL_RENDERBUFFER, app.captureDepth)
-      if glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE:
-        app.closeCapture()
-        raise newException(IOError, "Unable to allocate screenshot target")
-      app.captureSize = size
-    glBindFramebuffer(GL_FRAMEBUFFER, app.captureFramebuffer)
-    glViewport(0, 0, size.x, size.y)
+    app.captureFramebuffer =
+      app.captureTarget.beginScreenshotFrame(app.window)
 
 proc heroClip*(app: App, model: int, heroClass: HeroClass,
     dying, idleTime: float32): tuple[clip: int, time: float32] =

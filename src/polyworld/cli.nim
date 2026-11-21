@@ -2,16 +2,17 @@
 ##
 ## Every game understands `--bot`, `--player`, `--replay`, `--record`,
 ## `--seed`, `--play`, `--speed`, `--windowSize`, `--vsync`, `--seconds`,
-## `--minutes`, `--ticks`, `--mute`, and `--unmute`. Duration flags all write
+## `--minutes`, `--ticks`, `--mute`, `--unmute`, `--screenshot`, and `--frames`.
+## Duration flags all write
 ## `maximumTicks`; audio uses saved levels unless explicitly overridden.
 ## Each game runs its own argument loop, farms those flags through
 ## `takeCommonFlag`, and handles the rest itself.
 
 import
   std/strutils,
-  configs
+  configs, screenshots
 
-export configs
+export configs, screenshots
 
 type
   BotGroup* = object
@@ -19,6 +20,7 @@ type
     count*: int
 
   GameOptions* = object
+    capture*: ScreenshotOptions
     botGroups*: seq[BotGroup]
     replayPath*: string
     recordPath*: string
@@ -258,10 +260,18 @@ proc takeCommonFlag*(
 ): bool =
   ## Handles one shared flag. Returns false when the game should try it.
   try:
+    if options.capture.takeCaptureFlag(arguments, index, argument):
+      return true
+    if takeWindowSizeFlag(
+      options.windowWidth, options.windowHeight, arguments, index, argument
+    ):
+      return true
     if options.soundMuted.takeSoundFlag(argument):
       options.soundOverride = true
       return true
   except ValueError as error:
+    fail(error.msg)
+  except ScreenshotError as error:
     fail(error.msg)
   if argument.startsWith("--headless-tick-rate:") or
     argument.startsWith("--headless-tick-rate=") or
@@ -295,14 +305,6 @@ proc takeCommonFlag*(
     return true
   if argument.startsWith("--speed="):
     options.speed = parsePositiveInt32(argument[8 .. ^1], "--speed")
-    return true
-  if argument.startsWith("--windowSize:"):
-    (options.windowWidth, options.windowHeight) =
-      parseWindowSize(argument[13 .. ^1], "--windowSize")
-    return true
-  if argument.startsWith("--windowSize="):
-    (options.windowWidth, options.windowHeight) =
-      parseWindowSize(argument[13 .. ^1], "--windowSize")
     return true
   if argument.startsWith("--vsync:"):
     options.vsync = parseVsyncFlag(argument[8 .. ^1])
@@ -345,13 +347,6 @@ proc takeCommonFlag*(
       "--speed"
     )
     result = true
-  of "--windowSize":
-    (options.windowWidth, options.windowHeight) =
-      parseWindowSize(
-        arguments.argumentValue(index, "--windowSize"),
-        "--windowSize"
-      )
-    result = true
   of "--vsync":
     options.vsync = parseVsyncFlag(
       arguments.argumentValue(index, "--vsync")
@@ -366,6 +361,10 @@ proc validateGameOptions*(
     liveBotMessage: string
 ) =
   ## Checks replay exclusivity and the live-game bot count.
+  try:
+    options.capture.validateCapture()
+  except ScreenshotError as error:
+    fail(error.msg)
   when defined(headless):
     if options.playerSlot != 0:
       fail("--player requires the graphical client")

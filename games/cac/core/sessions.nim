@@ -2,6 +2,7 @@
 ## Card programs stay in the base set; the wire format contains stable card IDs.
 import std/[algorithm, json, options, sets, strutils]
 from polyworld/cli import takeSoundFlag
+import polyworld/screenshots
 import sim
 from battlesetup import MaxBattlePlayers
 export sim
@@ -25,6 +26,8 @@ type
     replayPath*: string  ## A recorded match to watch instead of playing.
     menu*: bool = true
     serverAddress*, roomCode*: string
+    capture*: ScreenshotOptions
+    windowWidth*, windowHeight*: int32
 
   BotActionKind* = enum
     PlayCardAction, EndTurnAction, ResolveTriggerAction, TossAction
@@ -63,6 +66,11 @@ proc parseSessionOptions*(args: openArray[string]): SessionOptions =
     directLaunch = false
     menuChoice: Option[bool]
   while index < args.len:
+    if result.capture.takeCaptureFlag(args, index, args[index]) or
+      takeWindowSizeFlag(result.windowWidth, result.windowHeight,
+        args, index, args[index]):
+        inc index
+        continue
     if result.soundMuted.takeSoundFlag(args[index]):
       inc index
       continue
@@ -135,6 +143,7 @@ proc parseSessionOptions*(args: openArray[string]): SessionOptions =
     result.serverAddress.len > 0 or result.roomCode.len > 0)
   if result.replayPath.len > 0:
     result.menu = false
+  result.capture.validateCapture()
 
 proc botPick(game: GameState, choices: seq[Choice], player: int,
     helps: bool): Choice =

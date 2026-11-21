@@ -638,9 +638,14 @@ proc buildShoreFields*() =
       else: ShoreField()
 
 proc captureScene*(size: IVec2) {.measure.} =
-  ## Copies the window's colour and depth into colorCopy and depthCopy. The depth texture
-  ## matches the window's 24-bit depth, 8-bit stencil format, which a depth blit requires;
-  ## a multisampled window is resolved by the blit.
+  ## Copies the current scene's colour and 24-bit depth into the water textures.
+  ## Preserves the caller's targets, including an offscreen screenshot buffer.
+  var readFramebuffer, drawFramebuffer: GLint
+  glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, readFramebuffer.addr)
+  glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, drawFramebuffer.addr)
+  defer:
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, readFramebuffer.GLuint)
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, drawFramebuffer.GLuint)
   if size != sceneCopySize:
     sceneCopySize = size
     glBindTexture(GL_TEXTURE_2D, depthCopy)
@@ -665,11 +670,10 @@ proc captureScene*(size: IVec2) {.measure.} =
       depthCopy, 0)
     if glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE:
       raise newException(ValueError, "water scene-copy framebuffer is incomplete")
-  glBindFramebuffer(GL_READ_FRAMEBUFFER, 0)
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, drawFramebuffer.GLuint)
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, sceneCopyFbo)
   glBlitFramebuffer(0, 0, size.x, size.y, 0, 0, size.x, size.y,
     GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT, GL_NEAREST.GLenum)
-  glBindFramebuffer(GL_FRAMEBUFFER, 0)
 
 proc reflecting*(params: WaterParams): bool =
   ## Whether this water shows reflections, so it needs its reflection pass.

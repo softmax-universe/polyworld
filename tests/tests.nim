@@ -13,6 +13,7 @@ import
   test_characters,
   test_character_meshes,
   test_cli,
+  test_screenshots,
   ../games/crewrift/tests/test_sim as TestCrewrift,
   ../games/crewrift/tests/test_bots as TestCrewriftBots,
   ../games/crewrift/tests/test_skins as TestCrewriftSkins,

@@ -379,8 +379,11 @@ proc endSunDepthPass*(windowSize: IVec2) =
 template sunDepthPasses*(windowSize: IVec2, body: untyped) =
   ## Draws one map without a cross-fade, otherwise both neighboring maps.
   ## The injected sunPassIndex is 0 for the first map and 1 for the second.
-  ## Restores the window target and MSAA setting even if a draw fails.
+  ## Restores the caller's targets and MSAA setting even if a draw fails.
   if sunShadowsActive():
+    var readFramebuffer, drawFramebuffer: GLint
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, readFramebuffer.addr)
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, drawFramebuffer.addr)
     when not defined(emscripten):
       let multisampleEnabled = glIsEnabled(GL_MULTISAMPLE)
     try:
@@ -390,6 +393,8 @@ template sunDepthPasses*(windowSize: IVec2, body: untyped) =
         body
     finally:
       endSunDepthPass(windowSize)
+      glBindFramebuffer(GL_READ_FRAMEBUFFER, readFramebuffer.GLuint)
+      glBindFramebuffer(GL_DRAW_FRAMEBUFFER, drawFramebuffer.GLuint)
       when not defined(emscripten):
         if multisampleEnabled == GL_TRUE:
           glEnable(GL_MULTISAMPLE)

@@ -7,7 +7,7 @@ export sim
 when not defined(headless):
   import std/[options, strutils]
   import windy
-  import polyworld/[connections, menus, sounds]
+  import polyworld/[connections, menus, screenshots, sounds]
   import core/[sessions, replays, bots], app, replayer, scene/post,
     modes/duel, modes/multiplayer, frontend, paths
 
@@ -48,6 +48,9 @@ when not defined(headless):
       "                   headless build)\n" &
       "  --mute           Mute this launch; otherwise use saved settings\n" &
       "  --unmute         Enable sound for this launch (--mute=false)\n" &
+      "  --screenshot PATH Save a PNG and exit (native client only)\n" &
+      "  --frames N       Capture after N rendered frames (default 30)\n" &
+      "  --windowSize WxH Set the native window size\n" &
       "  --cards          List every card and exit\n" &
       "  --cards:CLASS    List one class's cards (archer, warrior or mage)\n" &
       "                   and exit\n" &
@@ -76,11 +79,13 @@ when not defined(headless):
     if printCardReference(commandLineParams()):
       return
     var options = parseSessionOptions(commandLineParams())
+    configureCapture(options.capture, "cac.png")
     var soundExplicit = false
     for argument in commandLineParams():
       if argument == "--unmute" or argument.startsWith("--mute"):
         soundExplicit = true
-    configureSoundLaunch(options.soundMuted, soundExplicit)
+    configureSoundLaunch(options.soundMuted or captureActive(),
+      soundExplicit or captureActive())
     when defined(takeScreenshot):
       options.menu = "--menu" in commandLineParams()
     when defined(replayViewer):

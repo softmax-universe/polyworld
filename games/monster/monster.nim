@@ -1,12 +1,12 @@
 import
-  std/[os, parseopt, strutils, times],
+  std/[os, strutils, times],
   polyworld/cli,
-  common, maps, sim, brains, conversations
+  common, maps, sim, brains, conversations, options
 
 when not defined(headless):
   import
     std/unicode,
-    opengl, pixie, silky, vmath, windy,
+    pixie, silky, vmath, windy,
     polyworld/[assets, rtscameras, viewers],
     scenes, ui, hudassets, selections, voices, launches
 
@@ -18,90 +18,10 @@ when not defined(headless):
     CameraDistanceMax = 50'f
     CameraDistanceDefault = 34'f
 
-type Options = object
-  seed, width, height, frames: int
-  offline, noVoice, soundMuted, conversation: bool
-  saveDir, screenshot, prompt, model, selection: string
-
-proc options(): Options =
-  ## Reads a small native launcher interface and explicit capture options.
-  var customSave = false
-  result = Options(
-    seed: 42, width: 1440, height: 900, frames: 3,
-    model: DefaultMonsterModel,
-    saveDir: getDataDir() / "polyworld" / "monster"
-  )
-  when defined(takeScreenshot):
-    result.screenshot = absolutePath(
-      getEnv("SCREENSHOT_PATH", "output/monster.png")
-    )
-  try:
-    var arguments: seq[string]
-    for argument in commandLineParams():
-      if result.soundMuted.takeSoundFlag(argument):
-        result.conversation = not result.soundMuted
-      else:
-        arguments.add argument
-    if arguments.len > 0:
-      for kind, key, value in getopt(arguments):
-        case kind
-        of cmdLongOption, cmdShortOption:
-          case key
-          of "seed":
-            result.seed = parseInt(value)
-          of "width":
-            result.width = parseInt(value)
-          of "height":
-            result.height = parseInt(value)
-          of "frames":
-            result.frames = parseInt(value)
-          of "save-dir":
-            result.saveDir = absolutePath(value)
-            customSave = true
-          of "screenshot":
-            result.screenshot = absolutePath(value)
-          of "select":
-            result.selection = value
-          of "prompt":
-            result.prompt = value
-          of "model":
-            result.model = value
-          of "offline":
-            result.offline = true
-          of "no-voice":
-            result.noVoice = true
-          of "help", "h":
-            echo "Monster / Polyworld"
-            echo "Run from the repository: nim r games/monster/monster.nim"
-            echo "Options: --model:ID --seed:N --save-dir:PATH --offline"
-            echo "Modes: Text, or Conversation with an OpenAI key."
-            echo "Conversation listens continuously and supports interruption."
-            echo "Audio: --no-voice disables Conversation; --unmute starts it."
-            echo "Hidden capture: --screenshot:PATH [--prompt:TEXT] [--frames:N]"
-            echo "Inspect a profile on launch: --select:moss or a person/place ID."
-            echo "Or compile with -d:takeScreenshot (default: output/monster.png)."
-            echo "Camera: right-drag to pan, wheel to zoom, F to find Moss."
-            echo "Click or drag the minimap to look around; click Moss to follow."
-            echo "Left-click a villager, house, or stash to inspect it."
-            echo "Conversation: Enter to speak, Escape to release focus."
-            quit(0)
-          else:
-            raise newException(MonsterError, "Unknown option: " & key)
-        of cmdArgument:
-          raise newException(MonsterError, "Unexpected argument: " & key)
-        of cmdEnd:
-          discard
-  except ValueError as error:
-    raise newException(MonsterError, "Invalid Monster option: " & error.msg)
-  if result.width < 640 or result.height < 480 or result.frames < 1:
-    raise newException(MonsterError, "Use at least 640x480 and one frame.")
-  if not customSave:
-    result.saveDir = result.saveDir / $result.seed
-
 when defined(headless):
   proc runGame(settings: Options) =
     ## Exercises a real conversation and its complete physical action plan.
-    if settings.screenshot.len > 0:
+    if settings.capture.captureRequested():
       raise newException(MonsterError,
         "Use --screenshot or -d:takeScreenshot without -d:headless " &
           "to capture graphics.")
@@ -160,31 +80,23 @@ else:
     builder.addFont(DefaultFontPath, "Small", 12, glyphs)
     builder.addFont(DefaultFontPath, "WorldName", 32, glyphs)
 
-  proc capture(window: Window, path: string) =
-    ## Saves the rendered game frame in a local PNG for visual inspection.
-    let screenshot = newImage(window.size.x, window.size.y)
-    glReadPixels(
-      0, 0, window.size.x, window.size.y, GL_RGBA, GL_UNSIGNED_BYTE,
-      screenshot.data[0].addr
-    )
-    screenshot.flipVertical()
-    createDir(path.parentDir)
-    screenshot.writeFile(path)
-
   proc runGame(settings: Options) =
     ## Runs a responsive camera and chat around the fixed creature simulation.
     let
-      capturing = settings.screenshot.len > 0
-      savePath = settings.saveDir / "world.json"
+      capturing = captureActive()
+      worldPath = settings.saveDir / "world.json"
+      savePath = if capturing: "" else: worldPath
       atlasPath = RepositoryRoot / "tmp" / "monster.atlas.png"
       brain = newBrain(
         settings.saveDir / "conversation.json", settings.model,
-        not settings.offline
+        not settings.offline and (not capturing or settings.prompt.len > 0)
       )
+    if capturing:
+      brain.disableSaving()
     defer:
       brain.close()
     var world = newWorld(generateMap(settings.seed))
-    world.restoreWorld(savePath)
+    world.restoreWorld(worldPath)
     createDir(atlasPath.parentDir)
     let builder = newHudAtlas(4096)
     builder.addFonts()
@@ -198,8 +110,12 @@ else:
     )
     sk.builder = builder
     defer:
-      world.saveWorld(savePath)
+      if not capturing:
+        world.saveWorld(savePath)
       window.close()
+    var captureTarget: ScreenshotTarget
+    defer:
+      captureTarget.releaseScreenshotTarget()
     let scene = newMonsterScene(
       window, world.map, sk.atlas, sk.atlasTextureId()
     )
@@ -299,6 +215,7 @@ else:
             cameraDistance, renderTime)
           if chat.select(world, picked):
             following = chat.selection.kind == MossSelection
+      discard captureTarget.beginScreenshotFrame(window)
       scene.drawScene(
         window, world, cameraTarget, cameraDistance,
         renderTime, chat.selection
@@ -334,19 +251,22 @@ else:
           chat.restoreInput(spoken)
       voice.observe(brain.messages)
       voice.poll(window.focused)
-      if epochTime() - lastSave > 10:
+      if not capturing and epochTime() - lastSave > 10:
         world.saveWorld(savePath)
         lastSave = epochTime()
-      inc frame
-      if capturing and frame >= settings.frames and
-        not brain.pending and not brain.explanationPending and
-        not world.active and world.actions.len == 0:
-          window.capture(settings.screenshot)
-          echo "Saved ", settings.screenshot
-          break
+      if capturing:
+        let ready = settings.prompt.len == 0 or
+          (not brain.pending and not brain.explanationPending and
+          not world.active and world.actions.len == 0)
+        if ready:
+          if window.captureFrame(frame):
+            break
+        else:
+          inc frame
       if capturing and epochTime() - started > 120:
         raise newException(MonsterError, "Timed out waiting for capture.")
-      window.swapBuffers()
+      if not capturing:
+        window.swapBuffers()
       waitForDisplay()
 
 proc main() =
@@ -354,19 +274,21 @@ proc main() =
   try:
     when not defined(headless):
       restoreMonsterDirectory()
-    let settings = options()
+    let settings = parseOptions()
     when not defined(headless):
+      configureCapture(settings.capture, "output/monster.png")
       if not settings.offline and not settings.noVoice and
-        settings.screenshot.len == 0 and
+        not captureActive() and
         getEnv("COGAME_LLM").toLowerAscii() != "off":
           if launchMonster():
             return
     setCurrentDir(RepositoryRoot)
-    createDir(settings.saveDir)
+    if not settings.capture.captureRequested():
+      createDir(settings.saveDir)
     runGame(settings)
     when not defined(headless):
       finishMonster()
-  except MonsterError, IOError:
+  except MonsterError, ScreenshotError, IOError:
     stderr.writeLine("Monster: " & getCurrentExceptionMsg())
     quit(1)
 

@@ -36,6 +36,8 @@ proc usage() =
   echo "  --speed NUMBER          Graphical start speed: 1, 2, 4, or 16."
   echo "  --play=false            Start the graphical transport paused."
   echo "  --windowSize WxH        Graphical window, such as 800x400."
+  echo "  --screenshot PATH       Save a hidden PNG capture and exit."
+  echo "  --frames N              Capture after N rendered frames (default 30)."
   echo "  --vsync:off             Unlock the frame rate (default on)."
   echo "  --mute[=true|false]     Override saved sound levels for this launch."
   echo "  --unmute                Enable sound for this launch."
@@ -48,6 +50,7 @@ proc usage() =
   echo "  --monsters:N            Arena monster count, 1 to 24 (default 10)."
   echo "Compile with -d:headless for command-line simulation."
   echo "Compile with -d:emscripten for the web backend."
+  echo "Screenshot captures use bundled bots when no roster is supplied."
 
 type ArenaOptions* = object
   ## The debug fight that replaces the dungeon when enabled.
@@ -174,6 +177,13 @@ proc parseGameOptions(): GameOptions =
       else:
         fail("unknown argument: " & argument)
     inc index
+  when not defined(headless) and not defined(emscripten):
+    if result.capture.path.len > 0 and result.botGroups.len == 0 and
+      result.replayPath.len == 0 and result.playerSlot == 0:
+        result.botGroups.add BotGroup(
+          path: currentSourcePath().parentDir / "players" / "base.bas",
+          count: PartySize
+        )
   result.validateGameOptions(
     PartySize,
     "a live expedition requires exactly four bots"

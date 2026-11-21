@@ -197,8 +197,8 @@ proc runFrontend*(app: App, connection: var Connection,
       client.snapshot.phase in {rooms.Ended, Desynced}:
         client.send(RoomMessage(kind: ReturnLobby))
         client.error = ""
+  var screenshotFrame: int
   when defined(takeScreenshot):
-    var screenshotFrame: int
     # Capture fixtures change memory only; saved preferences remain untouched.
     preferences.name = "Player One"
     connectRequested = false
@@ -222,13 +222,14 @@ proc runFrontend*(app: App, connection: var Connection,
       raise newException(MenusError, "Unknown CAC_CAPTURE_PAGE")
   template presentMenuFrame() =
     ## Capture the rendered back buffer before swapping the hidden window.
-    when defined(takeScreenshot):
-      when not defined(emscripten):
-        doAssert not window.visible, "Capture windows must stay hidden"
-      captureScreenshot(window, screenshotFrame,
-        max(1, parseInt(getEnv("CAC_CAPTURE_FRAME", "20"))),
-        app.appDir / "cac_menu.png")
-    window.presentFrame(framePaceHz)
+    if captureFrame(window, screenshotFrame,
+      (when defined(takeScreenshot):
+        max(1, parseInt(getEnv("CAC_CAPTURE_FRAME", "20")))
+      else: 30), app.appDir / "cac_menu.png"):
+        when not defined(emscripten):
+          window.closeRequested = true
+    else:
+      window.presentFrame(framePaceHz)
   while not window.closeRequested and not launchLocal and not launchNetwork and
       not launchReplay:
     when not defined(emscripten):

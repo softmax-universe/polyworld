@@ -16,17 +16,20 @@ when defined(headless):
     ), run.world.totalXp())
 else:
   import
-    windy, polyworld/[menus, sounds],
+    windy, polyworld/[menus, sounds, viewers],
     assets, game, graphics, frontend, pointers, settings
   initializeOptions()
-  configureSoundLaunch(options.soundMuted, options.soundOverride)
+  configureCapture(options.capture, "games/gods_of_the_arena/gota_shot.png")
+  configureSoundLaunch(captureActive() or options.soundMuted,
+    captureActive() or options.soundOverride)
   try:
     var preferences = readGotaPreferences()
     configureSounds(
       false, preferences.mainVolume,
       preferences.fxVolume, preferences.uiVolume, preferences.musicVolume
     )
-    initSounds(GotaMusicPath)
+    if not captureActive():
+      initSounds(GotaMusicPath)
     if playerNameOverride.len > 0:
       preferences.name = playerNameOverride
       preferences.savePreferences("Polyworld GotA")
@@ -38,4 +41,5 @@ else:
       runFrontend()
   finally:
     releaseCursorConfinement()
+    releaseGotaCapture()
     closeSounds()

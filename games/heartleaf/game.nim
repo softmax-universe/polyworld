@@ -34,6 +34,8 @@ Heartleaf, a village dinner-party week between nine BASIC villagers.
   --play=false     Start the graphical transport paused.
   --speed N        Graphical start speed: 1, 2, 4, or 16.
   --windowSize WxH Graphical window, such as 800x400.
+  --screenshot PATH Save one PNG and exit without showing a window.
+  --frames N       Capture after N rendered frames (default 30).
   --vsync:off      Unlock the frame rate (default on).
   --mute[=true|false] Override saved sound levels for this launch.
   --unmute         Enable sound for this launch.
@@ -41,8 +43,7 @@ Heartleaf, a village dinner-party week between nine BASIC villagers.
 
 Compile with -d:headless for a command-line game.
 Compile with -d:emscripten for the web backend.
-Compile with -d:takeScreenshot to save a PNG without showing a window.
-Set SCREENSHOT_PATH for the output (default heartleaf.png).
+Screenshot captures use the bundled bots when no roster is supplied.
 Use --seek-tick or --seek-event with --play=false to capture that state."""
 
 proc parseGameOptions(): (GameOptions, int32) =
@@ -77,6 +78,13 @@ proc parseGameOptions(): (GameOptions, int32) =
         fail("unknown argument: " & argument)
     inc index
   options.setMaximumTicks(gameLengthTicks(dayCount))
+  when not defined(headless) and not defined(emscripten):
+    if options.capture.path.len > 0 and options.botGroups.len == 0 and
+      options.replayPath.len == 0 and options.playerSlot == 0:
+        options.botGroups.add BotGroup(
+          path: currentSourcePath().parentDir / "players" / "base.bas",
+          count: VillagerCount
+        )
   options.validateGameOptions(
     VillagerCount,
     "a live game requires exactly nine bots"

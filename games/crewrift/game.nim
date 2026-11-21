@@ -3,7 +3,7 @@
 import
   std/[os, strutils],
   bassy,
-  polyworld/[cli, policies],
+  polyworld/[cli, policies, screenshots],
   sim, maps, bots, replays
 
 type
@@ -11,8 +11,10 @@ type
     seed*, players*, ticks*, player*: int
     speed*: float32
     soundMuted*: bool = true
-    role*, name*, record*, replay*, screenshot*: string
-    width*, height*, captureTicks*: int
+    role*, name*, record*, replay*: string
+    width*, height*: int32
+    captureTicks*: int
+    capture*: ScreenshotOptions
     botGroups*: seq[BotGroup]
   Game* = ref object
     world*: SimServer
@@ -47,8 +49,9 @@ proc usage() =
   echo "  --speed:N         Simulation speed (default 1)."
   echo "  --record:PATH     Save an input replay with tick fingerprints."
   echo "  --replay:PATH     Play and verify a saved input replay."
-  echo "  --windowSize:WxH  Window size (default 1440x900)."
-  echo "  --screenshot:PATH Save a frame and exit."
+  echo "  --windowSize WxH  Window size (default 1440x900)."
+  echo "  --screenshot PATH Save a PNG and exit after --frames N (default 30)."
+  echo "  --capture-ticks:N Advance N ticks before capture frames (default 0)."
   echo "  --mute[=BOOL]     Start muted (default true)."
   echo "  --unmute          Start with sound enabled."
   echo "Compile with -d:headless to run and verify without graphics."
@@ -92,14 +95,21 @@ proc parseOptions*(arguments = commandLineParams()): Options =
   ## Parses the shared native and headless command surface.
   result = Options(
     seed: 2026, players: MinPlayers, ticks: MaxTicks,
-    player: 0, speed: 1, width: 1440, height: 900,
-    captureTicks: RoleRevealTicks + 12
+    player: 0, speed: 1, width: 1440, height: 900
   )
   when defined(headless):
     result.player = -1
   var index = 0
   while index < arguments.len:
     let argument = arguments[index]
+    try:
+      if result.capture.takeCaptureFlag(arguments, index, argument) or
+        takeWindowSizeFlag(result.width, result.height,
+          arguments, index, argument):
+          inc index
+          continue
+    except ScreenshotError as error:
+      raise newException(CrewriftError, error.msg)
     inc index
     let
       parts = argument.split(':', 1)
@@ -130,14 +140,7 @@ proc parseOptions*(arguments = commandLineParams()): Options =
       of "--role": result.role = value
       of "--record": result.record = value
       of "--replay": result.replay = value
-      of "--screenshot": result.screenshot = value
       of "--capture-ticks": result.captureTicks = parseInt(value)
-      of "--windowSize":
-        let size = value.toLowerAscii().split('x')
-        if size.len != 2:
-          raise newException(CrewriftError, "Expected --windowSize:WxH.")
-        result.width = parseInt(size[0])
-        result.height = parseInt(size[1])
       of "--help", "-h":
         usage()
         quit(0)
@@ -159,6 +162,12 @@ proc parseOptions*(arguments = commandLineParams()): Options =
     raise newException(CrewriftError, "Choose recording or replay playback.")
   if result.name.len > 128 or result.name != cleanChatMessage(result.name):
     raise newException(CrewriftError, "Player name must be printable text.")
+  try:
+    result.capture.validateCapture()
+  except ScreenshotError as error:
+    raise newException(CrewriftError, error.msg)
+  if result.capture.captureRequested():
+    result.soundMuted = true
   result.validateBots()
 
 proc loadBotSources(game: Game, options: Options) =

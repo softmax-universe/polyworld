@@ -349,6 +349,7 @@ proc addAbilityIcons(builder: AtlasBuilder) =
 
 proc runGraphics*() =
   ## Runs the native or Emscripten graphical expedition viewer.
+  configureCapture(options.capture, "games/call_to_adventure/shot.png")
   startGameProfile()
   profileBlock "atlas":
     let builder = newHudAtlas(4096)
@@ -375,6 +376,8 @@ proc runGraphics*() =
       msaa = msaa4x
     )
   let splash = startSplash(sk, window)
+  var screenshotTarget: ScreenshotTarget
+  defer: screenshotTarget.releaseScreenshotTarget()
   # The stack spans about 45 tiles top to bottom; the shading uses amplitude
   # as its height scale, so a value near the whole span keeps every level
   # readable instead of clipping the deep ones to black.
@@ -1850,9 +1853,9 @@ proc runGraphics*() =
           160
         )
 
+  var screenshotFrame = 0
+  applyScreenshotCamera(cameraDistance)
   when defined(takeScreenshot):
-    var screenshotFrame = 0
-    applyScreenshotCamera(cameraDistance)
     if existsEnv("PBR"):
       scene.shading = PbrCharacters
     if existsEnv("SIM_TICKS"):
@@ -2344,6 +2347,7 @@ proc runGraphics*() =
             drawWorldActors()
             scene.sunDepthPass = false
 
+        discard screenshotTarget.beginScreenshotFrame(window)
         glViewport(0, 0, window.size.x.GLsizei, window.size.y.GLsizei)
         when not defined(emscripten):
           glEnable(GL_MULTISAMPLE)
@@ -2365,14 +2369,16 @@ proc runGraphics*() =
 
         # Bodies drawn after the ground copy cast contact shadows but keep
         # their own colors.
-        occlusion.captureGround(window.size)
+        occlusion.captureGround(window.size, screenshotTarget.framebuffer)
         beginCharacters(scene, window, view, projection, eye)
         drawWorldActors()
         finishCharacters(scene)
         # Only the opaque world is occluded: gizmos, particles, bars,
         # outlines and the HUD draw after it at full brightness.
         profileBlock "ambient occlusion":
-          occlusion.applyScreenOcclusion(window.size, projection)
+          occlusion.applyScreenOcclusion(
+            window.size, projection, screenshotTarget.framebuffer
+          )
         # Walls stay whole: what they hide of a body shows through them on
         # a screen-door pattern, after the occlusion so it stays clean.
         profileBlock "xray bodies":
@@ -2449,13 +2455,10 @@ proc runGraphics*() =
         )
         sk.endUi()
         drawStatsOverlay(sk, window)
-      when defined(takeScreenshot):
-        captureScreenshot(
-          window,
-          screenshotFrame,
-          8,
-          "games/call_to_adventure/shot.png"
-        )
+      if captureFrame(window, screenshotFrame):
+        when not defined(emscripten):
+          window.closeRequested = true
+        return
       profileBlock "present":
         window.presentFrame(framePaceHz)
         reportDirectorFrame(

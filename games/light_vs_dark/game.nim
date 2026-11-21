@@ -95,6 +95,8 @@ Light vs Dark, a small real-time strategy match between any number of BASIC over
   --view MODE      Spectator fog: all or player number (light/dark aliases).
   --play=false     Start the graphical transport paused.
   --speed N        Graphical start speed: 1, 2, 4, or 16.
+  --screenshot PATH Save a native screenshot and exit.
+  --frames N       Rendered frames before capture (default 30).
   --windowSize WxH Graphical window, such as 800x400.
   --vsync:off      Unlock the frame rate (default on).
   --mute[=true|false] Override saved sound levels for this launch.
@@ -105,7 +107,7 @@ Light vs Dark, a small real-time strategy match between any number of BASIC over
 
 Compile with -d:headless for a command-line match.
 Compile with -d:emscripten for the web backend.
-Compile with -d:takeScreenshot for a deterministic capture."""
+Screenshots work in ordinary graphical builds."""
 
 proc parseGameOptions(
   settings: var MapSettings, diplomacy: var DiplomacySettings
@@ -181,6 +183,7 @@ proc parseGameOptions(
       else:
         fail("unknown argument: " & argument)
     inc index
+  result.capture.validateCapture()
   let count = result.botGroups.botCount + int(result.playerSlot > 0)
   if count > 0 or result.replayPath.len > 0:
     result.validateGameOptions(count, "supply at least one --bot or --player")

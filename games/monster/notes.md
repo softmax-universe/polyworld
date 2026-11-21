@@ -240,12 +240,19 @@ nim r -d:headless games/monster/monster.nim \
 Capture the rendered game in a hidden window:
 
 ```sh
-nim r games/monster/monster.nim --screenshot:output/monster.png
+nim r games/monster/monster.nim --screenshot output/monster.png \
+  --frames 30 --windowSize 1440x900
 ```
 
-Add `--prompt:'Walk to the village.'` to wait for the model and resulting
-actions before capture. `--frames:N` sets the minimum rendered frame count.
-Use `--save-dir:build/monster-capture` to keep capture progress separate.
+These shared screenshot flags also accept `=` and `:` separators. The default
+capture is the thirtieth rendered frame. It runs muted in a hidden window,
+creates the output directory, and exits without saving world or conversation
+changes. Ordinary captures do not send model requests.
+
+Add `--prompt:'Walk to the village.'` to request a model instruction and wait
+for its resulting actions before capture. In that mode, `--frames N` is the
+minimum rendered frame count. `--save-dir:PATH` selects which existing world
+and conversation to read; capture still leaves those files unchanged.
 
 The shared `nim r -d:takeScreenshot games/monster/monster.nim` option also
 captures in a hidden window, defaulting to `output/monster.png`. Set

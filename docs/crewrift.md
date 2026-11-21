@@ -132,10 +132,19 @@ nim r -d:headless games/crewrift/tests/test_sim.nim
 ```
 
 `--players:8` through `--players:16` set the roster. `--ticks:N` bounds active
-simulation ticks. `--windowSize:1440x900` changes the window. `--screenshot:PATH`
-captures a frame and exits. `--capture-ticks:N` selects the simulation tick to
-capture. Replays store input buttons, votes, and chat with a fingerprint for
-every tick. Playback reports the first mismatch.
+simulation ticks. Screenshot capture uses the shared native arguments:
+
+```sh
+nim r games/crewrift/crewrift.nim --screenshot output/crewrift.png --frames 30 --windowSize 1280x720
+```
+
+The same flags accept space, `=`, or `:` separators. Capture uses a hidden,
+muted window, writes the PNG after 30 rendered frames by default, and exits.
+Parent output folders are created automatically. No special build is needed;
+headless and browser builds cannot capture native screenshots.
+`--capture-ticks:N` optionally advances N simulation ticks before the capture
+frames; its default is zero. Replays store input buttons, votes, and chat with
+a fingerprint for every tick. Playback reports the first mismatch.
 
 This example is a local playable port. The original Bitworld websocket server,
 league clients, pixel renderer, and `.bitreplay` format are not connected to it.

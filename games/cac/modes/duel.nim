@@ -92,10 +92,14 @@ proc runDuel*(app: App) =
     game: GameState
     menu: MatchMenu
     # Captures can replay a cast from its visual seed.
-    play = when defined(takeScreenshot):
-      initTablePlay(parseBiggestInt(getEnv("CAC_VFX_SEED", "20260909")))
-    else:
-      initTablePlay()
+    play =
+      if captureActive():
+        when defined(takeScreenshot):
+          initTablePlay(parseBiggestInt(getEnv("CAC_VFX_SEED", "20260909")))
+        else:
+          initTablePlay(20260909)
+      else:
+        initTablePlay()
     animationTime = 0.0'f32
     hudTime = 0.0'f
     lastFrameTime = epochTime()
@@ -118,13 +122,10 @@ proc runDuel*(app: App) =
 
   proc gameSeed(): int64 =
     ## --seed replays one deal; otherwise every game gets a fresh one.
-    when defined(takeScreenshot):
-      result = sessionOptions.seed
-    else:
-      if sessionOptions.seedGiven:
-        return sessionOptions.seed
-      result = seedRng.rand(high(int32)).int64
-      echo "CaC seed ", result, " (replay with --seed ", result, ")"
+    if sessionOptions.seedGiven or captureActive():
+      return sessionOptions.seed
+    result = seedRng.rand(high(int32)).int64
+    echo "CaC seed ", result, " (replay with --seed ", result, ")"
 
   proc cameraPlayer(): int =
     if sessionOptions.human or phase == ChooseClasses: 0
@@ -211,8 +212,7 @@ proc runDuel*(app: App) =
     phase = ChooseClasses
     play.statusMessage = "Bots are choosing classes..."
 
-  when defined(takeScreenshot):
-    var screenshotFrame = 0
+  var screenshotFrame = 0
   if getEnv("CAC_AUTOSTART") == "1":
     startDuel([precon(Archer), precon(Mage)], 20260904)
     play.statusMessage =
@@ -617,7 +617,7 @@ proc runDuel*(app: App) =
       play.selectedAttacker != 0)
     battleInputEnabled = not menuWasVisible and not menu.visible
     let audible = window.focused and
-      not defined(takeScreenshot) and not menu.visible and not menu.paused and
+      not captureActive() and not menu.visible and not menu.paused and
       (app.replay == nil or (app.replay.transport.playing and
         app.replay.timeScale == 1 and app.replay.transport.targetTick < 0 and
         app.replay.transport.restoreTick < 0))
@@ -1045,6 +1045,7 @@ proc runDuel*(app: App) =
     sk.drawHudFaces()
     benchStop(Ui)
     benchEndFrame("duel")
+    var screenshotComplete = false
     when defined(takeScreenshot):
       if existsEnv("CAC_CAPTURE_SEQUENCE"):
         inc screenshotFrame
@@ -1060,13 +1061,20 @@ proc runDuel*(app: App) =
         if screenshotFrame >= max(2, parseInt(getEnv("CAC_CAPTURE_FRAME", "120"))):
           quit(0)
       else:
-        captureScreenshot(
+        screenshotComplete = captureFrame(
           window,
           screenshotFrame,
           (if existsEnv("CAC_CAPTURE_FRAME"): max(1, parseInt(getEnv("CAC_CAPTURE_FRAME")))
             elif getEnv("CAC_CAPTURE_SETTLED") == "1": 80 else: 20),
           appDir / "cac_shot.png"
         )
+    else:
+      screenshotComplete = captureFrame(
+        window, screenshotFrame, 30, appDir / "cac_shot.png")
+    if screenshotComplete:
+      when not defined(emscripten):
+        window.closeRequested = true
+      return
     window.presentFrame(framePaceHz)
     if app.replay != nil:
       app.replay.reportFrame()

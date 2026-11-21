@@ -1,10 +1,7 @@
 import
-  std/algorithm,
+  std/[algorithm, os],
   chroma, pixie, silky, vmath, windy,
-  actioncam, chrome, gameuis, inputs, metrics
-
-when defined(takeScreenshot):
-  import std/os
+  actioncam, chrome, gameuis, inputs, metrics, screenshots
 
 const
   StatsWidth* = 1440.0'f
@@ -281,9 +278,8 @@ proc drawStats*(sk: Silky, window: Window, layout: GameUiLayout,
     state: var StatsState, current: StatsTable, history: MetricHistory,
     options = StatsOptions()) =
   ## Draws the overlay after the normal world, HUD, and transport pass.
-  when defined(takeScreenshot):
-    if existsEnv("SHOW_STATS"):
-      state.toggled = true
+  if captureActive() and existsEnv("SHOW_STATS"):
+    state.toggled = true
   let table = state.displayedTable(
     current,
     window.buttonPressed[KeySpace] or
@@ -468,9 +464,8 @@ proc drawStatsOverlay*(sk: Silky, window: Window, layout: GameUiLayout,
     state: var StatsState, current: StatsTable, history: MetricHistory,
     options = StatsOptions()) =
   ## Draws the readable overlay in its own pass after the ordinary HUD.
-  when defined(takeScreenshot):
-    if existsEnv("SHOW_STATS"):
-      state.toggled = true
+  if captureActive() and existsEnv("SHOW_STATS"):
+    state.toggled = true
   if not state.visible(window.tabHeld):
     return
   let

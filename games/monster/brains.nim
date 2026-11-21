@@ -825,6 +825,11 @@ proc addEvent*(brain: Brain, text: string) =
   brain.messages.add Message(role: EventMessage, text: text)
   brain.saveVisible()
 
+proc disableSaving*(brain: Brain) =
+  ## Keeps loaded conversation state in memory without writing capture changes.
+  if brain != nil:
+    brain.savePath = ""
+
 proc close*(brain: Brain) =
   ## Saves memories and releases the outstanding inference worker symmetrically.
   if brain == nil:

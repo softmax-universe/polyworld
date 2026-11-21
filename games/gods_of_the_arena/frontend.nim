@@ -85,7 +85,7 @@ proc runFrontend*() =
   except MenusError, IOError, OSError:
     error = getCurrentExceptionMsg()
   roomName = defaultGameName(preferences.name)
-  preferences.applyPreferences(window)
+  preferences.applyPreferences(window, configureDisplay = not captureActive())
   window.updateCursorConfinement(preferences.edgeScrolling)
   let bots = @[
     bundledBot("Base bot", "base"),
@@ -116,7 +116,8 @@ proc runFrontend*() =
 
   while not window.closeRequested:
     when not defined(emscripten):
-      window.updateWindowSettings()
+      if not captureActive():
+        window.updateWindowSettings()
     launchLocal = false
     launchNetwork = false
     when not defined(emscripten):
@@ -261,6 +262,7 @@ proc runFrontend*() =
       )
     window.onFrame = proc() =
       ## Draws this lifecycle state without constructing a hidden match.
+      beginGotaFrame()
       updateSounds()
       window.updateCursorConfinement(preferences.edgeScrolling)
       let needsPlayerName = not eligiblePlayerName(preferences.name)
@@ -315,14 +317,14 @@ proc runFrontend*() =
           if error.len > 0:
             sk.menuLabel(error, at + vec2(0, 272), color = LobbyRed)
           sk.endUi()
-          window.presentFrame(framePaceHz)
+          presentGotaFrame()
           reportReplayFrame(0, 0)
           return
       when not defined(emscripten):
         if browsingReplays:
           replayAction = sk.drawReplayBrowser(window, replayBrowser)
           sk.endUi()
-          window.presentFrame(framePaceHz)
+          presentGotaFrame()
           reportReplayFrame(0, 0)
           return
       if page == HomeMenu:
@@ -353,7 +355,7 @@ proc runFrontend*() =
         when not defined(emscripten):
           drawReplayRetry()
         sk.endUi()
-        window.presentFrame(framePaceHz)
+        presentGotaFrame()
         reportReplayFrame(0, 0)
         return
       var layout: LobbyLayout
@@ -787,7 +789,7 @@ proc runFrontend*() =
         drawReplayRetry()
       sk.textStyle = "Default"
       sk.endUi()
-      window.presentFrame(framePaceHz)
+      presentGotaFrame()
       reportReplayFrame(0, 0)
     pollEvents()
     waitForDisplay()

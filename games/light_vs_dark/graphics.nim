@@ -60,8 +60,6 @@ type
   MatchMenuPage = enum
     HiddenMatchMenu, PauseMenu, MatchSettings
   GraphicsError = object of CatchableError
-  CaptureTarget = object
-    framebuffer, colorTexture, depthBuffer: GLuint
   SeekCheckpoint = object
     world: World
     actionIndex: int
@@ -369,7 +367,8 @@ proc initializeGraphics*(visible = true) =
   builder.write(AtlasPath)
   (window, sk) = initGameWindow(WindowTitle, AtlasPath,
     gameWindowSize(options.windowWidth, options.windowHeight),
-    options.vsync, msaa = msaa4x, visible = visible)
+    options.vsync, msaa = msaa4x,
+    visible = visible and not captureActive())
   window.onFocusChange = proc() =
     ## Releases confinement immediately when switching to another app.
     window.updateCursorConfinement()
@@ -377,47 +376,18 @@ proc initializeGraphics*(visible = true) =
     ## Restores the pointer before closing the game window.
     releaseCursorConfinement()
 
-proc initCaptureTarget(size: IVec2): CaptureTarget =
-  ## Allocates color and depth without relying on a visible Cocoa drawable.
-  glGenFramebuffers(1, result.framebuffer.addr)
-  glBindFramebuffer(GL_FRAMEBUFFER, result.framebuffer)
-  glGenTextures(1, result.colorTexture.addr)
-  glBindTexture(GL_TEXTURE_2D, result.colorTexture)
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8.GLint, size.x, size.y,
-    0, GL_RGBA, GL_UNSIGNED_BYTE, nil)
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST.GLint)
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST.GLint)
-  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-    GL_TEXTURE_2D, result.colorTexture, 0)
-  glGenRenderbuffers(1, result.depthBuffer.addr)
-  glBindRenderbuffer(GL_RENDERBUFFER, result.depthBuffer)
-  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, size.x, size.y)
-  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
-    GL_RENDERBUFFER, result.depthBuffer)
-  if glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE:
-    raise newException(GraphicsError, "Unable to allocate screenshot target")
-  glBindFramebuffer(GL_FRAMEBUFFER, 0)
-
-proc close(target: var CaptureTarget) =
-  ## Releases the offscreen target while its OpenGL context is still current.
-  if target.framebuffer == 0:
-    return
-  glBindFramebuffer(GL_FRAMEBUFFER, 0)
-  glDeleteRenderbuffers(1, target.depthBuffer.addr)
-  glDeleteTextures(1, target.colorTexture.addr)
-  glDeleteFramebuffers(1, target.framebuffer.addr)
-
 proc runGraphics*(network: NetworkMatch = nil,
     connection: Connection = nil,
     hooks = GraphicsHooks(),
     hidden = defined(takeScreenshot),
     autoSaveReplay = false): bool {.discardable.} =
   ## Owns match resources; the application window survives returning to the main menu.
-  initializeGraphics(visible = not hidden)
-  var captureTarget: CaptureTarget
-  if hidden:
-    captureTarget = initCaptureTarget(window.size)
-  defer: captureTarget.close()
+  let
+    captureHidden = hidden or captureActive()
+    saveAutomatically = autoSaveReplay and not captureActive()
+  initializeGraphics(visible = not captureHidden)
+  var captureTarget: ScreenshotTarget
+  defer: releaseScreenshotTarget(captureTarget)
   window.onFrame = nil
   window.onButtonPress = nil
   window.onButtonRelease = nil
@@ -467,7 +437,7 @@ proc runGraphics*(network: NetworkMatch = nil,
           ## Writes one validated game snapshot to its replay library.
           saveLibraryReplay(snapshot))
       saveError = ""
-  preferences.applyPreferences(window, configureDisplay = not hidden)
+  preferences.applyPreferences(window, configureDisplay = not captureHidden)
   window.updateCursorConfinement(preferences.edgeScrolling)
   let previousBindings = customBindingsEnabled
   customBindingsEnabled = true
@@ -530,7 +500,7 @@ proc runGraphics*(network: NetworkMatch = nil,
         primaryId = unit.id
         followSelection = false
         break
-  let splash = if hidden: Splash() else: startSplash(sk, window)
+  let splash = if captureHidden: Splash() else: startSplash(sk, window)
   profileBlock "terrain":
     seed = run.mapSeed
     clearProps()
@@ -594,7 +564,7 @@ proc runGraphics*(network: NetworkMatch = nil,
             pack,
             woodAxe = axe
           )
-  if not hidden:
+  if not captureHidden:
     drawSplash(sk, window, splash.name)
 
   let scene = newCharacterScene(window)
@@ -1980,7 +1950,7 @@ proc runGraphics*(network: NetworkMatch = nil,
       observeHumanCommunication(network, packet)
     feedLvdActions(observeTick = true)
     emitTickParticles(oldUnitCooldowns, towerTargets)
-    let audible = not hidden and window.focused and transport.playing and
+    let audible = not captureHidden and window.focused and transport.playing and
       transport.speed == 1 and transport.targetTick < 0 and
       transport.restoreTick < 0 and matchMenu == HiddenMatchMenu
     for event in battleAudio.observeBattleSounds(run.world, viewMode,
@@ -2023,7 +1993,7 @@ proc runGraphics*(network: NetworkMatch = nil,
         if unit.owner == LightPlayer and
             unit.state notin {UnitDying, UnitInMine}:
           selectedIds.add unit.id
-    var screenshotFrame = 0
+  var screenshotFrame = 0
 
   var
     viewingClock: ViewingClock
@@ -2070,18 +2040,19 @@ proc runGraphics*(network: NetworkMatch = nil,
       hooks.ready(actionCam)
     lastFrameTime = epochTime()
 
-  if not hidden:
+  if not captureHidden:
     holdSplash(sk, window, splash)
   if hooks.ready != nil:
     hooks.ready(actionCam)
   window.onFrame = proc() =
     profileBlock "frame":
+      discard beginScreenshotFrame(captureTarget, window, captureHidden)
       updateSounds()
       window.updateCursorConfinement(preferences.edgeScrolling)
       if hooks.reload != nil and hooks.reload():
         reloadMatch()
       let dt = frameDelta(lastFrameTime, Step)
-      let audioActive = not hidden and window.focused and transport.playing and
+      let audioActive = not captureHidden and window.focused and transport.playing and
         transport.speed == 1 and transport.targetTick < 0 and
         transport.restoreTick < 0 and matchMenu == HiddenMatchMenu
       if audioWasActive and not audioActive and not run.world.over:
@@ -2164,7 +2135,7 @@ proc runGraphics*(network: NetworkMatch = nil,
             transport.sync(run.world.tick, recordedNow, run.world.over)
       when not defined(emscripten):
         if not run.replayMode and replaySaving.beginAutomaticReplaySave(
-          autoSaveReplay,
+          saveAutomatically,
           run.world.over or run.world.tick >= run.maximumTicks
         ):
             try:
@@ -2479,7 +2450,7 @@ proc runGraphics*(network: NetworkMatch = nil,
         if matchMenu == HiddenMatchMenu:
           drawStatsOverlay(sk, window, teamColors)
           when not defined(emscripten):
-            if autoSaveReplay and matchResultsVisible():
+            if saveAutomatically and matchResultsVisible():
               sk.beginUi(window, window.size)
               sk.menuLabel(if saveError.len > 0: saveError
                 elif replaySaving.savedPath.len > 0:
@@ -2494,15 +2465,12 @@ proc runGraphics*(network: NetworkMatch = nil,
       finishHumanCommunicationFrame()
       if hooks.frame != nil and hooks.frame():
         leaveMatch = true
-      when defined(takeScreenshot):
-        captureScreenshot(
-          window,
-          screenshotFrame,
-          3,
-          "light_vs_dark.png"
-        )
+      when not defined(emscripten):
+        if captureFrame(window, screenshotFrame, 3, "light_vs_dark.png"):
+          window.closeRequested = true
+          leaveMatch = true
       profileBlock "present":
-        window.presentFrame(framePaceHz)
+        window.presentFrame(if captureActive(): 0 else: framePaceHz)
         reportDirectorFrame(
           actionCam, transport, cameraDistance, int32(run.hashCheck.mismatches)
         )
@@ -2686,7 +2654,7 @@ proc runGraphics*(network: NetworkMatch = nil,
     except CatchableError as error:
       recordingFailure = "Cannot save replay: " & error.msg
     when not defined(emscripten):
-      if replaySaving.shouldSaveReplayOnExit(autoSaveReplay):
+      if replaySaving.shouldSaveReplayOnExit(saveAutomatically):
         try:
           saveToLibrary()
         except CatchableError as error:

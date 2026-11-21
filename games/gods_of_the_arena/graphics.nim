@@ -1,7 +1,7 @@
 ## Window, terrain rendering, characters, camera, and HUD for the arena.
 
 import
-  std/[math, strutils, tables, times],
+  std/[math, os, strutils, tables, times],
   bumpy, chroma, opengl, pixie, silky, vmath,
   assets, brushes, content, groves, landscapes, sim, game, maps, replays, ui, walls,
   aiming, cameras, controls, faces, lighting, spelleffects, multiplayer, homes, lobbies, cursors, pointers,
@@ -23,9 +23,6 @@ when defined(emscripten):
   {.emit: "#include <emscripten.h>".}
 else:
   import polyworld/replaysaves, replaylibraries
-
-when defined(takeScreenshot):
-  import std/os
 
 const GotaLakeWater = block:
   ## The arena's lakes: the engine's lake preset, tuned for the arena.
@@ -241,6 +238,9 @@ proc addHudIcons(builder: AtlasBuilder) =
 var
   window*: Window
   sk*: Silky
+  screenshotTarget: ScreenshotTarget
+  screenshotFrame: int
+  runtimeScreenshot: bool
   terrainReady: bool
   sharedScene: CharacterScene
   towerPacks: array[Team, PropPack]
@@ -261,10 +261,34 @@ var
   godEyes: array[Team, DeathEyes]
   heroEyes: array[HeroClass, DeathEyes]
 
+proc beginGotaFrame*() =
+  ## Selects the shared offscreen target for a hidden application frame.
+  discard beginScreenshotFrame(screenshotTarget, window)
+
+proc presentGotaFrame*() =
+  ## Saves the requested frame before presenting and ending the normal loop.
+  when not defined(emscripten):
+    when ActiveTracePath.len == 0:
+      if captureFrame(window, screenshotFrame, 30,
+          "games/gods_of_the_arena/gota_shot.png"):
+        window.closeRequested = true
+    else:
+      if runtimeScreenshot and captureFrame(window, screenshotFrame, 30,
+          "games/gods_of_the_arena/gota_shot.png"):
+        window.closeRequested = true
+  window.presentFrame(framePaceHz)
+
+proc releaseGotaCapture*() =
+  ## Releases the application's offscreen target while its context is alive.
+  if window != nil:
+    releaseScreenshotTarget(screenshotTarget)
+
 proc initializeGraphics*() =
   ## Creates the application window and shared atlas exactly once.
   if window != nil:
     return
+  runtimeScreenshot = options.capture.path.len > 0
+  configureCapture(options.capture, "games/gods_of_the_arena/gota_shot.png")
   when ProfileWarmupFrames > 0:
     finishGameProfile()
   else:
@@ -320,6 +344,7 @@ proc runGraphics*(
 ): bool {.discardable.} =
   ## Runs one match on the existing window and releases match-owned resources.
   initializeGraphics()
+  let saveAutomatically = autoSaveReplay and not captureActive()
   stopSounds()
   defer: stopSounds()
   clearHudTooltip()
@@ -1356,7 +1381,7 @@ proc runGraphics*(
     if run.replayMode or not run.finished():
       return
     when not defined(emscripten):
-      if replaySaving.beginAutomaticReplaySave(autoSaveReplay, true):
+      if replaySaving.beginAutomaticReplaySave(saveAutomatically, true):
         try:
           saveToLibrary()
         except CatchableError as error:
@@ -2668,16 +2693,8 @@ proc runGraphics*(
       startReplayRecording(uint32(options.maximumTicks))
     replayCheckpoints = @[captureCheckpoint()]
 
-  let cleanScreenshot =
-    when defined(takeScreenshot): existsEnv("CLEAN_SCREENSHOT")
-    else: false
-  when defined(takeScreenshot):
-    var screenshotFrame = 0
-    let screenshotPath =
-      if existsEnv("SCREENSHOT_PATH"):
-        getEnv("SCREENSHOT_PATH")
-      else:
-        "games/gods_of_the_arena/gota_shot.png"
+  let cleanScreenshot = captureActive() and existsEnv("CLEAN_SCREENSHOT")
+  if captureActive():
     applyScreenshotCamera(cameraDistance)
     if existsEnv("CAM_X"): cameraTarget.x = getEnv("CAM_X").parseFloat.float32
     if existsEnv("CAM_Z"): cameraTarget.z = getEnv("CAM_Z").parseFloat.float32
@@ -2709,25 +2726,26 @@ proc runGraphics*(
         HealingAura,
         cameraTarget + vec3(0, 3.5'f32, 0)
       )
-    if not playerMode():
-      for hero in run.world.heroes:
-        if hero.class == Arcanist and hero.state != Dying:
-          primaryId = hero.id
-          selectedIds = @[hero.id]
-          followSelection = true
-          break
-      if primaryId == 0:
+    when defined(takeScreenshot):
+      if not playerMode():
         for hero in run.world.heroes:
-          if hero.state != Dying:
+          if hero.class == Arcanist and hero.state != Dying:
             primaryId = hero.id
             selectedIds = @[hero.id]
             followSelection = true
             break
-    else:
-      primaryId = playerHeroId()
-      selectedIds = @[primaryId]
-      followSelection = false
-      cameraTarget = playerHeroFrame()
+        if primaryId == 0:
+          for hero in run.world.heroes:
+            if hero.state != Dying:
+              primaryId = hero.id
+              selectedIds = @[hero.id]
+              followSelection = true
+              break
+      else:
+        primaryId = playerHeroId()
+        selectedIds = @[primaryId]
+        followSelection = false
+        cameraTarget = playerHeroFrame()
 
     if existsEnv("SELECT_ID"):
       selectEntity(getEnv("SELECT_ID").parseInt.int32)
@@ -2775,8 +2793,8 @@ proc runGraphics*(
       let dt = frameDelta(lastFrameTime)
       viewingDt = viewingClock.viewingDelta(window)
       viewingSeeking = transport.targetTick >= 0 or transport.restoreTick >= 0
-      let audible = window.focused and not viewingSeeking and
-        transport.playing and transport.speedIndex == 0 and
+      let audible = not captureActive() and window.focused and
+        not viewingSeeking and transport.playing and transport.speedIndex == 0 and
         matchMenu == HiddenMatchMenu
       if audioEnabled and not audible and
           (not run.world.gameOver or not window.focused or
@@ -3100,6 +3118,7 @@ proc runGraphics*(
               drawWorldCharacters(scene, worldCharacters, worldCharacterCount)
             scene.sunDepthPass = false
         profileBlock "Main pass":
+          beginGotaFrame()
           when not defined(emscripten):
             glEnable(GL_MULTISAMPLE)
           glClearColor(0.05, 0.06, 0.09, 1.0)
@@ -3196,7 +3215,10 @@ proc runGraphics*(
                 )
                 drawWorldCharacters(scene, worldCharacters, worldCharacterCount)
                 finishCharacters(scene)
-              glBindFramebuffer(GL_FRAMEBUFFER, 0)
+              if captureActive():
+                beginGotaFrame()
+              else:
+                glBindFramebuffer(GL_FRAMEBUFFER, 0)
               glViewport(0, 0, window.size.x, window.size.y)
           drawWaterBody(
             lake,
@@ -3608,22 +3630,15 @@ proc runGraphics*(
             not window.buttonPressed[MouseLeft]:
               resultsInputReady = true
           when not defined(emscripten):
-            if autoSaveReplay:
+            if saveAutomatically:
               sk.beginUi(window, window.size)
               sk.menuLabel(if saveError.len > 0: saveError
                 elif replaySaving.savedPath.len > 0:
                   "Replay saved to your library." else: "",
                 vec2(24, 24), 1000, MenuAccent)
               sk.endUi()
-      when defined(takeScreenshot) and ActiveTracePath.len == 0:
-        captureScreenshot(
-          window,
-          screenshotFrame,
-          30,
-          screenshotPath
-        )
       profileBlock "present":
-        window.presentFrame(framePaceHz)
+        presentGotaFrame()
         reportDirectorFrame(
           actionCam, transport, cameraDistance, int32(run.hashCheck.mismatches)
         )
@@ -3650,7 +3665,8 @@ proc runGraphics*(
         break
     pollEvents()
     when not defined(emscripten):
-      window.updateWindowSettings()
+      if not captureActive():
+        window.updateWindowSettings()
     waitForDisplay()
 
   window.cursor = Cursor(kind: ArrowCursor)
@@ -3666,7 +3682,7 @@ proc runGraphics*(
     except CatchableError as error:
       recordingFailure = "Cannot save replay: " & error.msg
     when not defined(emscripten):
-      if replaySaving.shouldSaveReplayOnExit(autoSaveReplay):
+      if replaySaving.shouldSaveReplayOnExit(saveAutomatically):
         try:
           saveToLibrary()
         except CatchableError as error:

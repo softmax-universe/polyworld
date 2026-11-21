@@ -24,6 +24,19 @@ proc bundledBot(name, file: string): LocalPolicy =
 proc runFrontend*() =
   ## Owns menu, lobby, match and return transitions on the same window.
   initializeGraphics()
+  var
+    captureTarget: ScreenshotTarget
+    screenshotFrame = 0
+  defer: releaseScreenshotTarget(captureTarget)
+
+  proc presentMenu() =
+    ## Captures every menu path before presentation and leaves normal cleanup active.
+    when not defined(emscripten):
+      if captureFrame(window, screenshotFrame, 30, "light_vs_dark.png"):
+        window.closeRequested = true
+    window.presentFrame(if captureActive(): 0 else: framePaceHz)
+    reportReplayFrame(0, 0)
+
   let inviteServer = inviteParameter("server")
   var
     preferences = Preferences()
@@ -86,7 +99,7 @@ proc runFrontend*() =
   template automaticReplaySave(): bool =
     ## Enables automatic recording only for desktop games.
     when defined(emscripten): false
-    else: replayPreferences.saveReplay
+    else: replayPreferences.saveReplay and not captureActive()
 
   try:
     preferences = readLvdPreferences()
@@ -95,7 +108,7 @@ proc runFrontend*() =
   except MenusError, IOError, OSError:
     error = getCurrentExceptionMsg()
   preferences = effectivePreferences(preferences, inviteServer, serverAddress)
-  preferences.applyPreferences(window)
+  preferences.applyPreferences(window, configureDisplay = not captureActive())
   window.updateCursorConfinement(preferences.edgeScrolling)
   roomName = defaultGameName(preferences.name)
   let bots = @[
@@ -114,7 +127,8 @@ proc runFrontend*() =
 
   while not window.closeRequested:
     when not defined(emscripten):
-      window.updateWindowSettings()
+      if not captureActive():
+        window.updateWindowSettings()
     launchLocal = false
     launchNetwork = false
     when not defined(emscripten):
@@ -252,6 +266,7 @@ proc runFrontend*() =
       )
     window.onFrame = proc() =
       ## Draws this lifecycle state without constructing a hidden match.
+      discard beginScreenshotFrame(captureTarget, window)
       updateSounds()
       window.updateCursorConfinement(preferences.edgeScrolling)
       var contextInputBlocked = false
@@ -312,15 +327,13 @@ proc runFrontend*() =
           if error.len > 0:
             sk.menuLabel(error, at + vec2(0, 272), color = LobbyRed)
           sk.endUi()
-          window.presentFrame(framePaceHz)
-          reportReplayFrame(0, 0)
+          presentMenu()
           return
       when not defined(emscripten):
         if browsingReplays:
           replayAction = sk.drawReplayBrowser(window, replayBrowser)
           sk.endUi()
-          window.presentFrame(framePaceHz)
-          reportReplayFrame(0, 0)
+          presentMenu()
           return
       if page == HomeMenu:
         case sk.drawLvdHome(window, homeFocus)
@@ -356,8 +369,7 @@ proc runFrontend*() =
         when not defined(emscripten):
           drawReplayRetry()
         sk.endUi()
-        window.presentFrame(framePaceHz)
-        reportReplayFrame(0, 0)
+        presentMenu()
         return
       var layout: LobbyLayout
       let origin =
@@ -819,8 +831,7 @@ proc runFrontend*() =
         drawReplayRetry()
       sk.textStyle = "Default"
       sk.endUi()
-      window.presentFrame(framePaceHz)
-      reportReplayFrame(0, 0)
+      presentMenu()
     pollEvents()
     waitForDisplay()
     when not defined(emscripten):

@@ -275,7 +275,7 @@ when not defined(headless):
       previewLastFrame = epochTime()
       terminalLog: LogReader  ## Where the terminal's printout of events is.
       seatRng =
-        if sessionOptions.seedGiven or defined(takeScreenshot):
+        if sessionOptions.seedGiven or captureActive():
           initRand(sessionOptions.seed)
         else: initRand()
       match: MultiplayerMatch
@@ -395,8 +395,7 @@ when not defined(headless):
       play.statusMessage =
         app.replay.playerName(match.current) & " begins."
       openingDraw = true
-    when defined(takeScreenshot):
-      var previewScreenshotFrame = 0
+    var previewScreenshotFrame = 0
     when defined(cacLayoutTuning):
       # The duel's layout keys: the viewed seat's hand is the player's one
       # and every other balcony's is an opponent's. Enter prints a row.
@@ -430,7 +429,7 @@ when not defined(headless):
       menu.handleEscape(window, play.pendingTargeting or
         play.selectedAttacker != 0)
       battleInputEnabled = not menuWasVisible and not menu.visible
-      let audible = window.focused and not defined(takeScreenshot) and
+      let audible = window.focused and not captureActive() and
         not menu.visible and not menu.paused and
         (app.replay == nil or (app.replay.transport.playing and
           app.replay.timeScale == 1 and app.replay.transport.targetTick < 0 and
@@ -1035,10 +1034,13 @@ when not defined(headless):
       sk.drawHudFaces()
       benchStop(Ui)
       benchEndFrame("multiplayer " & $layout.playerCount)
-      when defined(takeScreenshot):
-        captureScreenshot(window, previewScreenshotFrame,
-          max(1, parseInt(getEnv("CAC_CAPTURE_FRAME", "20"))),
-          appDir / &"cac_multiplayer_{layout.playerCount}.png")
+      if captureFrame(window, previewScreenshotFrame,
+        (when defined(takeScreenshot):
+          max(1, parseInt(getEnv("CAC_CAPTURE_FRAME", "20")))
+        else: 30), appDir / ("cac_multiplayer_" & $layout.playerCount & ".png")):
+          when not defined(emscripten):
+            window.closeRequested = true
+          return
       window.presentFrame(framePaceHz)
       if app.replay != nil:
         app.replay.reportFrame()

@@ -11,16 +11,17 @@ Adventure. The opening overview shows all nine cottages. Screenshots run in a
 hidden window and exit after writing their PNG:
 
 ```sh
-SCREENSHOT_PATH=tmp/heartleaf.png nim r -d:takeScreenshot \
-  games/heartleaf/heartleaf.nim \
-  --bot games/heartleaf/players/base.bas:9 \
+nim r games/heartleaf/heartleaf.nim \
+  --screenshot tmp/heartleaf.png --frames 30 \
   --seek-tick 1500 --play=false
 ```
 
 Use `--seek-event day:1:dinner` for a named event, or `--replay PATH` for a saved
 run. `CAM_DIST`, `CAM_X` and `CAM_Z` override the screenshot camera. The latter
 two use simulation tile coordinates. `--windowSize WIDTHxHEIGHT` overrides the
-shared window dimensions.
+shared window dimensions. With no roster or replay, screenshot capture uses
+the bundled villager bots. The standard capture flags also accept `=VALUE`
+and `:VALUE` forms.
 
 ## Reference layer captures
 
@@ -48,12 +49,12 @@ and props have transparent backgrounds. The assembled comparison excludes HUD,
 gnomes and crop placeholders. Normal gameplay retains them.
 
 To capture one layer, set `HEARTLEAF_LAYER` to `ground`, `buildings`,
-`vegetation`, `props` or `all` and compile with both capture flags:
+`vegetation`, `props` or `all` and compile with the scene-only capture flag:
 
 ```sh
-HEARTLEAF_LAYER=buildings SCREENSHOT_PATH=tmp/buildings.png \
-  nim r -d:takeScreenshot -d:sceneCapture games/heartleaf/heartleaf.nim \
-  --bot games/heartleaf/players/base.bas:9 \
+HEARTLEAF_LAYER=buildings \
+  nim r -d:sceneCapture games/heartleaf/heartleaf.nim \
+  --screenshot tmp/buildings.png --frames 30 \
   --seek-tick 1500 --play=false --windowSize 1122x1402
 ```
 

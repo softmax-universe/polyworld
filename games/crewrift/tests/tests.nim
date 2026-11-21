@@ -2,6 +2,7 @@
 
 {.warning[UnusedImport]: off.}
 import
+  test_capture_options,
   test_sim,
   test_bots,
   test_skins

@@ -9,6 +9,10 @@ type Mailbox* = ref object
   first*, count*: int
   lastId*: int32
 
+proc receivedChatId*(sender, target: int): int32 =
+  ## For a validated destination, retain the channel or identify the DM sender.
+  int32(if target < 0: target else: sender)
+
 proc newMailbox*(): Mailbox =
   ## Reserves one player's bounded inbox before the game starts.
   result = Mailbox(lastId: NoMailboxId)

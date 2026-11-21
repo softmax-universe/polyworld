@@ -5564,7 +5564,7 @@ proc deliverPolicyChat*(
   if game.inboxes.len == 0:
     for hero in game.world.heroes:
       game.inboxes.add newMailbox()
-  let id = int32(if target < 0: target else: sender)
+  let id = receivedChatId(sender, target)
   for recipient in 0 ..< game.inboxes.len:
     case target
     of -2:

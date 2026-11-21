@@ -514,7 +514,12 @@ proc drawBarTexture(sk: Silky, name: string, cap: int, bounds: BarRect,
   let
     uv = sk.atlas.entries[name]
     sourceSize = vec2(uv.width.float32, uv.height.float32)
-    sourceCap = (cap * max(sk.sliceScale, 1) * max(uv.pixelScale, 1)).float32
+    density =
+      when compiles(uv.pixelScale):
+        max(uv.pixelScale, 1)
+      else:
+        1
+    sourceCap = (cap * max(sk.sliceScale, 1) * density).float32
   for slice in barSlices(bounds, sourceSize, sourceCap, sk.uiScale):
     if slice.bounds.size.x <= 0 or slice.bounds.size.y <= 0:
       continue

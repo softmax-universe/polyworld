@@ -3,7 +3,7 @@
 ## publishes their results and replay like the other Polyworld games.
 import std/[os, strutils]
 import jsony
-import polyworld/cli
+import polyworld/[cli, timings]
 import ../core/[sim, sessions, bots, match, replays]
 
 when defined(coworld):
@@ -12,10 +12,14 @@ when defined(coworld):
 type
   HeadlessArgs* = object
     options*: GameOptions
+    playerCount*: int
     classNames*: seq[string]  ## `--classes`, one per seat; empty without it.
 
   ConfigClasses = object
     classes: seq[string]
+
+const HeadlessFlags* = {BotFlag, ReplayFlag, RecordFlag, SeedFlag,
+  SecondsFlag, MinutesFlag, TicksFlag, HeadlessTickRateFlag, VerboseFlag}
 
 proc seatClasses*(names: openArray[string], seats: int): seq[Seat] =
   ## Parses an explicit class override with one entry per seat. Each seat
@@ -58,26 +62,44 @@ proc parseHeadlessArgs*(arguments: seq[string]): HeadlessArgs =
   ## `--bot PATH[:COUNT]` once per group of seats (2 to 7 seats), `--seed`,
   ## `--ticks` (or `--seconds`, `--minutes`), `--classes archer,mage,...`
   ## and `--record PATH`; or `--replay PATH` to verify a recording. The
-  ## shared flags parse as in every Polyworld game; an error quits.
+  ## Shared argument errors remain catchable by callers and tests.
   result.options = GameOptions(seed: DefaultSessionSeed.int32,
     maximumTicks: DefaultDurationTicks)
   var index = 0
   while index < arguments.len:
-    let argument = arguments[index]
+    let
+      argument = arguments[index]
+      flag = splitFlag(argument)
     if result.options.takeCommonFlag(arguments, index, argument):
       discard
-    elif argument == "--classes":
-      result.classNames = arguments.argumentValue(index, argument).split(',')
-    elif argument.startsWith("--classes="):
-      result.classNames = argument["--classes=".len .. ^1].split(',')
     else:
-      fail("unknown argument: " & argument)
+      case flag.name
+      of "--classes":
+        result.classNames = flagValue(arguments, index, argument).split(',')
+      of "--players":
+        result.playerCount = parsePositiveInt32(
+          flagValue(arguments, index, argument), flag.name).int
+        if result.playerCount notin PlayerCount .. MaxPlayers:
+          raise newException(CliError, "--players must be between " &
+            $PlayerCount & " and " & $MaxPlayers)
+      else:
+        raise newException(CliError, "unknown argument: " & argument)
     inc index
+  result.options.rejectUnsupportedFlags(HeadlessFlags)
   # No window: --player is refused, and --replay takes no bots or record.
   result.options.validateGameOptions(0, "")
+  if result.playerCount > 0 and result.options.replayPath.len == 0:
+    result.options.validateGameOptions(result.playerCount,
+      "supply one bot per seat")
 
 proc runHeadless*() =
   ## Plays and optionally records one bot match, or verifies a replay.
+  if "--help" in commandLineParams() or "-h" in commandLineParams():
+    echo "Cards and Casters, headless"
+    echo commonUsageFor(HeadlessFlags)
+    echo "  --players N         Require N bot seats (otherwise inferred)"
+    echo "  --classes NAMES     Comma-separated class overrides, one per seat"
+    return
   let
     parsed = parseHeadlessArgs(commandLineParams())
     options = parsed.options
@@ -100,15 +122,27 @@ proc runHeadless*() =
     for _ in 0 ..< group.count:
       sources.add readFile(group.path)
       players.add PlayerConfig(name: group.path.extractFilename)
+  let bots = loadBots(sources)
+  if options.verbose:
+    echo "CaC headless seed ", options.seed, ", ", seats,
+      " players, maximum ", options.maximumTicks, " ticks"
+    for bot in bots:
+      bot.output = proc(event: PrintEvent) =
+        ## Shows BASIC output only for explicitly verbose launches.
+        case event.kind
+        of TextPrint: stdout.write(event.text)
+        of ValuePrint: stdout.write(event.value)
+        of FixedPrint: stdout.write(event.fixedValue)
+        of NewlinePrint: stdout.write("\n")
   let
-    bots = loadBots(sources)
     seated =
       if classOverride.len > 0: classOverride
       else: setupBotSeats(bots, options.seed.int64)
     recorder = initReplayRecorder(
       matchSetup(seated, options.seed, options.maximumTicks.uint32),
       GameConfig(players: players, seed: options.seed,
-        maxTicks: options.maximumTicks))
+        maxTicks: options.maximumTicks,
+        headlessTickRate: options.headlessTickRate))
   for player, bot in bots:
     for problem in bot.deckProblems:
       echo "player ", player, " illegal deck: ", problem
@@ -116,7 +150,9 @@ proc runHeadless*() =
     options.maximumTicks.uint32, recorder)
   played.scriptError = proc(player: int, message: string) =
     echo "player ", player, " BASIC error: ", message
-  played.run()
+  var pacer = initTickPacer(options.headlessTickRate)
+  while played.step():
+    pacer.pace()
   if options.recordPath.len > 0:
     saveReplay(options.recordPath, recorder.data)
   echo "Match ", played.outcomeLabel, " after ", played.tick, " ticks, ",

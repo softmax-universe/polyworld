@@ -5,9 +5,9 @@ import core/[sim, cardlist]
 export sim
 
 when not defined(headless):
-  import std/[options, strutils]
+  import std/options
   import windy
-  import polyworld/[connections, menus, screenshots, sounds]
+  import polyworld/[cli, connections, menus, screenshots, sounds]
   import core/[sessions, replays, bots], app, replayer, scene/post,
     modes/duel, modes/multiplayer, frontend, paths
 
@@ -25,45 +25,26 @@ when not defined(headless):
     echo Rule
 
   proc printHelp() =
-    echo "Cards and Casters\n" &
-      "Options (--key value or --key=value):\n" &
-      "  --menu           Open the main menu (default without match flags)\n" &
-      "  --direct         Launch a match without the menus\n" &
-      "  --server URL     Set the relay used after choosing Multiplayer\n" &
-      "  --room CODE      Join this room after choosing Multiplayer\n" &
-      "  --players N      Player count (2). 2 plays a duel; 3 to 7 play a\n" &
-      "                   multiplayer match: the last player alive wins.\n" &
-      "  --seed INTEGER   Set the battle seed\n" &
-      "  --bot PATH       Bot program (.bas), repeatable up to " & $PlayerCount &
-        " times.\n" &
-      "                   Duel: one bot plays both seats; with --human it\n" &
-      "                   plays the opponent. Multiplayer: the bots take\n" &
-      "                   every seat but yours, in turn.\n" &
-      "                   Defaults to the reference bots in players/.\n" &
-      "  --human [PATH]   Play seat 0 yourself instead of watching bots.\n" &
-      "                   With a bot program (.bas), play the class and deck\n" &
-      "                   it lists; otherwise choose a class on screen and\n" &
-      "                   play its precon.\n" &
-      "  --replay PATH    Watch a recorded match (see --record in the\n" &
-      "                   headless build)\n" &
-      "  --mute           Mute this launch; otherwise use saved settings\n" &
-      "  --unmute         Enable sound for this launch (--mute=false)\n" &
-      "  --screenshot PATH Save a PNG and exit (native client only)\n" &
-      "  --frames N       Capture after N rendered frames (default 30)\n" &
-      "  --windowSize WxH Set the native window size\n" &
-      "  --cards          List every card and exit\n" &
-      "  --cards:CLASS    List one class's cards (archer, warrior or mage)\n" &
-      "                   and exit\n" &
-      "  --card:NAME      Show one card and exit; case, spaces and hyphens\n" &
-      "                   don't matter (--card:hail-of-arrows)\n" &
-      "  -h, --help       Show this help and exit"
+    ## Lists shared launch arguments and CaC-specific setup choices.
+    echo "Cards and Casters"
+    echo commonUsageFor(SessionFlags)
+    echo "  --menu           Open the main menu (default without match flags)"
+    echo "  --direct         Launch a match without the menus"
+    echo "  --players N      Set 2 to 7 seats (defaults to supplied roster or 2)"
+    echo "  --deck PATH      Read the human class/deck from a bot setup script"
+    echo "                   Requires --player; only the setup program runs"
+    echo "  --cards          List every card and exit"
+    echo "  --cards:CLASS    List archer, warrior, or mage cards and exit"
+    echo "  --card:NAME      Show one card and exit"
+    echo "  -h, --help       Show this help and exit"
+    echo "Supply one bot per nonhuman seat; absent bots use bundled defaults."
 
-  proc readHumanSeat(path: string, seats: int, seed: int64): Seat =
+  proc readHumanSeat(path: string, seats: int, seed: int64, player: int32): Seat =
     ## The class and deck a bot script lists, for the human to play. Only
     ## its setup runs. An illegal deck is reported and seats them with none.
     try:
       resetInboxes(seats)
-      let vm = loadBot(readFile(path), 0)
+      let vm = loadBot(readFile(path), player)
       result = vm.setupSeat(seats, seed)
       for problem in vm.deckProblems:
         stderr.writeLine "Your deck in ", path, " is illegal: ", problem
@@ -79,24 +60,19 @@ when not defined(headless):
     if printCardReference(commandLineParams()):
       return
     var options = parseSessionOptions(commandLineParams())
+    options.resolveSessionPaths()
     configureCapture(options.capture, "cac.png")
-    var soundExplicit = false
-    for argument in commandLineParams():
-      if argument == "--unmute" or argument.startsWith("--mute"):
-        soundExplicit = true
     configureSoundLaunch(options.soundMuted or captureActive(),
-      soundExplicit or captureActive())
+      options.common.soundOverride or captureActive())
     when defined(takeScreenshot):
       options.menu = "--menu" in commandLineParams()
     when defined(replayViewer):
       options.menu = false
-    # Before initApp, which moves to the Polyworld folder.
-    for path in options.botPaths.mitems:
-      path = absolutePath(path)
     var humanSeat: Option[Seat]
     if options.humanDeckPath.len > 0:
       humanSeat = some(readHumanSeat(options.humanDeckPath,
-        max(options.playerCount, PlayerCount), options.seed))
+        max(options.playerCount, PlayerCount), options.seed,
+        options.common.playerSlot - 1))
     var replay: Replayer
     if options.replayPath.len > 0:
       # Before initApp, which moves to the Polyworld folder.
@@ -116,7 +92,8 @@ when not defined(headless):
         app.returnToMenu = false
         if directLaunch:
           directLaunch = false
-          if app.options.playerCount > PlayerCount:
+          if app.options.playerCount > PlayerCount or
+              app.options.common.playerSlot > 1:
             app.runMultiplayer()
           else:
             app.runDuel()

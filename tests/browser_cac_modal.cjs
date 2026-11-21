@@ -97,7 +97,7 @@ async function runCase(browser,mode) {
   page.on('pageerror',error=>result.errors.push(String(error)));
   page.on('console',message=>{if(message.type()==='error')result.errors.push(message.text());});
   try {
-    await page.goto(mode==='duel'?url+'?human=1&players=2&seed=42':url,{waitUntil:'load',timeout:120000});
+    await page.goto(mode==='duel'?url+'?player=1&players=2&seed=42':url,{waitUntil:'load',timeout:120000});
     await page.waitForFunction(()=>document.querySelector('#loading')?.hidden,null,{timeout:120000});
     if(mode==='ring') await startRing(page,result);
     else {

@@ -1,15 +1,18 @@
-import std/[json, options, strutils, unittest]
+import std/[json, options, os, strutils, unittest]
 import polyworld/screenshots
 import ../core/sessions
 
 suite "session options":
-  test "defaults":
+  test "defaults preserve the menu and saved sound choice":
     let options = parseSessionOptions([])
     check options.seed == DefaultSessionSeed
     check not options.seedGiven
     check options.playerCount == 2
-    check options.human == false
-    check options.soundMuted
+    check not options.human
+    check not options.soundMuted
+    check not options.common.soundOverride
+    check options.common.speed == 1
+    check options.common.vsync
     check options.menu
 
   test "shared screenshot and window flags accept every common spelling":
@@ -22,7 +25,7 @@ suite "session options":
         "--windowSize:800x600"]
     ]:
       when defined(headless) or defined(emscripten):
-        expect ScreenshotError:
+        expect CatchableError:
           discard parseSessionOptions(args)
       else:
         let options = parseSessionOptions(args)
@@ -30,122 +33,159 @@ suite "session options":
         check options.capture.frames == 3
         check options.windowWidth == 800 and options.windowHeight == 600
         check options.menu
-    let sized = parseSessionOptions(["--windowSize", "1280x900"])
-    check sized.windowWidth == 1280 and sized.windowHeight == 900
-    when not defined(headless) and not defined(emscripten):
-      let direct = parseSessionOptions(["--direct", "--screenshot", "shot.png"])
-      check direct.capture.frames == 30
-      check not direct.menu
+    when not defined(headless):
+      let sized = parseSessionOptions(["--windowSize", "1280x900"])
+      check sized.windowWidth == 1280 and sized.windowHeight == 900
 
-  test "invalid screenshot and window values fail before opening a window":
-    for args in [
-      @["--screenshot"], @["--screenshot="],
-      @["--screenshot", "--seed", "42"],
-      @["--screenshot=shot.png", "--frames=0"],
-      @["--screenshot=shot.png", "--frames=bad"],
-      @["--frames"], @["--windowSize=0x600"],
-      @["--windowSize=800"], @["--windowSize", "--seed", "42"]
-    ]:
-      expect ScreenshotError:
-        discard parseSessionOptions(args)
-
-  test "menus are the default and direct launches remain available":
+  test "menus stay available for destination and connection presets":
     check parseSessionOptions(["--seed=42"]).menu
     check not parseSessionOptions(["--direct"]).menu
-    check not parseSessionOptions(["--human"]).menu
     check not parseSessionOptions(["--players=5"]).menu
     check parseSessionOptions(["--menu", "--players=5"]).menu
     check not parseSessionOptions(["--menu", "--replay=a.replay"]).menu
+    when not defined(emscripten):
+      check parseSessionOptions(["--record", "match.replay"]).menu
     let network = parseSessionOptions([
-      "--players=5", "--server=127.0.0.1:8090", "--room", "abc"])
+      "--players=5", "--server:ws://localhost:9911/ws", "--room", "abc"])
     check network.menu
-    check network.serverAddress == "127.0.0.1:8090"
+    check network.serverAddress == "ws://localhost:9911/ws"
     check network.roomCode == "abc"
     for args in [@["--server"], @["--room="], @["--menu=false"],
         @["--direct=true"], @["--players=8"]]:
       expect ValueError:
         discard parseSessionOptions(args)
 
-  test "audio flags preserve session arguments and the last choice wins":
-    check SessionOptions().soundMuted
+  test "common playback values have one spelling across input forms":
+    for args in [
+      @["--play", "false", "--speed", "3",
+        "--vsync", "off", "--name", "Ada", "--replay", "m.replay"],
+      @["--play=false", "--speed=3", "--vsync=off",
+        "--name=Ada", "--replay=m.replay"],
+      @["--play:false", "--speed:3", "--vsync:off",
+        "--name:Ada", "--replay:m.replay"]
+    ]:
+      when defined(headless):
+        expect ValueError:
+          discard parseSessionOptions(args)
+      else:
+        let options = parseSessionOptions(args)
+        check options.common.pauseOnStart
+        check options.common.speed == 3
+        check not options.common.vsync
+        check options.common.playerName == "Ada"
+        check options.replayPath == "m.replay"
+    for args in [@["--seed", "-123"], @["--seed=-123"], @["--seed:-123"]]:
+      let options = parseSessionOptions(args)
+      check options.seed == -123 and options.seedGiven
+
+  test "menu setup preserves signed seeds and explicit bot occupancy":
+    for seed in [int32.low, -42, 0, int32.high]:
+      let options = parseSessionOptions(["--menu", "--seed=" & $seed])
+      check options.initialBattleSetup().seed == seed
+    let bots = parseSessionOptions(["--menu", "--bots", "a.bas:3"])
+    check bots.initialMenuHumanSeat() == -1
+    check bots.initialBattleSetup().classes.len == 3
+    when not defined(headless):
+      let human = parseSessionOptions([
+        "--menu", "--player", "2", "--bot", "a.bas"])
+      check human.initialMenuHumanSeat() == 1
+    check parseSessionOptions([]).initialMenuHumanSeat() == 0
+
+  test "connection options cannot discard a requested local roster":
+    for args in [@["--server=ws://localhost:9911/ws", "--bot=a.bas:2"],
+        @["--room=abc", "--replay=m.replay"],
+        @["--server=ws://localhost:9911/ws", "--player"],
+        @["--menu", "--player", "--deck=a.bas"]]:
+      expect ValueError:
+        discard parseSessionOptions(args)
+
+  test "audio uses common override state and the last choice wins":
     check parseSessionOptions(["--mute"]).soundMuted
     check not parseSessionOptions(["--unmute"]).soundMuted
     for argument in ["--mute=false", "--mute:off", "--mute=0"]:
-      let options = parseSessionOptions([
-        "--human", argument, "--seed", "42", "--replay", "m.replay"
-      ])
+      let options = parseSessionOptions([argument, "--seed", "42"])
       check not options.soundMuted
-      check options.human
+      check options.common.soundOverride
       check options.seed == 42
-      check options.replayPath == "m.replay"
     check parseSessionOptions(["--unmute", "--mute=true"]).soundMuted
     check not parseSessionOptions(["--mute", "--unmute"]).soundMuted
-    for argument in ["--mute=", "--mute=maybe"]:
-      expect ValueError:
-        discard parseSessionOptions([argument])
 
-  test "URL argument forms and negative seeds":
-    let options = parseSessionOptions([
-      "--seed", "-123", "--players=3", "--replay", "m.replay"])
-    check options.seed == -123
-    check options.seedGiven
-    check options.playerCount == 3
-    check options.replayPath == "m.replay"
-
-  test "bots are paths, at most one per duel seat":
-    check parseSessionOptions(["--bot", "a.bas", "--bot=b.bas"]).botPaths ==
-      @["a.bas", "b.bas"]
-    expect ValueError:
-      discard parseSessionOptions(["--bot=a.bas", "--bot=b.bas", "--bot=c.bas"])
-
-  test "human flag forms":
-    check parseSessionOptions(["--human"]).human == true
-    check parseSessionOptions(["--human", "true"]).human == true
-    check parseSessionOptions(["--human=1"]).human == true
-    check parseSessionOptions(["--human=yes"]).human == true
-    check parseSessionOptions(["--human", "false"]).human == false
-    check parseSessionOptions(["--human", "--seed", "1"]).human == true
-
-  test "a human may bring a bot script's deck":
-    for args in [@["--human", "players/archer.bas"],
-        @["--human=players/archer.bas"]]:
+  test "bot specifications expand in order without implicit repetition":
+    for args in [
+      @["--bot", "a.bas:2", "--bots", "b.bas"],
+      @["--bot=a.bas:2", "--bots=b.bas"],
+      @["--bot:a.bas:2", "--bots:b.bas"]
+    ]:
       let options = parseSessionOptions(args)
-      check options.human
-      check options.humanDeckPath == "players/archer.bas"
-    check parseSessionOptions(["--human"]).humanDeckPath == ""
-
-  test "player count selects a scene without changing duel options":
-    check parseSessionOptions(["--players=2"]).playerCount == 2
-    check parseSessionOptions(["--players=3"]).playerCount == 3
-    let options = parseSessionOptions([
-      "--players", "6", "--human", "--seed=42"])
-    check options.playerCount == 6
-    check options.human
-    check options.seed == 42
-    check options.seedGiven
-
-  test "invalid and missing player counts fail clearly":
-    for args in [@["--players"], @["--players="],
-        @["--players", "--seed=42"], @["--players=many"],
-        @["--players=3.5"], @["--players=0"], @["--players=1"],
-        @["--players=-3"], @["--players=9223372036854775808"]]:
+      check options.botPaths == @["a.bas", "a.bas", "b.bas"]
+      check options.playerCount == 3
+      check not options.menu
+    check parseSessionOptions(["--bots", "C:/bots/a.bas:2"]).botPaths ==
+      @["C:/bots/a.bas", "C:/bots/a.bas"]
+    for args in [@["--bot", "a.bas"],
+        @["--players=4", "--bot", "a.bas:2"],
+        @["--bot", "a.bas:8"], @["--bot", "a.bas:0"]]:
       expect ValueError:
         discard parseSessionOptions(args)
 
-  test "invalid and incomplete options fail clearly":
+  when not defined(headless):
+    test "player is a one-based human slot and deck selection is separate":
+      for args in [@["--player", "2", "--bot", "a.bas"],
+          @["--player=2", "--bot=a.bas"],
+          @["--player:2", "--bot:a.bas"]]:
+        let options = parseSessionOptions(args)
+        check options.human
+        check options.common.playerSlot == 2
+        check options.playerCount == 2
+        check options.botPaths == @["a.bas"]
+      check parseSessionOptions(["--player"]).common.playerSlot == 1
+      let deck = parseSessionOptions([
+        "--player", "--deck", "players/archer.bas"])
+      check deck.humanDeckPath == "players/archer.bas"
+      check not deck.menu
+      for args in [@["--player=0"], @["--player=3"],
+          @["--player", "Ada"], @["--human"],
+          @["--deck", "players/archer.bas"]]:
+        expect ValueError:
+          discard parseSessionOptions(args)
+
+  test "replay input excludes live bots, human control, and output":
+    for args in [@["--replay=m.replay", "--bot=a.bas:2"],
+        @["--replay=m.replay", "--player"],
+        @["--replay=m.replay", "--record=copy.replay"]]:
+      expect ValueError:
+        discard parseSessionOptions(args)
+
+  test "native action caps and exact replay destination share common options":
+    when not defined(emscripten):
+      for args in [@["--record", "out/match.replay", "--ticks", "50"],
+          @["--record=out/match.replay", "--ticks=50"],
+          @["--record:out/match.replay", "--ticks:50"]]:
+        let options = parseSessionOptions(args)
+        check options.common.recordPath == "out/match.replay"
+        check options.common.maximumTicks == 50
+      check parseSessionOptions(["--seconds:2"]).common.maximumTicks == 48
+    for args in [@["--llm-mode=barrier"], @["--headless-tick-rate=24"]]:
+      expect ValueError:
+        discard parseSessionOptions(args)
+
+  test "relative input and output paths survive a later working directory change":
+    when not defined(emscripten):
+      var options = parseSessionOptions([
+        "--bot", "bots/a.bas:2", "--record", "out/match.replay"])
+      options.resolveSessionPaths()
+      check options.common.recordPath == absolutePath("out/match.replay")
+      check options.botPaths == @[absolutePath("bots/a.bas"),
+        absolutePath("bots/a.bas")]
+
+  test "invalid options and unsupported aliases fail clearly":
     for args in [@["--seed=none"], @["--seed"], @["--seed="],
-        @["--unknown=value"], @["local"], @["--seed=9223372036854775808"]]:
+        @["--seed=2147483648"], @["--players=many"], @["--players=1"],
+        @["--players=0"], @["--players=-3"], @["--players=3.5"],
+        @["--class=warrior"], @["--opponent=mage"],
+        @["--unknown=value"], @["local"]]:
       expect ValueError:
         discard parseSessionOptions(args)
-
-  test "--class and --opponent are gone":
-    for args in [@["--class=warrior"], @["--class", "warrior"],
-        @["--opponent=mage"], @["--opponent", "mage"]]:
-      try:
-        discard parseSessionOptions(args)
-        check false
-      except ValueError as error:
-        check error.msg.startsWith("Unknown session option: --")
 
 suite "deterministic session bots":
   test "Bolt targets the enemy hero and never an ally":

@@ -6,6 +6,9 @@ import
   content, controls, game, graphics, homes, lobbies, multiplayer, presets,
   rosterstate, participantcontext, lobbyreadiness, joiningseats
 
+from polyworld/cli import WindowSizeFlag, BotFlag, PlayerFlag, RecordFlag,
+  SeedFlag, DurationFlags, ServerFlag, RoomFlag
+
 when not defined(emscripten):
   import polyworld/[replaysaves, tapes], replaylibraries, replaymenus, replays,
     replaysettings
@@ -44,7 +47,8 @@ proc runFrontend*() =
     error: string
     roomName: string
     matchName, namedRoom, publishedName: string
-    invite = inviteParameter("room")
+    invite = if options.roomCode.len > 0: options.roomCode
+      else: inviteParameter("room")
     joinRequested = invite.len > 0
     connection: Connection
     prepared: NetworkMatch
@@ -107,8 +111,9 @@ proc runFrontend*() =
       replayPreferences = readReplayPreferences()
   except MenusError, IOError, OSError:
     error = getCurrentExceptionMsg()
-  preferences = effectivePreferences(preferences, inviteServer, serverAddress)
-  preferences.applyPreferences(window, configureDisplay = not captureActive())
+  preferences = effectivePreferences(preferences, inviteServer, options.serverUrl)
+  preferences.applyPreferences(window, configureDisplay =
+    not captureActive() and WindowSizeFlag notin options.specifiedFlags)
   window.updateCursorConfinement(preferences.edgeScrolling)
   roomName = defaultGameName(preferences.name)
   let bots = @[
@@ -121,7 +126,7 @@ proc runFrontend*() =
   config.maxTicks = options.maximumTicks
   config.mapSettings = mapSettings
   config.diplomacySettings = diplomacySettings
-  if opensMultiplayer(invite):
+  if opensMultiplayer(invite, options.serverUrl):
     page = MultiplayerMenu
     connectRequested = true
 
@@ -223,9 +228,6 @@ proc runFrontend*() =
         prepared.humanPlayerFor(connection.client.participant) + 1
       )
       options.replayPath = ""
-      options.recordPath = ""
-      options.pauseOnStart = false
-      options.speed = 1
       var
         quitToMenu = false
         matchError: string
@@ -238,7 +240,7 @@ proc runFrontend*() =
         when not defined(emscripten):
           retainUnsavedReplay(problem)
       preferences = effectivePreferences(
-        readLvdPreferences(), inviteServer, serverAddress
+        readLvdPreferences(), inviteServer, options.serverUrl
       )
       if quitToMenu:
         connection.close()
@@ -814,7 +816,8 @@ proc runFrontend*() =
             window, preferences, AppName, origin, "", height
           ):
             page = HomeMenu
-            preferences = effectivePreferences(preferences, inviteServer, serverAddress)
+            preferences = effectivePreferences(preferences, inviteServer,
+              options.serverUrl)
       except CatchableError as problem:
         error = problem.msg
       if page in {MultiplayerMenu, LobbyMenu, SettingsMenu} and
@@ -859,14 +862,18 @@ proc runFrontend*() =
               window.onFrame = nil
               options.replayPath = selected.path
               options.recordPath = ""
+              options.botGroups.setLen(0)
               options.playerSlot = 0
+              options.serverUrl = ""
+              options.roomCode = ""
+              options.specifiedFlags = options.specifiedFlags -
+                {BotFlag, PlayerFlag, RecordFlag, SeedFlag, ServerFlag, RoomFlag} -
+                DurationFlags
               options.viewMode = 0
-              options.pauseOnStart = false
-              options.speed = 1
               initializeMatch()
               runGraphics()
               preferences = effectivePreferences(
-                readLvdPreferences(), inviteServer, serverAddress
+                readLvdPreferences(), inviteServer, previousOptions.serverUrl
               )
               replayBrowser.message = ""
             finally:
@@ -897,7 +904,7 @@ proc runFrontend*() =
         initializeLocalMatch(config, sources)
         runGraphics(autoSaveReplay = automaticReplaySave())
         preferences = effectivePreferences(
-          readLvdPreferences(), inviteServer, serverAddress
+          readLvdPreferences(), inviteServer, options.serverUrl
         )
       except CatchableError as problem:
         error = problem.msg

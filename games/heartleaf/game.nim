@@ -7,96 +7,48 @@
 
 import
   std/[os, strformat, times],
-  polyworld/[cli, controllers, profiles, tapes],
+  polyworld/[cli, controllers, profiles, tapes, timings],
   content,
   maps as mapgen,
   sim,
   bots,
   controls,
-  replays, seeking
-
-var startupTarget*: SeekTarget
+  replays, seeking,
+  options as launches
 
 proc usage() =
   ## Prints the command-line and compile-time configuration surface.
+  echo "Heartleaf, a village dinner-party week between nine BASIC villagers."
+  echo commonUsageFor(HeartleafCommonFlags)
   echo """
-Heartleaf, a village dinner-party week between nine BASIC villagers.
-
-  --bot PATH[:N]   Fill N of the nine villager slots with one program.
-  --player         Control villager one; supply eight bots.
-  --player:N       Control villager N (1 .. 9); supply eight bots.
-  --replay PATH    Play a recorded game instead of running bots.
-  --record PATH    Record this game to a replay file.
   --days N         Days in the week (default 7).
-  --seed N         Map seed (default 2026).
   --seek-tick N    Fast-forward to an absolute tick (zero is initial state).
   --seek-event S   Fast-forward to day:N:morning|dinner|scorecard.
-  --play=false     Start the graphical transport paused.
-  --speed N        Graphical start speed: 1, 2, 4, or 16.
-  --windowSize WxH Graphical window, such as 800x400.
-  --screenshot PATH Save one PNG and exit without showing a window.
-  --frames N       Capture after N rendered frames (default 30).
-  --vsync:off      Unlock the frame rate (default on).
-  --mute[=true|false] Override saved sound levels for this launch.
-  --unmute         Enable sound for this launch.
   --help           Show this message.
 
+Supply nine bots, or one human in slot 1 .. 9 and eight bots.
+--days sets the calendar; shared duration options can end a new match earlier.
+Heartleaf has fixed villager names, no LLM requests, and no audio output.
 Compile with -d:headless for a command-line game.
 Compile with -d:emscripten for the web backend.
 Screenshot captures use the bundled bots when no roster is supplied.
 Use --seek-tick or --seek-event with --play=false to capture that state."""
 
-proc parseGameOptions(): (GameOptions, int32) =
-  ## Reads the command line into a validated game description.
-  var options = GameOptions(
-    seed: DefaultSeed,
-    speed: 1
-  )
-  var dayCount = DefaultDayCount
-  let arguments = commandLineParams()
-  var index = 0
-  while index < arguments.len:
-    let argument = arguments[index]
-    if options.takeCommonFlag(arguments, index, argument):
-      discard
-    else:
-      case argument
-      of "--seek-tick", "--seek-event":
-        if startupTarget.kind != NoSeek:
-          fail("only one startup seek target is allowed")
-        startupTarget = parseSeekTarget(argument,
-          arguments.argumentValue(index, argument))
-      of "--days":
-        dayCount = parsePositiveInt32(
-          arguments.argumentValue(index, "--days"), "--days")
-        if dayCount > MaxDayCount:
-          fail("--days must be at most " & $MaxDayCount)
-      of "--help", "-h":
-        usage()
-        quit(0)
-      else:
-        fail("unknown argument: " & argument)
-    inc index
-  options.setMaximumTicks(gameLengthTicks(dayCount))
-  when not defined(headless) and not defined(emscripten):
-    if options.capture.path.len > 0 and options.botGroups.len == 0 and
-      options.replayPath.len == 0 and options.playerSlot == 0:
-        options.botGroups.add BotGroup(
-          path: currentSourcePath().parentDir / "players" / "base.bas",
-          count: VillagerCount
-        )
-  options.validateGameOptions(
-    VillagerCount,
-    "a live game requires exactly nine bots"
-  )
-  if startupTarget.kind != NoSeek and options.playerSlot > 0:
-    fail("startup seeking requires a replay or nine scripted bots")
-  (options, dayCount)
+proc readLaunchOptions(): LaunchOptions =
+  ## Reports command-line errors without initializing the game world.
+  try:
+    result = parseLaunchOptions(commandLineParams())
+  except ValueError as error:
+    fail(error.msg)
 
 let
-  parsed = parseGameOptions()
-  options* = parsed[0]
-  optionDays = parsed[1]
+  parsed = readLaunchOptions()
+  options* = parsed.common
+  startupTarget* = parsed.startupTarget
+
+if parsed.showHelp:
+  usage()
+  quit(0)
 
 var run*: Game
 
@@ -104,7 +56,7 @@ block:
   startGameProfile()
   var
     mapSeed = options.seed
-    dayCount = optionDays
+    dayCount = parsed.dayCount
   if options.replayPath.len > 0:
     var replayData: ReplayData
     profileBlock "replay":
@@ -133,6 +85,7 @@ block:
       gameMap = generateMap(mapSeed)
     gameMap.validateMap()
     run = newGame(gameMap, dayCount)
+    run.maximumTicks = parsed.executionTicks(run.maximumTicks)
     let
       kinds = controllerKinds(VillagerCount, options.playerSlot)
       expanded = options.botGroups.expandBotSources(kinds)
@@ -149,6 +102,7 @@ block:
     ))
     run.recorder.data.config = localGameConfig(options, VillagerCount)
     run.recorder.data.config.dayCount = dayCount
+    run.recorder.data.config.maxTicks = gameLengthTicks(dayCount)
     run.replayPlayer = ReplayPlayer(data: run.recorder.data)
 
 startupTarget.validate(run.world.dayCount, run.maximumTicks)
@@ -185,6 +139,7 @@ proc advanceGame*() =
     run.recorder.recordHash(run.stateHash())
 
 proc seekStartup*(afterTick: proc() {.closure.} = nil) =
+  ## Advances to the requested scene without changing the recorded setup.
   if startupTarget.kind == NoSeek:
     return
   while not startupTarget.reached(run.world):
@@ -232,12 +187,17 @@ proc runHeadless*() =
   defer:
     finishGameProfile()
   let started = epochTime()
-  seekStartup()
+  var pacer = initTickPacer(options.headlessTickRate)
+  seekStartup(proc() = pacer.pace())
   while startupTarget.kind == NoSeek and
       run.world.tick < run.maximumTicks and not run.world.over:
     advanceGame()
+    pacer.pace()
     if profileShouldDump(run.world.tick):
       finishGameProfile()
+    if options.verbose and run.world.tick mod (TickRate * 30) == 0:
+      echo &"tick {run.world.tick}/{run.maximumTicks}, " &
+        &"day {run.world.day}, {run.world.phase}"
   let
     elapsed = max(epochTime() - started, 0.000001)
     simulated = run.world.tick.float64 / TickRate.float64

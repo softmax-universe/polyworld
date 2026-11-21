@@ -28,6 +28,7 @@ import
   test_resourcepacks,
   test_woodcutting_presentation,
   test_backend_config,
+  test_backend_cli,
   test_multiplayer_backend,
   test_lobby_readiness,
   test_cosmetic_ready,

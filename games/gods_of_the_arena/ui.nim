@@ -161,6 +161,14 @@ proc keepDraftPlaying*(world: World, transport: var Player) =
   if world.phase == Drafting:
     transport.playing = true
 
+proc applyStartupPause*(
+    world: World, transport: var Player, pending: var bool
+) =
+  ## Applies one requested launch pause after mandatory drafting has finished.
+  if pending and world.phase != Drafting:
+    pending = false
+    transport.pause()
+
 proc currentLayout*(window: Window): GameUiLayout =
   ## Reserves timeline space only when the transport controls are visible.
   initGameUiLayout(

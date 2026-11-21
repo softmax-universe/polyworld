@@ -34,9 +34,10 @@ else:
       preferences.name = playerNameOverride
       preferences.savePreferences("Polyworld GotA")
     localPlayerName = preferences.name
-    if options.botGroups.len > 0 or options.replayPath.len > 0:
-      initializeMatch()
-      runGraphics()
+    if options.botGroups.len > 0 or options.replayPath.len > 0 or
+      options.playerSlot > 0:
+        initializeMatch()
+        runGraphics()
     if window == nil or not window.closeRequested:
       runFrontend()
   finally:

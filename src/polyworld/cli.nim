@@ -1,36 +1,45 @@
-## Shared command-line parsing for Polyworld games.
-##
-## Every game understands `--bot`, `--player`, `--replay`, `--record`,
-## `--seed`, `--play`, `--speed`, `--windowSize`, `--vsync`, `--seconds`,
-## `--minutes`, `--ticks`, `--mute`, `--unmute`, `--screenshot`, and `--frames`.
-## Duration flags all write
-## `maximumTicks`; audio uses saved levels unless explicitly overridden.
-## Each game runs its own argument loop, farms those flags through
-## `takeCommonFlag`, and handles the rest itself.
+## Shared launch options for native Polyworld games.
+## Games delegate common arguments here and reject unsupported capabilities.
 
 import
-  std/strutils,
+  std/[os, strutils],
   configs, screenshots
+
+from std/unicode import validateUtf8
 
 export configs, screenshots
 
 type
+  CliError* = object of ValueError
+
+  CommonFlag* = enum
+    BotFlag, PlayerFlag, NameFlag, ReplayFlag, RecordFlag, SeedFlag,
+    PlayFlag, SpeedFlag, WindowSizeFlag, VsyncFlag, SecondsFlag,
+    MinutesFlag, TicksFlag, SoundFlag, VerboseFlag, HeadlessTickRateFlag,
+    LlmModeFlag, ScreenshotFlag, FramesFlag, ServerFlag, RoomFlag
+
   BotGroup* = object
     path*: string
     count*: int
 
   GameOptions* = object
+    specifiedFlags*: set[CommonFlag]
     capture*: ScreenshotOptions
     botGroups*: seq[BotGroup]
     replayPath*: string
     recordPath*: string
+    playerName*: string
+      ## Display name, separate from the controlled player slot.
+    serverUrl*: string
+    roomCode*: string
     seed*: int32
+    tickRate*: int32 = SharedTickRate
+      ## Simulation ticks per second, configured by the game, not the command line.
     seconds*: int32
       ## Duration in seconds, kept in sync with `maximumTicks`.
     maximumTicks*: int32
-      ## Match length in simulation ticks. `--seconds`, `--minutes`, and
-      ## `--ticks` all write this field.
-    speed*: int32
+      ## Match length in simulation ticks, set by all three duration flags.
+    speed*: int32 = 1
       ## Graphical simulation speed multiplier.
     verbose*: bool
     viewMode*: int32
@@ -43,7 +52,6 @@ type
     windowHeight*: int32
       ## Graphical window height. Zero keeps the shared default.
     vsync*: bool = true
-      ## Graphical window waits for the display when true.
     soundMuted*: bool
       ## Explicit launch mute choice, applied only when soundOverride is set.
     soundOverride*: bool
@@ -55,20 +63,87 @@ type
     waitForLlm*: bool
       ## Waits for the whole tick's LLM request batch before advancing.
 
+const
+  AllCommonFlags* = {low(CommonFlag) .. high(CommonFlag)}
+  DurationFlags* = {SecondsFlag, MinutesFlag, TicksFlag}
+  GraphicalFlags* = {
+    PlayerFlag, NameFlag, PlayFlag, SpeedFlag, WindowSizeFlag, VsyncFlag,
+    ScreenshotFlag, FramesFlag
+  }
+  CommonNames: array[CommonFlag, string] = [
+    "--bot", "--player", "--name", "--replay", "--record", "--seed",
+    "--play", "--speed", "--windowSize", "--vsync", "--seconds",
+    "--minutes", "--ticks", "--mute", "--verbose", "--headless-tick-rate",
+    "--llm-mode", "--screenshot", "--frames", "--server", "--room"
+  ]
+  CommonHelp: array[CommonFlag, string] = [
+    "  --bot PATH[:N]       Add N bots from a program; repeatable (--bots also works).",
+    "  --player [N]         Control slot N, one-based; bare --player selects slot 1.",
+    "  --name TEXT          Set the human player's display name.",
+    "  --replay PATH        Load a recorded match instead of running bots.",
+    "  --record PATH        Save this match's replay to PATH.",
+    "  --seed N             Set the signed 32-bit random seed.",
+    "  --play [BOOL]        Start playing or paused (default true).",
+    "  --speed N            Set the positive integer playback speed (default 1).",
+    "  --windowSize WxH     Set the graphical window dimensions.",
+    "  --vsync [BOOL]       Wait for the display refresh (default true).",
+    "  --seconds N          Limit the match to N simulation seconds.",
+    "  --minutes N          Limit the match to N simulation minutes.",
+    "  --ticks N            Limit the match to N simulation ticks.",
+    "  --mute [BOOL]        Mute launch audio; --unmute restores sound.",
+    "  --verbose [BOOL]     Enable verbose output (default false).",
+    "  --headless-tick-rate N  Pace headless ticks per second; 0 is unlimited.",
+    "  --llm-mode MODE      Use async or barrier LLM requests (default async).",
+    "  --screenshot PATH    Save one native screenshot and exit.",
+    "  --frames N           Capture the Nth rendered frame (default 30).",
+    "  --server URL         Set the multiplayer relay address.",
+    "  --room CODE          Select a multiplayer room (--join also works)."
+  ]
+
+func commonUsageFor*(supported: set[CommonFlag]): string =
+  ## Lists the shared syntax for the capabilities implemented by one game.
+  for flag in CommonFlag:
+    if flag in supported:
+      result.add CommonHelp[flag] & "\n"
+  result.add "Values accept --flag VALUE, --flag=VALUE, or --flag:VALUE.\n"
+
+const CommonUsage* = commonUsageFor(AllCommonFlags)
+
 proc fail*(message: string) {.noreturn.} =
-  ## Prints one command-line error and exits.
+  ## Prints one command-line error and exits at a game launcher boundary.
   quit(message)
 
+proc cliFail(message: string) {.noreturn.} =
+  ## Raises one catchable argument error without terminating an embedding process.
+  raise newException(CliError, message)
+
+proc splitFlag*(argument: string): tuple[name, value: string, attached: bool] =
+  ## Splits the first attached-value separator without splitting path contents.
+  let separator = argument.find({'=', ':'})
+  if separator < 0:
+    return (argument, "", false)
+  (argument[0 ..< separator], argument[separator + 1 .. ^1], true)
+
 proc argumentValue*(
-    arguments: seq[string],
-    index: var int,
-    name: string
+  arguments: openArray[string], index: var int, name: string
 ): string =
-  ## Consumes and returns the required value after one flag.
+  ## Consumes a required separate value without consuming another option.
+  if index + 1 >= arguments.len or arguments[index + 1].startsWith("--") or
+    arguments[index + 1].len == 0:
+      cliFail(name & " requires a value")
   inc index
-  if index >= arguments.len:
-    fail(name & " requires a value")
   arguments[index]
+
+proc flagValue*(
+  arguments: openArray[string], index: var int, argument: string
+): string =
+  ## Reads a required value in separate, equals, or colon form.
+  let flag = splitFlag(argument)
+  if not flag.attached:
+    return arguments.argumentValue(index, flag.name)
+  if flag.value.len == 0:
+    cliFail(flag.name & " requires a value")
+  flag.value
 
 proc parseInt32*(text, name: string): int32 =
   ## Parses one signed 32-bit integer flag value.
@@ -76,49 +151,45 @@ proc parseInt32*(text, name: string): int32 =
   try:
     value = parseBiggestInt(text)
   except ValueError:
-    fail(name & " must be an integer")
+    cliFail(name & " must be an integer")
   if value < int32.low or value > int32.high:
-    fail(name & " must fit int32")
+    cliFail(name & " must fit int32")
   int32(value)
 
 proc parsePositiveInt32*(text, name: string): int32 =
   ## Parses one integer flag value that must be greater than zero.
   result = parseInt32(text, name)
   if result <= 0:
-    fail(name & " must be positive")
+    cliFail(name & " must be positive")
 
 proc addBotSpec*(groups: var seq[BotGroup], specification: string) =
-  ## Parses one bot path with an optional trailing instance count.
+  ## Parses one program path with an optional positive instance count.
   if specification.len == 0:
-    fail("--bot requires a path")
+    cliFail("--bot requires a path")
   var
     path = specification
     count = 1
-  let separator = specification.rfind(':')
-  if separator >= 0 and separator < specification.high:
-    let suffix = specification[separator + 1 .. ^1]
-    var numeric = true
-    for character in suffix:
-      if character notin {'0' .. '9'}:
-        numeric = false
-        break
-    if numeric:
-      path = specification[0 ..< separator]
-      count = parseInt(suffix)
+  let
+    separator = specification.rfind(':')
+    driveColon = separator == 1 and specification[0] in {'a' .. 'z', 'A' .. 'Z'}
+  if separator >= 0 and not driveColon:
+    path = specification[0 ..< separator]
+    count = parsePositiveInt32(
+      specification[separator + 1 .. ^1], "--bot count"
+    ).int
   if path.len == 0:
-    fail("--bot requires a path")
-  if count <= 0:
-    fail("--bot count must be positive")
+    cliFail("--bot requires a path")
   groups.add BotGroup(path: path, count: count)
 
 proc botCount*(groups: openArray[BotGroup]): int =
-  ## Returns the expanded number of configured bot instances.
+  ## Counts configured instances while rejecting invalid or overflowing totals.
   for group in groups:
+    if group.count <= 0 or group.count > int32.high - result:
+      cliFail("--bot count must total between 1 and " & $int32.high)
     result += group.count
 
 proc botSources*(
-    groups: openArray[BotGroup],
-    count: static int
+  groups: openArray[BotGroup], count: static int
 ): array[count, string] =
   ## Loads and expands bot files into one source string per slot.
   var slot = 0
@@ -126,271 +197,238 @@ proc botSources*(
     let source = readFile(group.path)
     for _ in 0 ..< group.count:
       if slot >= count:
-        fail("too many bots to expand")
+        cliFail("too many bots to expand")
       result[slot] = source
       inc slot
   if slot != count:
-    fail("bot files do not fill every slot")
+    cliFail("bot files do not fill every slot")
 
 proc parseWindowSize*(text, name: string): (int32, int32) =
-  ## Parses one `WIDTHxHEIGHT` window size, such as `800x400`.
+  ## Parses one positive `WIDTHxHEIGHT` window size.
   let separator = text.find({'x', 'X'})
   if separator <= 0 or separator >= text.high:
-    fail(name & " must look like 800x400")
+    cliFail(name & " must look like 800x400")
   (
     parsePositiveInt32(text[0 ..< separator], name),
     parsePositiveInt32(text[separator + 1 .. ^1], name)
   )
 
-proc ticksFromCount(count, scale: int32, name: string): int32 =
-  ## Converts a positive count into ticks without overflowing int32.
-  let ticks = int64(count) * int64(scale)
-  if ticks > int32.high:
-    fail(name & " is too large")
-  int32(ticks)
+proc simulationTickRate(options: GameOptions): int32 =
+  ## Uses the game's configured rate, including zero-initialized nested options.
+  if options.tickRate < 0:
+    cliFail("simulation tick rate must be positive")
+  if options.tickRate == 0: SharedTickRate else: options.tickRate
+
+proc ticksFromCount(count: int32, scale: int64, name: string): int32 =
+  ## Converts a positive count into ticks without overflowing the stored range.
+  if scale <= 0 or count.int64 > int32.high.int64 div scale:
+    cliFail(name & " is too large")
+  int32(count.int64 * scale)
 
 proc setMaximumTicks*(options: var GameOptions, ticks: int32) =
-  ## Writes the canonical tick duration and the derived second count.
+  ## Writes the canonical duration using this game's simulation tick rate.
   options.maximumTicks = ticks
-  options.seconds = ticks div SharedTickRate
+  options.seconds = ticks div options.simulationTickRate()
 
-proc takeDurationFlag(
-    options: var GameOptions,
-    arguments: seq[string],
-    index: var int,
-    argument: string
-): bool =
-  ## Handles `--seconds`, `--minutes`, and `--ticks`.
-  var
-    name = ""
-    text = ""
-  if argument.startsWith("--seconds="):
-    name = "--seconds"
-    text = argument[10 .. ^1]
-  elif argument.startsWith("--minutes="):
-    name = "--minutes"
-    text = argument[10 .. ^1]
-  elif argument.startsWith("--ticks="):
-    name = "--ticks"
-    text = argument[8 .. ^1]
-  else:
-    case argument
-    of "--seconds", "--minutes", "--ticks":
-      name = argument
-      text = arguments.argumentValue(index, argument)
-    else:
-      return false
-  let count = parsePositiveInt32(text, name)
-  case name
-  of "--seconds":
-    options.setMaximumTicks(ticksFromCount(count, SharedTickRate, name))
-  of "--minutes":
-    options.setMaximumTicks(
-      ticksFromCount(count, 60 * SharedTickRate, name)
-    )
-  of "--ticks":
-    options.setMaximumTicks(count)
-  else:
-    return false
-  true
-
-proc takePlayerFlag(options: var GameOptions, argument: string): bool =
-  ## Handles `--player`, `--player:N`, and `--player=N`.
-  var text = ""
-  if argument == "--player":
-    text = "1"
-  elif argument.startsWith("--player:"):
-    text = argument[9 .. ^1]
-  elif argument.startsWith("--player="):
-    text = argument[9 .. ^1]
-  else:
-    return false
-  if options.playerSlot != 0:
-    fail("only one --player allowed")
-  if text.len == 0:
-    fail("--player requires a slot")
-  options.playerSlot = parsePositiveInt32(text, "--player")
-  true
-
-proc parsePlayFlag(text: string): bool =
-  ## Parses `--play` as a boolean.
+proc parseBoolean(text, name: string): bool =
+  ## Parses the same explicit boolean vocabulary for every common switch.
   case text.strip().toLowerAscii()
-  of "true", "1", "yes", "on":
-    result = true
-  of "false", "0", "no", "off":
-    result = false
-  else:
-    fail("--play must be true or false")
+  of "true", "1", "yes", "on": true
+  of "false", "0", "no", "off": false
+  else: cliFail(name & " must be true or false")
 
-proc parseVsyncFlag(text: string): bool =
-  ## Parses `--vsync` as on or off.
-  case text.strip().toLowerAscii()
-  of "true", "1", "yes", "on":
-    result = true
-  of "false", "0", "no", "off":
-    result = false
-  else:
-    fail("--vsync must be on or off")
+proc optionalValue(
+  arguments: openArray[string], index: var int, argument, fallback: string
+): string =
+  ## Reads an optional value while leaving the next option for its own parser.
+  let flag = splitFlag(argument)
+  if flag.attached:
+    return arguments.flagValue(index, argument)
+  if index + 1 < arguments.len and not arguments[index + 1].startsWith("--"):
+    return arguments.argumentValue(index, flag.name)
+  fallback
 
 proc takeSoundFlag*(soundMuted: var bool, argument: string): bool =
-  ## Reads one launch-only mute flag without consuming unrelated arguments.
-  case argument
-  of "--mute":
-    soundMuted = true
-  of "--unmute":
-    soundMuted = false
-  else:
-    if not argument.startsWith("--mute=") and
-      not argument.startsWith("--mute:"):
-        return false
-    case argument[7 .. ^1].strip().toLowerAscii()
-    of "true", "1", "yes", "on":
-      soundMuted = true
-    of "false", "0", "no", "off":
-      soundMuted = false
-    else:
-      raise newException(ValueError, "--mute must be true or false")
+  ## Reads a standalone audio flag for callers that do not own an argument loop.
+  let flag = splitFlag(argument)
+  if flag.name notin ["--mute", "--unmute"]:
+    return false
+  let enabled =
+    if flag.attached: parseBoolean(flag.value, flag.name)
+    else: true
+  soundMuted = if flag.name == "--mute": enabled else: not enabled
   true
 
 proc takeCommonFlag*(
-    options: var GameOptions,
-    arguments: seq[string],
-    index: var int,
-    argument: string
+  options: var GameOptions, arguments: openArray[string],
+  index: var int, argument: string
 ): bool =
-  ## Handles one shared flag. Returns false when the game should try it.
+  ## Handles one common flag and records its capability without consuming unknowns.
   try:
     if options.capture.takeCaptureFlag(arguments, index, argument):
+      let flag = splitFlag(argument).name
+      options.specifiedFlags.incl(
+        if flag == "--frames": FramesFlag else: ScreenshotFlag
+      )
       return true
     if takeWindowSizeFlag(
       options.windowWidth, options.windowHeight, arguments, index, argument
     ):
+      options.specifiedFlags.incl WindowSizeFlag
       return true
-    if options.soundMuted.takeSoundFlag(argument):
-      options.soundOverride = true
-      return true
-  except ValueError as error:
-    fail(error.msg)
   except ScreenshotError as error:
-    fail(error.msg)
-  if argument.startsWith("--headless-tick-rate:") or
-    argument.startsWith("--headless-tick-rate=") or
-    argument == "--headless-tick-rate":
-      let text =
-        if argument == "--headless-tick-rate":
-          arguments.argumentValue(index, argument)
-        else:
-          argument[21 .. ^1]
-      options.headlessTickRate = parseInt32(text, "--headless-tick-rate")
-      if options.headlessTickRate < 0 or options.headlessTickRate > 10000:
-        fail("--headless-tick-rate must be 0 .. 10000")
-      return true
-  if argument.startsWith("--llm-mode:") or
-    argument.startsWith("--llm-mode=") or argument == "--llm-mode":
-      let text =
-        if argument == "--llm-mode":
-          arguments.argumentValue(index, argument)
-        else:
-          argument[11 .. ^1]
-      case text.toLowerAscii()
-      of "async": options.waitForLlm = false
-      of "barrier": options.waitForLlm = true
-      else: fail("--llm-mode must be async or barrier")
-      return true
-  if argument.startsWith("--bot:"):
-    options.botGroups.addBotSpec(argument[6 .. ^1])
-    return true
-  if argument.startsWith("--play="):
-    options.pauseOnStart = not parsePlayFlag(argument[7 .. ^1])
-    return true
-  if argument.startsWith("--speed="):
-    options.speed = parsePositiveInt32(argument[8 .. ^1], "--speed")
-    return true
-  if argument.startsWith("--vsync:"):
-    options.vsync = parseVsyncFlag(argument[8 .. ^1])
-    return true
-  if argument.startsWith("--vsync="):
-    options.vsync = parseVsyncFlag(argument[8 .. ^1])
-    return true
-  if options.takeDurationFlag(arguments, index, argument):
-    return true
-  if options.takePlayerFlag(argument):
-    return true
-  case argument
+    cliFail(error.msg)
+  let flag = splitFlag(argument)
+  template value(): string =
+    ## Reads the current required argument at its original position.
+    arguments.flagValue(index, argument)
+  template optional(fallback: string): string =
+    ## Reads the current optional argument without consuming the next option.
+    arguments.optionalValue(index, argument, fallback)
+  case flag.name
   of "--":
-    result = true
-  of "--bot":
-    options.botGroups.addBotSpec(
-      arguments.argumentValue(index, "--bot")
-    )
-    result = true
+    return not flag.attached
+  of "--bot", "--bots":
+    options.botGroups.addBotSpec(value())
+    options.specifiedFlags.incl BotFlag
+  of "--player":
+    if PlayerFlag in options.specifiedFlags:
+      cliFail("only one --player allowed")
+    let text = optional("1")
+    try:
+      options.playerSlot = parsePositiveInt32(text, "--player")
+    except CliError:
+      cliFail("--player requires a positive slot number; " &
+        "use --name for a display name")
+    options.specifiedFlags.incl PlayerFlag
+  of "--name":
+    let raw = value()
+    if validateUtf8(raw) >= 0:
+      cliFail("--name must contain valid UTF-8")
+    for character in raw:
+      if character < ' ' or character == '\x7f':
+        cliFail("--name cannot contain control characters")
+    let name = raw.strip()
+    if name.len == 0 or name.len > 64:
+      cliFail("--name requires a nonempty display name of at most 64 bytes")
+    options.playerName = name
+    options.specifiedFlags.incl NameFlag
   of "--replay":
-    options.replayPath = arguments.argumentValue(index, "--replay")
-    result = true
+    options.replayPath = value()
+    options.specifiedFlags.incl ReplayFlag
   of "--record":
-    options.recordPath = arguments.argumentValue(index, "--record")
-    result = true
+    options.recordPath = value()
+    options.specifiedFlags.incl RecordFlag
   of "--seed":
-    options.seed = parseInt32(
-      arguments.argumentValue(index, "--seed"),
-      "--seed"
-    )
-    result = true
+    options.seed = parseInt32(value(), flag.name)
+    options.specifiedFlags.incl SeedFlag
   of "--play":
-    options.pauseOnStart = not parsePlayFlag(
-      arguments.argumentValue(index, "--play")
-    )
-    result = true
+    options.pauseOnStart = not parseBoolean(optional("true"), flag.name)
+    options.specifiedFlags.incl PlayFlag
   of "--speed":
-    options.speed = parsePositiveInt32(
-      arguments.argumentValue(index, "--speed"),
-      "--speed"
-    )
-    result = true
+    options.speed = parsePositiveInt32(value(), flag.name)
+    options.specifiedFlags.incl SpeedFlag
   of "--vsync":
-    options.vsync = parseVsyncFlag(
-      arguments.argumentValue(index, "--vsync")
-    )
-    result = true
+    options.vsync = parseBoolean(optional("true"), flag.name)
+    options.specifiedFlags.incl VsyncFlag
+  of "--seconds", "--minutes", "--ticks":
+    let count = parsePositiveInt32(value(), flag.name)
+    case flag.name
+    of "--seconds":
+      options.setMaximumTicks(ticksFromCount(
+        count, options.simulationTickRate(), flag.name
+      ))
+      options.specifiedFlags.incl SecondsFlag
+    of "--minutes":
+      options.setMaximumTicks(ticksFromCount(
+        count, 60'i64 * options.simulationTickRate(), flag.name
+      ))
+      options.specifiedFlags.incl MinutesFlag
+    else:
+      options.setMaximumTicks(count)
+      options.specifiedFlags.incl TicksFlag
+  of "--mute", "--unmute":
+    let enabled = parseBoolean(optional("true"), flag.name)
+    options.soundMuted = if flag.name == "--mute": enabled else: not enabled
+    options.soundOverride = true
+    options.specifiedFlags.incl SoundFlag
+  of "--verbose":
+    options.verbose = parseBoolean(optional("true"), flag.name)
+    options.specifiedFlags.incl VerboseFlag
+  of "--headless-tick-rate":
+    let rate = parseInt32(value(), flag.name)
+    if rate < 0 or rate > 10000:
+      cliFail("--headless-tick-rate must be 0 .. 10000")
+    options.headlessTickRate = rate
+    options.specifiedFlags.incl HeadlessTickRateFlag
+  of "--llm-mode":
+    case value().toLowerAscii()
+    of "async": options.waitForLlm = false
+    of "barrier": options.waitForLlm = true
+    else: cliFail("--llm-mode must be async or barrier")
+    options.specifiedFlags.incl LlmModeFlag
+  of "--server":
+    options.serverUrl = value()
+    options.specifiedFlags.incl ServerFlag
+  of "--room", "--join":
+    options.roomCode = value()
+    options.specifiedFlags.incl RoomFlag
   else:
-    result = false
+    return false
+  true
+
+proc rejectUnsupportedFlags*(
+  options: GameOptions, supported: set[CommonFlag]
+) =
+  ## Rejects explicit unsupported requests, including false and zero-valued flags.
+  for flag in options.specifiedFlags - supported:
+    cliFail(CommonNames[flag] & " is not supported by this game")
+
+proc resolveGamePaths*(options: var GameOptions) =
+  ## Resolves launch paths before a game changes its working directory.
+  if options.replayPath.len > 0:
+    options.replayPath = absolutePath(options.replayPath)
+  if options.recordPath.len > 0:
+    options.recordPath = absolutePath(options.recordPath)
+  for group in options.botGroups.mitems:
+    group.path = absolutePath(group.path)
+
+proc validateHeadlessOptions*(options: GameOptions) =
+  ## Rejects visual controls in compiled or runtime headless launch modes.
+  if options.playerSlot != 0:
+    cliFail("--player requires the graphical client")
+  for flag in options.specifiedFlags * GraphicalFlags:
+    cliFail(CommonNames[flag] & " requires the graphical client")
 
 proc validateGameOptions*(
-    options: GameOptions,
-    liveSlotCount: int,
-    liveBotMessage: string
+  options: GameOptions, liveSlotCount = 0, liveBotMessage = ""
 ) =
-  ## Checks replay exclusivity and the live-game bot count.
+  ## Checks replay exclusivity, graphical human control, and the live-game roster.
   try:
     options.capture.validateCapture()
   except ScreenshotError as error:
-    fail(error.msg)
+    cliFail(error.msg)
   when defined(headless):
-    if options.playerSlot != 0:
-      fail("--player requires the graphical client")
+    options.validateHeadlessOptions()
+  discard options.botGroups.botCount
   if options.replayPath.len > 0:
     if options.botGroups.len > 0:
-      fail("--replay cannot be used with --bot")
+      cliFail("--replay cannot be used with --bot")
     if options.playerSlot != 0:
-      fail("--replay cannot be used with --player")
+      cliFail("--replay cannot be used with --player")
     if options.recordPath.len > 0:
-      fail("--replay cannot be recorded again")
+      cliFail("--replay cannot be recorded again")
+    for flag in options.specifiedFlags * (DurationFlags + {SeedFlag}):
+      cliFail("--replay cannot be used with " & CommonNames[flag])
   elif liveSlotCount > 0:
     if options.playerSlot != 0 and
-        (options.playerSlot < 1 or
-          options.playerSlot > liveSlotCount):
-      fail("--player must be between 1 and " & $liveSlotCount)
+      (options.playerSlot < 1 or options.playerSlot > liveSlotCount):
+        cliFail("--player must be between 1 and " & $liveSlotCount)
     let
-      needed =
-        if options.playerSlot != 0:
-          liveSlotCount - 1
-        else:
-          liveSlotCount
+      needed = if options.playerSlot != 0: liveSlotCount - 1 else: liveSlotCount
       count = options.botGroups.botCount
     if count != needed:
       if options.playerSlot != 0:
-        fail(
-          "live games with --player require " & $needed &
-            " bots; configured " & $count
-        )
-      fail(liveBotMessage & "; configured " & $count)
+        cliFail("live games with --player require " & $needed &
+          " bots; configured " & $count)
+      cliFail(liveBotMessage & "; configured " & $count)

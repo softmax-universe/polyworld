@@ -1014,3 +1014,27 @@ block:
     doAssert (match.game.players[seat].hand & match.game.players[seat].deck).
       countIt(it.name == "Bear") == 4
   doAssert match.bots[0] == nil
+
+echo "Selected human slots preserve bot order and verbose setup output"
+block:
+  var output = ""
+  let match = newMultiplayerMatch(
+    @[precon(Warrior), precon(Warrior), precon(Warrior)],
+    humanSeat = 1,
+    seed = 90210,
+    botSources = @[
+      "if selectingClass then\nprint \"first\"\npickClass(0)\n" &
+        "deckCard(\"Archer\", 40)\nend\nend if\nendTurn()",
+      "if selectingClass then\nprint \"last\"\npickClass(2)\n" &
+        "deckCard(\"Mage\", 40)\nend\nend if\nendTurn()"],
+    botsChoose = true,
+    output = proc(event: PrintEvent) =
+      ## Retains setup output without initializing a terminal or viewer.
+      if event.kind == TextPrint:
+        output.add event.text)
+  doAssert match.seed == 90210
+  doAssert match.humanSeat == 1 and match.bots[1] == nil
+  doAssert match.game.players[0].heroClass == Archer
+  doAssert match.game.players[1].heroClass == Warrior
+  doAssert match.game.players[2].heroClass == Mage
+  doAssert output == "firstlast"

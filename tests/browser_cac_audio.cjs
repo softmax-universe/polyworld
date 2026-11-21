@@ -88,7 +88,7 @@ async function nextHumanTurn(page) {
   await delay(300);
 }
 async function startGame(page,mode) {
-  await page.goto(mode==='duel'?url+'?human=1&players=2&seed=42':url,
+  await page.goto(mode==='duel'?url+'?player=1&players=2&seed=42':url,
     {waitUntil:'load',timeout:120000});
   await page.waitForFunction(()=>document.querySelector('#loading')?.hidden,
     null,{timeout:120000});

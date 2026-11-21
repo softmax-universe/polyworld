@@ -6,6 +6,9 @@ import
   content, controls, game, graphics, homes, lobbies, multiplayer, playernames,
   pointers, presets, replays, settings, joiningseats
 
+from polyworld/cli import BotFlag, DurationFlags, PlayerFlag, RecordFlag,
+  RoomFlag, SeedFlag, ServerFlag, WindowSizeFlag
+
 when not defined(emscripten):
   import polyworld/replaysaves, replaylibraries, replaymenus
 
@@ -29,7 +32,9 @@ proc runFrontend*() =
     error: string
     roomName: string
     matchName: string
-    invite = inviteParameter("room")
+    invite =
+      if options.roomCode.len > 0: options.roomCode
+      else: inviteParameter("room")
     joinRequested = invite.len > 0
     connection: Connection
     joiningSeat: JoiningSeat
@@ -85,7 +90,9 @@ proc runFrontend*() =
   except MenusError, IOError, OSError:
     error = getCurrentExceptionMsg()
   roomName = defaultGameName(preferences.name)
-  preferences.applyPreferences(window, configureDisplay = not captureActive())
+  preferences.applyPreferences(window,
+    configureDisplay = not captureActive() and
+      WindowSizeFlag notin options.specifiedFlags)
   window.updateCursorConfinement(preferences.edgeScrolling)
   let bots = @[
     bundledBot("Base bot", "base"),
@@ -207,9 +214,6 @@ proc runFrontend*() =
         prepared.humanHeroIndex() + 1
       )
       options.replayPath = ""
-      options.recordPath = ""
-      options.pauseOnStart = false
-      options.speed = 1
       var
         quitToMenu = false
         matchError: string
@@ -819,8 +823,12 @@ proc runFrontend*() =
               options.replayPath = selected.path
               options.recordPath = ""
               options.playerSlot = 0
-              options.pauseOnStart = false
-              options.speed = 1
+              options.botGroups.setLen(0)
+              options.serverUrl = ""
+              options.roomCode = ""
+              options.specifiedFlags = options.specifiedFlags -
+                {BotFlag, PlayerFlag, RecordFlag, SeedFlag, ServerFlag, RoomFlag} -
+                DurationFlags
               initializeMatch()
               runGraphics()
               preferences = readGotaPreferences()

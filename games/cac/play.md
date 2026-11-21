@@ -71,7 +71,7 @@ Give these to your human; they open a window:
 
 ```sh
 nim c cac.nim
-./cac --human --bot my.bas      # play against the bot
+./cac --player --bot my.bas      # play against the bot
 ./cac --replay m.replay         # watch a recorded match
 ```
 

@@ -2,6 +2,24 @@
 
 Run `nim c -r games/light_vs_dark/lvd.nim` from the Polyworld root to open the main menu. Explicit `--bot` or `--replay` arguments retain direct match/replay startup; headless builds retain the command-line runner.
 
+The [shared command-line options](../../../docs/command-line.md) apply to LvD. Use
+`--player N` for the one-based human slot and `--name Alice` for a display name.
+For example, `--player 2 --bot games/light_vs_dark/players/base.bas --record out/match.replay`
+starts a two-player match from the repository root and saves its replay.
+Repeat `--bot PATH[:N]` (or its
+`--bots` alias) to fill additional slots. Replay and bot paths are relative to
+the directory from which the game was launched. `--replay PATH` plays a recording.
+
+Native `--server URL` opens Multiplayer and connects; `--room CODE` also joins
+that room. A bare `--record PATH` retains the destination for a match started
+from the menu. Explicit playback speed, pause, and window-size choices also
+survive local menu startup.
+Live multiplayer follows the authoritative relay at normal speed; its pause
+action affects the shared match. `--play` and `--speed` control local games and
+file replays.
+`--headless-tick-rate` and `--llm-mode` belong to headless builds; graphical
+clients reject them instead of accepting settings they do not execute.
+
 ## Shared versus game-specific code
 
 - `src/polyworld/homes.nim`: centered main menu layout, keyboard navigation, atlas packing, and backdrop drawing.

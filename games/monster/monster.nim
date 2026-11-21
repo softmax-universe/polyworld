@@ -21,7 +21,7 @@ when not defined(headless):
 when defined(headless):
   proc runGame(settings: Options) =
     ## Exercises a real conversation and its complete physical action plan.
-    if settings.capture.captureRequested():
+    if settings.game.capture.captureRequested():
       raise newException(MonsterError,
         "Use --screenshot or -d:takeScreenshot without -d:headless " &
           "to capture graphics.")
@@ -35,7 +35,7 @@ when defined(headless):
       )
     defer:
       brain.close()
-    var world = newWorld(generateMap(settings.seed))
+    var world = newWorld(generateMap(settings.game.seed.int))
     world.restoreWorld(savePath)
     let started = epochTime()
     var
@@ -95,7 +95,7 @@ else:
       brain.disableSaving()
     defer:
       brain.close()
-    var world = newWorld(generateMap(settings.seed))
+    var world = newWorld(generateMap(settings.game.seed.int))
     world.restoreWorld(worldPath)
     createDir(atlasPath.parentDir)
     let builder = newHudAtlas(4096)
@@ -104,8 +104,8 @@ else:
     builder.write(atlasPath)
     let (window, sk) = initGameWindow(
       "Monster / Polyworld", atlasPath,
-      ivec2(settings.width.int32, settings.height.int32),
-      vsync = not capturing,
+      ivec2(settings.game.windowWidth, settings.game.windowHeight),
+      vsync = settings.game.vsync,
       visible = not capturing
     )
     sk.builder = builder
@@ -124,7 +124,8 @@ else:
     let voice = newMonsterVoice(
       historyCount = brain.messages.len,
       enabled = not settings.offline and not settings.noVoice and
-        not capturing and getEnv("COGAME_LLM").toLowerAscii() != "off"
+        not settings.game.soundMuted and not capturing and
+        getEnv("COGAME_LLM").toLowerAscii() != "off"
     )
     defer:
       voice.close()
@@ -135,6 +136,7 @@ else:
       chat = initChatUi()
       clock: ViewingClock
       accumulator = 0'f
+      paused = settings.game.pauseOnStart
       cameraDistance = CameraDistanceDefault
       cameraTarget = rtsFollowFrame(
         vec3(world.creature.position.x, 0, world.creature.position.y),
@@ -162,11 +164,17 @@ else:
       let dt =
         if capturing: 1'f / 60
         else: min(clock.viewingDelta(window), 0.1'f)
-      accumulator += dt
+      if not chat.typing and window.buttonPressed[KeySpace]:
+        paused = not paused
+      if not paused:
+        accumulator += dt * settings.game.speed.float32
       while accumulator >= 1'f / TickRate.float32:
         world.step()
         accumulator -= 1'f / TickRate.float32
       discard world.receive(brain)
+      if settings.game.verbose:
+        for text in world.events:
+          echo text
       world.outcomes(brain, savePath)
       voice.observe(brain.messages)
       voice.submitPending(world, brain)
@@ -276,14 +284,15 @@ proc main() =
       restoreMonsterDirectory()
     let settings = parseOptions()
     when not defined(headless):
-      configureCapture(settings.capture, "output/monster.png")
+      configureCapture(settings.game.capture, "output/monster.png")
       if not settings.offline and not settings.noVoice and
+        not settings.game.soundMuted and
         not captureActive() and
         getEnv("COGAME_LLM").toLowerAscii() != "off":
           if launchMonster():
             return
     setCurrentDir(RepositoryRoot)
-    if not settings.capture.captureRequested():
+    if not settings.game.capture.captureRequested():
       createDir(settings.saveDir)
     runGame(settings)
     when not defined(headless):

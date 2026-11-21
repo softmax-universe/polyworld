@@ -52,17 +52,23 @@ block:
   let directory = createTempDir("crewrift-bots-", "")
   defer:
     removeDir(directory)
-  let path = directory / "move.bas"
+  let
+    path = directory / "move.bas"
+    defaultPath = directory / "base.bas"
   writeFile(path, MoveSource)
+  writeFile(defaultPath, DefaultBotSource)
   for arguments in [
-    @["--spectate", "--bot", path & ":2"],
-    @["--spectate", "--bot:" & path & ":2"],
-    @["--spectate", "--bot=" & path & ":2"]
+    @["--spectate", "--bot", path & ":8"],
+    @["--spectate", "--bot:" & path & ":8"],
+    @["--spectate", "--bot=" & path & ":8"]
   ]:
     let parsed = parseOptions(arguments)
-    doAssert parsed.botGroups == @[BotGroup(path: path, count: 2)]
+    doAssert parsed.botGroups == @[BotGroup(path: path, count: 8)]
   var options = botOptions()
-  options.botGroups = @[BotGroup(path: path, count: 2)]
+  options.botGroups = @[
+    BotGroup(path: path, count: 2),
+    BotGroup(path: defaultPath, count: MinPlayers - 2)
+  ]
   let game = newGame(options)
   game.enterPlaying()
   let start = game.world.players[0].x
@@ -80,6 +86,7 @@ block:
   options.player = 2
   options.name = "Human"
   options.botGroups[0].count = 3
+  options.botGroups[1].count = MinPlayers - 4
   let human = newGame(options)
   doAssert human.bots[2].runtime == nil
   doAssert human.rosterName(2).endsWith("(Human)")
@@ -93,7 +100,7 @@ block:
     removeDir(directory)
   let path = directory / "broken.bas"
   var options = botOptions()
-  options.botGroups = @[BotGroup(path: path, count: 1)]
+  options.botGroups = @[BotGroup(path: path, count: MinPlayers)]
   for source in ["", "if then"]:
     if source.len > 0:
       writeFile(path, source)

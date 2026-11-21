@@ -711,11 +711,6 @@ proc validate(config: GameConfig) =
       CrewriftError,
       "Config field frictionDen must be positive."
     )
-  if config.seed < RandomSeedSentinel:
-    raise newException(
-      CrewriftError,
-      "Config field seed must be -1 or greater."
-    )
   if config.minPlayers < 1:
     raise newException(
       CrewriftError,
@@ -893,7 +888,7 @@ proc update*(config: var GameConfig, jsonText: string) =
 
 proc timeGameSeed*(): int =
   ## Returns a positive game seed derived from wall-clock time.
-  result = int(epochTime() * 1000) mod RandomSeedMod
+  result = int(int64(epochTime() * 1000) mod RandomSeedMod.int64)
   if result < 0:
     result += RandomSeedMod
 
@@ -3024,11 +3019,12 @@ proc loadCrewriftMap*(path = ""): CrewriftMap =
   except ValueError as error:
     raise newException(CrewriftError, "Invalid map metadata: " & error.msg)
 
-proc initSimServer*(config: GameConfig): SimServer =
+proc initSimServer*(config: GameConfig, resolveSeed = true): SimServer =
   ## Creates fixed-tick rules with collision derived from the selected floor.
   config.validate()
   var resolvedConfig = config
-  resolvedConfig.resolveRandomSeed()
+  if resolveSeed:
+    resolvedConfig.resolveRandomSeed()
   result.config = resolvedConfig
   result.rng = initRand(resolvedConfig.seed)
   result.gameMap = loadCrewriftMap(config.mapPath)

@@ -36,8 +36,9 @@ to reconnect. On macOS, the microphone and speaker share Apple's voice
 processing audio engine for echo cancellation during simultaneous playback
 and capture. Other platforms currently use the existing Slappy audio path.
 
-Use `--unmute` to start directly in Conversation, `--mute` for Text, or
-`--no-voice` to disable Conversation. `OPENAI_REALTIME_MODEL` and
+Use `--conversation` to start directly in Conversation. `--mute` disables
+voice audio and `--unmute` enables it without starting the microphone.
+`--no-voice` disables Conversation. `OPENAI_REALTIME_MODEL` and
 `OPENAI_REALTIME_VOICE` override
 the Voice Lab model and creature voice. Voice uses `OPENAI_API_KEY`, falling
 back to `MONSTER_KEY_FILE` or `~/secrets/openai.key`, including one retry for
@@ -45,6 +46,22 @@ a rejected environment key. Offline mode, hidden screenshots, and headless
 simulation do not open voice connections or microphones. On macOS the normal
 Nim command launches a local Monster app so its microphone permission belongs
 to the game.
+
+Monster uses Polyworld's common launch options for `--seed N`,
+`--windowSize WIDTHxHEIGHT`, `--vsync BOOL`, `--play BOOL`, `--speed N`,
+`--mute`, `--unmute`, `--verbose`, `--screenshot PATH`, and `--frames N`.
+Valued arguments accept separate, equals, or colon forms. For example,
+`--seed 17`, `--seed=17`, and `--seed:17` have the same meaning.
+`--play false` starts the simulation paused; Space pauses or resumes it while
+the text editor is unfocused. `--speed` changes the graphical simulation rate
+while leaving camera and UI movement unchanged. `--verbose` prints world
+events to the terminal.
+Headless prompt runs reject graphical transport, window, and capture options.
+
+The same value forms apply to `--model`, `--prompt`, `--select`, and
+`--save-dir`. Relative save directories resolve from the launch directory.
+Monster has no BASIC bot roster or action replay system, so it rejects
+unsupported match flags such as `--bot`, `--player`, `--record`, and `--replay`.
 
 Try this sequence:
 

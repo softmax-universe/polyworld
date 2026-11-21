@@ -343,6 +343,10 @@ proc runGraphics*(
     autoSaveReplay = false
 ): bool {.discardable.} =
   ## Runs one match on the existing window and releases match-owned resources.
+  if network != nil and not network.isSpectator and
+    (options.pauseOnStart or options.speed != 1):
+      echo "Live multiplayer follows the server clock; --play and --speed " &
+        "apply to local games, replays, and spectators."
   initializeGraphics()
   let saveAutomatically = autoSaveReplay and not captureActive()
   stopSounds()
@@ -1364,11 +1368,13 @@ proc runGraphics*(
       holdSeconds = 2.8,
       mapSpan = mapHalfSize() * 2
     )
+    pauseAfterDraft = options.pauseOnStart and run.world.phase == Drafting and
+      (network == nil or network.isSpectator)
     transport = initPlayer(
       live = not run.replayMode,
       durationTicks = run.durationTicks(),
-      playing = run.world.phase == Drafting or network.isSpectator or not options.pauseOnStart,
-      speed = if network.isSpectator: 1'i32 else: options.speed,
+      playing = run.world.phase == Drafting or not options.pauseOnStart,
+      speed = options.speed,
       repeating = run.replayMode and not network.isSpectator
     )
     spectatorStream = if network.isSpectator: newSpectatorStream(network) else: nil
@@ -2610,6 +2616,7 @@ proc runGraphics*(
       spectatorStream.advance()
     else:
       network.applyPacket(packet)
+    run.world.applyStartupPause(transport, pauseAfterDraft)
     for i, hero in run.world.heroes:
       if oldPortalEnds[i] > 0 and hero.portalEnds == 0:
         let
@@ -2711,6 +2718,7 @@ proc runGraphics*(
         advanceGame()
       if options.pauseOnStart and run.world.phase != Drafting:
         transport.pause()
+        pauseAfterDraft = false
     if existsEnv("PARTICLE_DEMO"):
       let
         origin = cameraTarget + vec3(-2.5'f32, 4.0'f32, 0)
@@ -2794,7 +2802,7 @@ proc runGraphics*(
       viewingDt = viewingClock.viewingDelta(window)
       viewingSeeking = transport.targetTick >= 0 or transport.restoreTick >= 0
       let audible = not captureActive() and window.focused and
-        not viewingSeeking and transport.playing and transport.speedIndex == 0 and
+        not viewingSeeking and transport.playing and transport.speed == 1 and
         matchMenu == HiddenMatchMenu
       if audioEnabled and not audible and
           (not run.world.gameOver or not window.focused or
@@ -2835,9 +2843,10 @@ proc runGraphics*(
           if run.world.tick == spectatorStream.receivedEnd:
             spectatorStream = nil
             network.promoteController()
+            pauseAfterDraft = false
             networkSpectator = false
             transport.streamed = false
-            transport.speedIndex = 0
+            transport.setSpeed(0)
             transport.playing = true
             transport.accumulator = 0
             run.historyPlayback = false
@@ -2871,7 +2880,7 @@ proc runGraphics*(
               leaveRequested = true
         transport.playing = not network.finished and
           network.client.snapshot.phase == rooms.Playing
-        transport.speedIndex = 0
+        transport.setSpeed(0)
         run.historyPlayback = false
         networkElapsed += dt
         try:

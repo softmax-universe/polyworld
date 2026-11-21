@@ -6,7 +6,7 @@
 
 import
   std/[math, os, strformat, strutils, times],
-  polyworld/[cli, controllers, metrics, profiles, rooms, tapes, timings],
+  polyworld/[cli, controllers, metrics, profiles, tapes, timings],
   content,
   maps,
   sim,
@@ -17,6 +17,12 @@ import
 when defined(coworld):
   import polyworld/coworld
 
+const SupportedFlags =
+  when defined(headless):
+    AllCommonFlags - GraphicalFlags - {NameFlag, ServerFlag, RoomFlag}
+  else:
+    AllCommonFlags - {HeadlessTickRateFlag, LlmModeFlag}
+
 var
   matchConfig* = GotaConfig(seed: ArenaSeed)
   serverAddress*: string
@@ -26,42 +32,24 @@ var
 proc usage() =
   ## Prints the command-line and compile-time configuration surface.
   echo "Gods of the Arena"
-  echo "  --server URL           Open Multiplayer and connect to a ws/wss server."
-  echo "  --bot:PATH              Fill one of the 10 hero slots."
-  echo "  --bot:PATH:N            Fill N of the 10 slots with that file."
-  echo "  --bot PATH[:N]          The equivalent two-argument form."
-  echo "  --player                Control the first hero; supply 9 bots."
-  echo "  --player:N              Control hero N (1-10); supply 9 bots."
-  echo "  --player NAME           Save a nonnumeric player display name."
-  echo "  --replay PATH           Play an action replay instead of bots."
-  echo "  --record PATH           Record bot actions to a replay."
-  echo "  --seconds NUMBER        Battle seconds (default 1200)."
-  echo "  --minutes NUMBER        Battle minutes (default 20)."
-  echo "  --ticks NUMBER          Battle ticks (default 28800)."
+  echo commonUsageFor(SupportedFlags)
+  echo "Live matches use ten slots; a human takes one slot, leaving nine bots."
+  echo "The duration covers battle time (default 1200 seconds)."
   echo "Drafting allows 10 seconds per pick, separate from battle time."
-  echo "  --seed NUMBER           Match seed for draft order, bot turn order,"
-  echo "                          and combat randomness; the arena stays fixed."
+  echo "Draft deadlines always advance; --play=false pauses after the draft."
+  echo "The match seed controls draft order, bots, and combat; the arena stays fixed."
   echo "  --map-seed NUMBER       Regenerate the arena from another seed (the"
   echo "                          league always plays the preset's own seed)."
   echo "  --draft-mode MODE       unique (default), team, or open."
   echo "  --config PATH           JSON match settings, including mapPreset."
-  echo "  --headless-tick-rate N   Wall-clock ticks per second, 0 is unlimited."
-  echo "  --llm-mode:async|barrier Wait for all requests between headless ticks."
   echo "  --spawn-interval NUMBER Seconds between waves."
-  echo "  --play=false            Start the graphical transport paused."
-  echo "  --speed NUMBER          Graphical start speed: 1, 2, 4, or 16."
-  echo "  --windowSize WxH        Graphical window, such as 1024x576."
-  echo "  --screenshot PATH       Save a hidden frame and exit."
-  echo "  --frames NUMBER         Capture after N rendered frames (default 30)."
-  echo "  --vsync:off             Unlock the frame rate (default on)."
-  echo "  --mute[=true|false]     Override saved sound levels for this launch."
-  echo "  --unmute                Enable sound for this launch."
   echo "Compile with -d:headless for command-line simulation."
   echo "Compile with -d:emscripten for the web backend."
 
-proc parseGameOptions(validateMatch: bool): GameOptions =
+proc parseGameOptions*(
+    arguments: seq[string], validateMatch = false
+): GameOptions =
   ## Parses runtime game, bot, replay, and simulation configuration.
-  let arguments = commandLineParams()
   var index = 0
   while index < arguments.len:
     if arguments[index] == "--config":
@@ -79,25 +67,11 @@ proc parseGameOptions(validateMatch: bool): GameOptions =
   )
   index = 0
   while index < arguments.len:
-    var argument = arguments[index]
-    if argument == "--player" and index + 1 < arguments.len and
-      not arguments[index + 1].startsWith("--"):
-        argument = "--player=" & arguments.argumentValue(index, "--player")
-    if argument.startsWith("--player=") and
-      not argument[9 .. ^1].allCharsInSet({'0' .. '9'}):
-        let name = argument[9 .. ^1].strip()
-        if name.len > 64 or not name.validName:
-          fail("--player requires a nonempty display name of at most 64 bytes")
-        playerNameOverride = name
-    elif result.takeCommonFlag(arguments, index, argument):
+    let argument = arguments[index]
+    if result.takeCommonFlag(arguments, index, argument):
       discard
     else:
       case argument
-      of "--server":
-        serverAddress = arguments.argumentValue(index, "--server")
-        if not serverAddress.startsWith("ws://") and
-          not serverAddress.startsWith("wss://"):
-            fail("--server requires a ws:// or wss:// URL")
       of "--config":
         discard arguments.argumentValue(index, "--config")
       of "--draft-mode":
@@ -132,18 +106,25 @@ proc parseGameOptions(validateMatch: bool): GameOptions =
       else:
         fail("unknown argument: " & argument)
     inc index
-  result.capture.validateCapture()
-  if serverAddress.len > 0:
+  result.rejectUnsupportedFlags(SupportedFlags)
+  result.resolveGamePaths()
+  serverAddress = result.serverUrl
+  playerNameOverride = result.playerName
+  if serverAddress.len > 0 or result.roomCode.len > 0:
     when defined(headless):
-      fail("--server requires the graphical client")
-    if result.botGroups.len > 0 or result.replayPath.len > 0 or
-      result.playerSlot > 0:
-        fail("--server uses lobby seats; select players and bots in the lobby")
-  if validateMatch or result.botGroups.len > 0 or result.replayPath.len > 0:
-    result.validateGameOptions(
-      HeroClassCount,
-      "live games require exactly 10 bots"
-    )
+      fail("--server and --room require the graphical client")
+    else:
+      if result.botGroups.len > 0 or result.replayPath.len > 0 or
+        result.playerSlot > 0:
+          fail("--server and --room use lobby seats; " &
+            "select players and bots in the lobby")
+  result.validateGameOptions(
+    if validateMatch or result.botGroups.len > 0 or result.playerSlot > 0:
+      HeroClassCount
+    else:
+      0,
+    "live games require exactly 10 slots"
+  )
 
 var
   options*: GameOptions
@@ -155,7 +136,12 @@ proc initializeOptions*() =
     options = coworldOptions(10)
     matchConfig = parseConfig(readLocal(getEnv("COGAME_CONFIG_URI")))
   else:
-    options = parseGameOptions(defined(headless))
+    options = parseGameOptions(commandLineParams(), defined(headless))
+  if options.verbose:
+    echo "GotA launch: seed=", options.seed,
+      " bots=", options.botGroups.botCount,
+      " player=", options.playerSlot,
+      " replay=", options.replayPath
 
 proc initializeMatch*() =
   ## Creates a fresh local or replay session from explicit startup settings.
@@ -411,9 +397,6 @@ proc initializeLocalMatch*(
   options.spawnIntervalTicks = config.spawnIntervalTicks
   options.playerSlot = int32(humanSeat + 1)
   options.replayPath = ""
-  options.recordPath = ""
-  options.pauseOnStart = false
-  options.speed = 1
   clearPlayerCommands()
   var activeSeats: seq[int]
   var packedSources: seq[string]

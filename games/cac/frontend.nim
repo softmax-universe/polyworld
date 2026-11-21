@@ -4,7 +4,7 @@ import
   bumpy, chroma, opengl, pixie, silky, vmath, windy,
   polyworld/[chrome, connections, homes, lobbies, menus, policies,
     roomclients, rooms, sounds, viewers],
-  app, core/[battlesetup, sim], net/[multiplayer, web], ui/controls,
+  app, core/[battlesetup, sessions, sim], net/[multiplayer, web], ui/controls,
   homes as cacHomes
 
 when not defined(emscripten):
@@ -134,16 +134,23 @@ proc runFrontend*(app: App, connection: var Connection,
   template preferences: untyped = app.preferences
   if not frontendState.initialized:
     frontendState = FrontendState(initialized: true,
-      setup: defaultBattleSetup(clamp(app.options.playerCount, 2, 7)),
-      humanSeat: 0, publicRoom: true)
-    frontendState.setup.seed = int32(app.options.seed and 0x7fffffff)
+      setup: app.options.initialBattleSetup(),
+      humanSeat: app.options.initialMenuHumanSeat(), publicRoom: true)
     frontendState.roomNameDefault = defaultRoomName(preferences.name)
     frontendState.roomName = frontendState.roomNameDefault
     when not defined(emscripten):
       frontendState.replayBrowser = initReplayBrowser(Library)
     frontendState.localPolicies.setLen(frontendState.setup.classes.len)
-    for index in 1 ..< frontendState.localPolicies.len:
-      if bots.len > 0:
+    var botIndex = 0
+    for index in 0 ..< frontendState.localPolicies.len:
+      if index == frontendState.humanSeat:
+        continue
+      if botIndex < app.options.botPaths.len:
+        let path = app.options.botPaths[botIndex]
+        frontendState.localPolicies[index] = LocalPolicy(
+          name: path.extractFilename(), bytes: readPolicyBytes(path))
+        inc botIndex
+      elif bots.len > 0:
         frontendState.localPolicies[index] = bots[index mod bots.len]
   var
     activeConnection = connection

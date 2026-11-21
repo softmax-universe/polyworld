@@ -1,7 +1,7 @@
 ## Game-specific art and startup routing over the shared main menu.
-proc opensMultiplayer*(room: string): bool =
-  ## A server URL configures a future connection; only invites bypass the main menu.
-  room.len > 0
+proc opensMultiplayer*(room: string, configuredServer = ""): bool =
+  ## Explicit server launches and room invites open the multiplayer menu.
+  room.len > 0 or configuredServer.len > 0
 
 when not defined(headless):
   import
@@ -79,8 +79,7 @@ when not defined(headless):
     result = stored
     if queryServer.len > 0:
       result.server = queryServer
-    elif configuredServer.len > 0 and configuredServer != Preferences().server:
-      # The backend's default is not an explicit frontend override.
+    elif configuredServer.len > 0:
       result.server = configuredServer
 
   proc addHomeAssets*(builder: AtlasBuilder) =

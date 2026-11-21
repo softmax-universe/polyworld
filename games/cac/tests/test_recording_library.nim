@@ -1,6 +1,7 @@
 import
   std/[os, strutils, tempfiles],
   ../app, ../core/[replays, sim], ../modes/multiplayer, ../replaylibraries
+from polyworld/cli import CliError, TicksFlag
 
 proc verify(data: ReplayData) =
   ## Replays every saved action and requires its canonical fingerprint.
@@ -153,6 +154,63 @@ proc testManualSaveRecovery() =
   doAssert app.replaySaveError.len == 0
   doAssert listReplays().len == 1
 
+proc testExplicitRecording() =
+  ## Writes the requested file even with autosave off and honors its action cap.
+  let
+    directory = createTempDir("cac-explicit-replay-", "")
+    target = directory / "chosen replay.cacreplay"
+    app = App(replayPreferences: ReplayPreferences(saveReplay: false),
+      playerNames: @["Alice", "Bob"])
+    seats = @[precon(Archer), precon(Mage)]
+  defer:
+    removeDir(directory)
+  app.options.common.recordPath = target
+  app.options.common.maximumTicks = 1
+  let recorder = app.beginReplayRecording(seats, 2026)
+  doAssert recorder.data.header.setup.maximumTicks == 1
+  doAssert recorder.data.config.maxTicks == 1
+  doAssert not app.atLaunchTickLimit()
+  var game = newGame(seats, 2026)
+  let action = ReplayAction(kind: ActionEndTurn, tick: 1,
+    playerId: game.currentPlayer.int32)
+  doAssert game.applyAction(action)
+  recorder.record(action)
+  recorder.recordHash(game.stateHash())
+  doAssert app.atLaunchTickLimit()
+  app.updateReplaySaving(completed = true)
+  doAssert fileExists(target)
+  let saved = readFile(target)
+  saved.decodeReplay().verify()
+  app.finishReplayRecording()
+  doAssert readFile(target) == saved
+  discard app.beginReplayRecording(seats, 77)
+  app.finishReplayRecording()
+  doAssert loadReplay(target).config.seed == 77
+  app.options.common.recordPath = target / "replay.cacreplay"
+  discard app.beginReplayRecording(seats, 78)
+  var rejected = false
+  try:
+    app.finishReplayRecording()
+  except CatchableError:
+    rejected = true
+  doAssert rejected, "An explicit CLI save must report a failed write."
+
+proc testNetworkLaunchControls() =
+  ## Refuses local duration limits before a room-backed match starts.
+  let app = App()
+  app.options.common.speed = 1
+  app.validateNetworkLaunch()
+  app.options.common.maximumTicks = 5
+  app.options.common.specifiedFlags.incl TicksFlag
+  var rejected = false
+  try:
+    app.validateNetworkLaunch()
+  except CliError:
+    rejected = true
+  doAssert rejected
+
 testLibraryRecording()
 testManualSaveRecovery()
+testExplicitRecording()
+testNetworkLaunchControls()
 echo "CaC library save, deduplication, opt-out, and recovery tests passed."

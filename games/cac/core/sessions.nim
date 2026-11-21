@@ -1,26 +1,29 @@
 ## Shared browser/server session options, deterministic bots and snapshot codec.
 ## Card programs stay in the base set; the wire format contains stable card IDs.
-import std/[algorithm, json, options, sets, strutils]
-from polyworld/cli import takeSoundFlag
-import polyworld/screenshots
+import std/[algorithm, json, options, os, sets, strutils]
+import polyworld/cli
 import sim
-from battlesetup import MaxBattlePlayers
+from battlesetup import BattleSetup, MaxBattlePlayers, defaultBattleSetup
 export sim
 
 const
   DefaultSessionSeed* = 20260910'i64
   SnapshotSchemaVersion* = 20
+  SessionFlags* = AllCommonFlags - {HeadlessTickRateFlag, LlmModeFlag} -
+    (when defined(emscripten): DurationFlags + {RecordFlag} else: {})
 
 type
   SessionOptions* = object
+    common*: GameOptions
+      ## Canonical launch arguments shared with every Polyworld game.
     seed*: int64
     seedGiven*: bool  ## --seed was passed; otherwise games may pick their own.
     playerCount*: int  ## Number of seats for a direct local match.
     human*: bool
-    soundMuted*: bool = true
+    soundMuted*: bool
       ## Launch audio preference, separate from deterministic match state.
     humanDeckPath*: string
-      ## `--human PATH.bas`: a bot script whose class and deck the human
+      ## `--deck PATH.bas`: a bot script whose class and deck the human
       ## plays. Only its setup runs.
     botPaths*: seq[string]
     replayPath*: string  ## A recorded match to watch instead of playing.
@@ -56,94 +59,102 @@ proc classId(heroClass: HeroClass): string =
   heroClass.className().toLowerAscii()
 
 proc parseSessionOptions*(args: openArray[string]): SessionOptions =
-  ## Accept both --key=value and --key value, including negative numeric seeds.
-  ## --human is a flag: --human, --human=true, --human true all work, and
-  ## --human PATH.bas plays the deck that script lists.
+  ## Shares common flags and validates the local roster before opening a window.
   result = SessionOptions(seed: DefaultSessionSeed, playerCount: PlayerCount,
-    human: false)
+    common: GameOptions(seed: DefaultSessionSeed.int32, speed: 1))
+  let arguments = @args
   var
     index = 0
     directLaunch = false
+    playersGiven = false
     menuChoice: Option[bool]
-  while index < args.len:
-    if result.capture.takeCaptureFlag(args, index, args[index]) or
-      takeWindowSizeFlag(result.windowWidth, result.windowHeight,
-        args, index, args[index]):
-        inc index
-        continue
-    if result.soundMuted.takeSoundFlag(args[index]):
-      inc index
-      continue
-    let separator = args[index].find('=')
-    let key = if separator >= 0: args[index][0 ..< separator] else: args[index]
-    if key in ["--menu", "--direct"]:
-      if separator >= 0:
-        raise newException(ValueError, key & " does not take a value")
-      menuChoice = some(key == "--menu")
-      inc index
-      continue
-    if key notin ["--seed", "--players", "--bot", "--human", "--replay",
-        "--server", "--room"]:
-      raise newException(ValueError, "Unknown session option: " & key)
-    if key in ["--players", "--bot", "--human", "--replay"]:
-      directLaunch = true
-    if key == "--human":
-      var value = "true"
-      if separator >= 0:
-        value = args[index][separator + 1 .. ^1]
-      elif index + 1 < args.len and not args[index + 1].startsWith("--"):
-        inc index
-        value = args[index]
-      if value.toLowerAscii().endsWith(".bas"):
-        result.human = true
-        result.humanDeckPath = value
-      else:
-        result.human = value.toLowerAscii() in ["true", "1", "yes", ""]
-      inc index
-      continue
-    var value: string
-    if separator >= 0:
-      value = args[index][separator + 1 .. ^1]
+  while index < arguments.len:
+    let
+      argument = arguments[index]
+      flag = splitFlag(argument)
+    if result.common.takeCommonFlag(arguments, index, argument):
+      if flag.name in ["--bot", "--bots", "--player", "--replay"]:
+        directLaunch = true
     else:
-      inc index
-      if index >= args.len or args[index].startsWith("--"):
-        raise newException(ValueError, "Missing value for " & key)
-      value = args[index]
-    if value.len == 0:
-      raise newException(ValueError, "Missing value for " & key)
-    case key
-    of "--seed":
-      try:
-        result.seed = parseBiggestInt(value).int64
-      except ValueError:
-        raise newException(ValueError, "Invalid integer seed: " & value)
-      result.seedGiven = true
-    of "--players":
-      try:
-        result.playerCount = parseInt(value)
-      except ValueError:
-        raise newException(ValueError, "Invalid integer player count: " & value)
-      if result.playerCount < PlayerCount:
-        raise newException(ValueError, "Player count must be at least " &
-          $PlayerCount)
-      if result.playerCount > MaxBattlePlayers:
-        raise newException(ValueError, "Player count must be at most " &
-          $MaxBattlePlayers)
-    of "--bot":
-      if result.botPaths.len >= PlayerCount:
-        raise newException(ValueError, "Too many --bot arguments (max " &
-          $PlayerCount & ")")
-      result.botPaths.add value
-    of "--replay": result.replayPath = value
-    of "--server": result.serverAddress = value
-    of "--room": result.roomCode = value
-    else: discard
+      case flag.name
+      of "--menu", "--direct":
+        if flag.attached:
+          raise newException(ValueError, flag.name & " does not take a value")
+        menuChoice = some(flag.name == "--menu")
+      of "--players":
+        result.playerCount = parsePositiveInt32(
+          flagValue(arguments, index, argument), flag.name).int
+        playersGiven = true
+        directLaunch = true
+      of "--deck":
+        result.humanDeckPath = flagValue(arguments, index, argument)
+      else:
+        raise newException(ValueError, "Unknown session option: " & flag.name)
     inc index
+  result.common.rejectUnsupportedFlags(SessionFlags)
+  result.common.validateGameOptions(0, "")
+  result.seed = result.common.seed.int64
+  result.seedGiven = SeedFlag in result.common.specifiedFlags
+  result.human = result.common.playerSlot > 0
+  result.soundMuted = result.common.soundMuted
+  result.replayPath = result.common.replayPath
+  result.serverAddress = result.common.serverUrl
+  result.roomCode = result.common.roomCode
+  result.capture = result.common.capture
+  result.windowWidth = result.common.windowWidth
+  result.windowHeight = result.common.windowHeight
+  if not playersGiven and result.common.botGroups.len > 0:
+    result.playerCount = result.common.botGroups.botCount + ord(result.human)
+  if result.playerCount notin PlayerCount .. MaxBattlePlayers:
+    raise newException(ValueError, "--players must be between " &
+      $PlayerCount & " and " & $MaxBattlePlayers)
+  if result.common.playerSlot > result.playerCount:
+    raise newException(ValueError, "--player must be between 1 and " &
+      $result.playerCount)
+  if result.common.botGroups.len > 0:
+    result.common.validateGameOptions(result.playerCount,
+      "supply one bot per nonhuman seat")
+    for group in result.common.botGroups:
+      for _ in 0 ..< group.count:
+        result.botPaths.add group.path
+  if result.humanDeckPath.len > 0 and not result.human:
+    raise newException(ValueError, "--deck requires --player")
+  if result.serverAddress.len > 0 or result.roomCode.len > 0:
+    if result.common.botGroups.len > 0 or result.human or
+        result.replayPath.len > 0:
+      raise newException(ValueError,
+        "--server and --room cannot be combined with --bot, --player, or --replay")
   result.menu = menuChoice.get(not directLaunch or
     result.serverAddress.len > 0 or result.roomCode.len > 0)
   if result.replayPath.len > 0:
     result.menu = false
-  result.capture.validateCapture()
+  if result.menu and result.humanDeckPath.len > 0:
+    raise newException(ValueError, "--deck requires a direct local launch")
+
+proc initialBattleSetup*(options: SessionOptions): BattleSetup =
+  ## Preserves the signed launch seed when the player enters local setup.
+  result = defaultBattleSetup(options.playerCount)
+  result.seed = options.seed.int32
+
+proc initialMenuHumanSeat*(options: SessionOptions): int =
+  ## Applies explicit roster choices while keeping the menu's default human.
+  if options.human:
+    options.common.playerSlot.int - 1
+  elif options.common.botGroups.len > 0:
+    -1
+  else:
+    0
+
+proc resolveSessionPaths*(options: var SessionOptions) =
+  ## Keeps user file arguments relative to the original launch directory.
+  options.common.resolveGamePaths()
+  options.replayPath = options.common.replayPath
+  options.botPaths.setLen(0)
+  for group in options.common.botGroups:
+    for _ in 0 ..< group.count:
+      options.botPaths.add group.path
+  if options.humanDeckPath.len > 0:
+    options.humanDeckPath = absolutePath(options.humanDeckPath)
 
 proc botPick(game: GameState, choices: seq[Choice], player: int,
     helps: bool): Choice =

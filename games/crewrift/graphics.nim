@@ -729,6 +729,7 @@ proc runGraphics*(initial: Options) =
       durationTicks = (game.world.config.maxTicks +
         game.world.config.roleRevealTicks).int32,
       speed = options.speed.int32,
+      playing = not options.pauseOnStart,
       repeating = game.playback
     )
     actionCam = initActionCam(
@@ -811,7 +812,7 @@ proc runGraphics*(initial: Options) =
     "Crewrift / Polyworld",
     AtlasPath,
     ivec2(options.width.int32, options.height.int32),
-    true
+    options.vsync
   )
   sk.builder = builder
   defer:

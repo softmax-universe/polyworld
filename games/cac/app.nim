@@ -3,12 +3,13 @@
 ## with these.
 import std/[options, os]
 import chroma, opengl, pixie, silky, vmath, windy
-import core/sim, core/sessions, ui/cardfaces, scene/cardrenderer,
+import core/sim, core/sessions, core/bots, ui/cardfaces, scene/cardrenderer,
   vfx/vfxrenderer, scene/post, scene/table, scene/courtyard, scene/heroes,
   ui/hud, ui/heroselect, ui/frontendassets, scene/heroselectstage, paths,
   replayer, net/multiplayer
 import polyworld/[assets, characters, chargen, connections,
   menus, viewers]
+from polyworld/cli import CliError, DurationFlags
 
 when not defined(emscripten):
   import polyworld/replaysaves, core/replays, replaylibraries, replaysettings
@@ -45,7 +46,7 @@ type
     captureFramebuffer*: GLuint
     captureTarget: ScreenshotTarget
     humanSeat*: Option[Seat]
-      ## The class and deck the human brought with `--human PATH.bas`;
+      ## The class and deck the human brought with `--deck PATH.bas`;
       ## without one they choose a class and play its precon.
     appDir*: string  ## The project folder: players/, the atlas, screenshots.
     window*: Window
@@ -67,6 +68,7 @@ type
       unsavedReplays*: seq[ReplayData]
       recording*: ReplayRecorder
       replaySaving: ReplaySaveState
+      explicitReplaySaved: bool
 
 const DefaultBots* = ["archer.bas", "warrior.bas", "mage.bas",
     "archer_warrior.bas"]
@@ -78,6 +80,26 @@ proc defaultBotSources*(appDir: string): seq[string] =
     let path = appDir / "players" / name
     if fileExists(path):
       result.add readFile(path)
+
+proc launchBotPrinter*(options: SessionOptions): PrintProc =
+  ## Routes script output to the terminal only for a verbose launch.
+  if options.common.verbose:
+    result = proc(event: PrintEvent) =
+      ## Writes each BASIC print fragment without changing simulation state.
+      case event.kind
+      of TextPrint: stdout.write(event.text)
+      of ValuePrint: stdout.write(event.value)
+      of FixedPrint: stdout.write(event.fixedValue)
+      of NewlinePrint: stdout.write("\n")
+
+proc validateNetworkLaunch*(app: App) =
+  ## Keeps room-authoritative timing separate from local launch controls.
+  if app.options.common.specifiedFlags * DurationFlags != {}:
+    raise newException(CliError,
+      "--ticks, --seconds, and --minutes are not supported for network matches")
+  if app.options.common.pauseOnStart or app.options.common.speed != 1:
+    echo "Network matches follow room timing; --play and --speed apply " &
+      "to local games and replays."
 
 proc polyworldRoot*(): string =
   var candidates: seq[string]
@@ -171,7 +193,7 @@ proc initApp*(sessionOptions: SessionOptions): App =
     (if sessionOptions.windowWidth > 0:
       ivec2(sessionOptions.windowWidth, sessionOptions.windowHeight)
     else: ivec2(3200, 2000)),
-    vsync = true
+    vsync = sessionOptions.common.vsync
   )
 
   var
@@ -210,6 +232,16 @@ proc initApp*(sessionOptions: SessionOptions): App =
   except MenusError, IOError, OSError:
     result.preferenceError = getCurrentExceptionMsg()
     result.preferences = Preferences()
+  if sessionOptions.common.playerName.len > 0:
+    result.preferences.name = sessionOptions.common.playerName
+  if sessionOptions.human:
+    for index in 0 ..< sessionOptions.playerCount:
+      result.playerNames.add(
+        if index == max(sessionOptions.common.playerSlot.int - 1, 0) and
+            result.preferences.name.len > 0:
+          result.preferences.name
+        else:
+          "Player " & $(index + 1))
   when not defined(emscripten):
     result.replayPreferences = ReplayPreferences()
     try:
@@ -229,6 +261,7 @@ when not defined(emscripten):
     app.recording = if app.replay == nil: recorder else: nil
     app.replaySaveError = ""
     app.replaySaving.resetReplaySave()
+    app.explicitReplaySaved = false
 
   proc beginReplayRecording*(app: App, seats: openArray[Seat],
       seed: int64, messages: openArray[ReplayAction] = []): ReplayRecorder =
@@ -239,13 +272,18 @@ when not defined(emscripten):
     if seed < low(int32).int64 or seed > high(int32).int64:
       app.replaySaveError = "This seed is outside the replay format's range."
       return
-    var config = GameConfig(seed: seed.int32, maxTicks: MaxReplayHashes.int32)
+    let maximumTicks =
+      if app.options.common.maximumTicks > 0:
+        app.options.common.maximumTicks
+      else:
+        MaxReplayHashes.int32
+    var config = GameConfig(seed: seed.int32, maxTicks: maximumTicks)
     for index in 0 ..< seats.len:
       config.players.add PlayerConfig(name:
         if index < app.playerNames.len: app.playerNames[index]
         else: "Player " & $(index + 1))
     result = initReplayRecorder(
-      matchSetup(seats, seed.int32, MaxReplayHashes.uint32), config)
+      matchSetup(seats, seed.int32, maximumTicks.uint32), config)
     for message in messages:
       result.record(message)
     app.recording = result
@@ -265,6 +303,12 @@ when not defined(emscripten):
 
   proc updateReplaySaving*(app: App, completed: bool) =
     ## Saves a completed match before the player leaves its result screen.
+    if app.options.common.recordPath.len > 0:
+      if completed and app.replay == nil and app.recording != nil and
+          not app.explicitReplaySaved:
+        saveReplay(app.options.common.recordPath, app.recording.data)
+        app.explicitReplaySaved = true
+      return
     if app.replay == nil and app.recording != nil and
       app.replaySaving.beginAutomaticReplaySave(
         app.replayPreferences.saveReplay and not captureActive(), completed):
@@ -275,6 +319,12 @@ when not defined(emscripten):
 
   proc finishReplayRecording*(app: App) =
     ## Preserves failed exit saves for retry after the renderer has cleaned up.
+    if app.options.common.recordPath.len > 0:
+      if app.replay == nil and app.recording != nil and
+          not app.explicitReplaySaved:
+        saveReplay(app.options.common.recordPath, app.recording.data)
+        app.explicitReplaySaved = true
+      return
     if app.replay != nil or app.recording == nil or
       not app.replaySaving.shouldSaveReplayOnExit(
         app.replayPreferences.saveReplay and not captureActive()):
@@ -302,6 +352,15 @@ when not defined(emscripten):
       app.replaySaveError = ""
     except CatchableError as error:
       app.replaySaveError = "Cannot save replay: " & error.msg
+
+proc atLaunchTickLimit*(app: App): bool =
+  ## Stops a native local match after its requested number of accepted actions.
+  when not defined(emscripten):
+    app.network == nil and app.replay == nil and app.recording != nil and
+      app.options.common.maximumTicks > 0 and
+      app.recording.data.hashes.len >= app.options.common.maximumTicks
+  else:
+    false
 
 proc setBattlefield*(app: App, playerCount: int) =
   ## Uses Tower Arena for two players and the ring for larger matches.

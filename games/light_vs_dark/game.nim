@@ -7,7 +7,7 @@
 
 import
   std/[os, strformat, strutils, times],
-  polyworld/[cli, controllers, metrics, profiles, rooms, tapes, timings],
+  polyworld/[cli, controllers, metrics, profiles, tapes, timings],
   content,
   maps as mapgen,
   sim,
@@ -65,26 +65,24 @@ when defined(coworld):
     )
     diplomacy.validate()
 
+const SupportedFlags =
+  when defined(headless):
+    AllCommonFlags - GraphicalFlags - {NameFlag, ServerFlag, RoomFlag}
+  else:
+    AllCommonFlags - {HeadlessTickRateFlag, LlmModeFlag}
+
 var
   serverAddress* = "ws://127.0.0.1:8090/ws"
   playerNameOverride*: string
 
 proc usage() =
   ## Prints the command-line and compile-time configuration surface.
+  echo "Light vs Dark"
+  echo commonUsageFor(SupportedFlags)
   echo """
-Light vs Dark, a small real-time strategy match between any number of BASIC overlords.
+Bots fill the roster in order around the optional human slot.
+The default match lasts 20 minutes and uses seed 2026.
 
-  --server URL     Multiplayer relay (default ws://127.0.0.1:8090/ws).
-  --player NAME    Set the menu player display name.
-  --bot PATH[:N]   Add N players using one BASIC program (default N=1).
-  --player         Add a human player in slot 1.
-  --player:N       Insert a human in slot N (one-based).
-  --replay PATH    Play a recorded match instead of running bots.
-  --record PATH    Record this match to a replay file.
-  --seconds N      Duration in seconds (default 1200).
-  --minutes N      Duration in minutes (default 20).
-  --ticks N        Duration in ticks (default 28800).
-  --seed N         Map seed (default 2026).
   --map-layout MODE  spoke or random (default spoke).
   --map-size N     Baseline map side for two players (default 90 tiles).
   --expansions N   Nearby expansions per player (default 2).
@@ -93,24 +91,15 @@ Light vs Dark, a small real-time strategy match between any number of BASIC over
   --war-grace-seconds N  War warning; alliance withdrawal takes 2N (default 10).
   --diplomacy-offer-seconds N  Peace/alliance offer lifetime (default 60).
   --view MODE      Spectator fog: all or player number (light/dark aliases).
-  --play=false     Start the graphical transport paused.
-  --speed N        Graphical start speed: 1, 2, 4, or 16.
-  --screenshot PATH Save a native screenshot and exit.
-  --frames N       Rendered frames before capture (default 30).
-  --windowSize WxH Graphical window, such as 800x400.
-  --vsync:off      Unlock the frame rate (default on).
-  --mute[=true|false] Override saved sound levels for this launch.
-  --unmute         Enable sound for this launch.
-  --headless-tick-rate N  Wall-clock ticks per second, 0 is unlimited.
-  --llm-mode:async|barrier Wait for all requests between headless ticks.
   --help           Show this message.
 
 Compile with -d:headless for a command-line match.
 Compile with -d:emscripten for the web backend.
 Screenshots work in ordinary graphical builds."""
 
-proc parseGameOptions(
-  settings: var MapSettings, diplomacy: var DiplomacySettings
+proc parseGameOptions*(
+  settings: var MapSettings, diplomacy: var DiplomacySettings,
+  arguments = commandLineParams()
 ): GameOptions =
   ## Reads the command line into a validated match description.
   result = GameOptions(
@@ -119,28 +108,13 @@ proc parseGameOptions(
     seed: DefaultSeed,
     speed: 1
   )
-  let arguments = commandLineParams()
   var index = 0
   while index < arguments.len:
-    var argument = arguments[index]
-    if argument == "--player" and index + 1 < arguments.len and
-      not arguments[index + 1].startsWith("--"):
-        argument = "--player=" & arguments.argumentValue(index, "--player")
-    if argument.startsWith("--player=") and
-      not argument[9 .. ^1].allCharsInSet({'0' .. '9'}):
-        let name = argument[9 .. ^1].strip()
-        if name.len > 64 or not name.validName:
-          fail("--player requires a nonempty name of at most 64 bytes")
-        playerNameOverride = name
-    elif result.takeCommonFlag(arguments, index, argument):
+    let argument = arguments[index]
+    if result.takeCommonFlag(arguments, index, argument):
       discard
     else:
       case argument
-      of "--server":
-        serverAddress = arguments.argumentValue(index, "--server")
-        if not serverAddress.startsWith("ws://") and
-          not serverAddress.startsWith("wss://"):
-            fail("--server requires a ws:// or wss:// URL")
       of "--war-grace-seconds":
         diplomacy.warGraceSeconds = parsePositiveInt32(
           arguments.argumentValue(index, argument), argument
@@ -183,10 +157,16 @@ proc parseGameOptions(
       else:
         fail("unknown argument: " & argument)
     inc index
-  result.capture.validateCapture()
+  result.rejectUnsupportedFlags(SupportedFlags)
+  result.resolveGamePaths()
   let count = result.botGroups.botCount + int(result.playerSlot > 0)
-  if count > 0 or result.replayPath.len > 0:
-    result.validateGameOptions(count, "supply at least one --bot or --player")
+  result.validateGameOptions(count, "supply at least one --bot or --player")
+  if result.serverUrl.len > 0 or result.roomCode.len > 0:
+    when defined(headless):
+      fail("--server and --room require the graphical client")
+    else:
+      if count > 0 or result.replayPath.len > 0:
+        fail("--server and --room use lobby seats; select players and bots in the lobby")
   if result.replayPath.len == 0 and count > 0:
     settings.validate(count)
     diplomacy.validate()
@@ -210,6 +190,13 @@ proc initializeOptions*() =
     options = coworldOptions(0)
   else:
     options = parseGameOptions(mapSettings, diplomacySettings)
+    if options.serverUrl.len > 0:
+      serverAddress = options.serverUrl
+    playerNameOverride = options.playerName
+    if options.verbose:
+      echo "LvD launch: ", options.botGroups.botCount, " bots, human slot ",
+        options.playerSlot, ", seed ", options.seed, ", ",
+        options.maximumTicks, " ticks"
   optionsInitialized = true
 
 proc initializeMatch*() =

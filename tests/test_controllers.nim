@@ -62,11 +62,26 @@ block:
     PlayerConfig(name: "turtle")
   ]
 
-echo "Testing local names cannot be supplied through CLI options"
+echo "Testing --name only renames the selected human controller"
+block:
+  var
+    options = GameOptions(playerSlot: 2)
+    index = 0
+  doAssert options.takeCommonFlag(@["--name", "Alice"], index, "--name")
+  options.botGroups.addBotSpec("bots/dragon.bas:2")
+  let config = options.localGameConfig(3)
+  doAssert config.players == @[
+    PlayerConfig(name: "dragon"),
+    PlayerConfig(name: "Alice"),
+    PlayerConfig(name: "dragon")
+  ]
+  doAssert options.playerName == "Alice"
+
+echo "Testing unsupported naming aliases do not alter bot names"
 block:
   static:
     doAssert not compiles(GameOptions(playerNames: @["Override"]))
-  for flag in ["--name", "--player-name", "--playerName", "--player-names"]:
+  for flag in ["--player-name", "--playerName", "--player-names"]:
     var
       options: GameOptions
       index = 0

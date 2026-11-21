@@ -4,16 +4,17 @@ Run from the Polyworld repository root, with the usual dependencies and sibling
 `polyworld_art` checkout:
 
 ```sh
-nim r games/crewrift/crewrift.nim
+nim r games/crewrift/crewrift.nim --player
 ```
 
-The default match has eight players, with one human and seven local Bassy BASIC
-bots. Roles are random. To choose a role or watch the bots:
+The default match has eight local Bassy BASIC bots. `--player` reserves slot one
+for a human, and `--player N` selects another one-based slot. Roles are random.
+To choose a role or watch the bots:
 
 ```sh
-nim r games/crewrift/crewrift.nim --role:imp
-nim r games/crewrift/crewrift.nim --role:crew
-nim r games/crewrift/crewrift.nim --spectate --seed:17
+nim r games/crewrift/crewrift.nim --player --role imp
+nim r games/crewrift/crewrift.nim --player --role crew
+nim r games/crewrift/crewrift.nim --seed 17
 ```
 
 | Control | Action |
@@ -52,8 +53,12 @@ and remaining task count, imposter kill count, or dead status. Scroll to see mor
 crew. Click a visible living crew member's portrait to follow them.
 The top-left **Room names** button shows or hides the large white room labels.
 Room labels start visible and retain their setting while seeking or looping.
-Use `--name:"Andre von Houck"` to name your human-controlled slot. Local bots
-are labeled `base.bas`, or the filename supplied with `--bot PATH[:N]`. See the
+Use `--player --name "Andre von Houck"` to name your human-controlled slot.
+`--name` requires `--player`; bot identities come from their program files.
+Local bots are labeled `base.bas`, or the filename supplied with the repeatable
+`--bot PATH[:N]` option (`--bots` has the same meaning). Supplied groups must
+fill every non-human slot in order. If no bot option is supplied, those slots
+use the bundled program. See the
 [BASIC bot guide](../games/crewrift/docs/bots.md) for custom policies and the
 host API. New replays retain the names for each slot. Older recordings without
 identities show `Unknown`.
@@ -124,15 +129,26 @@ faces, and boxes fully enclosed by solid meshes before auditing the ship.
 Input recordings can be viewed graphically or verified without graphics:
 
 ```sh
-nim r games/crewrift/crewrift.nim --record:tmp/crewrift.json
-nim r games/crewrift/crewrift.nim --replay:tmp/crewrift.json
-nim r -d:headless games/crewrift/crewrift.nim --record:tmp/crewrift.json
-nim r -d:headless games/crewrift/crewrift.nim --replay:tmp/crewrift.json
+nim r games/crewrift/crewrift.nim --player --record tmp/crewrift.json
+nim r games/crewrift/crewrift.nim --replay tmp/crewrift.json
+nim r -d:headless games/crewrift/crewrift.nim --record tmp/crewrift.json
+nim r -d:headless games/crewrift/crewrift.nim --replay tmp/crewrift.json
 nim r -d:headless games/crewrift/tests/test_sim.nim
 ```
 
-`--players:8` through `--players:16` set the roster. `--ticks:N` bounds active
-simulation ticks. Screenshot capture uses the shared native arguments:
+`--players 8` through `--players 16` set the roster. `--ticks N` bounds active
+simulation ticks; `--seconds N` and `--minutes N` express the same limit in
+time. `--play false` starts the viewer paused, `--speed N` selects its playback
+speed, and `--vsync off` disables display synchronization. Headless runs accept
+`--headless-tick-rate N` for wall-clock pacing; zero runs without waiting.
+Graphical builds reject this headless-only pacing option.
+Replay playback cannot be combined with bots, a human player, or recording.
+Explicit `--seed N` values are deterministic signed 32-bit integers, including
+negative values and `-1`. The exact seed is retained in recordings and rewinds.
+Crewrift has no network-room or LLM request interface, so those options are
+rejected. All value flags accept space, `=`, or `:` separators.
+
+Screenshot capture uses the shared native arguments:
 
 ```sh
 nim r games/crewrift/crewrift.nim --screenshot output/crewrift.png --frames 30 --windowSize 1280x720

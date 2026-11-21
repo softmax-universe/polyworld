@@ -16,6 +16,8 @@ import
 const
   LevelCount* = 6      ## surface, pyramid, rooms, caves, lava hall, vault
   PartySize* = 4
+  ArenaMonsterLimit* = 24
+    ## Six arena columns, leaving a gap before the heroes' column.
   InventorySlots* = 2
   ChatLines* = 16      ## ring buffer of recent party chatter
   TilesPerLevel* = GridTiles * GridTiles

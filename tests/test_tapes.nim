@@ -1,10 +1,33 @@
 import
-  std/strutils,
+  std/[os, strutils, tempfiles],
   polyworld/tapes
 
 type TapeAction = object
   tick*: uint32
   kind*: uint8
+
+echo "Testing replay files create missing output directories"
+block:
+  let
+    directory = createTempDir("polyworld_tape_", "")
+    path = directory / "nested" / "match.replay"
+  defer: removeDir(directory)
+  saveReplayFile(path, "test", 1, "commands")
+  doAssert loadReplayFile(path, "test", 1, string) == "commands"
+
+echo "Testing invalid replay output creates no directories"
+block:
+  let
+    directory = createTempDir("polyworld_invalid_tape_", "")
+    parent = directory / "nested"
+    path = parent / "match.replay"
+  defer: removeDir(directory)
+  try:
+    saveReplayFile(path, "test", 1, "too large", maxBytes = 1)
+    doAssert false, "Invalid replay data must be rejected"
+  except ReplayError:
+    discard
+  doAssert not dirExists(parent)
 
 echo "Testing action order and exact-tick playback"
 block:

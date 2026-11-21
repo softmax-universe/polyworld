@@ -11,7 +11,7 @@ import ../app, ../bench, ../ui/hud, ../scene/table, ../play,
   ../scene/cardrenderer, ../vfx/vfxrenderer, ../scene/post,
   ../scene/courtyard, ../scene/towerarena,
   ../ui/tuning, ../ui/matchmenu, ../ui/controls, ../replayer, ../audios
-import polyworld/[characters, chrome, menus, sounds, viewers]
+import polyworld/[characters, chrome, menus, player, sounds, viewers]
 when defined(emscripten):
   import ../net/web
 else:
@@ -86,11 +86,13 @@ proc runDuel*(app: App) =
   when not defined(emscripten):
     app.useReplayRecording()
   app.setBattlefield(2)
-  let names = if app.replay != nil: app.replay.playerNames() else: @[]
+  let names = if app.replay != nil: app.replay.playerNames()
+    else: app.playerNames
   var
     phase = ChooseClasses
     game: GameState
-    menu: MatchMenu
+    menu = MatchMenu(paused: app.replay == nil and
+      sessionOptions.common.pauseOnStart)
     # Captures can replay a cast from its visual seed.
     play =
       if captureActive():
@@ -163,6 +165,9 @@ proc runDuel*(app: App) =
         else:
           sources[1] = defaults[seedRng.rand(defaults.high)]
     botVms = loadBots(sources)
+    for bot in botVms:
+      if bot != nil:
+        bot.output = sessionOptions.launchBotPrinter()
 
   proc botSeat(player: int, seed: int64): Seat =
     ## A bot's own class and deck; an illegal deck is reported and seats
@@ -224,6 +229,8 @@ proc runDuel*(app: App) =
     play.addOpeningHands(game, duelLayout)
     play.statusMessage =
       app.replay.playerName(game.currentPlayer) & " begins."
+    app.replay.transport.playing = not sessionOptions.common.pauseOnStart
+    app.replay.transport.setPlaybackSpeed(max(sessionOptions.common.speed, 1))
   when defined(takeScreenshot):
     if getEnv("CAC_DEMO_BOARD") == "1":
       play.animations.setLen(0)
@@ -616,6 +623,10 @@ proc runDuel*(app: App) =
     menu.handleEscape(window, play.pendingTargeting or
       play.selectedAttacker != 0)
     battleInputEnabled = not menuWasVisible and not menu.visible
+    if app.atLaunchTickLimit():
+      menu.paused = true
+      battleInputEnabled = false
+      play.statusMessage = "Tick limit reached."
     let audible = window.focused and
       not captureActive() and not menu.visible and not menu.paused and
       (app.replay == nil or (app.replay.transport.playing and
@@ -630,6 +641,8 @@ proc runDuel*(app: App) =
       dt = 0
     if app.replay != nil:
       dt *= app.replay.timeScale
+    else:
+      dt *= max(sessionOptions.common.speed, 1).float32
     when defined(cacLayoutTuning):
       # Provisional controls for dialing in the camera and the hands.
       tuner.tune(window, dt, duelTuningTargets())
@@ -664,6 +677,10 @@ proc runDuel*(app: App) =
       elif not menu.paused:
         discard play.updateBots(game, duelLayout, botVms, botClock, humanActs,
           dt)
+        if app.atLaunchTickLimit():
+          menu.paused = true
+          battleInputEnabled = false
+          play.statusMessage = "Tick limit reached."
         for event in terminalLog.readNew(game):
           echo event.describe()
 
@@ -1039,7 +1056,7 @@ proc runDuel*(app: App) =
         playSound(cue)
     when not defined(emscripten):
       if phase == PlayGame:
-        app.updateReplaySaving(game.gameOver)
+        app.updateReplaySaving(game.gameOver or app.atLaunchTickLimit())
     menu.draw(app)
     sk.endUi()
     sk.drawHudFaces()

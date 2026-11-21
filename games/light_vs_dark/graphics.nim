@@ -26,6 +26,8 @@ import
   constructionpresentation, targetfeedback, rendervisibility,
   harvestpresentation, woodcuttingpresentation, battlesounds
 
+from polyworld/cli import WindowSizeFlag
+
 when defined(takeScreenshot):
   import std/[os, strutils]
 
@@ -437,7 +439,8 @@ proc runGraphics*(network: NetworkMatch = nil,
           ## Writes one validated game snapshot to its replay library.
           saveLibraryReplay(snapshot))
       saveError = ""
-  preferences.applyPreferences(window, configureDisplay = not captureHidden)
+  preferences.applyPreferences(window, configureDisplay =
+    not captureHidden and WindowSizeFlag notin options.specifiedFlags)
   window.updateCursorConfinement(preferences.edgeScrolling)
   let previousBindings = customBindingsEnabled
   customBindingsEnabled = true
@@ -480,6 +483,9 @@ proc runGraphics*(network: NetworkMatch = nil,
       repeating = network == nil and (run.replayMode or options.playerSlot == 0))
 
   resetMatchState()
+  if network != nil and (options.pauseOnStart or options.speed != 1):
+    echo "LvD multiplayer follows the live relay at 1x; --play and --speed " &
+      "apply to local games and file replays."
   if network != nil and hooks.reload != nil:
     raise newException(GraphicsError, "Cannot replace a network match in place")
   let assetSeed = run.mapSeed
@@ -2010,7 +2016,7 @@ proc runGraphics*(network: NetworkMatch = nil,
     let playback = transport
     resetMatchState()
     transport.playing = playback.playing
-    transport.speedIndex = playback.speedIndex
+    transport.setPlaybackSpeed(playback.speed)
     transport.repeating = playback.repeating
     seekCheckpoints.add SeekCheckpoint(
       world: run.world.clone(), actionIndex: 0, hashCheck: run.hashCheck
@@ -2090,7 +2096,7 @@ proc runGraphics*(network: NetworkMatch = nil,
             network.client.send(RoomMessage(kind: LeaveRoom))
             leaveRequested = true
         transport.playing = not network.finished and network.client.snapshot.phase == rooms.Playing
-        transport.speedIndex = 0
+        transport.setSpeed(0)
         run.historyPlayback = false
         networkPresentation.startFrame(dt)
         try:

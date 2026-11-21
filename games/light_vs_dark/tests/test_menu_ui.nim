@@ -24,9 +24,10 @@ suite "LvD roster":
     check humanAfterRemoval(-1, 0) == -1
 
 suite "LvD menu entry":
-  test "server overrides do not skip the main menu, room invites do":
+  test "explicit server launches and room invites open multiplayer":
     check not opensMultiplayer("")
     check opensMultiplayer("room-code")
+    check opensMultiplayer("", "ws://127.0.0.1:9911/ws")
 
 when not defined(headless):
   import polyworld/menus
@@ -38,7 +39,8 @@ when not defined(headless):
       check effectivePreferences(stored, "", configured).server == configured
       check effectivePreferences(stored, "wss://query.example/ws", configured).server ==
         "wss://query.example/ws"
-      check effectivePreferences(stored, "", Preferences().server) == stored
+      check effectivePreferences(stored, "", Preferences().server).server ==
+        Preferences().server
       check effectivePreferences(stored, "", "") == stored
 
     test "server query survives settings and local match preference reloads":

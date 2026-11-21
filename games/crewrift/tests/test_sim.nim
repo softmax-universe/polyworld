@@ -604,7 +604,7 @@ block:
 
 echo "Testing muted launch options"
 block:
-  doAssert parseOptions(@[]).soundMuted
+  doAssert not parseOptions(@[]).soundMuted
   doAssert parseOptions(@["--mute"]).soundMuted
   doAssert not parseOptions(@["--unmute"]).soundMuted
   doAssert not parseOptions(@["--mute=false"]).soundMuted

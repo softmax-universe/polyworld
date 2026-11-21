@@ -115,8 +115,6 @@ const
     ## for heroes and monsters alike.
   ArenaRanks = 4'i32
     ## Monsters per arena column, every other row and clear of both walls.
-  ArenaMonsterLimit* = 24
-    ## Six arena columns, leaving a gap before the heroes' column.
   ActorBodyRadius = 0.33'fx
   BodyTurnRate = 0.35'fx
   PathArrive = 0.35'fx

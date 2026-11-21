@@ -3,14 +3,16 @@
 import
   std/[os, strutils],
   bassy,
-  polyworld/[cli, policies, screenshots],
+  polyworld/[cli, policies, screenshots, timings],
   sim, maps, bots, replays
 
 type
   Options* = object
     seed*, players*, ticks*, player*: int
-    speed*: float32
-    soundMuted*: bool = true
+    speed*: int32
+    soundMuted*, pauseOnStart*, verbose*, seedSpecified*: bool
+    vsync*: bool = true
+    headlessTickRate*: int32
     role*, name*, record*, replay*: string
     width*, height*: int32
     captureTicks*: int
@@ -33,49 +35,40 @@ type
 proc usage() =
   ## Prints the controls and native or headless launch options.
   echo "Crewrift in Polyworld"
-  echo "  WASD: move or select vote. E / Space: use, kill, vote."
-  echo "  Arrows / middle / right drag: pan. Wheel: zoom. C: action camera."
-  echo "  Click / shift-click / box select: follow crew. Ctrl+A: select all."
-  echo "  Q: vent. Enter: meeting chat. Tab: map. R: new match."
-  echo "  --player:N        Control slot N (1-16, default 1)."
-  echo "  --name:NAME       Human player's name in the roster and replay."
-  echo "  --spectate        Let local bots play every slot."
+  when not defined(headless):
+    echo "  WASD: move or select vote. E / Space: use, kill, vote."
+    echo "  Arrows / middle / right drag: pan. Wheel: zoom. C: action camera."
+    echo "  Click / shift-click / box select: follow crew. Ctrl+A: select all."
+    echo "  Q: vent. Enter: meeting chat. Tab: map. R: new match."
+    echo "  --player [N]      Control slot N (1-16, bare flag selects 1)."
+    echo "  --name NAME       Human player's name in the roster and replay."
+  echo "  --spectate        Let local bots play every slot (the default)."
   echo "  --bot PATH[:N]    Use a BASIC program for N bot slots (default 1)."
-  echo "  --bot:PATH[:N]    Equivalent compact form; other slots use base.bas."
-  echo "  --role:crew|imp   Choose your role, or omit for random roles."
-  echo "  --players:N       Roster size (8-16, default 8)."
-  echo "  --seed:N          Match seed (default 2026)."
-  echo "  --ticks:N         Maximum active ticks (default 10000)."
-  echo "  --speed:N         Simulation speed (default 1)."
-  echo "  --record:PATH     Save an input replay with tick fingerprints."
-  echo "  --replay:PATH     Play and verify a saved input replay."
-  echo "  --windowSize WxH  Window size (default 1440x900)."
-  echo "  --screenshot PATH Save a PNG and exit after --frames N (default 30)."
-  echo "  --capture-ticks:N Advance N ticks before capture frames (default 0)."
-  echo "  --mute[=BOOL]     Start muted (default true)."
+  echo "  --bots PATH[:N]   Same as --bot; explicit bots must fill the roster."
+  echo "                    Without bot options, every bot uses base.bas."
+  when not defined(headless):
+    echo "  --role crew|imp   Choose your human role, or omit for random roles."
+  echo "  --players N       Roster size (8-16, default 8)."
+  echo "  --seed N          Match seed (default 2026)."
+  echo "  --ticks N         Maximum active ticks (default 10000)."
+  echo "  --seconds N       Same duration in seconds; --minutes N also works."
+  when not defined(headless):
+    echo "  --speed N         Simulation speed (default 1)."
+    echo "  --play BOOL       Start the viewer playing or paused."
+  echo "  --record PATH     Save an input replay with tick fingerprints."
+  echo "  --replay PATH     Play and verify a saved input replay."
+  when not defined(headless):
+    echo "  --windowSize WxH  Window size (default 1440x900)."
+    echo "  --screenshot PATH Save a PNG and exit after --frames N (default 30)."
+    echo "  --capture-ticks:N Advance N ticks before capture frames (default 0)."
+    echo "  --vsync BOOL      Enable display synchronization (default true)."
+  echo "  --mute[=BOOL]     Request muted audio."
   echo "  --unmute          Start with sound enabled."
+  echo "  --verbose         Print the resolved match setup."
+  when defined(headless):
+    echo "  --headless-tick-rate N  Pace headless ticks (default 0: unlimited)."
+  echo "All value flags accept spaces, =, or : separators."
   echo "Compile with -d:headless to run and verify without graphics."
-
-proc addBotOption(groups: var seq[BotGroup], specification: string) =
-  ## Validates the shared bot syntax using Crewrift's error boundary.
-  var path = specification
-  let separator = specification.rfind(':')
-  if separator >= 0 and separator < specification.high:
-    let suffix = specification[separator + 1 .. ^1]
-    var numeric = true
-    for character in suffix:
-      if character notin {'0' .. '9'}:
-        numeric = false
-        break
-    if numeric:
-      path = specification[0 ..< separator]
-      let count = parseBiggestInt(suffix)
-      if count < 1 or count > MaxPlayers:
-        raise newException(CrewriftError,
-          "Bot count must be between 1 and " & $MaxPlayers & ".")
-  if path.len == 0:
-    raise newException(CrewriftError, "--bot requires a BASIC source path.")
-  groups.addBotSpec(specification)
 
 proc validateBots(options: Options) =
   ## Rejects bot groups that cannot fit the live roster before reading files.
@@ -90,76 +83,84 @@ proc validateBots(options: Options) =
       raise newException(CrewriftError,
         "Too many bots for " & $available & " available slots.")
     count += group.count
+  if options.botGroups.len > 0 and count != available:
+    raise newException(CrewriftError,
+      "Explicit bots must fill " & $available & " slots; configured " &
+        $count & ".")
 
 proc parseOptions*(arguments = commandLineParams()): Options =
   ## Parses the shared native and headless command surface.
-  result = Options(
-    seed: 2026, players: MinPlayers, ticks: MaxTicks,
-    player: 0, speed: 1, width: 1440, height: 900
-  )
-  when defined(headless):
-    result.player = -1
-  var index = 0
-  while index < arguments.len:
-    let argument = arguments[index]
-    try:
-      if result.capture.takeCaptureFlag(arguments, index, argument) or
-        takeWindowSizeFlag(result.width, result.height,
-          arguments, index, argument):
-          inc index
-          continue
-    except ScreenshotError as error:
-      raise newException(CrewriftError, error.msg)
-    inc index
-    let
-      parts = argument.split(':', 1)
-      flag = parts[0]
-      value = if parts.len > 1: parts[1] else: ""
-    try:
-      if result.soundMuted.takeSoundFlag(argument):
-        continue
-      if argument == "--bot":
-        if index >= arguments.len:
-          raise newException(CrewriftError,
-            "--bot requires a BASIC source path.")
-        result.botGroups.addBotOption(arguments[index])
-        inc index
-        continue
-      if argument.startsWith("--bot="):
-        result.botGroups.addBotOption(argument[6 .. ^1])
-        continue
-      case flag
-      of "--bot": result.botGroups.addBotOption(value)
-      of "--seed": result.seed = parseInt(value)
-      of "--players": result.players = parseInt(value)
-      of "--ticks": result.ticks = parseInt(value)
-      of "--player": result.player = parseInt(value) - 1
-      of "--name": result.name = value.strip()
-      of "--spectate": result.player = -1
-      of "--speed": result.speed = parseFloat(value).float32
-      of "--role": result.role = value
-      of "--record": result.record = value
-      of "--replay": result.replay = value
-      of "--capture-ticks": result.captureTicks = parseInt(value)
-      of "--help", "-h":
-        usage()
-        quit(0)
+  result.players = MinPlayers
+  var
+    common = GameOptions(seed: 2026, maximumTicks: MaxTicks,
+      speed: 1, windowWidth: 1440, windowHeight: 900)
+    index = 0
+    spectate = false
+  try:
+    while index < arguments.len:
+      let
+        argument = arguments[index]
+        flag = argument.splitFlag().name
+      if common.takeCommonFlag(arguments, index, argument):
+        discard
       else:
-        raise newException(CrewriftError, "Unknown argument: " & argument)
-    except ValueError as error:
-      raise newException(CrewriftError, "Invalid option: " & error.msg)
-  if result.seed < RandomSeedSentinel or
-    result.players < MinPlayers or result.players > MaxPlayers or
+        case flag
+        of "--players", "--role", "--capture-ticks":
+          let value = arguments.flagValue(index, argument)
+          case flag
+          of "--players": result.players = parsePositiveInt32(value, flag).int
+          of "--role": result.role = value
+          of "--capture-ticks":
+            result.captureTicks = parseInt32(value, flag).int
+          else: discard
+        of "--spectate":
+          if argument != flag:
+            raise newException(CrewriftError, "--spectate takes no value.")
+          spectate = true
+        of "--help", "-h":
+          usage()
+          quit(0)
+        else:
+          raise newException(CrewriftError, "Unknown argument: " & argument)
+      inc index
+    if spectate and common.playerSlot != 0:
+      raise newException(CrewriftError, "--spectate cannot be used with --player.")
+    var supported = AllCommonFlags - {LlmModeFlag, ServerFlag, RoomFlag}
+    when not defined(headless):
+      supported.excl HeadlessTickRateFlag
+    common.rejectUnsupportedFlags(supported)
+    common.validateGameOptions(0, "")
+    if NameFlag in common.specifiedFlags and common.playerSlot == 0:
+      raise newException(CrewriftError, "--name requires --player.")
+  except ValueError as error:
+    raise newException(CrewriftError, "Invalid option: " & error.msg)
+  result.seed = common.seed
+  result.seedSpecified = SeedFlag in common.specifiedFlags
+  result.ticks = common.maximumTicks
+  result.player = common.playerSlot.int - 1
+  result.speed = common.speed
+  result.soundMuted = common.soundMuted
+  result.name = common.playerName
+  result.record = common.recordPath
+  result.replay = common.replayPath
+  result.width = common.windowWidth
+  result.height = common.windowHeight
+  result.capture = common.capture
+  result.botGroups = common.botGroups
+  result.pauseOnStart = common.pauseOnStart
+  result.vsync = common.vsync
+  result.verbose = common.verbose
+  result.headlessTickRate = common.headlessTickRate
+  if result.players < MinPlayers or result.players > MaxPlayers or
     result.player < -1 or result.player >= result.players or
     result.ticks < 1 or result.ticks > 1_000_000 or
     result.captureTicks < 0 or result.captureTicks > 1_000_000 or
-    not (result.speed > 0 and result.speed <= 16) or
-    result.width < 800 or result.height < 600:
+    result.speed <= 0 or result.width <= 0 or result.height <= 0:
       raise newException(CrewriftError, "Invalid roster, time, or window size.")
   if result.role notin ["", "crew", "imp"]:
     raise newException(CrewriftError, "Role must be crew or imp.")
-  if result.record.len > 0 and result.replay.len > 0:
-    raise newException(CrewriftError, "Choose recording or replay playback.")
+  if result.role.len > 0 and result.player < 0:
+    raise newException(CrewriftError, "--role requires --player.")
   if result.name.len > 128 or result.name != cleanChatMessage(result.name):
     raise newException(CrewriftError, "Player name must be printable text.")
   try:
@@ -210,7 +211,7 @@ proc rewind*(game: Game) =
   ## Restores the resolved match setup while retaining the input tape.
   var config = game.recording.config
   config.minPlayers = game.recording.players
-  game.world = initSimServer(config)
+  game.world = initSimServer(config, resolveSeed = false)
   game.world.fitStations()
   game.world.gameEventLoggingEnabled = false
   for i in 0 ..< config.minPlayers:
@@ -247,6 +248,8 @@ proc newGame*(options: Options): Game =
     result.recording = loadReplay(options.replay)
     result.playback = true
   else:
+    if not options.seedSpecified:
+      config.resolveRandomSeed()
     result.recording = ReplayData(
       version: ReplayVersion, config: config,
       players: config.minPlayers
@@ -254,6 +257,10 @@ proc newGame*(options: Options): Game =
     result.loadBotSources(options)
   result.rewind()
   result.recording.config = result.world.config
+  if options.verbose:
+    echo "Crewrift setup: ", result.world.players.len, " players, seed ",
+      result.world.config.seed, ", human slot ", options.player + 1,
+      ", replay ", result.playback
 
 proc rosterName*(game: Game, slot: int): string =
   ## Labels each crew color with its recorded human or policy identity.
@@ -343,8 +350,10 @@ proc advance*(game: Game, player = -1, record = false) =
 proc runHeadless*(options: Options) =
   ## Runs local policies or verifies all recorded simulation ticks.
   let game = newGame(options)
+  var pacer = initTickPacer(options.headlessTickRate)
   while not game.finished():
     game.advance(record = options.record.len > 0)
+    pacer.pace()
   saveReplay(options.record, game.recording)
   let outcome =
     if game.world.phase != GameOver: "partial replay"

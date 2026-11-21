@@ -33,7 +33,7 @@ proc turnNumber*(match: MultiplayerMatch): int =
 
 proc newMultiplayerMatch*(seats: openArray[Seat], humanSeat: int,
     seed: int64, botSources: openArray[string] = [],
-    botsChoose = false): MultiplayerMatch =
+    botsChoose = false, output: PrintProc = nil): MultiplayerMatch =
   ## The seats dealt by the core. The last seat standing wins. Every seat
   ## but the human's runs a bot script, taken from `botSources` in turn
   ## (repeating); with none, those seats don't act. With `botsChoose`, each
@@ -47,6 +47,9 @@ proc newMultiplayerMatch*(seats: openArray[Seat], humanSeat: int,
         sources[seat] = botSources[next mod botSources.len]
         inc next
   result.bots = loadBots(sources)
+  for bot in result.bots:
+    if bot != nil:
+      bot.output = output
   var selected = @seats
   when not defined(emscripten):
     var setupMessages: seq[ReplayAction]
@@ -156,7 +159,7 @@ when not defined(headless):
     ../vfx/vfxrenderer, ../scene/post, ../scene/courtyard, ../scene/towerarena,
     ../scene/heroes, ../ui/tuning, ../ui/matchmenu, ../ui/controls, ../audios,
     ../net/multiplayer as networkplay
-  import polyworld/[characters, chrome, connections, menus,
+  import polyworld/[characters, chrome, connections, menus, player,
     roomclients, sounds, viewers]
   import polyworld/rooms except Seat
   import ../replayer
@@ -255,6 +258,8 @@ when not defined(headless):
     ## Presents two players in Tower Arena and larger matches on the ring.
     ## Each human faces their own seat; spectators follow the active seat.
     bindApp(app)
+    if app.network != nil:
+      app.validateNetworkLaunch()
     when not defined(emscripten):
       app.useReplayRecording()
     let
@@ -279,7 +284,8 @@ when not defined(headless):
           initRand(sessionOptions.seed)
         else: initRand()
       match: MultiplayerMatch
-      menu: MatchMenu
+      menu = MatchMenu(paused: not online and app.replay == nil and
+        sessionOptions.common.pauseOnStart)
       play = initTablePlay()
       networkTable: TableLayout
       networkBlocked = false
@@ -306,12 +312,15 @@ when not defined(headless):
       for seat in seats.mitems:
         seat = precon(Archer)
       if human.isSome:
-        seats[0] = human.get
+        seats[max(sessionOptions.common.playerSlot.int - 1, 0)] = human.get
       choosingClasses = false
       match = newMultiplayerMatch(seats,
-        humanSeat = if human.isSome: 0 else: -1,
-        seed = seatRng.rand(high(int32)).int64, botSources = botSources,
-        botsChoose = true)
+        humanSeat = if human.isSome:
+          max(sessionOptions.common.playerSlot.int - 1, 0) else: -1,
+        seed = if sessionOptions.seedGiven: sessionOptions.seed
+          else: seatRng.rand(high(int32)).int64,
+        botSources = botSources, botsChoose = true,
+        output = sessionOptions.launchBotPrinter())
       when not defined(emscripten):
         play.recorder = app.beginReplayRecording(
           match.initialSeats, match.seed, match.setupMessages)
@@ -330,6 +339,9 @@ when not defined(headless):
     if botSources.len == 0:
       botSources = defaultBotSources(appDir)
     if online:
+      for bot in app.network.bots:
+        if bot != nil:
+          bot.output = sessionOptions.launchBotPrinter()
       when not defined(emscripten):
         app.useReplayRecording(app.network.recorder)
       app.network.automaticBots = false
@@ -374,6 +386,8 @@ when not defined(headless):
       when not defined(emscripten):
         play.recorder = app.beginReplayRecording(match.initialSeats, seed)
       for bot in match.bots:
+        if bot != nil:
+          bot.output = sessionOptions.launchBotPrinter()
         bot.ensureSeed(seed)
       orbit = initSeatOrbit(layout.balconies[match.viewedSeat].yaw)
       play.statusMessage = match.turnStatus(names)
@@ -394,6 +408,8 @@ when not defined(headless):
       play.resetTable()
       play.statusMessage =
         app.replay.playerName(match.current) & " begins."
+      app.replay.transport.playing = not sessionOptions.common.pauseOnStart
+      app.replay.transport.setPlaybackSpeed(max(sessionOptions.common.speed, 1))
       openingDraw = true
     var previewScreenshotFrame = 0
     when defined(cacLayoutTuning):
@@ -429,6 +445,10 @@ when not defined(headless):
       menu.handleEscape(window, play.pendingTargeting or
         play.selectedAttacker != 0)
       battleInputEnabled = not menuWasVisible and not menu.visible
+      if app.atLaunchTickLimit():
+        menu.paused = true
+        battleInputEnabled = false
+        play.statusMessage = "Tick limit reached."
       let audible = window.focused and not captureActive() and
         not menu.visible and not menu.paused and
         (app.replay == nil or (app.replay.transport.playing and
@@ -447,6 +467,8 @@ when not defined(headless):
         previewDt = 0
       if app.replay != nil:
         previewDt *= app.replay.timeScale
+      elif not online:
+        previewDt *= max(sessionOptions.common.speed, 1).float32
       previewTime += previewDt
       play.animations.advanceAnimations(previewDt)
       play.discardFlights.advanceAnimations(previewDt)
@@ -565,7 +587,12 @@ when not defined(headless):
           turnPassed()
           if botClock.scriptFailed:
             play.statusMessage = message
-        if play.presentationIdle(match.game) and not play.attackActive and
+        if app.atLaunchTickLimit():
+          menu.paused = true
+          battleInputEnabled = false
+          play.statusMessage = "Tick limit reached."
+        if not menu.paused and play.presentationIdle(match.game) and
+            not play.attackActive and
             not match.game.gameOver and not match.game.waitingChoice and
             match.game.dead(match.current):
           when not defined(emscripten):
@@ -1027,7 +1054,7 @@ when not defined(headless):
           playSound(cue)
       when not defined(emscripten):
         if not choosingClasses:
-          app.updateReplaySaving(match.game.gameOver or
+          app.updateReplaySaving(match.game.gameOver or app.atLaunchTickLimit() or
             (online and app.network.finished))
       menu.draw(app)
       sk.endUi()

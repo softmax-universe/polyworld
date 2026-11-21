@@ -35,11 +35,11 @@ for (const query of ["?mute=1&mute=0", "?mute=false&mute=false", "?mute&mute"]) 
 assert.deepEqual(configure("?replay=query.replay&mute=false"), [
   "--replay", "/web/replay.replay", "--unmute"
 ]);
-assert.deepEqual(configure("?mute=0&human=true&players=2", true), [
-  "--unmute", "--human", "true", "--players", "2"
+assert.deepEqual(configure("?mute=0&player=1&players=2", true), [
+  "--player=1", "--unmute", "--players", "2"
 ]);
-assert.deepEqual(configure("?human=true&players=2", true), [
-  "--human", "true", "--players", "2"
+assert.deepEqual(configure("?player=1&players=2", true), [
+  "--player=1", "--players", "2"
 ]);
 
 assert.deepEqual(configure("?bot=../bots/Dragon.bas:3&bot=other/Dragon.bas"), [

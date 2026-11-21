@@ -152,10 +152,15 @@ proc saveReplayFile*[T](
     data: T,
     maxBytes = DefaultMaxReplayBytes
 ) =
-  ## Writes one game payload with the common Polyworld header.
+  ## Writes a validated replay, creating its parent directories as needed.
   if path.len == 0:
     fail("replay output path is empty")
-  writeFile(path, encodeReplayFile(game, gameVersion, data, maxBytes))
+  let
+    bytes = encodeReplayFile(game, gameVersion, data, maxBytes)
+    directory = path.parentDir
+  if directory.len > 0:
+    createDir(directory)
+  writeFile(path, bytes)
 
 proc loadReplayFile*[T](
     path,

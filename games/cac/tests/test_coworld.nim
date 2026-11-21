@@ -186,6 +186,21 @@ suite "headless runner flags":
       @["archer", "mage"]
     check parseHeadlessArgs(@["--classes=warrior,mage,archer"]).classNames ==
       @["warrior", "mage", "archer"]
+    check parseHeadlessArgs(@["--classes:warrior,mage"]).classNames ==
+      @["warrior", "mage"]
+
+  test "explicit roster size, pacing, and unsupported flags are validated":
+    let parsed = parseHeadlessArgs(@[
+      "--bots=a.bas:3", "--players:3", "--headless-tick-rate", "24"])
+    check parsed.playerCount == 3
+    check parsed.options.botGroups.botCount == 3
+    check parsed.options.headlessTickRate == 24
+    for args in [@["--players=3", "--bot=a.bas:2"],
+        @["--player"], @["--speed=2"], @["--play=false"],
+        @["--windowSize=800x600"], @["--llm-mode=barrier"],
+        @["--server=ws://localhost:9911/ws"]]:
+      expect ValueError:
+        discard parseHeadlessArgs(args)
 
   test "--record and --replay":
     let recorded = parseHeadlessArgs(@["--bot", "a.bas:2", "--record",
@@ -204,17 +219,17 @@ suite "browser and replay viewer flags":
       "/episode.replay"
     check parseSessionOptions([]).replayPath == ""
 
-  test "the browser's URL parameters become session flags":
-    # webinputs.js: replay=URL, bot=URL, seed=N; web/inputs.js: human=1,
-    # players=N.
-    let options = parseSessionOptions(["--replay", "/web/replay.replay",
-      "--bot", "/web/bot0/archer.bas", "--bot", "/web/bot1/mage.bas",
-      "--seed", "-42", "--human", "true", "--players", "4"])
-    check options.replayPath == "/web/replay.replay"
-    check options.botPaths == @["/web/bot0/archer.bas", "/web/bot1/mage.bas"]
+  test "the browser's URL parameters become canonical session flags":
+    # Replay input is a separate launch from seed and bot configuration.
+    let options = parseSessionOptions([
+      "--bot", "/web/bot0/archer.bas:2", "--bot", "/web/bot1/mage.bas",
+      "--seed", "-42", "--players", "3"])
+    check options.replayPath == ""
+    check options.botPaths == @["/web/bot0/archer.bas",
+      "/web/bot0/archer.bas", "/web/bot1/mage.bas"]
     check options.seed == -42
-    check options.human
-    check options.playerCount == 4
+    check not options.human
+    check options.playerCount == 3
     let inputs = readFile(currentSourcePath().parentDir.parentDir /
       "web/inputs.js")
     check "\"class\"" notin inputs

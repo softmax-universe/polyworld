@@ -509,15 +509,8 @@ proc initHeroHost(
       result = activeGame.sendChat(player, int(args[0].asInt), text)
   let pullMailboxProc: NumericHostProc = proc(args: openArray[Value]): Value =
     ## Copies the oldest message into BASIC and consumes it on success.
-    let
-      player = activeGame.world.heroIndex(heroId)
-      inbox = activeGame.inboxes[player]
-    var runtime = activeGame.heroVms[player].runtime
-    if inbox.count == 0:
-      result = runtime.putString("")
-    else:
-      result = runtime.putString(inbox.messages[inbox.first])
-    discard inbox.pop()
+    let player = activeGame.world.heroIndex(heroId)
+    activeGame.heroVms[player].runtime.pullMailboxString(activeGame.inboxes[player])
   let mailboxIdProc: HostProc = proc(args: openArray[int32]): int32 =
     ## Returns the channel or DM sender of the last pulled message.
     activeGame.inboxes[activeGame.world.heroIndex(heroId)].lastId

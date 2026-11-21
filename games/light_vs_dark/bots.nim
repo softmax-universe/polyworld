@@ -331,7 +331,7 @@ proc deliverChat*(
     target < -2 or target == -1 or target >= game.inboxes.len or
     text.len == 0 or text.len > MaxChatBytes:
       return 0
-  let id = int32(if target < 0: target else: sender)
+  let id = receivedChatId(sender, target)
   for recipient in 0 ..< game.inboxes.len:
     if (target == -2 or recipient == target) and
       game.inboxes[recipient].count < MaxMailboxMessages:
@@ -392,15 +392,8 @@ proc buildOverlordHost*(playerId: int32, llm: LlmClient = nil, policySlot = -1):
       result = activeGame.sendChat(player, int(args[0].asInt), text)
   let pullMailboxProc: NumericHostProc = proc(args: openArray[Value]): Value =
     ## Copies the oldest message into BASIC and consumes it on success.
-    let
-      player = int(playerId)
-      inbox = activeGame.inboxes[player]
-    var runtime = activeGame.brains[player].runtime
-    if inbox.count == 0:
-      result = runtime.putString("")
-    else:
-      result = runtime.putString(inbox.messages[inbox.first])
-    discard inbox.pop()
+    let player = int(playerId)
+    activeGame.brains[player].runtime.pullMailboxString(activeGame.inboxes[player])
   let mailboxIdProc: HostProc = proc(args: openArray[int32]): int32 =
     ## Returns the channel or DM sender of the last pulled message.
     activeGame.inboxes[int(playerId)].lastId

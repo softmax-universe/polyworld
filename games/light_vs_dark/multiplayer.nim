@@ -77,13 +77,14 @@ proc encodeChat*(chat: ChatSubmission): string =
   result.put32(cast[uint32](chat.target))
   result.putString(chat.text)
 
-proc decodeChat(bytes: string): ChatSubmission =
-  var reader = PacketReader(data: bytes)
-  if reader.get32() != 0: reject("Unknown LvD mailbox payload")
-  result.player = cast[int32](reader.get32())
+proc readChat(reader: var PacketReader, tick: uint32): ReplayAction =
+  ## The caller consumed the chat tag while dispatching the packet.
+  result.kind = ActionChat
+  result.tick = tick
+  result.playerId = cast[int32](reader.get32())
   result.target = cast[int32](reader.get32())
   result.text = reader.getString(MaxChatBytes)
-  if reader.cursor != bytes.len: reject("Trailing LvD mailbox bytes")
+  if reader.cursor != reader.data.len: reject("Trailing LvD mailbox bytes")
 
 proc newLocalMatch*(config: LvdConfig, sources: openArray[string]): Game =
   config.validate()
@@ -294,18 +295,16 @@ proc applyPacket*(session: NetworkMatch, packet: RoomMessage) =
       reject("Command refers to an uninitialized LvD player")
     var reader = PacketReader(data: command.payload)
     if reader.get32() == 0:
-      let chat = decodeChat(command.payload)
-      if chat.player != int32(session.playerForSeat(int(command.seat))) or chat.target < -2 or
+      let chat = reader.readChat(packet.tick)
+      if chat.playerId != int32(session.playerForSeat(int(command.seat))) or chat.target < -2 or
         chat.target == -1 or chat.target >= game.world.players.len:
           reject("Invalid LvD mailbox sender or target")
       if chat.text.len > 0:
-        let action = ReplayAction(kind: ActionChat, tick: packet.tick,
-          playerId: chat.player, target: chat.target, text: chat.text)
         try:
-          action.validateAction(game.recorder.data.header.setup)
+          chat.validateAction(game.recorder.data.header.setup)
         except ReplayError as error:
           reject(error.msg)
-        actions.add action
+        actions.add chat
         inc chatCount
       continue
     var action = decodeSubmission(command.payload)

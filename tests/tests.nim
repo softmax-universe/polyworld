@@ -6,6 +6,7 @@ import
   test_assetpacks,
   test_actioncam,
   test_animblend_controls,
+  test_bars,
   test_directors,
   test_bodies,
   test_body_layers,

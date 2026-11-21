@@ -3,7 +3,7 @@
 import
   std/[math, strutils, tables, times, unicode],
   bumpy, chroma, pixie, silky, vmath, windy,
-  daycycles, gameuis, hovers, inputs, profiles, quadterrain, rtscameras,
+  bars, daycycles, gameuis, hovers, inputs, profiles, quadterrain, rtscameras,
   networks, sounds
 
 export daycycles
@@ -22,7 +22,6 @@ const
   BarFillName = "barfill.9patch"
   BarTrackPatch = 7
   BarFillPatch = 5
-  BarInset = 3.0'f32
   KeyPipName = "pip.medium"
   KeyPipSize = 28.0'f32
   KeyPipInset = 2.0'f32
@@ -509,10 +508,19 @@ proc fittedLabel*(
       return result & "..."
     result = candidate
 
-proc barPatch(size: Vec2, wanted: int): int =
-  ## Returns a 9-patch border that still fits inside size.
-  let cap = min(int(size.x / 2), int(size.y / 2))
-  min(wanted, max(cap, 1))
+proc drawBarTexture(sk: Silky, name: string, cap: int, bounds: BarRect,
+    color: ColorRGBX) =
+  ## Draws proportional end caps and a horizontally uniform center column.
+  let
+    uv = sk.atlas.entries[name]
+    sourceSize = vec2(uv.width.float32, uv.height.float32)
+    sourceCap = (cap * max(sk.sliceScale, 1) * max(uv.pixelScale, 1)).float32
+  for slice in barSlices(bounds, sourceSize, sourceCap, sk.uiScale):
+    if slice.bounds.size.x <= 0 or slice.bounds.size.y <= 0:
+      continue
+    sk.drawQuad(slice.bounds.position, slice.bounds.size,
+      vec2(uv.x.float32, uv.y.float32) + slice.sourcePosition,
+      slice.sourceSize, color)
 
 proc drawBar*(
     sk: Silky,
@@ -523,40 +531,26 @@ proc drawBar*(
     color: ColorRGBX
 ) =
   ## Draws one compact resource bar with a clamped fill.
+  let bounds = barBounds(position, size, sk.uiScale)
+  if bounds.size.x <= 0 or bounds.size.y <= 0:
+    return
   let ratio =
     if maximum <= 0:
       0.0'f32
     else:
       clamp(value / maximum, 0.0'f32, 1.0'f32)
   if BarTrackName in sk.atlas.entries:
-    sk.draw9Patch(
-      BarTrackName,
-      barPatch(size, BarTrackPatch),
-      position,
-      size
-    )
+    sk.drawBarTexture(BarTrackName, BarTrackPatch, bounds,
+      rgbx(255, 255, 255, 255))
   else:
-    sk.drawRect(position, size, BarBack)
+    sk.drawRect(bounds.position, bounds.size, BarBack)
   if ratio <= 0:
     return
-  let
-    inset = min(BarInset, size.y / 6.0'f32)
-    innerPos = position + vec2(inset)
-    innerSize = vec2(
-      max(size.x - inset * 2, 1),
-      max(size.y - inset * 2, 1)
-    )
-    fillSize = vec2(max(innerSize.x * ratio, 1), innerSize.y)
+  let fill = barFill(bounds, ratio, sk.uiScale)
   if BarFillName in sk.atlas.entries:
-    sk.draw9Patch(
-      BarFillName,
-      barPatch(fillSize, BarFillPatch),
-      innerPos,
-      fillSize,
-      color
-    )
+    sk.drawBarTexture(BarFillName, BarFillPatch, fill, color)
   else:
-    sk.drawRect(innerPos, fillSize, color)
+    sk.drawRect(fill.position, fill.size, color)
 
 proc drawSprite*(
     sk: Silky,

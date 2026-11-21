@@ -267,6 +267,8 @@ else:
           (not brain.pending and not brain.explanationPending and
           not world.active and world.actions.len == 0)
         if ready:
+          if settings.prompt.len > 0 and brain.failure.len > 0:
+            raise newException(MonsterError, "Creature request failed: " & brain.failure)
           if window.captureFrame(frame):
             break
         else:

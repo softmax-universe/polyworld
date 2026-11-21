@@ -26,7 +26,7 @@ proc help() =
   echo "Space pauses or resumes while the text editor is unfocused."
   echo "Click or drag the minimap to look around; click Moss to follow."
   echo "Left-click a villager, house, or stash to inspect it."
-  echo "Conversation: Enter to speak, Escape to release focus."
+  echo "Chat: Enter sends typed text. Escape switches chat/camera focus."
 
 proc parseOptions*(parameters = commandLineParams()): Options =
   ## Reads common launch arguments and Monster's own conversation settings.

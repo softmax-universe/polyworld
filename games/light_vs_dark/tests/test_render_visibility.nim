@@ -65,8 +65,9 @@ when not defined(legacyRenderVisibility):
   doAssert enemyIndex >= 0
   template enemy: untyped = w.buildings[enemyIndex]
   doAssert not renderBuildingVisible(w, 1, enemy)
-  w.diplomacy = initDiplomacy(2, DiplomacySettings(neutralStart: true,
-    warGraceSeconds: 1))
+  w.diplomacy = initDiplomacy(2, DiplomacySettings(
+    enabled: true, neutralStart: true, warGraceSeconds: 1
+  ))
   doAssert w.applyDiplomacy(0, 1, OfferAlliance)
   doAssert w.applyDiplomacy(1, 0, AcceptOffer, w.diplomacy.relation(0, 1).offerId)
   w.rebuildVision()

@@ -4,6 +4,8 @@ import jsony, polyworld/[rooms, roomclients], presets
 type RosterState* = object
   dirty*: bool
   pendingPayload*: string
+  resizePlayerCount, resizeTeamCount: int
+  resizeTeams: seq[int32]
 
 proc pending*(state: RosterState): bool = state.pendingPayload.len > 0
 
@@ -20,13 +22,24 @@ proc acceptConfig*(state: var RosterState, config: var LvdConfig,
     config = published
     state.dirty = false
     state.pendingPayload = ""
+  state.resizePlayerCount = 0
+  state.resizeTeamCount = 0
+  state.resizeTeams = @[]
 
 proc rejectConfig*(state: var RosterState, config: var LvdConfig,
     payload: string) =
   let published = parseConfig(payload)
-  config.playerCount = published.playerCount
+  if state.resizePlayerCount == published.playerCount:
+    config.playerCount = published.playerCount
+    config.teamCount = state.resizeTeamCount
+    config.diplomacySettings.teams = state.resizeTeams
+  elif config.playerCount != published.playerCount:
+    config.resizePlayers(published.playerCount)
   config.players = published.players
   state.pendingPayload = ""
+  state.resizePlayerCount = 0
+  state.resizeTeamCount = 0
+  state.resizeTeams = @[]
   state.dirty = config != published
 
 proc resizeRoster*(state: var RosterState, config: var LvdConfig,
@@ -34,17 +47,20 @@ proc resizeRoster*(state: var RosterState, config: var LvdConfig,
   ## Update the requested roster (local games have no relay client).
   if state.pending: return
   var updated = config
-  updated.playerCount = count
-  updated.players.setLen(count)
+  updated.resizePlayers(count)
   updated.validate()
   if client != nil:
     var published = parseConfig(client.snapshot.payload)
-    published.playerCount = count
-    published.players.setLen(count)
+    published.resizePlayers(count)
     published.validate()
     let payload = published.toJson()
     client.send(RoomMessage(kind: ResizeRoom, name: client.snapshot.name,
       number: uint32(count), tickRate: client.snapshot.tickRate,
       flag: publicRoom, payload: payload))
     state.pendingPayload = payload
+    state.resizePlayerCount = config.playerCount
+    state.resizeTeamCount = config.resolvedTeamCount()
+    state.resizeTeams = newSeq[int32](config.playerCount)
+    for player in 0 ..< config.playerCount:
+      state.resizeTeams[player] = config.playerTeam(player)
   config = updated

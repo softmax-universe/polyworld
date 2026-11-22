@@ -7,13 +7,16 @@ working example, and how to test a bot.
 
 ## Quick start
 
-From this folder (`games/cac`):
+CaC uses the repository's shared dependencies and `nimby.lock`. Follow the
+[repository setup](../../README.md#run-locally), then build from the
+repository root:
 
 ```sh
-nim c src/cac.nim                                 # builds ./cac
-./cac --cards:warrior                             # print a class's cards
-./cac --human --bot players/warrior.bas           # play against a bot
-nim c -d:headless -o:build/cac-headless src/cac.nim
+cd games/cac
+nim c cac.nim                           # builds ./cac
+./cac --cards:warrior                    # print a class's cards
+./cac --player --bot players/warrior.bas  # play against a bot
+nim c -d:headless -o:build/cac-headless cac.nim
 ./build/cac-headless --bot my.bas --bot players/mage.bas --seed 7
 ```
 
@@ -64,7 +67,7 @@ nim c -d:headless -o:build/cac-headless src/cac.nim
 
 Every card: `./cac --cards` (or `--cards:CLASS`, `--card:NAME`; see
 [Card reference](#card-reference)). The precon decks are `baseDeckLists` in
-`src/baseset.nim`.
+`baseset.nim`.
 
 ## Writing a bot
 
@@ -361,8 +364,8 @@ RETURN
 ./build/cac-headless --bot my.bas:4 --bot players/mage.bas --record m.replay
 ./build/cac-headless --replay m.replay       # check it replays exactly
 ./cac --replay m.replay                      # watch it
-./cac --bot my.bas                           # watch it play itself
-./cac --human --bot my.bas                   # play against it
+./cac --bot my.bas:2                         # watch it play itself
+./cac --player --bot my.bas                   # play against it
 ```
 
 Headless flags: `--bot PATH[:COUNT]` once per group of seats (2 to 7 seats
@@ -394,21 +397,28 @@ P/T:    3/1
 ## Playing
 
 ```sh
-./cac                               # two reference bots
-./cac --human                       # you pick a class on screen and play its precon
-./cac --human players/mage.bas      # you play that script's class and deck
-./cac --players 4 --human           # you and 3 bots around the ring
+./cac                               # main menu; --direct watches bundled bots
+./cac --player                       # you pick a class on screen and play its precon
+./cac --player --deck players/mage.bas      # you play that script's class and deck
+./cac --players 4 --player           # you and 3 bots around the ring
 ```
 
 | Flag | Meaning |
 |---|---|
-| `--human [PATH.bas]` | You play seat 0 (shown as player 1) |
-| `--bot PATH` | Bot script, up to 2; one plays both duel seats, and with `--human` it is your opponent. Default: the reference bots in `players/` (a human faces one at random) |
+| `--player [N]` | Control one-based seat N; bare --player selects seat 1 |
+| `--deck PATH.bas` | With --player, use the class and deck from this bot setup script |
+| `--bot PATH[:N]`, `--bots PATH[:N]` | Add N bot seats, repeatable; supplied bots must fill every nonhuman seat. With no explicit bots, use bundled defaults |
 | `--players N` | 2 is a duel; 3 to 7 play the ring (last one standing wins) |
 | `--seed N` | Fixed deal; without it every game takes a new seed and prints it |
 | `--replay PATH` | Watch a recorded match |
+| `--record PATH` | Save the current match to this exact path, including on exit |
+| `--name TEXT` | Set the human display name |
+| `--play BOOL`, `--speed N` | Start playing or paused, with a positive integer speed |
+| `--ticks N` | Cap a native local match after N accepted actions |
 | `--cards`, `--cards:CLASS`, `--card:NAME` | Print cards and exit |
 | `-h`, `--help` | Print the options and exit |
+
+Common values accept separate, equals, and colon forms. See [CLI details](cli.md).
 
 ## Coworld
 
@@ -425,7 +435,7 @@ contract is [`coworld/integration.md`](../../coworld/integration.md).
 
 ```sh
 (cd ../.. && nim r coworld/tools/sync_dependencies.nim)
-nim c -d:coworld -o:../../tmp/coworld/cac src/cac.nim
+nim c -d:coworld -o:../../tmp/coworld/cac cac.nim
 (cd ../.. && nim r coworld/tools/test_runtime.nim cac)
 coworld build --project ../../coworld/cac --version VERSION
 ```
@@ -433,34 +443,41 @@ coworld build --project ../../coworld/cac --version VERSION
 ## Development
 
 ```
-src/cac.nim         command line, then a game mode
-src/baseset.nim     the cards and precon decks
-src/core/           the game, no window: the card rules DSL (core), the
+cac.nim             command line, then a game mode
+baseset.nim         the cards and precon decks
+core/               the game, no window: the card rules DSL (core), the
                     match engine (sim), the BASIC bot API (bots), bot
                     matches (match), replays, card lookups (cardset) and
                     reference (cardlist), event text, rule trees, session
                     options and saved games
-src/modes/          duel, multiplayer ring, headless and Coworld runners
-src/app.nim, src/play.nim, src/replayer.nim
+modes/              duel, multiplayer ring, headless and Coworld runners
+app.nim, play.nim, replayer.nim
                     what the table modes share: window, targeting, replays
-src/scene/          3D table, courtyard, ring, heroes, screen effects
-src/ui/, src/vfx/   HUD, card faces, tuning panels; card and combat effects
+scene/              3D table, courtyard, ring, heroes, screen effects
+ui/, vfx/           HUD, card faces, tuning panels; card and combat effects
+pack_assets.nim     browser asset staging for the shared build
 tools/              web build, asset staging and review renders
+tests/              game checks and the standard tests.nim suite
 ```
 
-Every test (`test_courtyard_render` needs a GPU):
+Run the standard suite from this folder:
 
 ```sh
-for t in tests/*.nim; do nim r --out:build/$(basename $t .nim) $t; done
+nim r tests/tests.nim
 ```
 
-**Browser.** `./tools/serve.sh` builds and serves on port 8080
+Run `test_assets.nim`, `test_atlas.nim`, and `test_faces.nim` separately with
+the optional art and fonts available. `test_courtyard_render.nim` needs a GPU.
+
+**Browser.** `nim c -d:emscripten cac.nim` uses the shared browser build and
+writes the bundle to `emscripten/`. `./tools/serve.sh` builds and serves on
+port 8080
 (`CAC_SKIP_WEB_BUILD=1` serves the existing build; `./tools/build_web.sh`
-only builds). URL parameters mirror the flags: `human=1`, `players=N`,
+only builds). URL parameters mirror the flags: `player=1`, `players=N`,
 `seed=N`, `bot=URL` (repeatable), `replay=URL`, e.g.
-`cac.html?players=4&human=1`. Card art is staged cropped to the 546 × 417
+`cac.html?players=4&player=1`. Card art is staged cropped to the 546 × 417
 art window, so the download stays near 31 MB. The replay viewer:
-`CAC_WEB_DIR=build/replay ./tools/build_web.sh -d:replayViewer`, then
+`CAC_WEB_DIR=emscripten/replay ./tools/build_web.sh -d:replayViewer`, then
 `cac.html?replay=URL`. With Playwright, `node tests/test_hero_select.cjs`
 checks hero selection against the server.
 

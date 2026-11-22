@@ -1,7 +1,7 @@
 import
   std/[os, strutils],
   chroma, jsony, pixie, silky, vmath, windy,
-  chrome, displays, gameuis, inputs, policies, rtscameras
+  chrome, displays, gameuis, inputs, policies, rtscameras, sounds
 
 type
   MenusError* = object of CatchableError
@@ -20,11 +20,11 @@ type
     resolution*: WindowResolution
     fps*: int = 60
     interpolation*: bool = true
+    ambientOcclusion*: bool = true
     edgeScrolling*: EdgeScrollMode = FullscreenEdgeScroll
     bindings*: InputBindings = DefaultBindings
-    soundMuted*: bool
     mainVolume*: int = 100
-    musicVolume*: int = 100
+    musicVolume*: int = 25
     fxVolume*: int = 100
     uiVolume*: int = 100
     uiScaleMode*: UiScaleMode
@@ -43,6 +43,12 @@ type
     ## Optional game-owned rows; the shared menu knows no game actions.
     draw*: proc(sk: Silky, window: Window, origin: Vec2)
     capturing*: proc(): bool
+    validateBinding*: proc(action: InputAction, key: Button): string
+  LegacySoundPreferences = object
+    soundMuted: bool
+  SoundLaunch = object
+    explicit, silent, applied: bool
+    volume, savedVolume: int
 
 const
   DefaultControlProfile* = block:
@@ -59,6 +65,8 @@ var
   settingsTab: SettingsTab
   captureAction: InputAction
   captureSlot: int
+  bindingError: string
+  soundLaunch: SoundLaunch
 
 when defined(emscripten):
   {.emit: """
@@ -97,9 +105,6 @@ when defined(emscripten):
     const value = new URLSearchParams(window.location.search).get(UTF8ToString(name));
     stringToUTF8(value || '', output, length);
   });
-  EM_JS(void, polyworldCopyInvite, (const char* text), {
-    navigator.clipboard.writeText(UTF8ToString(text));
-  });
   EM_JS(void, polyworldSaveReplay, (const char* bytes, int length), {
     const blob = new Blob([HEAPU8.slice(bytes, bytes + length)],
       {type: 'application/octet-stream'});
@@ -115,7 +120,6 @@ when defined(emscripten):
   proc polyworldParameter(
     name, output: cstring, length: cint
   ) {.importc, nodecl.}
-  proc polyworldCopyInvite(text: cstring) {.importc, nodecl.}
   proc polyworldSaveReplay(bytes: cstring, length: cint) {.importc, nodecl.}
 
 proc saveReplayFile*(bytes: string) =
@@ -132,15 +136,21 @@ proc saveReplayFile*(bytes: string) =
       except IOError, OSError:
         raise newException(MenusError, "Cannot save replay: " & getCurrentExceptionMsg())
 
+proc configureSoundLaunch*(silent: bool, explicit = true) =
+  ## Applies explicit launch flags to Master without replacing saved levels.
+  soundLaunch = SoundLaunch(explicit: explicit, silent: silent)
+
 proc readPreferences*(app: string): Preferences =
   ## Loads native or browser settings through Windy's configuration storage.
   let bytes = getConfig(app, "settings.json")
-  if bytes.len == 0:
-    return Preferences()
-  try:
-    result = bytes.fromJson(Preferences)
-  except JsonError as error:
-    raise newException(MenusError, "Cannot read settings: " & error.msg)
+  result = Preferences()
+  if bytes.len > 0:
+    try:
+      result = bytes.fromJson(Preferences)
+      if bytes.fromJson(LegacySoundPreferences).soundMuted:
+        result.mainVolume = 0
+    except JsonError as error:
+      raise newException(MenusError, "Cannot read settings: " & error.msg)
   if result.windowMode == BorderlessWindow:
     result.windowMode = Fullscreen
   result.fps = clamp(result.fps, 0, 240)
@@ -148,13 +158,28 @@ proc readPreferences*(app: string): Preferences =
   result.musicVolume = clamp(result.musicVolume, 0, 100)
   result.fxVolume = clamp(result.fxVolume, 0, 100)
   result.uiVolume = clamp(result.uiVolume, 0, 100)
+  if soundLaunch.explicit:
+    if not soundLaunch.applied:
+      soundLaunch.savedVolume = result.mainVolume
+      soundLaunch.volume =
+        if soundLaunch.silent: 0
+        elif result.mainVolume > 0: result.mainVolume
+        else: 100
+      soundLaunch.applied = true
+    result.mainVolume = soundLaunch.volume
   result.uiScalePercent = clamp(result.uiScalePercent, 25, 400)
   if result.name.len > 64:
     result.name.setLen(64)
 
 proc savePreferences*(preferences: Preferences, app: string) =
   ## Saves ordinary preferences without bot data or reconnect secrets.
-  setConfig(app, "settings.json", preferences.toJson())
+  var saved = preferences
+  if soundLaunch.explicit and soundLaunch.applied:
+    if preferences.mainVolume == soundLaunch.volume:
+      saved.mainVolume = soundLaunch.savedVolume
+    else:
+      soundLaunch = SoundLaunch()
+  setConfig(app, "settings.json", saved.toJson())
 
 proc applyPreferences*(
   preferences: Preferences,
@@ -172,6 +197,10 @@ proc applyPreferences*(
       window.configureWindow(preferences.windowMode, preferences.resolution)
   framePaceHz = preferences.fps
   interpolateVisuals = preferences.interpolation
+  configureSounds(
+    false, preferences.mainVolume,
+    preferences.fxVolume, preferences.uiVolume, preferences.musicVolume
+  )
 
 proc customScale(preferences: var Preferences, percent: int) =
   ## Selects a fixed scale without changing other window settings.
@@ -251,10 +280,7 @@ proc inviteParameter*(name: string): string =
 
 proc copyInvite*(text: string) =
   ## Copies an invitation using the platform clipboard.
-  when defined(emscripten):
-    polyworldCopyInvite(text.cstring)
-  else:
-    setClipboardString(text)
+  setClipboardString(text)
 
 proc menuLabel*(
     sk: Silky, text: string, position: Vec2,
@@ -278,11 +304,34 @@ proc menuButton*(
       elif hovered: rgbx(66, 83, 73, 255)
       else: rgbx(41, 54, 48, 255)
   sk.drawRect(position, size, color)
+  sk.hoverSound(GameUiPanel(origin: position, size: size), enabled)
   sk.drawLabel(
     text, position, size, if enabled: MenuInk else: MenuMuted,
     "Default", CenterAlign
   )
-  enabled and hovered and window.buttonPressed[MouseLeft]
+  result = enabled and hovered and window.buttonPressed[MouseLeft]
+  if result:
+    playSound(ClickSound)
+
+template soundButton(label: string, enabled: bool, body: untyped) =
+  ## Adds pointer-entry feedback to a standard Silky menu button.
+  block:
+    let
+      soundLabel = label
+      soundEnabled = enabled
+    sk.startCurrentChildren()
+    let size = sk.getTextSize(sk.textStyle, soundLabel) +
+      vec2(sk.theme.padding.float32) * 2
+    sk.hoverSound(
+      GameUiPanel(origin: sk.placedAt(size), size: size), soundEnabled
+    )
+    button soundLabel, soundEnabled:
+      body
+
+template soundButton(label: string, body: untyped) =
+  ## Adds pointer-entry feedback to an enabled Silky menu button.
+  soundButton(label, true):
+    body
 
 proc menuInput*(
     sk: Silky, window: Window, id: string, value: var string,
@@ -360,15 +409,17 @@ proc bindingsPanel(
         continue
       if window.buttonPressed[key]:
         if key != KeyEscape:
-          preferences.bindings.bindInput(
-            captureAction,
-            captureSlot,
-            if key == KeyBackspace: ButtonUnknown else: key
-          )
+          let binding = if key == KeyBackspace: ButtonUnknown else: key
+          bindingError =
+            if extension.validateBinding == nil: ""
+            else: extension.validateBinding(captureAction, binding)
+          if bindingError.len == 0:
+            preferences.bindings.bindInput(captureAction, captureSlot, binding)
         bindingCapture = false
         break
   sk.drawLabel(
     if capturing: "Press a key or mouse button. Esc cancels; Backspace clears."
+    elif bindingError.len > 0: bindingError
     else: "Click a binding to change it. Conflicting bindings are cleared.",
     origin + vec2(0, 49), vec2(720, 34), sk.theme.defaultTextColor
   )
@@ -387,15 +438,17 @@ proc bindingsPanel(
             "Press a button..."
           else:
             preferences.bindings[action][slot].bindingLabel
-        button label, not capturing:
+        soundButton label, not capturing:
+          bindingError = ""
           captureAction = action
           captureSlot = slot
           bindingCapture = true
     if extension.draw != nil:
       extension.draw(sk, window, listOrigin + vec2(0, controls.actions.len.float32 * 38 + 12))
   sk.at = origin + vec2(500, height - 32)
-  button "Reset bindings", not capturing:
+  soundButton "Reset bindings", not capturing:
     preferences.resetBindings(controls)
+    bindingError = ""
 
 proc percentageSlider(
   sk: Silky,
@@ -429,7 +482,8 @@ proc settingsPanel*(
     sk: Silky, window: Window, preferences: var Preferences,
     app: string, origin: Vec2, title = "Settings", height = 440.0'f,
     controls = DefaultControlProfile,
-    extension = ControlExtension()
+    extension = ControlExtension(),
+    supportsAmbientOcclusion = false
 ): bool =
   ## Edits preferences with the existing Silky theme and widgets.
   when defined(emscripten):
@@ -462,6 +516,8 @@ proc settingsPanel*(
       )
     if interaction == Released:
       settingsTab = page
+      playSound(ClickSound)
+    sk.hoverSound(tab, not bindingCapture)
     let selected = settingsTab == page
     sk.drawTab(tab, selected, interaction in {Hovered, Pressed, Held})
     sk.drawLabel(
@@ -474,23 +530,37 @@ proc settingsPanel*(
     )
   case settingsTab
   of SoundSettings:
-    sk.at = origin + vec2(0, 64)
-    checkBox "Mute all sound", preferences.soundMuted
     sk.percentageSlider(
-      window, "Main", preferences.mainVolume, origin + vec2(0, 120)
+      window, "Master", preferences.mainVolume, origin + vec2(0, 64)
     )
     sk.percentageSlider(
-      window, "Music", preferences.musicVolume, origin + vec2(0, 176)
+      window, "Music", preferences.musicVolume, origin + vec2(0, 112)
     )
     sk.percentageSlider(
-      window, "FX", preferences.fxVolume, origin + vec2(0, 232)
+      window, "Sound effects", preferences.fxVolume, origin + vec2(0, 160)
     )
     sk.percentageSlider(
-      window, "UI", preferences.uiVolume, origin + vec2(0, 288)
+      window, "UI effects", preferences.uiVolume, origin + vec2(0, 208)
     )
+    if preferences != previous:
+      configureSounds(
+        false, preferences.mainVolume,
+        preferences.fxVolume, preferences.uiVolume, preferences.musicVolume
+      )
+      preferences.savePreferences(app)
+    let audioEnabled = preferences.mainVolume > 0
+    sk.at = origin + vec2(0, 264)
+    soundButton "Test combat sound", audioEnabled and preferences.fxVolume > 0:
+      playSound(SwordSound)
+    sk.at = origin + vec2(320, 264)
+    soundButton "Test UI sound", audioEnabled and preferences.uiVolume > 0:
+      playSound(ClickSound)
     sk.drawLabel(
-      "Audio playback is not available yet.",
-      origin + vec2(0, 352),
+      if preferences.mainVolume == 0:
+        "Master is at 0%. Raise it to hear music and effects."
+      else:
+        "Master controls all audio. Music, sound effects and UI have separate volumes.",
+      origin + vec2(0, 312),
       vec2(720, 36),
       sk.theme.disabledTextColor
     )
@@ -535,6 +605,9 @@ proc settingsPanel*(
         sk.popLayout()
     sk.at = origin + vec2(0, 160)
     checkBox "Visual interpolation", preferences.interpolation
+    if supportsAmbientOcclusion:
+      sk.at = origin + vec2(360, 160)
+      checkBox "Ambient occlusion", preferences.ambientOcclusion
     sk.drawLabel("FPS limit", origin + vec2(0, 204), vec2(210, 36),
       sk.theme.defaultTextColor)
     for i, fps in [30, 60, 120, 0]:
@@ -566,13 +639,13 @@ proc settingsPanel*(
       previous.uiScaleMode == AutoUiScale:
         preferences.customScale(percent)
     sk.at = origin + vec2(420, 292)
-    button "-", percent > 25:
+    soundButton "-", percent > 25:
       preferences.customScale(percent - 10)
     sk.at = origin + vec2(480, 292)
-    button $percent & "%":
+    soundButton $percent & "%":
       preferences.customScale(100)
     sk.at = origin + vec2(600, 292)
-    button "+", percent < 400:
+    soundButton "+", percent < 400:
       preferences.customScale(percent + 10)
     if preferences.uiScaleMode == CustomUiScale:
       sk.percentageSlider(
@@ -599,6 +672,7 @@ proc settingsPanel*(
         )
         preferences.savePreferences(app)
   sk.at = origin + vec2(0, height - 32)
-  button "Save and Back", not bindingCapture:
+  soundButton "Save and Back", not bindingCapture:
     preferences.savePreferences(app)
+    playSound(CancelSound)
     result = true

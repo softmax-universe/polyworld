@@ -2,8 +2,10 @@
 
 {.warning[UnusedImport]: off.}
 import
+  test_options,
   test_maps,
   test_nav,
+  test_replays,
   test_sim,
   test_skillbar
 

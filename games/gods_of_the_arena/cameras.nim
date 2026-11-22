@@ -3,6 +3,9 @@ import
   polyworld/[directors, rtscameras],
   sim
 
+const GotaEdgePanMargin* = 60.0'f
+  ## Pixel band inside each window edge that pans the arena camera.
+
 proc zoomPitch*(distance: float32): float32 =
   ## Lowers the close-up viewing angle smoothly from 53 to 35 degrees.
   let close = rtsEaseT((8.0'f - distance) / 3.0'f)

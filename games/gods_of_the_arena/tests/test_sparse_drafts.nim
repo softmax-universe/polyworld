@@ -22,7 +22,8 @@ for seats in [@[8], @[3, 8], @[0, 4, 8], @[0, 1, 3, 4, 5, 7, 9]]:
       run.flushPlayerCommands()
       if turn == 0 or turn == run.world.draftHeroId(): run.runBotDecisions()
     )
-    doAssert run.world.tick < 240, "Local sparse bots must not wait for absent slots"
+    doAssert run.world.tick < 240 + PreparationTicks,
+      "Local sparse bots must not wait for absent slots"
   doAssert humanPicked and run.world.draftTurn == seats.len
   for hero in run.world.heroes: doAssert hero.drafted
   let data = decodeReplay(encodeReplay(run.recorder.data))
@@ -38,19 +39,20 @@ for seats in [@[8], @[3, 8], @[0, 4, 8], @[0, 1, 3, 4, 5, 7, 9], @[0, 2, 4]]:
   for mode in ["unique", "team", "open"]:
     for timeout in [false, true]:
       let config = parseConfig("{\"maxTicks\":3,\"draftMode\":\"" & mode & "\"}")
-      var snapshot = RoomMessage(kind: RoomState, revision: 1, tickRate: 24,
+      var snapshot = RoomMessage(kind: RoomState, phase: rooms.Playing, revision: 1, tickRate: 24,
         payload: config.toJson(), seats: newSeq[Seat](10),
         participants: @[Participant(id: 99, name: "Peer")])
       for seat in seats:
         snapshot.participants.add Participant(id: uint32(seat + 1), name: "Player " & $seat)
         snapshot.seats[seat] = Seat(owner: uint32(seat + 1), name: "Human")
-      let a = RoomClient(began: true, welcomed: true, match: 1, participant: uint32(seats[0] + 1), snapshot: snapshot)
-      let b = RoomClient(began: true, welcomed: true, match: 1, participant: 99, snapshot: snapshot)
+      let a = RoomClient(began: true, connected: true, welcomed: true, match: 1, participant: uint32(seats[0] + 1), snapshot: snapshot, initialSnapshot: snapshot)
+      let b = RoomClient(began: true, connected: true, welcomed: true, match: 1, participant: 99, snapshot: snapshot, initialSnapshot: snapshot)
       let first = prepareNetworkMatch(a, newSeq[string](10))
       let second = prepareNetworkMatch(b, newSeq[string](10))
       let world = first.game.world
       doAssert world.heroes.len == seats.len and world.draftOrder.len == seats.len
-      doAssert first.game.durationTicks() == 3 + seats.len.int32 * DraftPickTicks
+      doAssert first.game.durationTicks() ==
+        3 + seats.len.int32 * DraftPickTicks + PreparationTicks
       for i, hero in world.heroes:
         doAssert hero.id == FirstHeroId + seats[i].int32
       # Independent expected alternating-team order, retaining original seats.
@@ -69,15 +71,15 @@ for seats in [@[8], @[3, 8], @[0, 4, 8], @[0, 1, 3, 4, 5, 7, 9], @[0, 2, 4]]:
         team = 1 - team
       for i, index in world.draftOrder:
         doAssert world.heroes[index].id == expected[i]
-      let begin = RoomMessage(kind: BeginMatch, revision: 1, match: 1, hash: first.game.networkHash())
-      doAssert begin.hash == second.game.networkHash()
+      let begin = RoomMessage(kind: BeginMatch, revision: 1, match: 1, hash: setupHash(snapshot))
+      doAssert first.game.networkHash() == second.game.networkHash()
       first.start(begin)
       second.start(begin)
       var tick = 0'u32
       while not first.finished:
         inc tick
         let oldTurn = world.draftTurn
-        var packet = RoomMessage(kind: TickPacket, match: 1, tick: tick)
+        var packet = RoomMessage(kind: TickPacket, match: 1, tick: tick, seats: snapshot.seats)
         if world.phase == Drafting:
           doAssert world.draftHeroId() == expected[oldTurn]
           if not timeout:
@@ -94,11 +96,12 @@ for seats in [@[8], @[3, 8], @[0, 4, 8], @[0, 1, 3, 4, 5, 7, 9], @[0, 2, 4]]:
           doAssert world.draftTurn == min(int(tick) div DraftPickTicks, seats.len)
         a.outgoing.setLen(0)
         b.outgoing.setLen(0)
-        doAssert int(tick) <= seats.len * DraftPickTicks + 3
+        doAssert int(tick) <= seats.len * DraftPickTicks + PreparationTicks + 3
       let draftTicks = if timeout: seats.len * DraftPickTicks else: seats.len
       doAssert world.phase == Playing and world.draftHeroId() == 0
       doAssert world.draftTurn == seats.len and world.draftTicks == draftTicks
-      doAssert world.tick == draftTicks + 3 and world.battleTick() == 3
+      doAssert world.tick == draftTicks + PreparationTicks + 3 and
+        world.battleTick() == 3
       for hero in world.heroes: doAssert hero.drafted
       let data = decodeReplay(encodeReplay(first.game.recorder.data))
       data.validate()
@@ -111,9 +114,13 @@ for seats in [@[8], @[3, 8], @[0, 4, 8], @[0, 1, 3, 4, 5, 7, 9], @[0, 2, 4]]:
       var checkpoint: World
       for i in 0 ..< data.hashes.len:
         replay.tickWorld(nil)
-        if i == 0: checkpoint = replay.world.clone()
+        if replay.world.phase == Playing and
+            replay.world.preparationTicks == 17:
+          checkpoint = replay.world.clone()
       doAssert replay.hashCheck.mismatches == 0
       doAssert replay.stateHash() == first.game.stateHash()
+      doAssert checkpoint != nil and checkpoint.preparationTicksLeft() > 0
+      doAssert checkpoint.footmen.len == 0
       replay.world.restore(checkpoint)
       replay.replayPlayer.syncCursor(checkpoint.tick.uint32)
       for i in checkpoint.tick.int ..< data.hashes.len: replay.tickWorld(nil)

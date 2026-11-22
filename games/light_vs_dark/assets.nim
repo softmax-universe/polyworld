@@ -1,11 +1,12 @@
 import
   std/os,
   jsony,
-  polyworld/[assets, chargen, common, terrainsurfaces],
+  polyworld/[assets, chargen, common, terrainsurfaces, soundassets],
   polyworld/chargen/teamcolors,
   content, factions
 
 const
+  MusicPath* = DataRoot & "/music/yearning-of-the-deep-woods.ogg"
   LogoPath* = DataRoot & "/themes/lvd/lvd_logo.png"
   MenuRoot* = DataRoot & "/themes/lvd/menu/"
   MenuImages* = [
@@ -198,6 +199,9 @@ proc generatedCharacterAssets*(): seq[Asset] =
 proc browserAssets*(): seq[Asset] =
   ## Declares every presentation asset reachable by either faction.
   result = hudAssets(LogoPath)
+  result.add soundAssets()
+  result.add fileAsset(MusicPath)
+  result.add fileAsset("music/yearning-of-the-deep-woods.json")
   for name in MenuImages:
     result.add fileAsset(MenuRoot & name & ".png")
   for path in ["LICENSE", "licenses/lvd.md",

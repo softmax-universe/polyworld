@@ -228,7 +228,7 @@ const LightUnits: array[UnitKind, UnitStats] = [
     gold: 900, wood: 200, trainTicks: 600,
     hp: 120, armor: 0, piercing: 255, basic: 0, splash: 63,
     missPercent: 0, cooldownTicks: 192,
-    rangeTiles: 8, sightTiles: 8, stepTicks: SlowStepTicks, food: 1,
+    rangeTiles: 8, sightTiles: 10, stepTicks: SlowStepTicks, food: 1,
     trainedAt: BarracksBuilding,
     requires: {BlacksmithBuilding, LumberMillBuilding}
   ),
@@ -347,6 +347,16 @@ const BuildingTable*: array[BuildingKind, BuildingStats] = [
   )
 ]
 
+## Cleric automatic support (same balance for both factions).
+const
+  ClericMaxMana* = 100'i32
+  ClericHealManaCost* = 5'i32
+  ClericHealAmount* = 8'i32
+  ClericHealRange* = 4'i32
+  ClericHealCooldown* = TickRate
+  ClericManaRegenTicks* = TickRate
+    ## One mana per second; integer remainder is authoritative state.
+
 ## Economy
 
 const
@@ -357,10 +367,13 @@ const
   MineTicks* = 60'i32
     ## Ticks a peon spends hidden inside a gold mine.
   MinersPerMine* = 4'i32
-  WoodPerTrip* = 100'i32
+  TownHallMineGap* = 5'i32
+    ## Clear tiles required between a new town hall and a gold mine footprint.
+  WoodPerTrip* = 25'i32
+    ## Smaller loads keep nearby forests from funding an army with one worker.
   ChopTicks* = 80'i32
   WoodPerTree* = 400'i16
-    ## Four trips, after which the tile is removed from the map.
+    ## Total wood per tile; a full tree lasts sixteen worker loads.
   DepositTicks* = 5'i32
   MainMineGold* = 45_000'i32
   ExpansionMineGold* = 25_000'i32
@@ -468,12 +481,14 @@ proc contentHash*(): uint64 =
       hash.addHashy(required in stats.requires)
   for value in [
     StartingGold, StartingWood, StartingPeons, GoldPerTrip, MineTicks,
-    MinersPerMine, WoodPerTrip, ChopTicks, int32(WoodPerTree), DepositTicks,
+    MinersPerMine, TownHallMineGap, WoodPerTrip, ChopTicks, int32(WoodPerTree),
+    DepositTicks,
     MainMineGold, ExpansionMineGold, FoodCapMax, UnitsPerPlayer, DeathTicks,
     RubbleTicks, OrthogonalCost, DiagonalCost, ShoveAfterTicks,
     SwapAfterTicks, RepathAfterTicks, AbandonAfterTicks,
     RepathCooldownTicks, ShortPathCooldownTicks, OccupiedTilePenalty,
-    AttackMissPercent
+    AttackMissPercent, ClericMaxMana, ClericHealManaCost, ClericHealAmount,
+    ClericHealRange, ClericHealCooldown, ClericManaRegenTicks
   ]:
     hash.addHashy(value)
   uint64(hash)

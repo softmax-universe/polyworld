@@ -5,6 +5,40 @@ import ../researchpresentation
 import ../[content, sim, maps]
 
 suite "Authoritative research HUD data":
+  test "each research tier selects its own icon and max keeps tier three":
+    let w = newWorld(generateMap(DefaultSeed), TickRate * 600)
+    const Prefixes = [
+      "keenflight_arrows", "tempered_edges", "runed_plating",
+      "windrunner_training"
+    ]
+    for kind in ResearchKind:
+      for level in 0'i32 .. MaxResearchLevel:
+        w.players[0].researchLevels[kind] = level
+        let card = w.researchCard(0, NoEntity, kind)
+        check card.icon == Prefixes[kind.ord] & "_" & $[1, 2, 3, 3][level]
+        check card.level == level
+
+  test "active research keeps the icon of the tier being researched":
+    let w = newWorld(generateMap(DefaultSeed), TickRate * 600)
+    var producer = NoEntity
+    for building in w.buildings:
+      if building.owner == 0:
+        producer = building.id
+        break
+    let index = w.buildingIndex(producer)
+    require index >= 0
+    for kind in ResearchKind:
+      w.players[0].researchLevels[kind] = 1
+      w.buildings[index].kind = researchBuilding(kind)
+      w.buildings[index].researchKind = kind
+      w.buildings[index].researchLevel = 2
+      w.buildings[index].researchTicks = 60
+      w.buildings[index].researchTotal = 120
+      let card = w.researchCard(0, producer, kind)
+      check card.active
+      check card.icon.endsWith("_2")
+      check card.researchTitle.endsWith(" II")
+
   test "research coverage tooltips and explicit temporary icon keys":
     let w = newWorld(generateMap(DefaultSeed), TickRate * 600)
     let card = w.researchCard(0, NoEntity, TemperedEdges)

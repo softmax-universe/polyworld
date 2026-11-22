@@ -3,7 +3,12 @@ import
   ../[bots, content, diplomacies, maps, replays, sim]
 
 const
-  FastDiplomacy = DiplomacySettings(neutralStart: true, warGraceSeconds: 1, offerSeconds: 4)
+  FastDiplomacy = DiplomacySettings(
+    enabled: true,
+    neutralStart: true,
+    warGraceSeconds: 1,
+    offerSeconds: 4
+  )
   BasePolicy = staticRead("../players/base.bas")
 
 proc step(game: Game, ticks = 1) =
@@ -31,6 +36,9 @@ proc defeat(game: Game, player: int32) =
   for building in game.world.buildings:
     if building.owner == player:
       game.world.damageEntity(building.id, building.hp)
+  # This fixture isolates diplomacy after elimination; grace duration has its
+  # own exact-boundary regression in test_hall_defeat. Expire next tick here.
+  game.world.players[player].hallLossDeadline = game.world.tick + 1
 
 echo "Testing neutral starts, bilateral deadlines, and offer validation"
 block transitions:

@@ -7,10 +7,6 @@
   var parameters = new URLSearchParams(window.location.search);
   var args = Module["arguments"] || [];
 
-  if (parameters.get("human") === "true" || parameters.get("human") === "1") {
-    args.push("--human", "true");
-  }
-
   parameters.getAll("players").forEach(function (value) {
     args.push("--players", value);
   });

@@ -1,7 +1,7 @@
 import
   std/os,
   jsony,
-  polyworld/[assets, chargen, common],
+  polyworld/[assets, chargen, common, soundassets],
   content
 
 const
@@ -10,6 +10,7 @@ const
   ]
   MenuRoot* = DataRoot & "/themes/gota/menu/"
   LogoPath* = MenuRoot & "logo.png"
+  GotaMusicPath* = DataRoot & "/music/gota/the-celtic-storm.ogg"
   MenuImages* = [
     "background", "logo", "button-single-player", "button-multiplayer",
     "button-settings", "button-exit"
@@ -234,6 +235,9 @@ proc generatedCharacterAssets*(): seq[Asset] =
 proc browserAssets*(): seq[Asset] =
   ## Declares every presentation asset reachable by an arena match.
   result = hudAssets(LogoPath)
+  result.add soundAssets()
+  result.add fileAsset(GotaMusicPath)
+  result.add fileAsset("music/gota/the-celtic-storm.json")
   for asset in result.mitems:
     if asset.source == LogoPath.assetName:
       asset = imageAsset(LogoPath, 768)

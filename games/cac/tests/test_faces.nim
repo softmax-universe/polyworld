@@ -3,8 +3,8 @@
 ## boxes, and a face shows the state of its card.
 import std/[sequtils, sets, strutils, tables, unittest]
 import pixie, silky
-import ../src/core/[sim, cardset], ../src/baseset,
-  ../src/ui/[cardfaces, silkyfaces]
+import ../core/[sim, cardset], ../baseset,
+  ../ui/[cardfaces, silkyfaces]
 
 let builder = newAtlasBuilder(5632, 4)
 builder.addFaceAssets()
@@ -19,7 +19,7 @@ proc changed(card: Card, gained, lost: Rules): FaceState =
 proc printed(card: Card): FaceState =
   FaceState(card: card, power: -1, toughness: -1)
 
-proc textIn(state: FaceState, box: Rect): TextBlock =
+proc textIn(state: FaceState, box: Rect): silkyfaces.TextBlock =
   for text in state.faceText():
     if text.box == box:
       return text

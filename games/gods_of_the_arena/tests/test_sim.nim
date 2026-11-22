@@ -1,7 +1,6 @@
 ## Gods of the Arena simulation: hashing, towers, and a live bot tick.
 ##
-## game.nim parses the command line and builds the world at import time, so
-## this test must be run with a bot roster:
+## Startup is explicit; this test initializes the requested bot roster:
 ##   nim r games/gods_of_the_arena/tests/test_sim.nim -- \
 ##     --bot:games/gods_of_the_arena/players/base.bas:10
 
@@ -11,6 +10,10 @@ import
 
 template hashNow(): uint64 =
   run.stateHash()
+
+# Startup is explicit now; importing game.nim deliberately creates no match.
+initializeOptions()
+initializeMatch()
 
 doAssert run.world.heroes.len == 10,
   "run this test with " &

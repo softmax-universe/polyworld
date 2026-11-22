@@ -68,7 +68,7 @@ proc package(destination, release: string) =
   let manifest = %*{
     "release": release,
     "source_revision": command(["git", "rev-parse", "HEAD"]),
-    "dependencies_sha256": digest(readFile(Root / "coworld/dependencies.lock")),
+    "dependencies_sha256": digest(readFile(Root / "nimby.lock")),
     "files": files
   }
   writeFile(

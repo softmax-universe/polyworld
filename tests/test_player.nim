@@ -140,6 +140,39 @@ block:
   doAssert speedIndexOf(16) == 3
   doAssert speedIndexOf(64) == 3
 
+echo "Testing launch speeds remain exact until a preset is selected"
+block:
+  for value in [3'i32, 8, 64]:
+    var p = initPlayer(live = true, durationTicks = 100, speed = value)
+    doAssert p.speed == value
+    p.setSpeed(2)
+    doAssert p.speed == 4
+    p.setPlaybackSpeed(value)
+    doAssert p.speed == value
+    p.setSpeed(0)
+    doAssert p.speed == 1
+
+echo "Testing realtime accumulation scales with the exact speed"
+block:
+  var p = initPlayer(live = true, durationTicks = 1000, speed = 16)
+  p.startFrame(0.025, 24)
+  doAssert abs(p.accumulator - 0.4) < 0.00001
+  p.setPlaybackSpeed(3)
+  p.accumulator = 0
+  p.startFrame(0.02, 24)
+  doAssert abs(p.accumulator - 0.06) < 0.00001
+  doAssert p.shouldTick(0)
+
+echo "Testing large realtime speeds still yield to the next frame"
+block:
+  var p = initPlayer(live = true, durationTicks = int32.high,
+    speed = int32.high)
+  p.startFrame(0.1, 24)
+  let remaining = p.accumulator
+  doAssert not p.shouldTick(epochTime() - 1)
+  doAssert p.accumulator == remaining
+  doAssert p.shouldTick(epochTime())
+
 echo "Testing empty replay playback stays at tick zero"
 block:
   var p = initPlayer(live = false, durationTicks = 100)

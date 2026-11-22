@@ -13,7 +13,7 @@ server deployment or commit was performed for this integration.
   teardown clears communication, `hudNetwork`, frame/key/release/rune/focus
   callbacks and native rune capture, including exceptional/early-return exits.
 - Enter opens/sends and Escape cancels through the production button callback,
-  before sequential shortcuts, pause/menu, fullscreen and chrome hotkeys.
+  before contextual action keys, pause/menu, fullscreen and chrome hotkeys.
   Entry cancels gestures, build placement and armed attack. Repeated Enter is
   quarantined until release; release forwarding is unconditional.
 - The rune callback forwards Unicode to communication only with the match menu
@@ -35,8 +35,8 @@ server deployment or commit was performed for this integration.
   successful `network.applyPacket`, including every catch-up packet. It never
   observes optimistic submissions or merely received future packets.
 - Chat uses `game.sendChat(sender, -2, text)`. Broadcast mailbox IDs are **-2**,
-  not sender IDs; attribution uses the validated applied TickPacket seat and
-  recorded config name. The observer deduplicates ticks, retains at most 100
+  not sender IDs; attribution uses the recorded player ID and config name.
+  The observer follows chat records in the authoritative action stream, keeps 100
   lines, and never drains bot or human mailboxes. Display continues even when
   unread bot mailboxes reach their independent cap.
 - Local successful chat appears immediately; network chat appears only after
@@ -48,8 +48,17 @@ server deployment or commit was performed for this integration.
   FFA starts AtWar. Peace and alliance require recipient acceptance; the
   sender's resend cooldown remains after peace. Ending an alliance retains
   vision through its warning interval. The panel pages through all opponents.
-- No new chat wire format, sender-in-text convention, mailbox drain, speculative
-  world mutation, simulation change or replay-chat support was introduced.
+- Replay tapes store `ActionChat` records with text, sender, recipient and
+  authoritative tick in the same ordered `data.actions` stream as gameplay.
+  Same-tick move, chat, diplomacy and repeated chat retain their admitted order.
+  Chat may be recorded at tick zero or between gameplay decision ticks.
+- Public Unicode broadcasts appear in playback; direct messages and binary bot
+  mailbox strings stay out of the public HUD. Rewinding rebuilds the bounded
+  feed from action records at the displayed tick without consuming mailboxes.
+- Playback applies recorded gameplay without rerunning bots or delivering chat
+  to mailboxes again. Chat-triggered bot actions retain their original simulation
+  hashes. Chat does not count toward gameplay-command totals or actions per
+  minute, including after replay seeks.
 
 ## Native verification
 
@@ -69,7 +78,7 @@ All commands above passed during integration (graphics has existing unused
 `os`/`strutils` import warnings outside screenshot builds).
 
 - `test_human_communication` is registered in the art-free game suite. It runs
-  real two-human Create/Join/Claim/Ready/Start and binary relay exchanges,
+  real two-human Create/Join/Claim/Start and binary relay exchanges,
   both-direction Unicode/name chat, bot-inbox preservation, bounded feed, no
   optimistic mutation, matching peer hashes and diplomacy/vision transitions.
 - `test_human_communication_ui` executes the UI key/rune hooks and quarantine.
@@ -92,5 +101,12 @@ of OS text event generation, browser input, final glyph coverage, network HUD
 rendering across two browser clients, or return-to-menu/second-match lifecycle.
 The parent owns full-suite/build/browser verification after this handoff. Unicode
 is transported exactly; the raster font may not cover every entered glyph.
-Chat is not exported in replay tapes. No WASM build, server change or commit was
-requested for this subtask.
+The ordered action stream uses replay format 9 and game version 50. Earlier
+formats are rejected without a compatibility path.
+
+`test_replays` covers mixed-stream codec ordering, repeated messages, tick-zero
+chat, recipient and size limits, file round trips and exact-tick cursor seeks.
+`test_replay_chat` covers live bot reactions, public and private messages,
+capacity rejection before mutation, identical player/spectator action streams,
+interleaved network commands, playback hashes and gameplay-only metrics after
+rewinding. The local match warning remains presentation-only.

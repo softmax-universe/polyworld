@@ -36,7 +36,7 @@ if a.backend == 'wasm':
                 '--passL:-sALLOW_MEMORY_GROWTH -sSTACK_SIZE=4194304']
 # The temporary main file does not inherit the repository config.
 deps = pathlib.Path(os.environ.get('POLYWORLD_DEPS', ROOT.parent))
-for line in (ROOT/'coworld/dependencies.lock').read_text().splitlines():
+for line in (ROOT/'nimby.lock').read_text().splitlines():
     if not line.strip(): continue
     dep = deps/line.split()[0]
     command.append('--path:'+str(dep/'src' if (dep/'src').is_dir() else dep))

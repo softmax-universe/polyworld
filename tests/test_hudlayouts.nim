@@ -5,7 +5,8 @@ import
   polyworld/[chrome, gameuis, player, stackpanels],
   ../games/gods_of_the_arena/layouts as gota,
   ../games/light_vs_dark/layouts as lvd,
-  ../games/call_to_adventure/layouts as cta
+  ../games/call_to_adventure/layouts as cta,
+  ../games/call_to_adventure/gear
 
 proc checkPanels(parent: GameUiPanel, children: openArray[GameUiPanel]) =
   ## Checks that non-overlapping children draw and hit inside their parent.
@@ -29,15 +30,28 @@ proc checkHud(
   doAssert layout.size.x >= TransportMinWidth
   doAssert layoutFits(layout, panels, 48), $layout.size
 
-proc checkHud(
-    layout: GameUiLayout,
-    regions: openArray[tuple[region: GameUiRegion, size: Vec2]]
-) =
-  ## Checks the actual game plates and transport at the shared HUD scale.
-  var panels: seq[GameUiPanel]
-  for (region, size) in regions:
-    panels.add layout.panel(region, size)
-  checkHud(layout, panels)
+proc checkAdventureHud(layout: GameUiLayout) =
+  ## Checks the plate, map, and stacked hero columns used by CTA's HUD.
+  let
+    plate = layout.panel(GameUiRegion.TopLeft, cta.PanelPlate)
+    map = layout.panel(GameUiRegion.TopRight, cta.PanelMap)
+    height = layout.sheetHeight()
+  var panels = @[plate, map]
+  doAssert height > 0 and height <= cta.SheetHeight
+  for top in [plate, map]:
+    for row in 0 ..< 2:
+      let sheet = GameUiPanel(
+        origin: top.origin + vec2(0,
+          top.size.y + cta.ColumnGap +
+          row.float32 * (height + cta.ColumnGap)),
+        size: vec2(cta.ColumnWidth, height)
+      )
+      doAssert sheet.origin.x == top.origin.x
+      doAssert sheet.origin.y + sheet.size.y <=
+        layout.gameAreaSize.y - layout.margin
+      panels.add sheet
+  doAssert layout.size.x >= TransportMinWidth
+  doAssert layoutFits(layout, panels, cta.ColumnGap), $layout.size
 
 echo "Testing all game HUDs at shared scale breakpoints"
 for size in [
@@ -73,8 +87,13 @@ for size in [
   let shop = gota.shopPanels(layout.size)
   checkPanels(shop.panel, [shop.heading, shop.catalog, shop.footer])
   checkPanels(shop.catalog, shop.cards)
-  doAssert shop.cards[0].size.x >= (if shop.compact: 230 else: 280)
-  doAssert shop.cards[0].size.y >= (if shop.compact: 140 else: 160)
+  # The catalogue now uses compact icon/name/price cells plus a dedicated
+  # retained-details gutter, not the old full-description cards.
+  doAssert shop.tooltipGutter.size.x >= 380
+  for card in shop.cards:
+    doAssert card.size.x >= 72 and card.size.y >= 88
+    doAssert not card.overlaps(shop.tooltipGutter)
+    doAssert card.inside(layout.size)
   checkHud(layout, [
     gota.scorePanel(layout),
     layout.panel(GameUiRegion.TopCenter, gota.PanelHeroes),
@@ -84,20 +103,13 @@ for size in [
     layout.panel(GameUiRegion.BottomRight, gota.PanelInventory)
   ])
   checkHud(layout, [
-    (GameUiRegion.TopLeft, lvd.PanelScore),
-    (GameUiRegion.TopCenter, lvd.PanelResources),
-    (GameUiRegion.TopRight, lvd.PanelMinimap),
-    (GameUiRegion.BottomLeft, lvd.PanelSelection),
-    (GameUiRegion.BottomRight, lvd.PanelBuild)
+    layout.panel(GameUiRegion.TopLeft, lvd.PanelScore),
+    lvd.resourcePanel(layout),
+    layout.panel(GameUiRegion.TopRight, lvd.PanelMinimap),
+    layout.panel(GameUiRegion.BottomLeft, lvd.PanelSelection),
+    layout.panel(GameUiRegion.BottomRight, lvd.PanelBuild)
   ])
-  checkHud(layout, [
-    (GameUiRegion.TopLeft, cta.PanelParty),
-    (GameUiRegion.TopCenter, cta.PanelQuest),
-    (GameUiRegion.TopRight, cta.PanelMinimap),
-    (GameUiRegion.BottomLeft, cta.PanelChat),
-    (GameUiRegion.BottomCenter, cta.PanelAbilities),
-    (GameUiRegion.BottomRight, cta.PanelInventory)
-  ])
+  checkAdventureHud(layout)
 
 echo "Testing HUD stacks at different screen origins"
 for origin in [vec2(0), vec2(123, 57), vec2(2200, 1100)]:
@@ -177,50 +189,46 @@ for origin in [vec2(0), vec2(123, 57), vec2(2200, 1100)]:
     let
       panel = GameUiPanel(origin: origin, size: lvd.PanelBuild)
       build = panel.buildPanels()
-    checkPanels(panel, build.tabs)
     checkPanels(build.contents, build.slots)
-    doAssert build.slots[0].origin.y >=
-      build.tabs[0].origin.y + build.tabs[0].size.y
+    doAssert build.slots[0].origin.y == build.contents.origin.y
   block:
     let
-      panel = GameUiPanel(origin: origin, size: cta.PanelParty)
-      party = panel.partyPanels()
-    for i, hero in party:
-      checkPanels(panel, [hero.card])
-      checkPanels(hero.card, [hero.portrait, hero.name, hero.hp, hero.mana])
-      if i > 0:
-        doAssert hero.card.origin.y - party[i - 1].card.origin.y ==
-          hero.card.size.y + cta.PartyGap
-  block:
-    let
-      panel = GameUiPanel(origin: origin, size: cta.PanelChat)
-      chat = panel.chatPanels()
-    checkPanels(panel, [chat.general, chat.combat, chat.body])
-  block:
-    let
-      panel = GameUiPanel(origin: origin, size: cta.PanelQuest)
-      quest = panel.questPanels()
+      panel = GameUiPanel(origin: origin, size: cta.PanelPlate)
+      plate = panel.platePanels()
     checkPanels(panel, [
-      quest.theme, quest.heading, quest.title, quest.clock, quest.enemies
+      plate.icon, plate.title, plate.progress, plate.questIcon,
+      plate.quest, plate.status
     ])
-  block:
+  for viewportHeight in [864.0'f, 900, 1080, 1440]:
     let
-      panel = GameUiPanel(origin: origin, size: cta.PanelAbilities)
-      abilities = panel.abilityPanels()
-    checkPanels(panel, abilities.slots)
-    checkPanels(panel, [abilities.divider, abilities.xp])
-    doAssert abilities.slots[3].origin.x + abilities.slots[3].size.x <
-      abilities.divider.origin.x
-    doAssert abilities.divider.origin.x < abilities.slots[4].origin.x
-  block:
-    let
-      panel = GameUiPanel(origin: origin, size: cta.PanelInventory)
-      inventory = cta.inventoryPanels(panel)
-    checkPanels(panel, inventory.slots)
-    checkPanels(panel, inventory.counters)
-    checkPanels(panel, [inventory.title])
-    doAssert inventory.counters[0].origin.y >=
-      inventory.slots[^1].origin.y + inventory.slots[^1].size.y
+      layout = initGameUiLayout(vec2(1920, viewportHeight), TransportHeight)
+      panel = GameUiPanel(origin: origin,
+        size: vec2(cta.ColumnWidth, layout.sheetHeight()))
+      sheet = panel.sheetPanels()
+    var contents = @[
+      sheet.portrait, sheet.name, sheet.hp, sheet.mana,
+      sheet.mainLabel, sheet.offLabel
+    ]
+    doAssert sheet.sheet == panel
+    for well in sheet.gear:
+      contents.add well
+    for skill in sheet.skills:
+      contents.add skill
+    checkPanels(panel, contents)
+    doAssert sheet.hp.origin.x == sheet.mana.origin.x
+    doAssert sheet.hp.size == sheet.mana.size
+    doAssert sheet.gear[MainHandSlot].origin.y ==
+      sheet.gear[OffHandSlot].origin.y
+    doAssert sheet.mainLabel.origin.y + sheet.mainLabel.size.y <=
+      sheet.gear[MainHandSlot].origin.y
+    doAssert sheet.offLabel.origin.y + sheet.offLabel.size.y <=
+      sheet.gear[OffHandSlot].origin.y
+    doAssert sheet.skills[0].origin.y >=
+      sheet.gear[SecondRingSlot].origin.y +
+      sheet.gear[SecondRingSlot].size.y
+    for i in 1 ..< sheet.skills.len:
+      doAssert sheet.skills[i].origin.y == sheet.skills[0].origin.y
+      doAssert sheet.skills[i].size == sheet.skills[0].size
 
 echo "Testing variable-width replay transport"
 for width in [TransportMinWidth, 1280.0'f, 1920, 3840]:

@@ -31,6 +31,16 @@ doAssert "Stuns and roots" in itemDetails(PortalScroll).description
 doAssert ("Stun", "0.5s") in abilityDetails(FirebrandSword, 4).rows
 doAssert ("Healing", "375 HP") in abilityDetails(HealingBloom, 4).rows
 
+for item in [BattleAxe, RuneCrossbow, SunsteelLongsword, RangerBow]:
+  let card = itemDetails(item)
+  let eligibility = if item in [BattleAxe, SunsteelLongsword]:
+    "Melee heroes only" else: "Ranged heroes only"
+  doAssert ("Requires", eligibility) in card.rows
+  doAssert ("Attack damage", "+" & $item.itemSpec.damage) in card.rows
+  doAssert "basic attacks only" in card.description
+  doAssert "any inventory slot" in card.description
+  doAssert "not increase attack range" in card.description
+
 # Art-free timing/session regressions run with the ordinary GotA suite.
 {.push warning[UnusedImport]: off.}
 import test_tooltip_hover, test_tooltip_session, test_tooltip_routes

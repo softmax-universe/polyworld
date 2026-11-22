@@ -1,477 +1,313 @@
 # Gameserver packets
 
-Outer protocol **4**. [GotA payloads](../games/gods_of_the_arena/packets.md) · [Hosting](gameserver.md).
+Outer protocol **5**. See [hosting and integration](gameserver.md).
 
-One binary WebSocket message per packet at `/ws`. Fields are in wire order,
-little endian, without padding. `string` and `seq[T]` have a `uint32` length
-prefix. Types below describe the wire, so boolean flags are `uint32` (0 or 1).
+One binary WebSocket message carries one packet at `/ws`. Fields below are
+in wire order, little endian, without padding. A `string` is a `uint32` byte
+length followed by its bytes; a `seq[T]` is a `uint32` count followed by its
+records. Boolean flags are `uint32` values restricted to 0 or 1.
 
-## Common header — 64 bytes
+Version 5 is an exact wire contract. Earlier versions are rejected. There
+are no game-name policies or compatibility branches, and no manual-ready,
+preparation-duration or server-announcement messages.
 
-Every packet starts with this header; the packet tables list only its body.
+## Common header
 
-| Field | Nim wire type | Carries / rules |
+Every packet starts with this 64-byte header. Message descriptions below
+list only the body.
+
+| Field | Wire type | Meaning |
 | --- | --- | --- |
-| `magic` | `array[4, char]` | PWRM. |
-| `version` | `uint32` | Exactly 4. |
-| `kind` | `uint32` | Packet ID below. |
-| `delivery` | `uint64` | Server delivery counter per connection, starting at 1; clients send 0. |
-| `match` | `uint32` | Match generation within room; starts at 0, increments on start. |
-| `server` | `uint64` | Server monotonic send time in microseconds; client sends 0. |
-| `echo` | `uint64` | Client echoes the latest received server timestamp unchanged. |
-| `received` | `uint64` | Client's cumulative delivery acknowledgement; paired with `echo`. |
-| `measuredAt` | `uint64` | Server time of the latest RTT measurement; 0 means unavailable. |
-| `rtt` | `uint32` | Latest server-measured round trip in microseconds. |
-| `jitter` | `uint32` | Absolute difference between consecutive RTT samples, in microseconds. |
+| `magic` | 4 bytes | ASCII `PWRM`. |
+| `version` | `uint32` | Exactly 5. |
+| `kind` | `uint32` | Message ID below. |
+| `delivery` | `uint64` | Server delivery counter, starting at 1 per connection; clients send 0. |
+| `match` | `uint32` | Match generation within the room; increments on each start. |
+| `server` | `uint64` | Server monotonic send time, microseconds. |
+| `echo` | `uint64` | Client echo of its latest received server timestamp. |
+| `received` | `uint64` | Cumulative server-delivery acknowledgement paired with `echo`. |
+| `measuredAt` | `uint64` | Server time of latest RTT measurement; 0 if unavailable. |
+| `rtt` | `uint32` | Server-measured round trip, microseconds. |
+| `jitter` | `uint32` | Absolute difference between consecutive RTT samples, microseconds. |
 
-The server validates the echo against its delivery record, then subtracts its
-original send time from its current monotonic time. Client clocks never enter
-this calculation. RTT includes the client's processing and acknowledgement
-turnaround. New measurements arrive with subsequent ordinary server packets.
-Replayed ticks get fresh transport timestamps; timing is not simulation state.
+The relay checks timestamp echoes against its delivery records. Client
+clocks are not used. RTT includes client processing and acknowledgement
+turnaround. Catch-up packets receive fresh transport timestamps; timestamps
+are not part of simulation state.
 
-Normal traffic is one submission per command and one authoritative packet per
-tick. The tick's command list confirms new submissions. Explicit CommandAck
-packets resolve retransmissions. Hashes, catch-up, and room/status changes still
-use their required control packets. Clients also acknowledge applied ticks.
-Receipts and timestamp echoes ride on outgoing packets, with a
-100 ms fallback when otherwise idle. Keepalives run only after 3 seconds idle.
-
+Receipts normally ride on outgoing packet headers, with a 100 ms idle
+fallback. Clients send application keepalives after three seconds without
+outgoing traffic. WebSocket control ping/pong frames are not room packets.
 
 ## Shared records
 
-### GameIdentity
+Fields in each row are ordered exactly as encoded.
 
-Exact equality is required for all three fields.
-
-| Field | Nim wire type | Carries / rules |
-| --- | --- | --- |
-| `game` | `string` | Game name; nonempty, ≤96 bytes. |
-| `gameplay` | `uint32` | Gameplay version. |
-| `protocol` | `uint32` | Game payload protocol; nonzero. |
-
-### Participant
-
-One connected guest may own multiple seats or spectate.
-
-| Field | Nim wire type | Carries / rules |
-| --- | --- | --- |
-| `id` | `uint32` | Nonzero guest ID. |
-| `name` | `string` | Display name; updates on reconnect outside matches; ≤64 bytes. |
-| `connected` | `uint32` | Connected = 1. |
-| `ready` | `uint32` | Ready = 1. |
-
-### Seat
-
-A seat has no server-side team or human/bot classification.
-
-| Field | Nim wire type | Carries / rules |
-| --- | --- | --- |
-| `owner` | `uint32` | Participant ID; 0 means unclaimed. |
-| `name` | `string` | Seat name; ≤96 bytes. |
-
-### RoomListing
-
-Public room browser entry.
-
-| Field | Nim wire type | Carries / rules |
-| --- | --- | --- |
-| `id` | `string` | Room ID; ≤64 bytes. |
-| `name` | `string` | Room name; ≤96 bytes. |
-| `phase` | `uint32` | RoomPhase value. |
-| `occupied` | `uint32` | Claimed seats. |
-| `seats` | `uint32` | Total seats. |
-
-### Command
-
-Retained command ownership and bytes inside a TickPacket.
-
-| Field | Nim wire type | Carries / rules |
-| --- | --- | --- |
-| `participant` | `uint32` | Submitting participant. |
-| `seat` | `uint32` | Owned seat index. |
-| `sequence` | `uint64` | Participant command sequence. |
-| `payload` | `string` | Opaque game command; ≤4,096 bytes. |
-
-### RoomPhase
-
-Shared phase values carried as `uint32`.
-
-| Value | Phase |
+| Record | Ordered fields |
 | --- | --- |
-| 0 | Lobby |
-| 1 | Playing |
-| 2 | Waiting |
-| 3 | Ended |
-| 4 | Desynced; also fatal abort or exhausted limits |
+| `GameIdentity` | `game: string`, `gameplay: uint32`, `protocol: uint32` |
+| `Participant` | `id: uint32`, `name: string`, `connected: uint32`, `ready: uint32` |
+| `Seat` | `owner: uint32`, `kind: uint32`, `name: string` |
+| `Command` | `participant: uint32`, `seat: uint32`, `seatKind: uint32`, `sequence: uint64`, `payload: string` |
+| `RoomListing` | `id: string`, `name: string`, `phase: uint32`, `occupied: uint32`, `seats: uint32` |
 
-## 0. Hello — Client → server
+`GameIdentity` is an opaque compatibility tuple. All three fields must match
+for discovery, joining and reconnecting. `game` is nonempty and at most
+96 bytes; `protocol` is nonzero. Their values do not select server behavior.
 
-Identify the game and player, or reconnect an existing guest.
+A participant ID is nonzero. Participant names are at most 64 bytes.
+`ready` is cosmetic information for the host; it never gates startup.
+`connected` describes the participant's current transport state.
 
-| Field | Nim wire type | Carries / rules |
+A seat's array index is its stable slot identifier. Owner 0 means empty.
+`kind` and `seatKind` use `HumanSeat = 0` and `BotSeat = 1`; names are at
+most 96 bytes and have no permission or type semantics. Teams are not part
+of this record. A command's participant and kind are stamped by the relay
+when it admits the submission, before any later reassignment.
+
+Room IDs are at most 64 bytes and room names at most 96 bytes. Phase values
+are `Lobby = 0`, `Playing = 1`, `Waiting = 2`, `Ended = 3`, `Desynced = 4`.
+`Desynced` also represents fatal aborts and exhausted service limits.
+
+## Room settings and snapshot bodies
+
+`CreateRoom`, `ConfigureRoom` and `ResizeRoom` share this ordered body:
+
+| Field | Wire type | Meaning |
 | --- | --- | --- |
-| `identity` | `GameIdentity` | Exact game, gameplay version and payload protocol. |
-| `name` | `string` | Display name; ≤64 bytes. |
-| `token` | `string` | Empty for a new guest; private reconnect token otherwise; ≤64 bytes. |
+| `name` | `string` | Room name, at most 96 bytes. |
+| `flag` | `uint32` | Public = 1; unlisted = 0. |
+| `tickRate` | `uint32` | 1 through 120 ticks per second. |
+| `number` | `uint32` | 1 through 64 slots. |
+| `payload` | `string` | Opaque game configuration, at most 65,536 bytes. |
 
-## 1. Welcome — Server → client
+`RoomState` and `BeginMatch` share this ordered snapshot body. `BeginMatch`
+appends a `uint64` setup hash after the snapshot:
 
-Assign the guest identity and private reconnect token.
-
-| Field | Nim wire type | Carries / rules |
+| Field | Wire type | Meaning |
 | --- | --- | --- |
-| `participant` | `uint32` | Nonzero participant ID. |
-| `token` | `string` | Private token; ≤64 bytes. Never broadcast. |
-
-## 2. ListRooms — Client → server
-
-Request public rooms matching the exact game identity.
-
-| Body | Size |
-| --- | --- |
-| None; header only | 64 bytes total |
-
-## 3. RoomList — Server → client
-
-Return compatible public rooms.
-
-| Field | Nim wire type | Carries / rules |
-| --- | --- | --- |
-| `rooms` | `seq[RoomListing]` | At most 64 rooms. |
-
-## 4. CreateRoom — Client → server
-
-Create a room with opaque game setup. The relay assigns a six-character uppercase
-A–Z/0–9 invitation code using OS randomness and bounded collision retries.
-Unlisted invitations are not authentication; private reconnect tokens remain
-separate 24-byte secrets. Existing longer room IDs remain joinable exactly.
-
-| Field | Nim wire type | Carries / rules |
-| --- | --- | --- |
-| `name` | `string` | Room name; ≤96 bytes. |
-| `flag` | `uint32` | Public = 1, unlisted = 0. |
-| `tickRate` | `uint32` | 1–120 ticks/second. |
-| `number` | `uint32` | 1–64 seats. |
-| `payload` | `string` | Opaque setup blob; ≤65,536 bytes. |
-
-## 5. JoinRoom — Client → server
-
-Join by room ID; joins during a match are spectators. Lookup is exact-first;
-only six-character alphanumeric invitations fall back to uppercase. Longer
-legacy IDs and reconnect tokens are never case-folded.
-
-| Field | Nim wire type | Carries / rules |
-| --- | --- | --- |
-| `room` | `string` | Room ID; ≤64 bytes. Also works for unlisted rooms. |
-
-## 6. RoomState — Server → client
-
-Replace the local room snapshot after lobby changes or reconnection.
-
-| Field | Nim wire type | Carries / rules |
-| --- | --- | --- |
-| `room` | `string` | Room ID; empty clears membership; ≤64 bytes. |
-| `name` | `string` | Room name; ≤96 bytes. |
-| `participant` | `uint32` | Room owner ID. |
-| `revision` | `uint32` | Setup/roster revision. |
-| `phase` | `uint32` | RoomPhase value. |
-| `tickRate` | `uint32` | Simulation ticks/second. |
-| `flag` | `uint32` | In Lobby: public visibility (1 public, 0 unlisted). In match phases: explicit pause. |
-| `payload` | `string` | Opaque setup; ≤65,536 bytes. |
-| `participants` | `seq[Participant]` | At most 64. |
-| `seats` | `seq[Seat]` | At most 64; array index is seat ID. |
-
-## 7. ConfigureRoom — Client → server
-
-Owner changes lobby settings; clears readiness and increments revision.
-
-| Field | Nim wire type | Carries / rules |
-| --- | --- | --- |
-| `name` | `string` | Room name; ≤96 bytes. |
-| `flag` | `uint32` | Public = 1, unlisted = 0. |
-| `tickRate` | `uint32` | 1–120 ticks/second. |
-| `number` | `uint32` | 1–64 seats; shrinking cannot remove another participant's seat. |
-| `payload` | `string` | Opaque setup; ≤65,536 bytes. |
-
-## 8. ClaimSeat — Client → server
-
-Claim an empty lobby seat or rename your own seat.
-
-| Field | Nim wire type | Carries / rules |
-| --- | --- | --- |
-| `seat` | `uint32` | Zero-based seat index. |
-| `name` | `string` | Seat name; ≤96 bytes. |
-
-## 9. ReleaseSeat — Client → server
-
-Release your lobby seat; an already empty seat is accepted. In Galcon, GotA,
-and LvD, the host may also release a foreign bot seat (seat name is not
-`Human`), without removing its participant or their other seats.
-
-| Field | Nim wire type | Carries / rules |
-| --- | --- | --- |
-| `seat` | `uint32` | Zero-based seat index. |
-
-## 10. Ready — Client → server
-
-Only a current controller may confirm the loaded setup and initial state hash.
-Roster-only edits retain visible ready intent, but Start requires a new Ready
-confirmation for the current revision; newcomers are never auto-readied.
-
-| Field | Nim wire type | Carries / rules |
-| --- | --- | --- |
-| `revision` | `uint32` | Must match current room revision. |
-| `hash` | `uint64` | Initial game digest; all controllers must agree. |
-
-## 11. StartMatch — Client → server
-
-Owner-only start. GotA accepts a sparse, nonempty occupied roster without Ready
-clicks: the host prepares the current snapshot and supplies its initial hash.
-Peers prepare on BeginMatch, check its exact revision/hash before ticks, and
-report tick zero against the relay's immutable checkpoint. Missing reports do
-not block the clock; mismatches still desync. Galcon protocol 2+ and LvD
-protocol 3+ use automatic revision-bound preparation and can defer a host start
-until proofs arrive, independently of cosmetic Ready. Legacy policies retain
-their existing Ready gates; legacy LvD requires every seat to be occupied.
-
-| Field | Nim wire type | Carries / rules |
-| --- | --- | --- |
-| `revision` | `uint32` | Required current revision for GotA; ignored by other startup policies. |
-| `hash` | `uint64` | Host-prepared initial hash for GotA; ignored by other startup policies. |
-
-## 12. BeginMatch — Server → client
-
-Start or reconstruct the match using the preceding RoomState; header carries the match ID.
-
-| Field | Nim wire type | Carries / rules |
-| --- | --- | --- |
-| `revision` | `uint32` | Agreed setup revision. |
-| `hash` | `uint64` | Agreed initial state hash. |
-
-## 13. SubmitCommand — Client → server
-
-Queue opaque input for an owned seat; server assigns the next tick in receipt order.
-
-| Field | Nim wire type | Carries / rules |
-| --- | --- | --- |
-| `seat` | `uint32` | Seat owned by sender. |
-| `sequence` | `uint64` | Consecutive from 1 across all sender seats; identical retransmissions are deduplicated. |
-| `payload` | `string` | Opaque game command; ≤4,096 bytes. |
-
-## 14. CommandAck — Server → client
-
-Resolve a retransmitted command's queue acceptance, not gameplay success.
-New commands are confirmed by their inclusion in TickPacket.
-
-| Field | Nim wire type | Carries / rules |
-| --- | --- | --- |
-| `sequence` | `uint64` | Accepted command sequence. |
-| `tick` | `uint32` | Assigned execution tick. |
-
-## 15. TickPacket — Server → client
-
-Execute this immutable tick once, including ticks with no commands.
-
-| Field | Nim wire type | Carries / rules |
-| --- | --- | --- |
-| `tick` | `uint32` | Next consecutive simulation tick. |
-| `commands` | `seq[Command]` | Server receipt order; at most 1,024 commands. |
-
-## 16. AppliedTick — Client → server
-
-Acknowledge that simulation has executed through this tick.
-
-| Field | Nim wire type | Carries / rules |
-| --- | --- | --- |
-| `tick` | `uint32` | Last applied simulation tick. |
-
-## 17. Catchup — Client → server
-
-Request retained ticks after the last applied tick.
-
-| Field | Nim wire type | Carries / rules |
-| --- | --- | --- |
-| `tick` | `uint32` | Last applied tick; server sends at most 16 ticks per batch. |
-
-## 18. CaughtUp — Server → client
-
-End a catch-up batch; does not authorize skipping ticks.
-
-| Field | Nim wire type | Carries / rules |
-| --- | --- | --- |
-| `tick` | `uint32` | Last tick in this batch. |
-| `number` | `uint32` | Current playback edge (final tick when completed); request another batch if behind. |
-
-## 19. ReportHash — Client → server
-
-Compare state at tick 0 and every simulation-second boundary; mismatches stop the match.
-
-| Field | Nim wire type | Carries / rules |
-| --- | --- | --- |
-| `tick` | `uint32` | Multiple of tickRate; not ahead of server. Older retransmissions compare against their own historical checkpoint. |
-| `hash` | `uint64` | Game digest; first report sets the historical checkpoint, later reports compare without waiting. |
-
-## 20. MatchStatus — Server → client
-
-Publish running, waiting, completed or failed state.
-
-| Field | Nim wire type | Carries / rules |
-| --- | --- | --- |
-| `flag` | `uint32` | Explicit pause = 1, otherwise 0; other waits can still apply. |
-| `phase` | `uint32` | RoomPhase value. |
-| `tick` | `uint32` | Latest emitted tick while active; actual final tick when completed. |
-| `detail` | `string` | Status or failure explanation; ≤4,096 bytes. |
-
-## 21. LeaveRoom — Client → server
-
-Leave a lobby/completed room or spectate elsewhere; live controllers must first end the match.
-
-| Body | Size |
-| --- | --- |
-| None; header only | 64 bytes total |
-
-## 22. KickParticipant — Client → server
-
-Room owner removes another participant from the lobby.
-
-| Field | Nim wire type | Carries / rules |
-| --- | --- | --- |
-| `participant` | `uint32` | Participant to remove. |
-
-## 23. ReturnLobby — Client → server
-
-Owner reopens an ended/failed room and clears history, pause and readiness.
-
-| Body | Size |
-| --- | --- |
-| None; header only | 64 bytes total |
-
-## 24. FinishMatch — Client → server
-
-Report the final state; the first controller report ends tick production. Later reports must match the retained final tick and hash.
-
-| Field | Nim wire type | Carries / rules |
-| --- | --- | --- |
-| `tick` | `uint32` | Actual final tick; may fall between hash checkpoints. |
-| `hash` | `uint64` | Final game digest. |
-
-## 25. Received — Client → server
-
-Idle fallback to release outgoing traffic credit; normally carried in the header.
-
-| Field | Nim wire type | Carries / rules |
-| --- | --- | --- |
-| `sequence` | `uint64` | Optional cumulative delivery ID; 0 uses the header acknowledgement. |
-
-## 26. Keepalive — Both directions
-
-Application heartbeat; client sends after 3 seconds without outgoing traffic, server disconnects after 15 seconds without traffic.
-
-| Body | Size |
-| --- | --- |
-| None; header only | 64 bytes total |
-
-## 27. Failure — Server → client
-
-Report an invalid request or packet; does not necessarily stop the match.
-
-| Field | Nim wire type | Carries / rules |
-| --- | --- | --- |
-| `detail` | `string` | Diagnostic; ≤4,096 bytes. |
-
-## 28. AbortMatch — Client → server
-
-A controller explicitly stops the match for everyone, including on fatal client errors or quitting.
-
-| Field | Nim wire type | Carries / rules |
-| --- | --- | --- |
-| `detail` | `string` | Reason; ≤4,096 bytes. First fatal diagnostic is retained. |
-
-## 29. PauseMatch — Client → server
-
-A controller pauses or resumes the current match; spectators cannot.
-
-| Field | Nim wire type | Carries / rules |
-| --- | --- | --- |
-| `flag` | `uint32` | 1 pauses new ticks; 0 resumes without waiting for client progress or hashes. |
-
-## 30. ResizeRoom — Client → server
-
-Uses the same body and owner/lobby validation as ConfigureRoom. When tick rate
-and opaque payload are unchanged, preserves controlling participants' ready
-intent while incrementing revision. A Galcon JSON change only to integer
-`players` matching `number`, or an LvD JSON roster resize that preserves the
-surviving player entries and appends only empty names, is also roster-only.
-Other payload changes invalidate readiness. Name-only changes use the same
-operation; preserve visibility from the Lobby RoomState flag. Revision-bound
-proofs must be refreshed where required by the adapter's startup policy.
-
-Spectator membership changes publish snapshots without changing setup revision.
-Seat changes and controller renames require new revision-bound proofs even when
-ready intent is retained.
-
-## 31. Prepared — Client → server
-
-Automatically confirm a current controller's setup revision and initial hash
-without changing its cosmetic ready flag. Same body and validation as Ready.
-This opcode alone does not change an adapter's StartMatch policy.
-
-| Field | Nim wire type | Carries / rules |
-| --- | --- | --- |
-| `revision` | `uint32` | Must match current room revision. |
-| `hash` | `uint64` | Automatically prepared initial digest. |
-
-## 32. ReadyStatus — Client → server
-
-Change only the current lobby controller's displayed readiness. GotA uses this
-social-only flag independently of its host-prepared StartMatch.
-
-| Field | Nim wire type | Carries / rules |
-| --- | --- | --- |
-| `flag` | `uint32` | Ready = 1, unready = 0. |
-
-## Shared rules
-
-| Concern | Rule |
-| --- | --- |
-| Server scope | Identity, membership, ownership, timeline and hash comparison only. Setup and command blobs stay opaque. |
-| Match validation | SubmitCommand, AppliedTick, Catchup, ReportHash, FinishMatch, AbortMatch and PauseMatch require the current header match ID. |
-| Delivery | Consecutive per socket; resets on reconnect. Pre-identification failures can use delivery 0. |
-| Commands | Sequence spans all seats of one participant and survives reconnect. Gaps, zero or altered retransmissions fail. |
-| Hash verification | Startup readiness must agree. During play, first report sets the checkpoint; later reports for the same match/tick compare asynchronously. Missing hashes do not pause; mismatches stop visibly. No state repair. |
-| Spectator hashes | Compared with retained checkpoints; mismatch stops the room, but absent spectator reports do not block it. |
-| Disconnect / lag | Missing or lagging controllers do not pause production. Reconnect retains seats; slow clients pull bounded catch-up batches. |
-| Explicit pause | Already-emitted ticks still execute. Pending commands stay on the next tick. Resume resets the clock deadline; no time catch-up burst. |
-| Quit | Live controller sends AbortMatch then LeaveRoom. Spectator sends LeaveRoom. No simulated winner is invented. |
-| Recovery | Same live client reconnects with its private token and VMs intact. Browser reload/process restart recovery is unsupported. |
-| Room IDs / tokens | 48 lowercase hex characters from 24 random bytes; unlisted room ID grants access, reconnect token stays private. |
-| Validation | Truncation, invalid enums/flags, oversized counts and trailing bytes fail. Display names reject blank/control characters; UTF-8 is not independently checked. |
-| History | Kept until ReturnLobby or last participant leaves; server restart loses it. Includes opaque commands, never bot programs or weights. |
-| Versions | Exact only. Incompatible outer layout changes bump RoomProtocolVersion; game payload and gameplay versions are separate. |
-
-## Limits
-
-| Resource | Current bound |
+| `room` | `string` | Room ID; an empty RoomState clears membership. |
+| `name` | `string` | Room name. |
+| `participant` | `uint32` | Host participant ID. |
+| `revision` | `uint32` | Configuration/roster revision. |
+| `phase` | `uint32` | Room phase. |
+| `tickRate` | `uint32` | Simulation ticks per second. |
+| `flag` | `uint32` | In Lobby, public visibility; in match phases, pause state. |
+| `payload` | `string` | Opaque game configuration. |
+| `participants` | `seq[Participant]` | At most 64 participants. |
+| `seats` | `seq[Seat]` | At most 64 ordered slots. |
+| `hash` | `uint64` | BeginMatch only: immutable initial setup hash. |
+
+`RoomState` describes the current administrative state. `BeginMatch` carries
+the preserved starting setup, including original slot responsibilities and
+owner names. Later membership and ownership edits do not rewrite it. A late
+joiner must reconstruct from `BeginMatch`, then replay the tick history.
+
+## Initialization hash
+
+Use `rooms.setupHash(snapshot)` for every game's `StartMatch`. It is 64-bit
+FNV-1a over the following byte sequence, using offset basis
+`14695981039346656037` and prime `1099511628211`, with multiplication modulo
+2^64:
+
+1. Raw ASCII `Polyworld room setup v5`, without a length prefix.
+2. `tickRate` as `uint32`.
+3. `seats` as `seq[Seat]`, in slot order.
+4. For every slot, its owning participant's name as a `string`; empty for an
+   unowned slot or an owner absent from the snapshot's participant list.
+5. The exact game configuration `payload` as a `string`.
+
+Participant array ordering does not affect name lookup. Ready and connected
+flags, room name/visibility, host identity, revision and transport timing are
+not hashed. The revision is validated separately. JSON key order and
+whitespace are part of the exact setup bytes; the relay does not normalize
+JSON. This digest checks setup agreement, not cryptographic authenticity.
+
+After checking the setup hash, clients construct their own simulation and
+send `ReportHash` at tick zero. The first simulation report establishes that
+checkpoint; it is not compared with the setup hash.
+
+## Messages
+
+All fields listed in a body cell are in wire order. "Header only" means a
+64-byte packet with no body. See the preceding tables for settings and
+snapshot bodies.
+
+| ID | Message | Direction | Body |
+| --- | --- | --- | --- |
+| 0 | `Hello` | Client to server | `identity: GameIdentity`, `name: string`, `token: string` |
+| 1 | `Welcome` | Server to client | `participant: uint32`, `token: string` |
+| 2 | `ListRooms` | Client to server | Header only |
+| 3 | `RoomList` | Server to client | `rooms: seq[RoomListing]` |
+| 4 | `CreateRoom` | Client to server | Settings body |
+| 5 | `JoinRoom` | Client to server | `room: string` |
+| 6 | `RoomState` | Server to client | Snapshot body without hash |
+| 7 | `ConfigureRoom` | Client to server | Settings body |
+| 8 | `ClaimSeat` | Client to server | `seat: uint32`, `participant: uint32`, `seatKind: uint32`, `name: string` |
+| 9 | `ReleaseSeat` | Client to server | `seat: uint32` |
+| 10 | `StartMatch` | Client to server | `revision: uint32`, `hash: uint64` |
+| 11 | `BeginMatch` | Server to client | Snapshot body followed by `hash: uint64` |
+| 12 | `SubmitCommand` | Client to server | `seat: uint32`, `sequence: uint64`, `payload: string` |
+| 13 | `CommandAck` | Server to client | `sequence: uint64`, `tick: uint32`, `flag: uint32` |
+| 14 | `TickPacket` | Server to client | `tick: uint32`, `commands: seq[Command]`, `seats: seq[Seat]` |
+| 15 | `AppliedTick` | Client to server | `tick: uint32` |
+| 16 | `Catchup` | Client to server | `tick: uint32` |
+| 17 | `CaughtUp` | Server to client | `tick: uint32`, `number: uint32` |
+| 18 | `ReportHash` | Client to server | `tick: uint32`, `hash: uint64` |
+| 19 | `MatchStatus` | Server to client | `flag: uint32`, `phase: uint32`, `tick: uint32`, `detail: string` |
+| 20 | `LeaveRoom` | Client to server | Header only |
+| 21 | `KickParticipant` | Client to server | `participant: uint32` |
+| 22 | `ReturnLobby` | Client to server | Header only |
+| 23 | `FinishMatch` | Client to server | `tick: uint32`, `hash: uint64` |
+| 24 | `Received` | Client to server | `sequence: uint64` |
+| 25 | `Keepalive` | Both directions | Header only |
+| 26 | `Failure` | Server to client | `detail: string` |
+| 27 | `AbortMatch` | Client to server | `detail: string` |
+| 28 | `PauseMatch` | Client to server | `flag: uint32` |
+| 29 | `ResizeRoom` | Client to server | Settings body |
+| 30 | `ReadyStatus` | Client to server | `flag: uint32` |
+
+### Connection and membership
+
+`Hello` with an empty token creates a participant. A nonempty token restores
+that participant after an identity comparison; a replacement connection
+closes the old connection. `Welcome` returns the private token, at most
+64 bytes. Tokens are never broadcast. A restored live client retains its
+private VM and simulation state; reconnecting does not start a new match.
+
+`ListRooms` returns at most 64 compatible public rooms. `CreateRoom` creates
+a room and gives its creator ownership. `JoinRoom` joins a compatible room
+by invitation code, including an unlisted room. Lookup tries the exact ID
+then uppercases a six-character alphanumeric invitation. Joining a running
+match sends both current room state and the immutable starting setup.
+
+`LeaveRoom` releases the sender's assignments and removes membership, even
+during play. `KickParticipant` lets the host remove another participant in
+any phase. The host leaves through `LeaveRoom`, rather than kicking itself.
+A room with no connected participants is deleted. If the host leaves while
+others remain, ownership passes to a remaining participant.
+
+### Configuration and slots
+
+`ConfigureRoom` is host-only and lobby-only. It changes the opaque setup,
+slot count and administrative settings, then increments the revision.
+`ResizeRoom` is host-only and also works during a match, when `payload` and
+`tickRate` must stay unchanged. The server never parses game JSON to classify
+a change. Shrinking releases removed trailing slots, including assignments
+to other participants when requested by the host.
+
+`ClaimSeat.participant = 0` selects the sender. A nonzero target must belong
+to the room. Hosts may assign empty or occupied slots to any participant;
+guests may claim empty slots for themselves or update their own slots.
+`seatKind` explicitly selects human or bot control. The name must be nonempty
+and printable; it never determines the kind. `ReleaseSeat` accepts an
+already-empty slot. Hosts may release any assignment; others may release
+only their own. These operations apply in every room phase.
+
+`ReadyStatus` updates any room participant's own visible ready flag in any
+phase. Settings and roster edits preserve that cosmetic flag. It is never
+consulted by `StartMatch`. There is no prepared-state handshake.
+
+### Starting and advancing
+
+`StartMatch` is host-only in the lobby. Its revision must equal the current
+room revision and its hash must equal `setupHash` of that snapshot. A valid
+request starts immediately without waiting for ready flags, preparation
+reports or controller connectivity. An empty occupied roster is also valid
+for the relay; the game decides whether its setup is playable. `BeginMatch`
+gives every client the same initial configuration and slot responsibilities.
+
+`SubmitCommand` is accepted only for a slot owned by its sender in an active
+match. The relay supplies the command's participant and controller kind;
+clients cannot choose that provenance. Sequences are consecutive from 1 per
+participant across all their slots and survive reconnect. An exact
+retransmission receives its original `CommandAck`; changed retransmissions
+or gaps fail. Admission does not promise that gameplay will accept the
+command.
+
+If the sender no longer owns the slot when a new submission arrives, the
+relay consumes its sequence and returns `CommandAck` with `tick = 0` and
+`flag = 1`. The discarded command never enters game history. This retires
+in-flight input after a removal or resize without breaking later command
+sequences. `flag = 0` acknowledges an admitted command at its assigned tick.
+Retransmissions retain the original admitted/discarded result even if slot
+ownership has since changed.
+
+`TickPacket` executes once at its consecutive tick. Its commands retain
+admission-time provenance, even if a slot was reassigned before delivery.
+Its `seats` is the complete end-of-tick routing roster. Apply game commands
+first, then update applied ownership. Do not validate historical commands
+against the latest `RoomState`. The shared client's `appliedTick` updates
+`appliedSeats` after the taken packet is executed.
+
+`AppliedTick` acknowledges executed simulation progress. `Catchup` requests
+ticks after that position, up to 16 at a time. `CaughtUp.tick` is the last
+tick in the batch, and `number` is the current playback edge, or final tick
+for a completed match. It does not authorize skipping intermediate ticks.
+
+### Hashes, completion and pause
+
+`ReportHash` is valid at tick zero and simulation-second boundaries, never
+ahead of the relay. The first report for each historical checkpoint sets its
+hash; later reports compare against that checkpoint. Missing reports do not
+pause the timeline. Disagreeing reports, including spectator reports, stop
+the match. Setup agreement and simulation agreement are separate checks.
+
+`FinishMatch` reports a game-decided final tick and hash. The first report
+must come from a participant that controlled a slot at the beginning or end
+of that tick, or submitted an admitted command in that tick. This preserves
+completion authority across later reassignment. The relay retains the
+completed edge even if that controller subsequently leaves, and compares
+subsequent completion reports. The final tick must be positive. The relay
+has no configured gameplay duration and does not calculate the outcome.
+
+`PauseMatch` lets the host or a controller pause or resume new ticks. Pending commands
+remain queued and already emitted packets stay immutable. `MatchStatus`
+reports the phase, pause flag, playback edge and diagnostic. `AbortMatch`
+lets the host or a controller stop the match after a fatal client error. `ReturnLobby`
+lets the host reopen an ended or failed room and clear its match history.
+
+### Transport and errors
+
+`Received.sequence` is an optional cumulative delivery acknowledgement;
+zero uses the acknowledgement in the header. Acknowledgements release
+outgoing transport credit. Idle clients send `Keepalive`; the server closes
+connections with no application traffic for 15 seconds.
+
+`Failure.detail` describes a rejected operation or packet and does not
+necessarily end the match. Status and failure text are limited to 4,096
+bytes. Malformed lengths, invalid enum/flag values, trailing packet bytes,
+stale match IDs and unauthorized room mutations are rejected.
+
+## Limits and lifetime
+
+| Resource | Bound |
 | --- | --- |
 | Entire outer packet | 256 KiB |
 | Setup / command payload | 64 KiB / 4 KiB |
 | Rooms / guests / live sockets | 64 / 512 / 256 |
-| Seats / participants per room | 64 / 64 |
-| Commands in one decoded tick | 1,024; pending byte accounting may stop earlier |
-| Pending storage accounting | Each accepted command adds `2 * payload.len + 64`; admission also checks the pending half-wire budget |
-| Retained room history | 128 MiB accounting budget, 345,600 ticks |
+| Slots / participants per room | 64 / 64 |
+| Commands per decoded tick | 1,024; byte accounting may stop admission earlier |
+| Retained room history | 128 MiB accounting budget |
 | Aggregate retained history | 512 MiB accounting budget |
-| Unacknowledged outgoing bytes | 512 KiB per guest, then disconnect |
+| Unacknowledged outgoing bytes | 512 KiB per guest |
 | Identified incoming traffic | 256 KiB per one-second accounting window |
 | Client pending commands / buffered ticks | 4,096 / 128 |
+
+There is no fixed match-duration or retained-tick-count limit. Memory and
+wire limits remain enforced. The relay stops a match visibly if retaining
+accepted history would exceed its resource budget. History is kept until
+returning to the lobby or deleting the room; a server restart loses it.
+History contains commands and routing snapshots, never bot programs or
+private VM state. Game timers, drafting, teams, countdowns and announcements
+are entirely client-owned.
 
 ## Source
 
 | File | Owns |
 | --- | --- |
-| [rooms.nim](../src/polyworld/rooms.nim) | Wire codec and IDs. |
-| [relays.nim](../src/polyworld/relays.nim) | Timeline, limits and mandatory hashes. |
-| [roomclients.nim](../src/polyworld/roomclients.nim) | Acknowledgements and catch-up. |
+| [rooms.nim](../src/polyworld/rooms.nim) | Wire codec, types and setup hash. |
+| [relays.nim](../src/polyworld/relays.nim) | Rooms, routing, timeline, limits and hash comparison. |
+| [roomclients.nim](../src/polyworld/roomclients.nim) | Initial/applied snapshots, acknowledgements and catch-up. |
 | [connections.nim](../src/polyworld/connections.nim) | Windy transport. |
 | [gameserver.nim](../tools/gameserver.nim) | Mummy event loop. |

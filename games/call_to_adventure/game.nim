@@ -5,182 +5,23 @@
 ## replaying.
 
 import
-  std/[os, strformat, strutils, times],
+  std/[strformat, strutils, times],
   polyworld/[cli, controllers, metrics, profiles, tapes, timings],
   content,
   maps,
   sim,
   bots,
   controls,
-  replays
+  replays,
+  options as launchoptions
+
+export launchoptions
 
 when defined(coworld):
   import polyworld/coworld
 
-proc usage() =
-  ## Prints the shared Polyworld game command surface.
-  echo "Call to Adventure"
-  echo "  --bot:PATH              Fill one of the four hero slots."
-  echo "  --bot:PATH:N            Fill N slots with that BASIC program."
-  echo "  --bot PATH[:N]          The equivalent two-argument form."
-  echo "  --player                Control the first hero; supply 3 bots."
-  echo "  --player:N              Control hero N (1-4); supply 3 bots."
-  echo "  --replay PATH           Play recorded actions instead of bots."
-  echo "  --record PATH           Record bot actions to a replay."
-  echo "  --seed NUMBER           Live dungeon seed."
-  echo "  --seconds NUMBER        Duration in seconds (default 1200)."
-  echo "  --minutes NUMBER        Duration in minutes (default 20)."
-  echo "  --ticks NUMBER          Duration in ticks (default 28800)."
-  echo "  --headless-tick-rate N   Wall-clock ticks per second, 0 is unlimited."
-  echo "  --llm-mode:async|barrier Wait for all requests between headless ticks."
-  echo "  --speed NUMBER          Graphical start speed: 1, 2, 4, or 16."
-  echo "  --play=false            Start the graphical transport paused."
-  echo "  --windowSize WxH        Graphical window, such as 800x400."
-  echo "  --vsync:off             Unlock the frame rate (default on)."
-  echo "  --verbose               Print periodic headless summaries."
-  echo "  --arena                 Debug fight in one 10x10 room."
-  echo "  --hero:CLASS[,CLASS]    Arena party: wizard (the mage), rogue (the"
-  echo "                          archer), fighter, cleric (the druid); default"
-  echo "                          mage,fighter."
-  echo "  --monster:NAME[,NAME]   Arena monsters, cycled: dustling (default)..."
-  echo "  --monsters:N            Arena monster count, 1 to 24 (default 10)."
-  echo "Compile with -d:headless for command-line simulation."
-  echo "Compile with -d:emscripten for the web backend."
-
-type ArenaOptions* = object
-  ## The debug fight that replaces the dungeon when enabled.
-  enabled*: bool
-  heroes*: seq[HeroClass]
-  species*: seq[Species]
-  count*: int
-
-var arenaOptions* = ArenaOptions(
-  heroes: @[WizardClass, FighterClass],
-  species: @[DustlingSpecies],
-  count: 10
-)
-
-proc squashed(name: string): string =
-  ## Lowercases a name and drops spaces, dashes and underscores.
-  for ch in name:
-    if ch.isAlphaNumeric:
-      result.add ch.toLowerAscii
-
-proc heroName*(class: HeroClass): string =
-  ## A class's plain name, such as Fighter.
-  ($class)[0 ..< ($class).len - "Class".len]
-
-proc parseArenaHero(name: string): HeroClass =
-  ## Reads a hero class by its plain name, in any case. The rogue, who
-  ## carries the bow, also answers to archer and ranger, the wizard to mage
-  ## and arcanist, and the cleric to druid.
-  if name.squashed in ["archer", "ranger"]:
-    return RogueClass
-  if name.squashed in ["mage", "arcanist"]:
-    return WizardClass
-  if name.squashed == "druid":
-    return ClericClass
-  for class in HeroClass:
-    if class.heroName.squashed == name.squashed:
-      return class
-  fail("unknown --hero " & name & "; use mage, archer, fighter or druid")
-
-proc parseArenaMonster(name: string): Species =
-  ## Reads a species by its display name, ignoring case, spaces and dashes.
-  for species in Species:
-    if SpeciesNames[species].squashed == name.squashed:
-      return species
-  var names: seq[string]
-  for species in Species:
-    names.add SpeciesNames[species].toLowerAscii.replace(' ', '_')
-  fail("unknown --monster " & name & "; use one of " & names.join(", "))
-
-proc parseArenaHeroes(names: string): seq[HeroClass] =
-  ## Reads a comma-separated party, each class at most once.
-  for name in names.split(','):
-    let class = parseArenaHero(name)
-    if class in result:
-      fail("--hero names the " & class.heroName & " twice")
-    result.add class
-
-proc parseArenaCount(value: string): int =
-  ## Reads how many monsters the arena spawns.
-  try:
-    result = parseInt(value)
-  except ValueError:
-    fail("--monsters takes a count; pick species with --monster:" & value)
-  if result notin 1 .. ArenaMonsterLimit:
-    fail("--monsters takes 1 to " & $ArenaMonsterLimit)
-
-proc arenaMonsters*(): seq[Species] =
-  ## The arena's monsters, cycling through the chosen species.
-  for index in 0 ..< arenaOptions.count:
-    result.add arenaOptions.species[index mod arenaOptions.species.len]
-
-proc takeArenaFlag(
-    arguments: seq[string],
-    index: var int,
-    argument: string
-): bool =
-  ## Handles the debug arena flags. Picking heroes or monsters implies it.
-  if argument == "--arena":
-    arenaOptions.enabled = true
-    return true
-  for flag in ["--hero", "--monsters", "--monster"]:
-    var value = ""
-    if argument == flag:
-      value = arguments.argumentValue(index, argument)
-    elif argument.startsWith(flag & ":") or argument.startsWith(flag & "="):
-      value = argument[flag.len + 1 .. ^1]
-    else:
-      continue
-    arenaOptions.enabled = true
-    case flag
-    of "--hero":
-      arenaOptions.heroes = parseArenaHeroes(value)
-    of "--monsters":
-      arenaOptions.count = parseArenaCount(value)
-    else:
-      arenaOptions.species = @[]
-      for name in value.split(','):
-        arenaOptions.species.add parseArenaMonster(name)
-    return true
-
-proc parseGameOptions(): GameOptions =
-  ## Parses runtime game, bot, replay, and renderer configuration.
-  result = GameOptions(
-    seed: 2026,
-    seconds: DefaultMinutes * 60,
-    maximumTicks: DefaultDurationTicks,
-    speed: 1
-  )
-  let arguments = commandLineParams()
-  var index = 0
-  while index < arguments.len:
-    let argument = arguments[index]
-    if result.takeCommonFlag(arguments, index, argument):
-      discard
-    elif takeArenaFlag(arguments, index, argument):
-      discard
-    else:
-      case argument
-      of "--verbose":
-        result.verbose = true
-      of "--help", "-h":
-        usage()
-        quit(0)
-      else:
-        fail("unknown argument: " & argument)
-    inc index
-  result.validateGameOptions(
-    PartySize,
-    "a live expedition requires exactly four bots"
-  )
-  if arenaOptions.enabled and
-      (result.recordPath.len > 0 or result.replayPath.len > 0):
-    fail("--arena is a debug fight and cannot record or replay")
-
 var
+  arenaOptions* = defaultArenaOptions()
   options*: GameOptions
   run*: Game
 
@@ -205,7 +46,9 @@ proc decideHeroSlot(game: Game, slot: int32) =
         actor.id,
         action
     ):
-      discard game.applyHeroAction(slot, action)
+      if action.kind != ActionChat:
+        # Mailboxes were consumed by private VMs; only their commands replay.
+        discard game.applyHeroAction(slot, action)
     return
   if isPlayerIndex(options.playerSlot, slot):
     flushPlayerCommands(game)
@@ -274,7 +117,7 @@ proc arenaMatchup(): string =
   for class in arenaOptions.heroes:
     heroes.add class.heroName
   var counts: array[Species, int]
-  for species in arenaMonsters():
+  for species in arenaOptions.arenaMonsters():
     inc counts[species]
   var monsters: seq[string]
   for species in arenaOptions.species:
@@ -381,7 +224,12 @@ proc runHeadless*() =
 when defined(coworld):
   options = coworldOptions(4)
 else:
-  options = parseGameOptions()
+  try:
+    let parsed = parseGameOptions()
+    options = parsed.options
+    arenaOptions = parsed.arena
+  except CliError as error:
+    fail(error.msg)
 
 startGameProfile()
 if options.replayPath.len > 0:
@@ -412,7 +260,7 @@ else:
           options.seed,
           options.maximumTicks,
           arenaOptions.heroes,
-          arenaMonsters()
+          arenaOptions.arenaMonsters()
         )
       else:
         newGame(options.seed, options.maximumTicks)

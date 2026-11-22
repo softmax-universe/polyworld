@@ -277,25 +277,22 @@ proc abilityProc(heroId: int32, field: AbilityField): HostProc =
     of AbilityManaCost: spec.manaCost
 
 proc deliverChat*(
-  game: Game, sender, target: int, text: openArray[char]
+  game: Game, sender, target: int, text: openArray[char], tick = -1'i32
 ): int32 =
-  ## Routes chat according to this game's player and team rules.
+  ## Records policy traffic and routes it by this game's player and team rules.
   if sender notin 0 ..< game.inboxes.len or
-    target < -2 or target >= game.inboxes.len:
+    target < -2 or target >= game.inboxes.len or
+    text.len == 0 or text.len > MaxChatBytes:
       return 0
-  let id = int32(if target < 0: target else: sender)
-  for recipient in 0 ..< game.inboxes.len:
-    case target
-    of -2:
-      discard
-    of -1:
-      if game.world.heroes[recipient].team != game.world.heroes[sender].team:
-        continue
-    else:
-      if recipient != target:
-        continue
-    if game.inboxes[recipient].push(id, text):
-      inc result
+  if game.recorder != nil:
+    var message = newString(text.len)
+    for i in 0 ..< text.len:
+      message[i] = text[i]
+    game.recorder.record(ReplayAction(
+      tick: uint32(if tick >= 0: tick else: game.world.tick),
+      kind: ActionPolicyChat, heroId: game.world.heroes[sender].id,
+      first: target.int32, text: message))
+  game.deliverPolicyChat(sender, target, text)
 
 proc sendChat*(
     game: Game, sender, target: int, text: openArray[char]
@@ -304,7 +301,8 @@ proc sendChat*(
   if game.networked:
     if sender notin 0 ..< game.world.heroes.len or
       target < -2 or target >= game.world.heroes.len or
-      text.len > MaxChatBytes or game.submissions.len >= 1024:
+      text.len == 0 or text.len > MaxChatBytes or
+      game.submissions.len >= 1024:
         return 0
     var message = newString(text.len)
     for i in 0 ..< text.len:
@@ -511,15 +509,8 @@ proc initHeroHost(
       result = activeGame.sendChat(player, int(args[0].asInt), text)
   let pullMailboxProc: NumericHostProc = proc(args: openArray[Value]): Value =
     ## Copies the oldest message into BASIC and consumes it on success.
-    let
-      player = activeGame.world.heroIndex(heroId)
-      inbox = activeGame.inboxes[player]
-    var runtime = activeGame.heroVms[player].runtime
-    if inbox.count == 0:
-      result = runtime.putString("")
-    else:
-      result = runtime.putString(inbox.messages[inbox.first])
-    discard inbox.pop()
+    let player = activeGame.world.heroIndex(heroId)
+    activeGame.heroVms[player].runtime.pullMailboxString(activeGame.inboxes[player])
   let mailboxIdProc: HostProc = proc(args: openArray[int32]): int32 =
     ## Returns the channel or DM sender of the last pulled message.
     activeGame.inboxes[activeGame.world.heroIndex(heroId)].lastId
@@ -925,21 +916,27 @@ proc neuralLimits(): Limits =
 
 proc loadBotSources*(
     game: Game,
-    sources: openArray[string]
+    sources: openArray[string],
+    preserve = false
 ) =
-  ## Loads bot files into every hero slot except the optional human slot.
+  ## Loads owned bots, optionally preserving unchanged private runtimes.
   activeGame = game
   let
     limits = neuralLimits()
     schema = initHeroHost(0)
-  game.heroVms = newSeq[HeroVm](game.world.heroes.len)
+  if not preserve:
+    game.heroVms = newSeq[HeroVm](game.world.heroes.len)
+    game.inboxes.setLen(game.world.heroes.len)
+    for inbox in game.inboxes.mitems:
+      inbox = newMailbox()
   game.structuredBots = false
-  game.inboxes.setLen(game.world.heroes.len)
-  for inbox in game.inboxes.mitems:
-    inbox = newMailbox()
   var bound = false
   for i in 0 ..< game.world.heroes.len:
     if i >= sources.len or sources[i].len == 0:
+      game.heroVms[i] = nil
+      continue
+    if preserve and game.heroVms[i] != nil:
+      game.structuredBots = game.structuredBots or game.heroVms[i].structured
       continue
     let llm = newLlmClient(i)
     let policy =

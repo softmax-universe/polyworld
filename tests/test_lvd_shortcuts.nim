@@ -1,105 +1,132 @@
-import std/unittest
+import std/[json, unittest]
 import ../games/light_vs_dark/[shortcuts, content, controls, maps, sim]
 
-suite "LvD sequential shortcuts":
-  test "B release B recognizes Barracks, not a simultaneous chord":
+suite "LvD single contextual shortcuts":
+  test "one key matches with repeat suppression and no hidden menu":
     var state: ShortcutState
-    let first = state.pressShortcut(DefaultShortcuts, 'B', 1.0)
-    check first.consumed
-    check first.action == -1
-    state.releaseShortcut('B')
-    let second = state.pressShortcut(DefaultShortcuts, 'B', 1.1)
-    check second.consumed
-    check second.action == BuildBarracksShortcut.ord
-
-  test "holding prefix never completes or refreshes its sequence":
-    var state: ShortcutState
-    discard state.pressShortcut(DefaultShortcuts, 'B', 1.0)
-    let repeated = state.pressShortcut(DefaultShortcuts, 'B', 1.1)
-    check repeated.consumed
-    check repeated.action == -1
-    state.releaseShortcut('B')
-    check state.pressShortcut(DefaultShortcuts, 'B', 1.2).action == BuildBarracksShortcut.ord
-    check state.pressShortcut(DefaultShortcuts, 'B', 1.3).action == -1
-
-  test "menu stays open across arbitrary delays and repeated commands":
-    var state: ShortcutState
-    discard state.pressShortcut(DefaultShortcuts, 'B', 1.0)
-    state.releaseShortcut('B')
-    check state.pressShortcut(DefaultShortcuts, 'B', 3600.0).action == BuildBarracksShortcut.ord
-    state.releaseShortcut('B')
-    check state.pressShortcut(DefaultShortcuts, 'F', 7200.0).action == BuildFarmShortcut.ord
-    state.releaseShortcut('F')
-    # Unassigned keys do not eat unrelated gameplay shortcuts or close the menu.
-    check not state.pressShortcut(DefaultShortcuts, 'Z', 8000.0).consumed
-    state.releaseShortcut('Z')
-    check state.pressShortcut(DefaultShortcuts, 'B', 9000.0).action == BuildBarracksShortcut.ord
-
-  test "cancellation, modifiers and menus never leak a pending sequence":
-    for reason in 1 .. 3:
+    check state.pressShortcut(DefaultShortcuts, 'E', 0).action == BuildBarracksShortcut.ord
+    check state.pressShortcut(DefaultShortcuts, 'E', 1).action == -1
+    state.releaseShortcut('E')
+    check state.pressShortcut(DefaultShortcuts, 'W', 3600).action == BuildFarmShortcut.ord
+    state.releaseShortcut('W')
+    check not state.pressShortcut(DefaultShortcuts, 'W', 3601, modified = true).consumed
+    state.releaseShortcut('W')
+    check not state.pressShortcut(DefaultShortcuts, 'W', 3602, gameplay = false).consumed
+    state.resetShortcut()
+    check not state.pressShortcut(DefaultShortcuts, 'E', 1, actions = {TrainPeonShortcut}).consumed
+    check state.pressShortcut(DefaultShortcuts, 'Q', 2, actions = {TrainPeonShortcut}).action == TrainPeonShortcut.ord
+  test "all actions match their single key in context":
+    for action in ShortcutAction:
       var state: ShortcutState
-      discard state.pressShortcut(DefaultShortcuts, 'T', 1.0)
-      state.releaseShortcut('T')
-      case reason
-      of 1:
-        discard state.pressShortcut(DefaultShortcuts, '\e', 1.1)
-      of 2:
-        discard state.pressShortcut(DefaultShortcuts, 'X', 1.1, modified = true)
-      of 3:
-        discard state.pressShortcut(DefaultShortcuts, 'X', 1.1, gameplay = false)
-      else:
-        discard state.pressShortcut(DefaultShortcuts, 'Z', 1.1)
-      check state.pressShortcut(DefaultShortcuts, 'S', 3.1).action == -1
-    var state: ShortcutState
-    check not state.pressShortcut(DefaultShortcuts, 'T', 1.0, modified = true).consumed
-    state.releaseShortcut('T')
-    check not state.pressShortcut(DefaultShortcuts, 'T', 1.1, gameplay = false).consumed
-
-  test "recognized menu action consumes but unrelated keys fall through":
-    var state: ShortcutState
-    discard state.pressShortcut(DefaultShortcuts, 'T', 1.0)
-    state.releaseShortcut('T')
-    let archer = state.pressShortcut(DefaultShortcuts, 'A', 1.1)
-    check archer.consumed
-    check archer.action == TrainArcherShortcut.ord
-    state.releaseShortcut('A')
-    discard state.pressShortcut(DefaultShortcuts, 'B', 2.0)
-    state.releaseShortcut('B')
-    let mismatch = state.pressShortcut(DefaultShortcuts, 'A', 2.1)
-    check not mismatch.consumed
-    check mismatch.action == -1
-
-  test "editing validates full sequences, rejects conflicts, persists and resets":
+      check DefaultShortcuts[action].len == 1
+      check shortcutLabel(action).len > 0
+      check state.pressShortcut(DefaultShortcuts, DefaultShortcuts[action][0], 0,
+        actions = {action}).action == action.ord
+  test "edits reject same-context collisions but allow different contexts":
     var bindings = DefaultShortcuts
-    check bindings.setShortcut(BuildBarracksShortcut, "b b") == ""
-    check bindings == DefaultShortcuts
-    check bindings.setShortcut(BuildBarracksShortcut, "T P").len > 0
-    check bindings == DefaultShortcuts
-    for invalid in ["", "B", "BBB", "B !", "Ctrl+B"]:
+    check bindings.setShortcut(BuildBarracksShortcut, "f").len > 0
+    for invalid in ["", "BB", "B !", "Ctrl+B"]:
       check bindings.setShortcut(BuildBarracksShortcut, invalid).len > 0
-      check bindings == DefaultShortcuts
-    check bindings.setShortcut(BuildBarracksShortcut, "q 7") == ""
-    check bindings[BuildBarracksShortcut] == "Q7"
+    check bindings.setShortcut(BuildBarracksShortcut, "7") == ""
+    check bindings.setShortcut(TrainPeonShortcut, "7") == ""
     check decodeShortcuts(encodeShortcuts(bindings)) == bindings
     check decodeShortcuts("") == DefaultShortcuts
-    expect ValueError:
-      discard decodeShortcuts("not json")
+    expect ValueError: discard decodeShortcuts("not json")
     bindings.resetShortcuts()
     check bindings == DefaultShortcuts
 
-  test "every content kind has an unambiguous build or train default":
-    check DefaultShortcuts[BuildBarracksShortcut] == "BB"
-    check DefaultShortcuts[TrainPeonShortcut] == "TP"
-    check DefaultShortcuts[TrainSoldierShortcut] == "TS"
-    check BuildBlacksmithShortcut.ord + 1 == BuildableHigh.ord + 1
-    check TrainSummonShortcut.ord - TrainPeonShortcut.ord + 1 == UnitKind.high.ord + 1
+
+  test "default palettes avoid global actions and mixed producer collisions":
+    for first in ShortcutAction:
+      if first != CancelSiteShortcut:
+        check DefaultShortcuts[first][0] notin ReservedShortcutKeys
+      for second in ShortcutAction:
+        if first < second and
+            (first <= BuildBlacksmithShortcut) ==
+            (second <= BuildBlacksmithShortcut):
+          check DefaultShortcuts[first] != DefaultShortcuts[second]
+    check DefaultShortcuts[CancelSiteShortcut] == "X"
+
+  test "action keys stay reserved and cancel always remains X":
+    var bindings = DefaultShortcuts
     for action in ShortcutAction:
-      check shortcutLabel(action).len > 0
-      var state: ShortcutState
-      let keys = DefaultShortcuts[action]
-      check state.pressShortcut(DefaultShortcuts, keys[0], 1.0).consumed
-      state.releaseShortcut(keys[0])
-      check state.pressShortcut(DefaultShortcuts, keys[1], 1.1).action == action.ord
+      for key in ReservedShortcutKeys:
+        if action != CancelSiteShortcut or key != 'X':
+          check bindings.setShortcut(action, $key).len > 0
+    check bindings.setShortcut(CancelSiteShortcut, "7").len > 0
+    check bindings.setShortcut(CancelSiteShortcut, "X") == ""
+    check bindings == DefaultShortcuts
+    var invalid = bindings
+    invalid[TrainPeonShortcut] = "A"
+    expect ValueError: discard decodeShortcuts(encodeShortcuts(invalid))
+    invalid = bindings
+    invalid[CancelSiteShortcut] = "7"
+    expect ValueError: discard decodeShortcuts(encodeShortcuts(invalid))
+    invalid = bindings
+    invalid[TrainPeonShortcut] = bindings[ResearchArrowsShortcut]
+    expect ValueError: discard decodeShortcuts(encodeShortcuts(invalid))
+
+  test "idle peon key is global rebindable and compatible with saved layouts":
+    var bindings = DefaultShortcuts
+    check bindings[IdlePeonShortcut] == "."
+    check bindings.setShortcut(IdlePeonShortcut, "Q").len > 0
+    check bindings.setShortcut(BuildFarmShortcut, ".").len > 0
+    check bindings.setShortcut(TrainPeonShortcut, ".").len > 0
+    check bindings.setShortcut(IdlePeonShortcut, ",") == ""
+    check decodeShortcuts(encodeShortcuts(bindings)) == bindings
+    var saved = parseJson(encodeShortcuts(bindings))
+    saved["bindings"].delete($IdlePeonShortcut)
+    saved["bindings"][$BuildBarracksShortcut] = %"7"
+    let migrated = decodeShortcuts($saved)
+    check migrated[IdlePeonShortcut] == "."
+    check migrated[BuildBarracksShortcut] == "7"
+
+suite "LvD shortcut migration":
+  setup:
+    let oldKeys = [
+      "H", "F", "B", "L", "T", "U", "C", "K",
+      "P", "S", "A", "M", "K", "C", "H", "E", "Q", "W", "R", "V", "X"
+    ]
+    var saved = newJObject()
+    saved["version"] = %2
+    saved["bindings"] = newJObject()
+    for action in ShortcutAction.low .. CancelSiteShortcut:
+      saved["bindings"][$action] = %oldKeys[action.ord]
+
+  test "both older default formats become the current left-hand layout":
+    check decodeShortcuts($saved) == DefaultShortcuts
+    check shortcutMigrationReport.len > 0
+    saved["version"] = %1
+    for action in ShortcutAction.low .. CancelSiteShortcut:
+      saved["bindings"][$action] = %("B " & oldKeys[action.ord])
+    check decodeShortcuts($saved) == DefaultShortcuts
+
+  test "valid custom bindings keep priority over new defaults":
+    saved["bindings"][$BuildTownHallShortcut] = %"7"
+    saved["bindings"][$TrainPeonShortcut] = %"W"
+    let migrated = decodeShortcuts($saved)
+    check migrated[BuildTownHallShortcut] == "7"
+    check migrated[TrainPeonShortcut] == "W"
+    check migrated[TrainSoldierShortcut] != "W"
+    check decodeShortcuts(encodeShortcuts(migrated)) == migrated
+
+  test "legacy reserved keys and custom cancel migrate to safe bindings":
+    saved["bindings"][$BuildBarracksShortcut] = %"A"
+    saved["bindings"][$TrainKnightShortcut] = %"X"
+    saved["bindings"][$CancelSiteShortcut] = %"7"
+    let migrated = decodeShortcuts($saved)
+    check migrated[BuildBarracksShortcut] == "E"
+    check migrated[TrainKnightShortcut] == "F"
+    check migrated[CancelSiteShortcut] == "X"
+    check shortcutMigrationReport.len > 0
+    check decodeShortcuts(encodeShortcuts(migrated)) == migrated
+
+  test "partial old files preserve edits and acquire current missing defaults":
+    saved["bindings"] = %*{"BuildBarracksShortcut": "7"}
+    let migrated = decodeShortcuts($saved)
+    check migrated[BuildBarracksShortcut] == "7"
+    check migrated[TrainPeonShortcut] == "Q"
+    check migrated[CancelSiteShortcut] == "X"
 
 suite "LvD shortcut commands":
   setup:

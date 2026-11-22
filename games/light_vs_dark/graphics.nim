@@ -8,22 +8,31 @@
 ## what gets drawn changes.
 
 import
-  std/[math, os, strformat, strutils, tables, times, unicode],
+  std/[math, strformat, tables, times, unicode],
   chroma, fixxy, opengl, pixie, vmath, windy, silky,
   polyworld/[actioncam, assets, characters, chargen, chrome, clickmarks, common,
-    inputs, lighting, particles, particleshaders, pathing, player, profiles, gameuis,
+    inputs, lighting, particles, particleshaders, pathing, player, pointers,
+    profiles, gameuis,
     quadterrain, rtscameras, selectionoutlines, shapes, shadows, tapes, toon,
-    viewers, visions, worldbars, worldtexts, menus, connections, roomclients, rooms, displays],
-  appearances, assets, backpacks, buildings, content, factions, groves,
+    viewers, visions, worldbars, worldtexts, menus, connections, roomclients, rooms, displays, sounds],
+  appearances, assets, backpacks, buildings, content, factions, groves, teamlooks,
   resourcepacks, symbols, treeorders,
   sim, maps,
   game,
   replays,
   ui,
   controls, homes, lobbies, multiplayer, attackorders, layouts, linemoves,
-  networkpresentation, shortcutsettings, unitselection, orderfeedback,
+  networkpresentation, shortcutsettings, unitselection, orderfeedback, ordermarkers,
   constructionpresentation, targetfeedback, rendervisibility,
-  harvestpresentation, woodcuttingpresentation
+  harvestpresentation, woodcuttingpresentation, battlesounds
+
+from polyworld/cli import WindowSizeFlag
+
+when defined(takeScreenshot):
+  import std/[os, strutils]
+
+when not defined(emscripten):
+  import polyworld/replaysaves, replaylibraries
 
 const
   DefaultCameraDistance = 17.0'f
@@ -34,10 +43,22 @@ const
     ## that much.
   RebakeFrameGap = 30
     ## Batches nearby harvest and construction changes into one scene update.
-  SelectionDragPixels = 6.0'f32
+  SelectionDragPixels = 10.0'f32
     ## Pointer travel that turns a click into a box select.
+  SelectionReach = 2.0'f
+    ## World-tile distance for selecting beside a unit or building.
 
 type
+  GraphicsHooks* = object
+    ## Optional tools share the full game renderer and playback lifecycle.
+    ready*: proc(camera: var ActionCam)
+      ## Frames the initial world and each replacement after its reset.
+    reload*: proc(): bool
+      ## Replaces run between frames; requires the same seed and factions.
+    key*: proc(button: Button, camera: var ActionCam): bool
+    overlay*: proc()
+    frame*: proc(): bool
+      ## Returns true to leave the current match after presenting its frame.
   MatchMenuPage = enum
     HiddenMatchMenu, PauseMenu, MatchSettings
   GraphicsError = object of CatchableError
@@ -89,8 +110,45 @@ var
   terrainReady = false
   shortcutState: ShortcutState
   shortcutHeldButtons, shortcutFrameButtons: set[Button]
+  attackHeldButtons: set[Button]
+  attackPressedButtons: set[Button]
+  attackSelection: seq[int32]
+  attackHoldConsumed = false
+  attackLeftStarted = false
+  rightOrderFromBuild = false
 
 ## Presentation helpers
+
+proc cancelAttackModifier() =
+  ## Clears targeting without allowing held keys to rearm on repeat.
+  attackMoveArmed = false
+  attackHeldButtons = {}
+  attackHoldConsumed = false
+  attackSelection.setLen(0)
+
+proc checkAttackSelection() =
+  ## Keeps attack targeting bound to the selection that armed it.
+  if attackMoveArmed and
+      (selectedIds != attackSelection or pendingBuild >= 0):
+    cancelAttackModifier()
+
+proc pressAttackModifier(button: Button) =
+  ## Captures the selection for a fresh attack key press.
+  if attackHeldButtons == {}: attackHoldConsumed = false
+  attackHeldButtons.incl button
+  attackSelection = selectedIds
+
+proc consumeAttackModifier() =
+  ## A tap is one-shot; an active hold can issue multiple accepted orders.
+  attackHoldConsumed = true
+  attackMoveArmed = attackHeldButtons != {}
+
+proc releaseAttackModifier(button: Button) =
+  ## Ends held targeting while preserving an unused tap.
+  attackPressedButtons.excl button
+  attackHeldButtons.excl button
+  if attackHeldButtons == {} and attackHoldConsumed:
+    attackMoveArmed = false
 
 proc cancelGameplayGestures() =
   ## Menu input must not leave a half-finished battlefield gesture behind.
@@ -100,7 +158,10 @@ proc cancelGameplayGestures() =
   panning = false
   minimapPanning = false
   rightOrderStarted = false
+  rightOrderFromBuild = false
+  attackLeftStarted = false
   lineGesture.cancelLine()
+  cancelAttackModifier()
 
 proc selectedBuildWorker(): int32 =
   ## Use the same first eligible selected worker for preview and submission.
@@ -152,7 +213,7 @@ proc addHudIcons(builder: AtlasBuilder, factions: openArray[Faction]) =
       if kind == GoldMineBuilding and player != LightPlayer:
         continue
       if not builder.addImage(
-          buildingPortraitKey(player, kind),
+          buildingPortraitSlotKey(player, kind),
           readImage(buildingPortraitPath(factions[player], kind))
         ):
         raise newException(
@@ -214,6 +275,10 @@ proc captureUnitPoses() =
   previousUnitPositions.clear()
   previousUnitFacings.clear()
   for unit in run.world.units:
+    # Inside-mine bodies retain their entrance pose but may exit anywhere on
+    # the perimeter. No visible previous pose exists across that teleport;
+    # renderPoint/renderFacing fall back to the new pose for the exit tick.
+    if unit.state == UnitInMine: continue
     previousUnitPositions[unit.id] = unitWorldPoint(unit)
     previousUnitFacings[unit.id] = unitYaw(unit)
 
@@ -297,33 +362,52 @@ proc buildUiAtlas(factions: openArray[Faction]): AtlasBuilder =
   result.addHomeAssets()
   result.addFont(DefaultFontPath, "WorldName", 32.0)
 
-proc initializeGraphics*() =
+proc initializeGraphics*(visible = true) =
   ## Creates one application window without constructing a hidden match.
   if window != nil: return
   let builder = buildUiAtlas(factionOrder(DefaultSeed.int64))
   builder.write(AtlasPath)
   (window, sk) = initGameWindow(WindowTitle, AtlasPath,
     gameWindowSize(options.windowWidth, options.windowHeight),
-    options.vsync, msaa = msaa4x)
+    options.vsync, msaa = msaa4x,
+    visible = visible and not captureActive())
+  window.onFocusChange = proc() =
+    ## Releases confinement immediately when switching to another app.
+    window.updateCursorConfinement()
+  window.onCloseRequest = proc() =
+    ## Restores the pointer before closing the game window.
+    releaseCursorConfinement()
 
 proc runGraphics*(network: NetworkMatch = nil,
-    connection: Connection = nil): bool {.discardable.} =
-  ## Owns match resources; the application window survives returning home.
-  initializeGraphics()
+    connection: Connection = nil,
+    hooks = GraphicsHooks(),
+    hidden = defined(takeScreenshot),
+    autoSaveReplay = false): bool {.discardable.} =
+  ## Owns match resources; the application window survives returning to the main menu.
+  let
+    captureHidden = hidden or captureActive()
+    saveAutomatically = autoSaveReplay and not captureActive()
+  initializeGraphics(visible = not captureHidden)
+  var captureTarget: ScreenshotTarget
+  defer: releaseScreenshotTarget(captureTarget)
   window.onFrame = nil
   window.onButtonPress = nil
   window.onButtonRelease = nil
   window.onRune = nil
-  window.onFocusChange = nil
+  window.onFocusChange = proc() =
+    ## Keeps pointer release active while match resources load.
+    window.updateCursorConfinement()
   window.runeInputEnabled = false
   shortcutState.resetShortcut()
   shortcutHeldButtons = {}
   shortcutFrameButtons = {}
+  attackPressedButtons = {}
   endShortcutEditing()
   hudNetwork = network
   resetHudTooltips()
   resetHumanCommunication()
   defer:
+    stopSounds()
     hudNetwork = nil
     resetHudTooltips()
     resetHumanCommunication()
@@ -331,55 +415,85 @@ proc runGraphics*(network: NetworkMatch = nil,
     window.onButtonPress = nil
     window.onButtonRelease = nil
     window.onRune = nil
-    window.onFocusChange = nil
+    window.onFocusChange = proc() =
+      ## Preserves focus-based release when returning to the main menu.
+      window.updateCursorConfinement()
     window.runeInputEnabled = false
   startGameProfile()
   var
     leaveMatch, quitToMenu, leaveRequested: bool
+    battleAudio: BattleSounds
+    audioWasActive = false
     matchMenu = HiddenMatchMenu
     preferences = readLvdPreferences()
     saveError: string
-  preferences.applyPreferences(window)
+  when not defined(emscripten):
+    var replaySaving: ReplaySaveState
+
+    proc saveToLibrary() =
+      ## Saves each recorded state once across manual and automatic exports.
+      replaySaving.requestReplaySave()
+      let data = recordingData()
+      discard replaySaving.saveReplaySnapshot(data,
+        proc(snapshot: ReplayData): string =
+          ## Writes one validated game snapshot to its replay library.
+          saveLibraryReplay(snapshot))
+      saveError = ""
+  preferences.applyPreferences(window, configureDisplay =
+    not captureHidden and WindowSizeFlag notin options.specifiedFlags)
+  window.updateCursorConfinement(preferences.edgeScrolling)
   let previousBindings = customBindingsEnabled
   customBindingsEnabled = true
   bindingCapture = false
   defer:
     customBindingsEnabled = previousBindings
     bindingCapture = false
-  viewMode = if options.playerSlot > 0: options.playerSlot else: options.viewMode
-  primaryId = NoEntity
-  lineGesture.cancelLine()
-  rightOrderStarted = false
-  selectedIds.setLen(0)
-  seekCheckpoints.setLen(0)
-  previousUnitPositions.clear()
-  previousUnitFacings.clear()
-  unitPoses.setLen(0)
-  terrainVisionTick = int32.low
-  terrainVisionMode = int32.low
-  pendingBuild = -1
-  attackMoveArmed = false
-  selectionStarted = false
-  panning = false
-  minimapPanning = false
-  followSelection = false
-  cameraDistance = DefaultCameraDistance
-  cameraTarget = vec3(0)
-  placedEditCount = 0
-  placedBuildingKey = ""
-  framesSinceRebake = 0
-  frameAlpha = 0
-  clearPlayerCommands()
-  targetFlash = TargetFeedback()
-  transport = initPlayer(live = not run.replayMode,
-    durationTicks = run.maximumTicks, playing = not options.pauseOnStart,
-    speed = options.speed,
-    repeating = network == nil and (run.replayMode or options.playerSlot == 0))
+  proc resetMatchState() =
+    ## Clears world-specific state while retaining uploaded render resources.
+    viewMode = if options.playerSlot > 0: options.playerSlot else: options.viewMode
+    stopSounds()
+    battleAudio.resetBattleSounds()
+    discard battleAudio.observeBattleSounds(run.world, viewMode, enabled = false)
+    primaryId = NoEntity
+    cancelGameplayGestures()
+    shortcutState.resetShortcut()
+    shortcutHeldButtons = {}
+    shortcutFrameButtons = {}
+    selectedIds.setLen(0)
+    seekCheckpoints.setLen(0)
+    previousUnitPositions.clear()
+    previousUnitFacings.clear()
+    unitPoses.setLen(0)
+    terrainVisionTick = int32.low
+    terrainVisionMode = int32.low
+    pendingBuild = -1
+    followSelection = false
+    groupCameraScale = 1
+    cameraDistance = DefaultCameraDistance
+    cameraTarget = vec3(0)
+    placedEditCount = 0
+    placedBuildingKey = ""
+    framesSinceRebake = 0
+    frameAlpha = 0
+    clearPlayerCommands()
+    targetFlash = TargetFeedback()
+    transport = initPlayer(live = not run.replayMode,
+      durationTicks = run.maximumTicks, playing = not options.pauseOnStart,
+      speed = options.speed,
+      repeating = network == nil and (run.replayMode or options.playerSlot == 0))
+
+  resetMatchState()
+  if network != nil and (options.pauseOnStart or options.speed != 1):
+    echo "LvD multiplayer follows the live relay at 1x; --play and --speed " &
+      "apply to local games and file replays."
+  if network != nil and hooks.reload != nil:
+    raise newException(GraphicsError, "Cannot replace a network match in place")
+  let assetSeed = run.mapSeed
   let order = factionOrder(run.mapSeed.int64)
-  var playerFactions = newSeq[Faction](run.world.players.len)
-  for player in 0 ..< run.world.players.len:
-    playerFactions[player] = order[Faction(player mod FactionFiles.len)]
-  let builder = buildUiAtlas(playerFactions)
+  let
+    playerFactions = playerFactions(run.mapSeed,
+      run.world.diplomacy.settings, run.world.players.len)
+    builder = buildUiAtlas(order)
   sk.builder = builder
   sk.image = builder.atlasImage
   sk.atlas = builder.atlas
@@ -392,7 +506,7 @@ proc runGraphics*(network: NetworkMatch = nil,
         primaryId = unit.id
         followSelection = false
         break
-  let splash = startSplash(sk, window)
+  let splash = if captureHidden: Splash() else: startSplash(sk, window)
   profileBlock "terrain":
     seed = run.mapSeed
     clearProps()
@@ -438,12 +552,6 @@ proc runGraphics*(network: NetworkMatch = nil,
     for player in 0 ..< run.world.players.len:
       # UI and every summoned body identify their owning faction.
       teamColors[player] = FactionColors[roster.factions[player]]
-      if player >= FactionFiles.len:
-        unitModels[player] = unitModels[player mod FactionFiles.len]
-        unitClips[player] = unitClips[player mod FactionFiles.len]
-        woodAxeModels[player] = woodAxeModels[player mod FactionFiles.len]
-        resourceModels[player] = resourceModels[player mod FactionFiles.len]
-        continue
       for kind in UnitKind:
         let model = unitModelCache.loadUnitModel(
           manifest, roster.players[player][kind.ord], kind
@@ -462,7 +570,8 @@ proc runGraphics*(network: NetworkMatch = nil,
             pack,
             woodAxe = axe
           )
-  drawSplash(sk, window, splash.name)
+  if not captureHidden:
+    drawSplash(sk, window, splash.name)
 
   let scene = newCharacterScene(window)
   scene.useToonShading()
@@ -487,7 +596,7 @@ proc runGraphics*(network: NetworkMatch = nil,
   var
     grove: Grove
     buildingArt: BuildingArt
-  let scenery = grovePlacements(
+  var scenery = grovePlacements(
     run.world.treeWood, run.mapSeed, run.world.map.forestRocks
   )
   profileBlock "props":
@@ -597,6 +706,8 @@ proc runGraphics*(network: NetworkMatch = nil,
 
   proc restoreTo(target: int32) =
     ## Reloads the last checkpoint at or before a tick, then resimulates.
+    stopSounds()
+    battleAudio.resetBattleSounds()
     let wanted = clamp(target, 0'i32, transport.timelineEnd)
     var slot = min(
       int(wanted) div SeekCheckpointTicks,
@@ -620,6 +731,7 @@ proc runGraphics*(network: NetworkMatch = nil,
     while run.world.tick < wanted:
       advanceGame()
       if network == nil: captureCheckpoint()
+    discard battleAudio.observeBattleSounds(run.world, viewMode, enabled = false)
 
   ## Camera and input
 
@@ -652,8 +764,10 @@ proc runGraphics*(network: NetworkMatch = nil,
 
   proc selectEntity(id: int32, additive = false) =
     ## Selects or toggles one entity. Spectator mode follows the selection.
+    defer: checkAttackSelection()
     if not selectionTarget(id).found:
       return
+    playSound(SelectSound)
     if not additive:
       selectedIds.setLen(0)
     elif isSelected(id) and selectedIds.len > 1:
@@ -677,6 +791,7 @@ proc runGraphics*(network: NetworkMatch = nil,
 
   proc clearSelection() =
     ## Clears the selection and leaves the camera free-floating.
+    defer: checkAttackSelection()
     let hadSelection =
       selectedIds.len > 0 or
       primaryId != NoEntity or
@@ -689,6 +804,7 @@ proc runGraphics*(network: NetworkMatch = nil,
 
   proc selectAllUnits() =
     ## Selects all living mobile units for group following.
+    defer: checkAttackSelection()
     selectedIds.setLen(0)
     let owner =
       if options.playerSlot > 0 and not run.replayMode:
@@ -701,6 +817,7 @@ proc runGraphics*(network: NetworkMatch = nil,
           continue
         selectedIds.add unit.id
     if selectedIds.len > 0:
+      playSound(SelectSound)
       primaryId = selectedIds[0]
       if not playerMode():
         followSelection = true
@@ -709,6 +826,7 @@ proc runGraphics*(network: NetworkMatch = nil,
 
   proc pruneSelection() =
     ## Removes entities that have died or left the selectable world.
+    defer: checkAttackSelection()
     var i = selectedIds.high
     while i >= 0:
       if not selectionTarget(selectedIds[i]).found:
@@ -826,6 +944,45 @@ proc runGraphics*(network: NetworkMatch = nil,
             0.6'f32
           )
 
+  proc pickSelectionEntity(viewProjection: Mat4): int32 =
+    ## Keeps direct hits, then finds the closest visible entity within two tiles.
+    result = pickEntity(viewProjection)
+    if result != NoEntity:
+      if run.world.hasUnit(result):
+        if run.world.units[run.world.unitIndex(result)].hp > 0: return
+      elif run.world.hasBuilding(result):
+        if run.world.buildings[run.world.buildingIndex(result)].hp > 0: return
+      result = NoEntity
+    let ground = pickGroundPoint(window.mousePos.vec2, window.size.vec2,
+      viewProjection, cameraTarget.y)
+    var bestDistance = SelectionReach * SelectionReach
+    template consider(id: int32, candidateX, candidateZ: float32) =
+      block:
+        let
+          dx = candidateX - ground.x
+          dz = candidateZ - ground.z
+          distance = dx * dx + dz * dz
+        if distance <= bestDistance and
+            (result == NoEntity or distance < bestDistance or id < result):
+          bestDistance = distance
+          result = id
+    for unit in run.world.units:
+      if unit.hp <= 0 or unit.state in {UnitDying, UnitInMine} or
+          not shownUnit(unit):
+        continue
+      let position = renderPoint(unit)
+      consider(unit.id, position.x, position.z)
+    for structure in run.world.buildings:
+      if structure.hp <= 0 or structure.state == BuildingDying or
+          not shownBuilding(structure):
+        continue
+      let
+        left = structure.origin.x.float32 - mapHalf()
+        top = structure.origin.y.float32 - mapHalf()
+        x = clamp(ground.x, left, left + structure.footprint.width.float32)
+        z = clamp(ground.z, top, top + structure.footprint.depth.float32)
+      consider(structure.id, x, z)
+
   proc structureAtTile(x, y: int32): int32 =
     ## Standing structure whose footprint contains this tile.
     result = NoEntity
@@ -846,14 +1003,15 @@ proc runGraphics*(network: NetworkMatch = nil,
       point.y <= origin.y + size.y
 
   proc boxedUnits(viewProjection: Mat4): seq[int32] =
-    ## Returns visible units whose screens fall inside the drag box.
+    ## Returns boxed units, or boxed buildings when no selectable units are inside.
     let
       press = selectionPressPosition
       current = window.mousePos.vec2
       origin = vec2(min(press.x, current.x), min(press.y, current.y))
       size = vec2(abs(current.x - press.x), abs(current.y - press.y))
       ownerFilter =
-        if viewMode == 0: -1'i32
+        if playerMode(): options.playerSlot - 1
+        elif viewMode == 0: -1'i32
         else: viewMode - 1
     for unit in run.world.units:
       if unit.state in {UnitDying, UnitInMine}:
@@ -869,13 +1027,24 @@ proc runGraphics*(network: NetworkMatch = nil,
       )
       if insideBox(point, origin, size):
         result.add unit.id
+    if result.len > 0:
+      return
+    for structure in run.world.buildings:
+      if structure.hp <= 0 or structure.state == BuildingDying or
+          (ownerFilter >= 0 and structure.owner != ownerFilter) or
+          not shownBuilding(structure):
+        continue
+      let point = screenPosition(buildingCentre(structure) + vec3(0, 1.4, 0), viewProjection)
+      if insideBox(point, origin, size): result.add structure.id
 
   proc selectBox(ids: seq[int32], additive: bool) =
     ## Replaces or extends the selection with boxed units.
+    defer: checkAttackSelection()
     if ids.len == 0:
       if not additive:
         clearSelection()
       return
+    playSound(SelectSound)
     if not additive:
       selectedIds.setLen(0)
     for id in ids:
@@ -931,6 +1100,7 @@ proc runGraphics*(network: NetworkMatch = nil,
       shortcutState.resetShortcut()
       shortcutHeldButtons = {}
       shortcutFrameButtons = {}
+      attackPressedButtons = {}
       cancelHumanCommunicationInput()
       window.runeInputEnabled = false
     if not focused or matchMenu != HiddenMatchMenu or bindingCapture or
@@ -938,7 +1108,12 @@ proc runGraphics*(network: NetworkMatch = nil,
       cancelGameplayGestures()
       return
     pruneSelection()
-    if attackMoveArmed:
+    if window.mousePressed(MouseLeft):
+      attackLeftStarted = playerMode() and attackMoveArmed and pendingBuild < 0
+    elif not window.mouseDown(MouseLeft) and not window.mouseReleased(MouseLeft):
+      attackLeftStarted = false
+    if attackLeftStarted:
+      selectionStarted = false
       minimapPanning = false
     else:
       updateMinimapCamera(
@@ -949,10 +1124,10 @@ proc runGraphics*(network: NetworkMatch = nil,
     let overUi = mouseOverUi(window, sk.mousePos)
     if window.buttonPressed[KeyA] and
         window.actionDown(ControlInput):
-      attackMoveArmed = false
+      cancelAttackModifier()
       selectAllUnits()
-    elif window.mousePressed(MouseLeft) and not overUi and not attackMoveArmed and
-        pendingBuild < 0:
+    elif window.mousePressed(MouseLeft) and not overUi and
+        pendingBuild < 0 and not attackLeftStarted:
       selectionPressPosition = window.mousePos.vec2
       selectionStarted = true
       selectionAdditive =
@@ -975,7 +1150,8 @@ proc runGraphics*(network: NetworkMatch = nil,
     if not minimapPanning and
         applyRtsPan(
           cameraTarget,
-          rtsPanDir(window),
+          rtsPanDir(window, preferences.edgeScrolling,
+            pointerConfined = window.cursorConfined),
           dt,
           cameraDistance,
           mapHalf()
@@ -1036,18 +1212,31 @@ proc runGraphics*(network: NetworkMatch = nil,
   proc updateWorldSelection(viewProjection: Mat4) =
     ## Windy raises DoubleClick on the second left press, not its release.
     if refreshPendingBuild(): return
+    if attackLeftStarted:
+      selectionStarted = false
+      return
     if window.buttonPressed[DoubleClick]:
       # Consume the second release even when a modal/HUD/command owns input.
       selectionStarted = false
       if matchMenu != HiddenMatchMenu or not transport.playing or
           mouseOverUi(window, sk.mousePos) or pendingBuild >= 0 or
-          attackMoveArmed or bindingCapture:
+          bindingCapture:
         return
       let owner =
         if playerMode(): options.playerSlot - 1
         elif viewMode > 0: viewMode - 1
         else: -1'i32
-      let ids = run.world.matchingUnitIds(pickEntity(viewProjection), owner)
+      let clicked = pickSelectionEntity(viewProjection)
+      var ids = run.world.matchingUnitIds(clicked, owner)
+      if clicked.isBuildingId and run.world.hasBuilding(clicked):
+        let source = run.world.buildings[run.world.buildingIndex(clicked)]
+        if owner < 0 or source.owner == owner:
+          for structure in run.world.buildings:
+            if structure.kind != source.kind or structure.owner != source.owner or
+                structure.hp <= 0 or structure.state == BuildingDying or
+                not shownBuilding(structure): continue
+            let point = screenPosition(buildingCentre(structure) + vec3(0, 1.4, 0), viewProjection)
+            if insideBox(point, vec2(0), window.size.vec2): ids.add structure.id
       if ids.len > 0:
         selectBox(ids, window.actionDown(ShiftInput))
         # The consumed press must not collapse back to a single selection.
@@ -1061,14 +1250,14 @@ proc runGraphics*(network: NetworkMatch = nil,
         window.mousePos.vec2 - selectionPressPosition
       ).length
       overUi = mouseOverUi(window, sk.mousePos)
-    if drag > SelectionDragPixels:
+    if drag >= SelectionDragPixels:
       selectBox(
         boxedUnits(viewProjection),
         selectionAdditive
       )
     elif not overUi:
       if not (playerMode() and pendingBuild >= 0):
-        let picked = pickEntity(viewProjection)
+        let picked = pickSelectionEntity(viewProjection)
         if picked != NoEntity:
           selectEntity(picked, selectionAdditive)
         elif not selectionAdditive:
@@ -1089,12 +1278,12 @@ proc runGraphics*(network: NetworkMatch = nil,
       tile = groundTile(ground, mapHalf(), run.world.map.side)
     (tile[0] - size.width div 2, tile[1] - size.depth div 2)
 
-  proc queuePendingBuild(x, y: int32) =
+  proc queuePendingBuild(x, y: int32, append = false) =
     ## Sends the first selected peon to raise the pending structure.
     let id = selectedBuildWorker()
     if id != NoEntity:
-      queueBuild(options.playerSlot - 1, id, pendingBuild, x, y)
-      pendingBuild = -1
+      queueBuild(options.playerSlot - 1, id, pendingBuild, x, y, append)
+      if not append: pendingBuild = -1
     else:
       discard refreshPendingBuild()
 
@@ -1102,6 +1291,23 @@ proc runGraphics*(network: NetworkMatch = nil,
     ## Returns the render centre of one map tile.
     let xz = tileCentreXZ(tile2(x, y))
     vec3(xz.x, surfaceHeight(xz.x, xz.y), xz.y)
+
+  proc drawSelectedOrderMarkers(viewProjection: Mat4) =
+    ## Rebuilds looping destinations from the selected units' current orders.
+    let owner =
+      if playerMode(): options.playerSlot - 1
+      elif viewMode > 0: viewMode - 1
+      else: -1'i32
+    var moves, attacks: seq[Vec3]
+    for marker in run.world.selectedOrderMarkers(selectedIds, owner):
+      let
+        x = toFloat32(marker.position.x) - mapHalf()
+        z = toFloat32(marker.position.y) - mapHalf()
+        point = vec3(x, surfaceHeight(x, z), z)
+      if marker.attack: attacks.add point
+      else: moves.add point
+    clickMarks.drawLoopingClickMarks(viewProjection, moves)
+    attackClickMarks.drawLoopingClickMarks(viewProjection, attacks)
 
   proc issueSelectedMove(player, x, y: int32, append = false): bool =
     ## Moves every selected owned unit, or rallies a selected building.
@@ -1116,30 +1322,37 @@ proc runGraphics*(network: NetworkMatch = nil,
             continue
         queueMove(player, id, x, y, append = append)
         result = true
-    if not result:
-      for id in selectedIds:
-        if id.isBuildingId and run.world.buildingOwner(id) == player:
-          queueSetRally(player, id, x, y)
-          result = true
+    if run.world.queueSelectedRally(player, selectedIds, x, y):
+      result = true
 
   proc updatePlayerOrder(viewProjection: Mat4, focused = window.focused) =
-    ## A + primary targets an enemy or attack-moves combat-capable units.
-    ## Keep arming through secondary press for the line-order gesture adapter.
+    ## Armed clicks attack; otherwise left places and right moves.
     if refreshPendingBuild(): return
-    if not playerMode() or hudTooltipContains(sk.mousePos):
+    checkAttackSelection()
+    if not playerMode():
       lineGesture.cancelLine()
       rightOrderStarted = false
       return
     let
       rightOrder = window.mouseReleased(MouseRight)
-      buildClick = pendingBuild >= 0 and window.mousePressed(MouseLeft)
-      attackClick = pendingBuild < 0 and attackMoveArmed and window.mousePressed(MouseLeft)
       player = options.playerSlot - 1
       inside = window.mousePos.x >= 0 and window.mousePos.y >= 0 and
         window.mousePos.x < window.size.x and window.mousePos.y < window.size.y
       overUi = mouseOverUi(window, sk.mousePos)
       onMinimap = attackMinimapTile(currentLayout(window), sk.mousePos,
         run.world.map.side) != NoTile and not window.buttonDown[KeyTab]
+    if window.mousePressed(MouseRight):
+      rightOrderFromBuild = pendingBuild >= 0 and inside
+      if rightOrderFromBuild:
+        pendingBuild = -1
+        cancelAttackModifier()
+        selectionStarted = false
+        minimapPanning = false
+    if hudTooltipContains(sk.mousePos):
+      lineGesture.cancelLine()
+      rightOrderStarted = false
+      rightOrderFromBuild = false
+      return
     if window.mousePressed(MouseRight):
       rightOrderStarted = inside and (not overUi or onMinimap)
       if rightOrderStarted and not overUi and not onMinimap and pendingBuild < 0:
@@ -1148,6 +1361,17 @@ proc runGraphics*(network: NetworkMatch = nil,
         lineGesture.beginLine(run.world, player, selectedIds,
           linePoint(ground.x + mapHalf(), ground.z + mapHalf()),
           linePoint(window.mousePos.x, window.mousePos.y), attackMoveArmed)
+    let
+      buildClick = pendingBuild >= 0 and window.mousePressed(MouseLeft)
+      leftAttack = attackLeftStarted and window.mousePressed(MouseLeft)
+      attackClick = pendingBuild < 0 and attackMoveArmed and
+        (rightOrder or leftAttack)
+      moveOnly = rightOrderFromBuild
+    if rightOrder: rightOrderFromBuild = false
+    if leftAttack:
+      lineGesture.cancelLine()
+      rightOrderStarted = false
+      if not inside or not focused: return
     if lineGesture.active:
       if not inside or not focused or pendingBuild >= 0:
         lineGesture.cancelLine()
@@ -1179,7 +1403,8 @@ proc runGraphics*(network: NetworkMatch = nil,
                 else:
                   clickMarks.emitClickMark(clickTilePoint(target.tile.x.int32,
                     target.tile.y.int32))
-              attackMoveArmed = false
+              playSound(if wasAttack: AttackOrderSound else: MoveOrderSound)
+              if wasAttack: consumeAttackModifier()
             return
         elif not window.mouseDown(MouseRight):
           lineGesture.cancelLine()
@@ -1189,45 +1414,60 @@ proc runGraphics*(network: NetworkMatch = nil,
     if rightOrder:
       if not rightOrderStarted or not inside: return
       rightOrderStarted = false
-      attackMoveArmed = false
     if pendingBuild >= 0:
+      if not buildClick: return
       # Placement owns this press and its release, including invalid sites.
       # HUD chooses a blueprint after this pass; only a fresh world press places it.
       selectionStarted = false
       minimapPanning = false
       if not inside or overUi or onMinimap: return
-      let origin = buildGhostOrigin(viewProjection)
-      if run.world.canPlace(player, BuildingKind(pendingBuild), origin[0], origin[1],
-          selectedBuildWorker()):
-        queuePendingBuild(origin[0], origin[1])
+      let
+        origin = buildGhostOrigin(viewProjection)
+        append = window.actionDown(ShiftInput)
+        valid =
+          if append:
+            run.world.canQueueBuild(player, selectedBuildWorker(), pendingBuild,
+              origin[0], origin[1])
+          else:
+            run.world.canPlace(player, BuildingKind(pendingBuild), origin[0],
+              origin[1], selectedBuildWorker())
+      if valid:
+        queuePendingBuild(origin[0], origin[1], append)
         clickMarks.emitClickMark(clickTilePoint(origin[0], origin[1]))
+      else:
+        playSound(ErrorSound)
       return
     # Minimap orders must precede generic HUD rejection. Tab owns its overlay.
     let mini = attackMinimapTile(currentLayout(window), sk.mousePos,
       run.world.map.side)
     if mini != NoTile and not window.buttonDown[KeyTab]:
-      if attackClick and not rightOrder:
+      if attackClick:
         selectionStarted = false
         minimapPanning = false
         if run.world.queueArmedAttackMove(player, selectedIds,
             mini.x.int32, mini.y.int32, append = window.actionDown(ShiftInput)):
+          consumeAttackModifier()
+          playSound(AttackOrderSound)
           attackClickMarks.emitClickMark(clickTilePoint(mini.x.int32, mini.y.int32))
       elif pendingBuild < 0 and issueSelectedMove(player, mini.x.int32, mini.y.int32, append = window.actionDown(ShiftInput)):
+        playSound(MoveOrderSound)
         clickMarks.emitClickMark(clickTilePoint(mini.x.int32, mini.y.int32))
       return
     if mouseOverUi(window, sk.mousePos):
       return
-    if attackClick and not rightOrder:
+    if attackClick:
       selectionStarted = false
       let picked = pickEntity(viewProjection)
       if picked != NoEntity:
         if run.world.queueFeedbackAttack(player, selectedIds, picked,
             append = window.actionDown(ShiftInput)):
           targetFlash.flashTarget(AttackEntityFlash, picked, player)
-          attackMoveArmed = false
+          consumeAttackModifier()
           if run.world.hasUnit(picked):
+            playSound(AttackOrderSound)
             attackClickMarks.emitClickMark(renderPoint(run.world.units[run.world.unitIndex(picked)]))
           elif run.world.hasBuilding(picked):
+            playSound(AttackOrderSound)
             attackClickMarks.emitClickMark(buildingCentre(run.world.buildings[run.world.buildingIndex(picked)]))
         # Friendly/neutral/invalid entity clicks never become ground orders.
         return
@@ -1235,6 +1475,8 @@ proc runGraphics*(network: NetworkMatch = nil,
         viewProjection, cameraTarget.y)
       let tile = groundTile(ground, mapHalf(), run.world.map.side)
       if run.world.queueArmedAttackMove(player, selectedIds, tile[0], tile[1], append = window.actionDown(ShiftInput)):
+        consumeAttackModifier()
+        playSound(AttackOrderSound)
         attackClickMarks.emitClickMark(clickTilePoint(tile[0], tile[1]))
       return
     let
@@ -1256,7 +1498,7 @@ proc runGraphics*(network: NetworkMatch = nil,
           under
         else:
           picked
-    if target != NoEntity:
+    if not moveOnly and target != NoEntity:
       if run.world.hasBuilding(target):
         let structure = run.world.buildings[run.world.buildingIndex(target)]
         if structure.owner == player and structure.state == BuildingUnderConstruction:
@@ -1264,14 +1506,24 @@ proc runGraphics*(network: NetworkMatch = nil,
             let unit = run.world.units[run.world.unitIndex(id)]
             if unit.kind == PeonUnit:
               queueBuild(player, id, structure.kind.ord.int32,
-                structure.origin.x.int32, structure.origin.y.int32)
+                structure.origin.x.int32, structure.origin.y.int32,
+                append = window.actionDown(ShiftInput))
+              playSound(MoveOrderSound)
               clickMarks.emitClickMark(buildingCentre(structure))
               return
+          return
+        if structure.owner == player and run.world.queueFeedbackDeposit(
+            player, selectedIds, target, append = window.actionDown(ShiftInput)):
+          targetFlash.flashTarget(HarvestEntityFlash, target, player)
+          playSound(MoveOrderSound)
+          clickMarks.emitClickMark(buildingCentre(structure))
+          attackMoveArmed = false
           return
         if structure.kind == GoldMineBuilding:
           if run.world.queueFeedbackHarvest(player, selectedIds, target, tree = false,
               append = window.actionDown(ShiftInput)):
             targetFlash.flashTarget(HarvestEntityFlash, target, player)
+            playSound(MoveOrderSound)
             clickMarks.emitClickMark(buildingCentre(structure))
           attackMoveArmed = false
           return
@@ -1279,6 +1531,7 @@ proc runGraphics*(network: NetworkMatch = nil,
           if run.world.queueFeedbackAttack(player, selectedIds, target,
               append = window.actionDown(ShiftInput)):
             targetFlash.flashTarget(AttackEntityFlash, target, player)
+            playSound(AttackOrderSound)
             attackClickMarks.emitClickMark(buildingCentre(structure))
           attackMoveArmed = false
           return
@@ -1287,19 +1540,22 @@ proc runGraphics*(network: NetworkMatch = nil,
         if run.world.queueFeedbackAttack(player, selectedIds, target,
             append = window.actionDown(ShiftInput)):
           targetFlash.flashTarget(AttackEntityFlash, target, player)
+          playSound(AttackOrderSound)
           attackClickMarks.emitClickMark(renderPoint(run.world.units[run.world.unitIndex(target)]))
         attackMoveArmed = false
         return
-    if tree >= 0:
+    if not moveOnly and tree >= 0:
       if run.world.queueFeedbackHarvest(player, selectedIds, tree, tree = true,
           append = window.actionDown(ShiftInput)):
         targetFlash.flashTarget(HarvestTreeFlash, tree, player)
+        playSound(MoveOrderSound)
         clickMarks.emitClickMark(clickTilePoint(
           tree mod run.world.map.side, tree div run.world.map.side
         ))
       attackMoveArmed = false
       return
     if issueSelectedMove(player, tile[0], tile[1], append = window.actionDown(ShiftInput)):
+      playSound(MoveOrderSound)
       clickMarks.emitClickMark(clickTilePoint(tile[0], tile[1]))
     attackMoveArmed = false
 
@@ -1414,6 +1670,27 @@ proc runGraphics*(network: NetworkMatch = nil,
       finishCharacters(scene)
     selectionOutline.drawOutline(targetFlash.targetFlashColor())
 
+  proc drawBuildingGhost(kind: BuildingKind, owner: int32, origin: Tile2,
+      viewProjection: Mat4, tint: Vec4) =
+    ## Shares the complete translucent model between placement and queued plans.
+    let
+      size = BuildingTable[kind].footprint
+      x = origin.x.float32 + size.width.float32 * 0.5'f - mapHalf()
+      z = origin.y.float32 + size.depth.float32 * 0.5'f - mapHalf()
+      centre = vec3(x, surfaceHeight(x, z), z)
+    buildingArt.buildingPack(owner).drawProp(
+      BuildingProps[kind], centre, 0.0'f, BuildingScale, viewProjection, tint)
+
+  proc drawQueuedBuildGhosts(viewProjection: Mat4) =
+    ## Shows only the selected peons' planned buildings, never real blockers.
+    let owner =
+      if playerMode(): options.playerSlot - 1
+      elif viewMode > 0: viewMode - 1
+      else: -1'i32
+    for marker in run.world.selectedBuildMarkers(selectedIds, owner):
+      drawBuildingGhost(marker.kind, marker.owner, marker.origin, viewProjection,
+        vec4(0.55, 0.95, 0.65, 0.42))
+
   proc drawBuildGhost(viewProjection: Mat4) =
     ## Follows the pointer with a transparent building while placing.
     if refreshPendingBuild(): return
@@ -1421,28 +1698,22 @@ proc runGraphics*(network: NetworkMatch = nil,
       return
     let
       kind = BuildingKind(pendingBuild)
-      size = BuildingTable[kind].footprint
       origin = buildGhostOrigin(viewProjection)
     let
-      valid = run.world.canPlace(options.playerSlot - 1, kind, origin[0], origin[1],
-        selectedBuildWorker())
-      x = float32(origin[0]) + float32(size.width) * 0.5'f32 - mapHalf()
-      z = float32(origin[1]) + float32(size.depth) * 0.5'f32 - mapHalf()
-      centre = vec3(x, surfaceHeight(x, z), z)
-      name = BuildingProps[kind]
+      valid =
+        if window.actionDown(ShiftInput):
+          run.world.canQueueBuild(options.playerSlot - 1, selectedBuildWorker(),
+            pendingBuild, origin[0], origin[1])
+        else:
+          run.world.canPlace(options.playerSlot - 1, kind, origin[0], origin[1],
+            selectedBuildWorker())
       tint =
         if valid:
           vec4(0.55, 0.95, 0.65, 0.42)
         else:
           vec4(0.95, 0.28, 0.22, 0.42)
-    buildingArt.buildingPack(options.playerSlot - 1).drawProp(
-      name,
-      centre,
-      0.0'f32,
-      BuildingScale,
-      viewProjection,
-      tint
-    )
+    drawBuildingGhost(kind, options.playerSlot - 1, tile2(origin[0], origin[1]),
+      viewProjection, tint)
 
   proc updateTerrainVision() {.measure.} =
     ## Uploads the selected team's softened visible and explored terrain.
@@ -1521,14 +1792,16 @@ proc runGraphics*(network: NetworkMatch = nil,
       sk.atlasTextureId()
     )
 
-  proc particleTargetPosition(id: int32): tuple[
+  proc particleTargetPosition(id: int32, requireVisible = false): tuple[
       found: bool,
       position: Vec3
   ] =
-    ## Returns the visible presentation center of one combat target.
+    ## Retain the flight even when an endpoint is hidden; draw-time sight clips
+    ## enemy fragments. Melee bursts still require visible participants.
     if id.isUnitId:
       let index = run.world.unitIndex(id)
-      if index >= 0 and shownUnit(run.world.units[index]):
+      if index >= 0 and run.world.units[index].state != UnitInMine and
+          (not requireVisible or shownUnit(run.world.units[index])):
         let unit = run.world.units[index]
         return (
           true,
@@ -1537,7 +1810,8 @@ proc runGraphics*(network: NetworkMatch = nil,
         )
     elif id.isBuildingId:
       let index = run.world.buildingIndex(id)
-      if index >= 0 and shownBuilding(run.world.buildings[index]):
+      if index >= 0 and
+          (not requireVisible or shownBuilding(run.world.buildings[index])):
         return (
           true,
           buildingCentre(run.world.buildings[index]) + vec3(0, 0.8'f32, 0)
@@ -1584,7 +1858,7 @@ proc runGraphics*(network: NetworkMatch = nil,
   ) =
     ## Emits each unit and tower attack exactly once after its simulation tick.
     for unit in run.world.units:
-      if not shownUnit(unit) or unit.state != UnitAttacking:
+      if unit.state != UnitAttacking:
         continue
       let stats = unitOf(unit.owner, unit.kind)
       if unit.cooldown != stats.cooldownTicks or
@@ -1636,10 +1910,11 @@ proc runGraphics*(network: NetworkMatch = nil,
           owner = unit.owner
         )
       of PeonUnit, SoldierUnit, KnightUnit:
-        particles.emitParticleBurst(
-          CombatSparks, target.position, owner = unit.owner)
+        if shownUnit(unit) and particleTargetPosition(unit.targetId, true).found:
+          particles.emitParticleBurst(
+            CombatSparks, target.position, owner = unit.owner)
     for structure in run.world.buildings:
-      if not shownBuilding(structure) or structure.id notin towerTargets:
+      if structure.id notin towerTargets:
         continue
       let stats = BuildingTable[structure.kind]
       if structure.cooldown != stats.cooldownTicks:
@@ -1681,6 +1956,15 @@ proc runGraphics*(network: NetworkMatch = nil,
       observeHumanCommunication(network, packet)
     feedLvdActions(observeTick = true)
     emitTickParticles(oldUnitCooldowns, towerTargets)
+    let audible = not captureHidden and window.focused and transport.playing and
+      transport.speed == 1 and transport.targetTick < 0 and
+      transport.restoreTick < 0 and matchMenu == HiddenMatchMenu
+    for event in battleAudio.observeBattleSounds(run.world, viewMode,
+        options.playerSlot - 1, audible):
+      if event.global:
+        playSound(event.cue)
+      else:
+        playWorldSound(event.cue, event.position, cameraTarget)
     if network == nil: captureCheckpoint()
 
   when defined(takeScreenshot):
@@ -1715,17 +1999,71 @@ proc runGraphics*(network: NetworkMatch = nil,
         if unit.owner == LightPlayer and
             unit.state notin {UnitDying, UnitInMine}:
           selectedIds.add unit.id
-    var screenshotFrame = 0
+  var screenshotFrame = 0
 
   var
     viewingClock: ViewingClock
     cameraSeekSerial = -1
     networkPresentation: NetworkPresentation
 
-  holdSplash(sk, window, splash)
+  proc reloadMatch() =
+    ## Reuses models and textures while replacing the map and playback history.
+    if run.mapSeed != assetSeed or playerFactions !=
+        teamlooks.playerFactions(run.mapSeed,
+          run.world.diplomacy.settings, run.world.players.len):
+      raise newException(GraphicsError,
+        "A renderer reload requires the same map seed and player factions")
+    let playback = transport
+    resetMatchState()
+    transport.playing = playback.playing
+    transport.setPlaybackSpeed(playback.speed)
+    transport.repeating = playback.repeating
+    seekCheckpoints.add SeekCheckpoint(
+      world: run.world.clone(), actionIndex: 0, hashCheck: run.hashCheck
+    )
+    resetHudTooltips()
+    resetHumanCommunication()
+    matchMenu = HiddenMatchMenu
+    currentSight.setLen(0)
+    particles.clearParticles()
+    harvesting.clearHarvest()
+    clickMarks.advanceClickMarks(ClickMarkDuration)
+    attackClickMarks.advanceClickMarks(ClickMarkDuration)
+    damageTrails = DamageTrailTracker()
+    playerLabels = layoutNames(sk.atlas.fonts["WorldName"],
+      sk.atlas.size, run.config.players)
+    scenery = grovePlacements(
+      run.world.treeWood, run.mapSeed, run.world.map.forestRocks
+    )
+    rebakeScene(initial = true)
+    actionCam.resetDirector()
+    actionCam.mapSpan = mapHalf() * 2
+    cameraSeekSerial = -1
+    viewingClock = ViewingClock()
+    viewingDt = 0
+    viewingSeeking = false
+    if hooks.ready != nil:
+      hooks.ready(actionCam)
+    lastFrameTime = epochTime()
+
+  if not captureHidden:
+    holdSplash(sk, window, splash)
+  if hooks.ready != nil:
+    hooks.ready(actionCam)
   window.onFrame = proc() =
     profileBlock "frame":
+      discard beginScreenshotFrame(captureTarget, window, captureHidden)
+      updateSounds()
+      window.updateCursorConfinement(preferences.edgeScrolling)
+      if hooks.reload != nil and hooks.reload():
+        reloadMatch()
       let dt = frameDelta(lastFrameTime, Step)
+      let audioActive = not captureHidden and window.focused and transport.playing and
+        transport.speed == 1 and transport.targetTick < 0 and
+        transport.restoreTick < 0 and matchMenu == HiddenMatchMenu
+      if audioWasActive and not audioActive and not run.world.over:
+        stopSounds()
+      audioWasActive = audioActive
       viewingDt = viewingClock.viewingDelta(window)
       viewingSeeking = transport.targetTick >= 0 or transport.restoreTick >= 0
       if not transport.playing or viewingSeeking:
@@ -1758,7 +2096,7 @@ proc runGraphics*(network: NetworkMatch = nil,
             network.client.send(RoomMessage(kind: LeaveRoom))
             leaveRequested = true
         transport.playing = not network.finished and network.client.snapshot.phase == rooms.Playing
-        transport.speedIndex = 0
+        transport.setSpeed(0)
         run.historyPlayback = false
         networkPresentation.startFrame(dt)
         try:
@@ -1773,6 +2111,14 @@ proc runGraphics*(network: NetworkMatch = nil,
         except RoomsError as error:
           network.abort(error.msg)
         connection.pump()
+        network.resumeControllers()
+        let assignedSlot = int32(network.humanPlayerFor(network.client.participant) + 1)
+        if options.playerSlot != assignedSlot:
+          options.playerSlot = assignedSlot
+          viewMode = assignedSlot
+          selectedIds.setLen(0)
+          primaryId = NoEntity
+          cancelGameplayGestures()
         transport.sync(run.world.tick, run.world.tick, run.world.over)
       else:
         let restoreTick = transport.takeRestore()
@@ -1793,6 +2139,15 @@ proc runGraphics*(network: NetworkMatch = nil,
               if run.recorder != nil: int32(run.recorder.data.hashes.len)
               else: int32(run.replayPlayer.data.hashes.len)
             transport.sync(run.world.tick, recordedNow, run.world.over)
+      when not defined(emscripten):
+        if not run.replayMode and replaySaving.beginAutomaticReplaySave(
+          saveAutomatically,
+          run.world.over or run.world.tick >= run.maximumTicks
+        ):
+            try:
+              saveToLibrary()
+            except CatchableError as error:
+              saveError = "Cannot save replay: " & error.msg
       let active = simulationActive(transport)
       harvesting.updateHarvest(run.world, dt, viewer = -1, paused = not active)
       currentSight = run.world.renderVisibilityValues(viewMode, CurrentSightMask)
@@ -1893,6 +2248,7 @@ proc runGraphics*(network: NetworkMatch = nil,
           scene.sunDepthPass = true
           drawWorldUnits()
           scene.sunDepthPass = false
+        glBindFramebuffer(GL_FRAMEBUFFER, captureTarget.framebuffer)
         when not defined(emscripten):
           glEnable(GL_MULTISAMPLE)
         glClearColor(0.05, 0.06, 0.09, 1.0)
@@ -1905,6 +2261,7 @@ proc runGraphics*(network: NetworkMatch = nil,
         finishCharacters(scene)
         drawSelectedOutline(view, projection, viewProjection)
         drawTargetOutline(view, projection, viewProjection)
+        drawQueuedBuildGhosts(viewProjection)
         drawBuildGhost(viewProjection)
         drawWater(
           viewProjection,
@@ -1918,14 +2275,15 @@ proc runGraphics*(network: NetworkMatch = nil,
           barCameraUp,
           cameraForward,
           (if viewMode == 0: @[] else: currentSight),
-          run.world.map.side.int, vec2(-mapHalf()), visibilityPadding = 5,
-          viewer = viewMode - 1
+          run.world.map.side.int, vec2(-mapHalf()),
+          viewer = viewMode - 1, clipToSight = true
         )
         harvestBars.clear()
         harvestBars.addHarvestBillboards(harvesting, run.world, -1, harvestAnchor)
         harvestBars.draw(viewProjection, barCameraRight, barCameraUp)
         clickMarks.drawClickMarks(viewProjection)
         attackClickMarks.drawClickMarks(viewProjection)
+        drawSelectedOrderMarkers(viewProjection)
         if lineGesture.active and lineGesture.dragging:
           worldShapes.clear()
           let color = orderFeedbackColor(lineGesture.attackMove)
@@ -1978,7 +2336,17 @@ proc runGraphics*(network: NetworkMatch = nil,
           glDisable(GL_MULTISAMPLE)
         glActiveTexture(GL_TEXTURE0)
         glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
-        sk.beginUi(window, window.size)
+        var menuOrigin: Vec2
+        if matchMenu == HiddenMatchMenu:
+          sk.beginUi(window, window.size)
+        elif matchMenu == MatchSettings:
+          menuOrigin = sk.beginOverlay(window, vec2(768, 488)) + vec2(24)
+        else:
+          let
+            panelHeight = when defined(emscripten): 488.0'f else: 572.0'f
+            panel = sk.beginOverlay(window, vec2(512, panelHeight))
+          sk.lobbyPanel(panel, vec2(512, panelHeight))
+          menuOrigin = panel + vec2(24)
         let beforeHud = transport
         if matchMenu == HiddenMatchMenu:
           drawUi(
@@ -1995,13 +2363,14 @@ proc runGraphics*(network: NetworkMatch = nil,
             teamColors,
             if connection != nil: connection.stats else: nil
           )
+          checkAttackSelection()
           if attackMoveArmed:
             if pendingBuild >= 0:
               attackMoveArmed = false
             else:
               let at = vec2(max(12.0'f, window.size.x.float32 / sk.uiScale / 2 - 220), 78)
               sk.drawRect(at, vec2(440, 40), rgbx(40, 8, 8, 225))
-              sk.menuLabel("ATTACK: click or right-drag / Shift queues / Esc cancels", at + vec2(8, 4), 424)
+              sk.menuLabel("ATTACK: click or right-drag / Shift queues / X cancels", at + vec2(8, 4), 424)
           drawSelectionBox(
             sk,
             window,
@@ -2011,14 +2380,7 @@ proc runGraphics*(network: NetworkMatch = nil,
         if network != nil: transport = beforeHud
         if matchMenu != HiddenMatchMenu:
           resetHudTooltips()
-          sk.pushLayer(PopupsLayer)
-          let view = window.size.vec2 / sk.uiScale
-          sk.drawRect(vec2(0), view, rgbx(0, 0, 0, 170))
-          let origin = (view - vec2(if matchMenu == MatchSettings: 720 else: 464,
-            if matchMenu == MatchSettings: 700 else: 440)) * 0.5'f
-          sk.lobbyPanel(origin - vec2(24),
-            vec2(if matchMenu == MatchSettings: 768 else: 512,
-              if matchMenu == MatchSettings: 748 else: 488))
+          let origin = menuOrigin
           try:
             if quitToMenu:
               sk.menuLabel("Leaving match...", origin, 464)
@@ -2026,10 +2388,12 @@ proc runGraphics*(network: NetworkMatch = nil,
               if sk.lvdSettingsPanel(window, preferences, "Polyworld LvD", origin):
                 matchMenu = PauseMenu
             else:
-              let paused = if network == nil: not transport.playing
-                else: network.client.snapshot.flag
-              let activeMatch = network == nil or
-                network.client.snapshot.phase in {rooms.Playing, Waiting}
+              let
+                paused = if network == nil: not transport.playing
+                  else: network.client.snapshot.flag
+                activeMatch = network == nil or
+                  network.client.snapshot.phase in {rooms.Playing, Waiting}
+                exitY = when defined(emscripten): 220.0'f else: 276.0'f
               var controller = network == nil
               if network != nil:
                 for seat in network.client.snapshot.seats:
@@ -2048,12 +2412,16 @@ proc runGraphics*(network: NetworkMatch = nil,
                     match: network.client.match, flag: not paused))
               if sk.lobbyButton("Settings", origin + vec2(0, 164), 464):
                 matchMenu = MatchSettings
+              when not defined(emscripten):
+                if sk.lobbyButton("Save replay", origin + vec2(0, 220), 464,
+                  enabled = run.recorder != nil and not run.replayMode):
+                    saveToLibrary()
               if network == nil or network.client.snapshot.phase in {rooms.Ended, Desynced, Lobby}:
-                if sk.lobbyButton(if network == nil: "Return to Home" else: "Return to lobby",
-                  origin + vec2(0, 220), 464):
+                if sk.lobbyButton(if network == nil: "Return to menu" else: "Return to lobby",
+                  origin + vec2(0, exitY), 464):
                   leaveMatch = returnToMatchLobby(network)
               if network != nil and sk.lobbyButton("Quit to main menu",
-                origin + vec2(0, if activeMatch: 220 else: 276), 464):
+                origin + vec2(0, if activeMatch: exitY else: exitY + 56), 464):
                 quitToMenu = true
                 if network == nil: leaveMatch = true
                 elif controller and activeMatch:
@@ -2062,34 +2430,53 @@ proc runGraphics*(network: NetworkMatch = nil,
                   network.client.send(RoomMessage(kind: LeaveRoom))
                   leaveRequested = true
               sk.menuLabel(if network == nil: "Use Pause match to stop the game."
-                else: "Quitting as a player ends the match for everyone.",
-                origin + vec2(0, 332), 464)
+                else: "Unused slots join next match; existing kingdoms can change controllers.",
+                origin + vec2(0, exitY + 112), 464)
               sk.menuLabel("Drag: select group / Shift: add / Ctrl+A: all units",
-                origin + vec2(0, 368), 464)
+                origin + vec2(0, exitY + 148), 464)
               sk.menuLabel("Right drag: formation / A: attack / Shift: queue",
-                origin + vec2(0, 404), 464)
+                origin + vec2(0, exitY + 184), 464)
           except CatchableError as error:
             saveError = error.msg
-          if saveError.len > 0: sk.menuLabel(saveError, origin + vec2(0, 340), 464)
-          sk.popLayer()
+          when not defined(emscripten):
+            if matchMenu == PauseMenu:
+              if saveError.len > 0:
+                sk.menuLabel(saveError, origin + vec2(0, 500), 464, MenuAccent)
+              elif replaySaving.savedPath.len > 0:
+                sk.menuLabel("Replay saved to your library.",
+                  origin + vec2(0, 500), 464, MenuAccent)
+            elif saveError.len > 0:
+              sk.menuLabel(saveError, origin + vec2(0, 340), 464)
+          else:
+            if saveError.len > 0:
+              sk.menuLabel(saveError, origin + vec2(0, 340), 464)
+        if matchMenu == HiddenMatchMenu and hooks.overlay != nil:
+          hooks.overlay()
         sk.endUi()
         if matchMenu == HiddenMatchMenu:
           drawStatsOverlay(sk, window, teamColors)
+          when not defined(emscripten):
+            if saveAutomatically and matchResultsVisible():
+              sk.beginUi(window, window.size)
+              sk.menuLabel(if saveError.len > 0: saveError
+                elif replaySaving.savedPath.len > 0:
+                  "Replay saved to your library." else: "",
+                vec2(24, 24), 1000, MenuAccent)
+              sk.endUi()
         # Silky ends rune capture when no editable field was submitted. Restore
         # chat capture after ALL UI passes, without interfering with Settings.
         if matchMenu == HiddenMatchMenu:
           window.runeInputEnabled = humanCommunicationTyping() and window.focused
         if humanCommunicationBlocksGameplay(): cancelGameplayGestures()
       finishHumanCommunicationFrame()
-      when defined(takeScreenshot):
-        captureScreenshot(
-          window,
-          screenshotFrame,
-          3,
-          "light_vs_dark.png"
-        )
+      if hooks.frame != nil and hooks.frame():
+        leaveMatch = true
+      when not defined(emscripten):
+        if captureFrame(window, screenshotFrame, 3, "light_vs_dark.png"):
+          window.closeRequested = true
+          leaveMatch = true
       profileBlock "present":
-        window.presentFrame(framePaceHz)
+        window.presentFrame(if captureActive(): 0 else: framePaceHz)
         reportDirectorFrame(
           actionCam, transport, cameraDistance, int32(run.hashCheck.mismatches)
         )
@@ -2099,6 +2486,8 @@ proc runGraphics*(network: NetworkMatch = nil,
         window.closeRequested = true
 
   window.onButtonPress = proc(button: Button) =
+    window.captureCursorConfinement(button)
+    checkAttackSelection()
     if bindingCapture: return
     if matchMenu == HiddenMatchMenu and humanCommunicationKey(button):
       shortcutState.resetShortcut()
@@ -2110,32 +2499,73 @@ proc runGraphics*(network: NetworkMatch = nil,
     if matchMenu == HiddenMatchMenu and humanCommunicationBlocksGameplay():
       cancelGameplayGestures()
       return
-    # Combat owns its configured attack key whenever eligible units are selected,
-    # even with Units open (whose Archer command defaults to A).
+    if button == KeyX:
+      # Text fields own their letters; everywhere else X stays Cancel.
+      if matchMenu != HiddenMatchMenu and window.runeInputEnabled: return
+      let matched = shortcutState.pressShortcut(DefaultShortcuts, 'X',
+        epochTime(), actions = {CancelSiteShortcut})
+      shortcutHeldButtons.incl button
+      shortcutFrameButtons.incl button
+      if matched.action < 0: return
+      if matchMenu != HiddenMatchMenu:
+        matchMenu = if matchMenu == MatchSettings: PauseMenu else: HiddenMatchMenu
+        cancelGameplayGestures()
+        return
+      let targeting = pendingBuild >= 0 or attackMoveArmed or
+        lineGesture.active or rightOrderStarted or selectionStarted
+      cancelGameplayGestures()
+      pendingBuild = -1
+      if not targeting and playerMode():
+        let player = options.playerSlot - 1
+        var cancelled = false
+        for id in selectedIds:
+          if run.world.unitOwner(id) == player or
+              run.world.buildingOwner(id) == player:
+            queueCancel(player, id)
+            cancelled = true
+        if cancelled: playSound(CancelSound)
+      return
+    if matchMenu == HiddenMatchMenu and hooks.key != nil:
+      if hooks.key(button, actionCam):
+        return
+    # Combat owns its configured attack key whenever units are selected.
     if matchMenu == HiddenMatchMenu and playerMode() and
         AttackMoveInput.matches(button) and not window.scaleModifier and
         not window.actionDown(ControlInput) and
-        not window.buttonDown[KeyLeftAlt] and not window.buttonDown[KeyRightAlt] and
-        run.world.armSelectedAttackMove(options.playerSlot - 1, selectedIds):
-      shortcutState.cancelShortcut()
-      selectionStarted = false
-      minimapPanning = false
-      return
+        not window.buttonDown[KeyLeftAlt] and not window.buttonDown[KeyRightAlt]:
+      if button in attackPressedButtons: return
+      attackPressedButtons.incl button
+      if run.world.armSelectedAttackMove(options.playerSlot - 1, selectedIds):
+        pressAttackModifier(button)
+        shortcutState.cancelShortcut()
+        selectionStarted = false
+        minimapPanning = false
+        return
     let key = shortcutKey(button)
     if key != '\0':
       let matched = shortcutState.pressShortcut(currentShortcuts, key, epochTime(),
         gameplay = matchMenu == HiddenMatchMenu and playerMode(),
         modified = window.scaleModifier or window.actionDown(ControlInput) or
-          window.buttonDown[KeyLeftAlt] or window.buttonDown[KeyRightAlt])
+          window.buttonDown[KeyLeftAlt] or window.buttonDown[KeyRightAlt],
+        actions = run.world.contextualActions(options.playerSlot - 1, selectedIds) +
+          {IdlePeonShortcut})
       if matched.consumed:
-        if matched.action >= 0:
-          commandTab = if ShortcutAction(matched.action) <= BuildBlacksmithShortcut: 0 else: 1
-        elif button == KeyB: commandTab = 0
-        elif button == KeyT: commandTab = 1
         shortcutHeldButtons.incl button
         shortcutFrameButtons.incl button
-        if matched.action >= 0 and run.world.performShortcut(options.playerSlot - 1,
-            selectedIds, ShortcutAction(matched.action)):
+        if matched.action == IdlePeonShortcut.ord:
+          let id = run.world.nextIdlePeon(options.playerSlot - 1, primaryId)
+          if id != NoEntity:
+            cancelGameplayGestures()
+            pendingBuild = -1
+            selectedIds = @[id]
+            primaryId = id
+            followSelection = false
+            actionCam.takeManual()
+            cameraTarget = renderPoint(run.world.units[run.world.unitIndex(id)])
+            playSound(SelectSound)
+          return
+        if matched.action >= 0 and performAudibleShortcut(run.world,
+            options.playerSlot - 1, selectedIds, ShortcutAction(matched.action)):
           selectionStarted = false
           minimapPanning = false
           lineGesture.cancelLine()
@@ -2167,37 +2597,30 @@ proc runGraphics*(network: NetworkMatch = nil,
     if window.scaleModifier or window.actionDown(ControlInput) or
         window.buttonDown[KeyLeftAlt] or window.buttonDown[KeyRightAlt]:
       return
-    if playerMode() and button in {KeyB, KeyT}:
-      commandTab = if button == KeyB: 0 else: 1
-      shortcutHeldButtons.incl button
-      shortcutFrameButtons.incl button
-      return
     if AttackMoveInput.matches(button) and not window.actionDown(ControlInput) and
         not window.scaleModifier:
-      if playerMode() and run.world.armSelectedAttackMove(options.playerSlot - 1, selectedIds):
-        selectionStarted = false
-        minimapPanning = false
       return
     if PauseInput.matches(button):
       if network == nil: transport.togglePlay()
     elif CameraInput.matches(button): actionCam.toggle(followSelection)
     elif ShadingInput.matches(button): scene.toggleShading()
     elif StopInput.matches(button):
-      lineGesture.cancelLine()
-      rightOrderStarted = false
+      cancelGameplayGestures()
       if playerMode():
         let player = options.playerSlot - 1
         for id in selectedIds:
           if run.world.unitOwner(id) == player or
               run.world.buildingOwner(id) == player:
             queueCancel(player, id)
+            playSound(CancelSound)
         pendingBuild = -1
         attackMoveArmed = false
-    elif button == KeyE: showTiles = not showTiles
+    elif button == KeyF6: showTiles = not showTiles
     elif button == KeyV and not playerMode():
       viewMode = (viewMode + 1) mod int32(run.world.players.len + 1)
 
   window.onButtonRelease = proc(button: Button) =
+    releaseAttackModifier(button)
     humanCommunicationRelease(button)
     shortcutState.releaseShortcut(shortcutKey(button))
     shortcutHeldButtons.excl button
@@ -2207,12 +2630,15 @@ proc runGraphics*(network: NetworkMatch = nil,
       discard humanCommunicationRune(rune)
 
   window.onFocusChange = proc() =
+    window.updateCursorConfinement()
     if not window.focused:
+      stopSounds()
       resetHudTooltips()
       cancelHumanCommunicationInput()
       shortcutState.resetShortcut()
       shortcutHeldButtons = {}
       shortcutFrameButtons = {}
+      attackPressedButtons = {}
       cancelGameplayGestures()
       window.runeInputEnabled = false
 
@@ -2225,7 +2651,20 @@ proc runGraphics*(network: NetworkMatch = nil,
   window.onButtonRelease = nil
   shortcutState.resetShortcut()
   endShortcutEditing()
-  saveRecording()
+  var recordingFailure: string
+  when not defined(emscripten):
+    var libraryFailure: string
+  if not run.replayMode:
+    try:
+      saveRecording()
+    except CatchableError as error:
+      recordingFailure = "Cannot save replay: " & error.msg
+    when not defined(emscripten):
+      if replaySaving.shouldSaveReplayOnExit(saveAutomatically):
+        try:
+          saveToLibrary()
+        except CatchableError as error:
+          libraryFailure = "Cannot save replay: " & error.msg
   clickMarks.closeClickMarks()
   attackClickMarks.closeClickMarks()
   worldShapes.closeShapeRenderer()
@@ -2234,4 +2673,12 @@ proc runGraphics*(network: NetworkMatch = nil,
   particles.closeParticles()
   harvestBars.closeWorldBarRenderer()
   finishGameProfile()
+  when not defined(emscripten):
+    if libraryFailure.len > 0:
+      raise newException(ReplaySaveError, libraryFailure)
+  if recordingFailure.len > 0:
+    when defined(emscripten):
+      raise newException(MenusError, recordingFailure)
+    else:
+      raise newException(ReplayExportError, recordingFailure)
   result = quitToMenu

@@ -1,4 +1,5 @@
-import windy
+import windy, fullscreens
+export fullscreens
 
 when defined(linux):
   from windy/platforms/linux/x11/xlib import nil
@@ -65,7 +66,7 @@ proc isFullscreen*(window: Window): bool =
   when defined(emscripten):
     polyworldFullscreen() != 0
   else:
-    window.fullscreen
+    window.desktopFullscreen or window.fullscreen
 
 proc setFullscreen*(window: Window, enabled: bool) =
   ## Changes fullscreen, deferring browser requests until an input gesture.
@@ -80,28 +81,24 @@ proc setFullscreen*(window: Window, enabled: bool) =
     if status < 0:
       echo "Fullscreen unavailable: check browser or iframe permissions."
   else:
-    window.fullscreen = enabled
+    when defined(macosx):
+      window.setDesktopFullscreen(enabled)
+    else:
+      window.fullscreen = enabled
 
 when not defined(emscripten):
   proc windowMode*(window: Window): WindowMode =
     ## Reports the selected mode, including an OS fullscreen transition.
     if pendingWindowSettings:
       requestedWindowMode
-    elif window.fullscreen:
+    elif window.isFullscreen:
       Fullscreen
     else:
       Windowed
 
   proc windowSizeLimit*(window: Window): IVec2 =
-    ## Leaves room for window decorations and the desktop on the current screen.
-    when defined(linux):
-      # X11 root dimensions are already pixels, including any desktop scaling.
-      let display = xlib.XOpenDisplay(nil)
-      if display == nil:
-        raise newException(WindyError, "Unable to open the X11 display")
-      defer: XCloseDisplay(display)
-      xlib.screen(display, xlib.defaultScreen(display)).size - ivec2(80, 140)
-    else:
+    ## Leaves desktop room when the backend can enumerate screens.
+    when declared(getScreens):
       let screens = getScreens()
       if screens.len == 0:
         return window.size
@@ -111,28 +108,44 @@ when not defined(emscripten):
           screen = candidate
           break
       ((screen.size.vec2 - vec2(80, 140)) * window.contentScale).ivec2
+    elif defined(linux):
+      # X11 root dimensions are already pixels, including desktop scaling.
+      let display = xlib.XOpenDisplay(nil)
+      if display == nil:
+        raise newException(WindyError, "Unable to open the X11 display")
+      defer: XCloseDisplay(display)
+      xlib.screen(display, xlib.defaultScreen(display)).size - ivec2(80, 140)
+    else:
+      # Do not cap requested resolutions at the current window size.
+      ivec2(int32.high, int32.high)
 
   proc updateWindowSettings*(window: Window) =
     ## Applies queued OS changes outside drawing and waits for fullscreen.
+    window.updateDesktopFullscreen()
+    if window.desktopFullscreenChanging:
+      return
     if fullscreenTransition:
-      if window.fullscreen != fullscreenTarget:
+      if window.isFullscreen != fullscreenTarget:
         return
       fullscreenTransition = false
     if not pendingWindowSettings:
       return
     let wantsFullscreen = requestedWindowMode == Fullscreen
-    if window.fullscreen != wantsFullscreen:
-      if wantsFullscreen and window.style != DecoratedResizable:
-        window.style = DecoratedResizable
+    if window.isFullscreen != wantsFullscreen:
+      when not defined(macosx):
+        if wantsFullscreen and window.style != DecoratedResizable:
+          window.style = DecoratedResizable
       fullscreenTarget = wantsFullscreen
-      fullscreenTransition = true
+      fullscreenTransition = not defined(macosx)
       window.setFullscreen(wantsFullscreen)
-      return
+      if fullscreenTransition:
+        return
     if wantsFullscreen:
       pendingWindowSettings = false
       return
-    if window.style != DecoratedResizable:
-      window.style = DecoratedResizable
+    when not defined(macosx):
+      if window.style != DecoratedResizable:
+        window.style = DecoratedResizable
     if requestedResolution != CurrentResolution:
       let
         size = requestedResolution.resolutionSize
@@ -148,6 +161,7 @@ when not defined(emscripten):
     resolution: WindowResolution
   ) =
     ## Queues native display changes for the outer event loop.
+    window.prepareDesktopFullscreen()
     requestedWindowMode =
       if mode == BorderlessWindow:
         Fullscreen

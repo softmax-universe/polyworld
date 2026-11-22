@@ -1,0 +1,6 @@
+Generated using the built-in image_gen tool.
+
+Use case: lighting-weather
+Input image: edit target, the supplied abstract high-speed night city with colored radial light trails.
+Edit request: Produce a SQUARE image with exactly 1:1 aspect ratio. Recompose the scene to fit the square, preserving one single vanishing point at the exact geometric center (50% width, 50% height). Make the entire image noticeably brighter and warmer: lift the dark midtones, add a luminous warm atmospheric glow, and make amber, golden yellow, orange, warm white, and rich red the dominant light-trail colors. Retain some purple and muted blue-gray secondary streaks for depth. Golden streetlamp light and red car taillights smear dramatically outward from the center to every edge, with bright warm reflections streaming over the roadway. Increase the glowing light area and visibility of broad smeared city shapes, while retaining charcoal shadows for contrast; no blown-out featureless highlights.
+Preserve: the extreme forward speed, very long radial zoom blur, abstract photographic motion smears, barely suggested night-city forms and cars, cinematic layered texture, only one central vanishing point. The center remains a small focal point, not a large glowing orb. No sharp cars or buildings, no text, no logos, no watermark. Output must be square, not landscape.

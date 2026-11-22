@@ -4,7 +4,7 @@
 ## Writes to build/card-previews (ignored), never into polyworld_art.
 import std/[os, strutils]
 import pixie
-import ../src/core/core, ../src/core/cardset, ../src/ui/cardfaces, ../src/paths
+import ../core/core, ../core/cardset, ../ui/cardfaces, ../paths
 
 let
   root = artworkRoot() / "cards"

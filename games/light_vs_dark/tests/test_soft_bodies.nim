@@ -23,7 +23,8 @@ block movingPeonPushesIdleFriend:
     maxIdleStep = max(maxIdleStep, length(idle.body.pos-before))
   doAssert length(idle.body.pos-start) > 0.2'fx,
     "A moving peon must push its idle friend, not route around a hard occupied tile"
-  doAssert closest < 0.4'fx, "Rubber bodies must allow real transient overlap"
+  doAssert closest >= 0.4'fx and closest < 0.5'fx,
+    "Peons must make pushing contact without deep body interpenetration"
   doAssert maxIdleStep <= 0.081'fx, "No tile-sized separation teleport"
   doAssert length(mover.body.pos-f.goals[0]) <= 0.4'fx
   doAssert idle.state == UnitIdle and not idle.hasGoal

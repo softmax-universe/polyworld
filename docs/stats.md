@@ -68,8 +68,8 @@ APM uses reconstructed history when seeking, and revisiting a completed
 tick does not count commands again. Histories and decoded CPU samples have
 explicit size limits.
 
-For viewer screenshots, build with `-d:takeScreenshot` and set
-`SHOW_STATS=1` to include the overlay. Normal builds use TAB and the button.
+For viewer screenshots, use `--screenshot PATH` and set `SHOW_STATS=1` to
+include the overlay. Interactive play uses TAB and the button.
 
 ## GotA replay events
 

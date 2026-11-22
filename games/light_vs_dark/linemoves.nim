@@ -40,6 +40,38 @@ proc destinationPoint*(target: LineDestination): LinePoint =
   linePoint(target.tile.x.float64 + 0.5 + int32(target.offset.x).float64/65536,
     target.tile.y.float64 + 0.5 + int32(target.offset.y).float64/65536)
 
+proc formationSamples(stroke: openArray[LinePoint], count: int): seq[LinePoint] =
+  ## Adds parallel rows when the stroke cannot hold one tile-spaced row.
+  if count <= 0 or stroke.len == 0: return
+  var lengths = newSeq[float64](stroke.len)
+  for i in 1 ..< stroke.len:
+    lengths[i] = lengths[i-1] + sqrt(distanceSquared(stroke[i-1], stroke[i]))
+  let length = lengths[^1]
+  if length <= 1e-9 or length >= (count-1).float64:
+    return sampleLine(stroke, count)
+  let columns = max(1, floor(length).int + 1)
+  var row = 0
+  while result.len < count:
+    let
+      rowCount = min(columns, count - result.len)
+      samples = sampleLine(stroke, rowCount)
+      depth = ((row + 1) div 2).float64 * (if row mod 2 == 1: 1.0 else: -1.0)
+    var segment = 1
+    for i, sample in samples:
+      let at = length * (if rowCount == 1: 0.5 else: i.float64/(rowCount-1).float64)
+      while segment < stroke.len-1 and
+          (lengths[segment] < at or lengths[segment] == lengths[segment-1]):
+        inc segment
+      while segment > 1 and lengths[segment] == lengths[segment-1]:
+        dec segment
+      let
+        dx = stroke[segment].x - stroke[segment-1].x
+        dy = stroke[segment].y - stroke[segment-1].y
+        span = lengths[segment] - lengths[segment-1]
+      result.add linePoint(sample.x - dy / span * depth,
+        sample.y + dx / span * depth)
+    inc row
+
 proc eligibleLineUnits*(world: World, player: int32,
     selected: openArray[int32]): seq[int32] =
   if world == nil or player < 0 or player >= world.players.len: return
@@ -68,21 +100,28 @@ type LineConnectivity = object
   world: World
   side: int
   open: seq[bool]
-  blocked: HashSet[int]
+  blocked, solid: HashSet[int]
+  selected: seq[int32]
   labels, queue: seq[int]
 
 proc refresh(cache: var LineConnectivity, world: World, ids: seq[int32]): bool =
-  ## World has no blocker revision. Compare an exact openness snapshot (not a
-  ## hash or tick heuristic) so construction, chopped trees, replay edits and
-  ## moving nonselected units invalidate connectivity even within the same tick.
+  ## Compare exact openness, occupants and eligible units so changes invalidate
+  ## the preview even without a simulation tick or pointer movement.
   let side = world.map.side.int
-  var blocked = initHashSet[int]()
+  var
+    blocked = initHashSet[int]()
+    solid = initHashSet[int]()
   let selected = ids.toHashSet()
+  let owner = if ids.len > 0: world.units[world.unitIndex(ids[0])].owner else: -1
   for unit in world.units:
     if unit.state notin {UnitDying, UnitInMine} and unit.hp > 0 and
         unit.id notin selected and world.map.inGrid(unit.tile):
-      blocked.incl world.map.tileIndex(unit.tile).int
-  result = cache.world != world or cache.side != side or cache.blocked != blocked
+      let cell = world.map.tileIndex(unit.tile).int
+      blocked.incl cell
+      # Friendlies can yield along a route, but keep their cells out of slots.
+      if unit.owner != owner: solid.incl cell
+  result = cache.world != world or cache.side != side or
+    cache.blocked != blocked or cache.solid != solid or cache.selected != ids
   if cache.open.len != side*side:
     cache.open = newSeq[bool](side*side)
     result = true
@@ -96,11 +135,13 @@ proc refresh(cache: var LineConnectivity, world: World, ids: seq[int32]): bool =
   cache.world = world
   cache.side = side
   cache.blocked = move(blocked)
+  cache.solid = move(solid)
+  cache.selected = ids
   cache.labels.setLen(side*side)
   inc lastLinePlanWork.connectivityBuilds
   for cell in 0 ..< cache.labels.len:
     inc lastLinePlanWork.connectivityCells
-    cache.labels[cell] = if cache.open[cell] and cell notin cache.blocked: 0 else: -1
+    cache.labels[cell] = if cache.open[cell] and cell notin cache.solid: 0 else: -1
   var component = 0
   for index in 0 ..< cache.labels.len:
     inc lastLinePlanWork.connectivityCells
@@ -138,7 +179,8 @@ proc nearestSlot(cache: LineConnectivity, component: int, sample: LinePoint,
   template examine(x, y: int) =
     let cell = y*side+x
     inc lastLinePlanWork.slotCells
-    if cache.labels[cell] == component and cell notin reserved:
+    if cache.labels[cell] == component and cell notin cache.blocked and
+        cell notin reserved:
       let cost = distanceSquared(linePoint(x.float64+0.5, y.float64+0.5), sample)
       if cost < bestDistance or (cost == bestDistance and cell < result):
         result = cell
@@ -165,11 +207,10 @@ proc nearestSlot(cache: LineConnectivity, component: int, sample: LinePoint,
 proc planLineMove(world: World, player: int32, selected: openArray[int32],
     stroke: openArray[LinePoint], cache: var LineConnectivity,
     refreshed = false): seq[LineDestination] =
-  ## Choose one legal reachable cell per unit; short strokes spread into nearby
-  ## free cells instead of collapsing onto one point. No simulation mutation.
+  ## Fits all units in rows, then chooses distinct legal reachable cells.
   if not refreshed: lastLinePlanWork = LinePlanWork()
   let ids = world.eligibleLineUnits(player, selected)
-  let samples = sampleLine(stroke, ids.len)
+  let samples = formationSamples(stroke, ids.len)
   if samples.len == 0: return
   let side = world.map.side.int
   if not refreshed: discard cache.refresh(world, ids)
@@ -274,18 +315,22 @@ proc targetsReachable(gesture: var LineGesture, world: World): bool =
   ## Validate, but never reassign, the displayed snapshot at release. A newly
   ## blocked route cancels instead of committing stale destinations or unseen ones.
   let ids = world.eligibleLineUnits(gesture.player, gesture.selection)
+  var assigned = initHashSet[int32]()
   lastLinePlanWork = LinePlanWork()
   discard gesture.connectivity.refresh(world, ids)
   for target in gesture.targets:
     if target.unitId notin ids: continue # Dispatch already skips ineligible units.
+    if target.unitId in assigned: return false
+    assigned.incl target.unitId
     let unit = world.units[world.unitIndex(target.unitId)]
     if not world.map.inGrid(unit.tile) or not world.map.inGrid(target.tile): return false
     let origin = world.map.tileIndex(unit.tile).int
     let destination = world.map.tileIndex(target.tile).int
-    if gesture.connectivity.labels[origin] <= 0 or
+    if destination in gesture.connectivity.blocked or
+        gesture.connectivity.labels[origin] <= 0 or
         gesture.connectivity.labels[origin] != gesture.connectivity.labels[destination]:
       return false
-  true
+  assigned.len == ids.len
 
 proc queueLineTargets*(world: World, player: int32,
     targets: openArray[LineDestination], attackMove = false, append = false): int =

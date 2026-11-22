@@ -5,8 +5,11 @@ import chroma, pixie, silky, vmath, fixxy
 import polyworld/[chrome, gameuis]
 import content, sim, tooltips
 
-const ResearchIconKeys*: array[ResearchKind, string] = [
-  "keenflight_arrows", "tempered_edges", "runed_plating", "windrunner_training"]
+const ResearchIconKeys*: array[ResearchKind, array[3, string]] = [
+  ["keenflight_arrows_1", "keenflight_arrows_2", "keenflight_arrows_3"],
+  ["tempered_edges_1", "tempered_edges_2", "tempered_edges_3"],
+  ["runed_plating_1", "runed_plating_2", "runed_plating_3"],
+  ["windrunner_training_1", "windrunner_training_2", "windrunner_training_3"]]
 const TemporaryResearchIcons*: array[ResearchKind, string] = [
   "bow", "attack", "armor", "speed_1x"]
 
@@ -66,9 +69,9 @@ proc researchKinds*(w: World, player, buildingId: int32): seq[ResearchKind] =
 proc researchCard*(w: World, player, buildingId: int32,
     kind: ResearchKind): ResearchCard =
   result.name = researchName(kind)
-  result.icon = ResearchIconKeys[kind]
   result.level = w.researchLevel(player, kind)
   result.maxLevel = MaxResearchLevel
+  result.icon = ResearchIconKeys[kind][clamp(result.level, 0, MaxResearchLevel - 1)]
   let cost = researchStats(kind, min(MaxResearchLevel, result.level + 1))
   result.gold = cost.gold
   result.wood = cost.wood

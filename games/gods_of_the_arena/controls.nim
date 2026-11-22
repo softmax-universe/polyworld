@@ -20,6 +20,11 @@ type
     CommandLevelAbility
     CommandBuyback
     CommandStop
+    CommandSell
+    CommandSwap
+    CommandQueueWalk
+    CommandQueueAttackMove
+    CommandQueueAttack
 
   PlayerCommand = object
     kind: PlayerCommandKind
@@ -49,28 +54,28 @@ proc queueDraft*(heroId, classId: int32) =
     kind: CommandDraft, heroId: heroId, first: classId
   )
 
-proc queueWalkTo*(heroId, mapX, mapY: int32) =
-  ## Queues one walk command for the human hero.
+proc queueWalkTo*(heroId, mapX, mapY: int32, append = false) =
+  ## Submits a walk, optionally after the hero's current orders.
   pending.add PlayerCommand(
-    kind: CommandWalk,
+    kind: (if append: CommandQueueWalk else: CommandWalk),
     heroId: heroId,
     first: mapX,
     second: mapY
   )
 
-proc queueAttackMove*(heroId, mapX, mapY: int32) =
-  ## Queues one attack-move command for the human hero.
+proc queueAttackMove*(heroId, mapX, mapY: int32, append = false) =
+  ## Submits an attack-move, optionally after the hero's current orders.
   pending.add PlayerCommand(
-    kind: CommandAttackMove,
+    kind: (if append: CommandQueueAttackMove else: CommandAttackMove),
     heroId: heroId,
     first: mapX,
     second: mapY
   )
 
-proc queueAttackTarget*(heroId, targetId: int32) =
-  ## Queues one attack command for the human hero.
+proc queueAttackTarget*(heroId, targetId: int32, append = false) =
+  ## Submits an attack, optionally after the hero's current orders.
   pending.add PlayerCommand(
-    kind: CommandAttack,
+    kind: (if append: CommandQueueAttack else: CommandAttack),
     heroId: heroId,
     first: targetId
   )
@@ -82,6 +87,15 @@ proc queueBuyItem*(heroId, itemId: int32) =
     heroId: heroId,
     first: itemId
   )
+
+proc queueSellItem*(heroId, slot: int32) =
+  ## Queues a whole-stack sale; never mutates inventory before authority.
+  pending.add PlayerCommand(kind: CommandSell, heroId: heroId, slot: slot)
+
+proc queueSwapItems*(heroId, fromSlot, toSlot: int32) =
+  ## Exchanges full stacks, or moves into an empty slot, on the decision tick.
+  pending.add PlayerCommand(kind: CommandSwap, heroId: heroId,
+    slot: fromSlot, first: toSlot)
 
 proc queueUseItem*(heroId, slot: int32, targetId = 0'i32) =
   ## Queues inventory use on self or an explicitly selected allied hero.
@@ -165,7 +179,7 @@ proc activatePlayerAbility*(
     world: World,
     heroId, slotId: int32
 ): bool =
-  ## Casts self abilities immediately and arms all aimed abilities.
+  ## Casts self abilities immediately and arms ready aimed abilities.
   let hero = world.heroById(heroId)
   if hero.id == 0 or hero.hp <= 0 or hero.state == Dying or
     slotId < 0 or slotId > HeroAbilitySlot.high.ord:
@@ -173,6 +187,8 @@ proc activatePlayerAbility*(
   let spec = heroAbility(hero.class, HeroAbilitySlot(slotId)).abilitySpec
   armedAbility = -1
   armedItem = -1
+  if hero.cooldowns[HeroAbilitySlot(slotId)] > 0:
+    return false
   if hero.abilityLevels[HeroAbilitySlot(slotId)] == 0:
     queueCastTarget(heroId, slotId, heroId)
     return true
@@ -180,13 +196,16 @@ proc activatePlayerAbility*(
     queueCastTarget(heroId, slotId, heroId)
     return true
   armedAbility = slotId
+  true
 
 proc action(command: PlayerCommand, tick: int32): ReplayAction =
   ## Converts a human intent to the same payload used by bot commands.
   const Kinds: array[PlayerCommandKind, uint8] = [
     ActionDraft, ActionWalkTo, ActionAttackTarget, ActionAttackMove,
     ActionBuyItem, ActionUseItem, ActionUseItemAt, ActionCastTarget,
-    ActionCastPoint, ActionLevelAbility, ActionBuyback, ActionStop
+    ActionCastPoint, ActionLevelAbility, ActionBuyback, ActionStop, ActionSellItem,
+    ActionSwapItems, ActionQueueWalkTo, ActionQueueAttackMove,
+    ActionQueueAttackTarget
   ]
   ReplayAction(
     tick: uint32(tick), heroId: command.heroId, kind: Kinds[command.kind],

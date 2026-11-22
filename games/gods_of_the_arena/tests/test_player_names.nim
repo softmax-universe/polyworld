@@ -89,7 +89,7 @@ suite "GotA exact multiplayer player names":
       check decoded.participants[0].name == name
       check decoded.seats[0].name == name
 
-  test "Hello Welcome JoinRoom ClaimSeat Ready and prepared configs keep exact names":
+  test "Hello Welcome JoinRoom ClaimSeat status and initial configs keep exact names":
     let fixture = newFixture()
     let names = @["mason :)", "  spaced name  ", "'single' \"double\": (ok)",
       "Zoë 雪 🙂: (hi)", repeat("x", 64), repeat("é", 32)]
@@ -121,14 +121,15 @@ suite "GotA exact multiplayer player names":
       "Böt 雪: (two)", "  bot with outer spaces  "]
     for i, name in botNames:
       owner.send(RoomMessage(kind: ClaimSeat,
-        seat: uint32(names.len + i), name: name))
+        seat: uint32(names.len + i), seatKind: BotSeat, name: name))
     fixture.exchange()
     var sessions: seq[NetworkMatch]
     for client in fixture.clients:
       require client.error.len == 0
       for i, name in names:
         check client.snapshot.namedParticipant(fixture.clients[i].participant).name == name
-        check client.snapshot.seats[i].name == "Human"
+        check client.snapshot.seats[i].name == name
+        check client.snapshot.seats[i].kind == HumanSeat
         check client.snapshot.seats[i].owner == fixture.clients[i].participant
       for i, name in botNames:
         check client.snapshot.seats[names.len + i].name == name
@@ -143,8 +144,7 @@ suite "GotA exact multiplayer player names":
       sessions.add session
     for session in sessions:
       check session.game.networkHash() == sessions[0].game.networkHash()
-      session.client.send(RoomMessage(kind: Ready,
-        revision: session.revision, hash: session.game.networkHash()))
+      session.client.send(RoomMessage(kind: ReadyStatus, flag: true))
     fixture.exchange()
     for observer in fixture.clients:
       require observer.error.len == 0
@@ -153,7 +153,7 @@ suite "GotA exact multiplayer player names":
         check participant.name == name
         check participant.ready
     owner.send(RoomMessage(kind: StartMatch, revision: sessions[0].revision,
-      hash: sessions[0].game.networkHash()))
+      hash: setupHash(owner.snapshot)))
     fixture.exchange()
     for session in sessions:
       require session.client.error.len == 0
@@ -167,7 +167,7 @@ suite "GotA exact multiplayer player names":
     fixture.exchange()
     for client in fixture.clients:
       check client.error.len == 0
-    for kind in [Hello, JoinRoom, ClaimSeat, Ready, StartMatch]:
+    for kind in [Hello, JoinRoom, ClaimSeat, ReadyStatus, StartMatch]:
       check fixture.sent.containsKind(kind)
     for kind in [Welcome, RoomState, BeginMatch]:
       check fixture.received.containsKind(kind)

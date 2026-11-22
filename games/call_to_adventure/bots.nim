@@ -118,14 +118,36 @@ proc heroLimits(): Limits =
 proc sendChat*(
   game: Game, sender, target: int, text: openArray[char]
 ): int32 =
-  ## Broadcasts to players within 16 tiles on the sender's level.
-  if sender notin 0 ..< game.inboxes.len or target != -2:
+  ## Records nearby broadcasts in command order before delivering mailboxes.
+  if game == nil or game.replayMode or game.historyPlayback or
+      sender notin 0 ..< game.inboxes.len or target != -2 or
+      text.len == 0 or text.len > MaxChatBytes:
     return 0
   let origin = game.world.actors[sender].home
+  var recipients = 0'u8
   for recipient in 0 ..< game.inboxes.len:
     let distance = tileDistance(origin, game.world.actors[recipient].home)
-    if distance in 0 .. 16 and game.inboxes[recipient].push(-2, text):
+    if distance in 0 .. 16 and game.inboxes[recipient] != nil and
+        game.inboxes[recipient].count < MaxMailboxMessages:
+      recipients = recipients or (1'u8 shl recipient)
       inc result
+  if result == 0:
+    return
+  if game.recorder != nil:
+    var copy = newString(text.len)
+    for index, ch in text:
+      copy[index] = ch
+    game.recorder.recordChat(ReplayAction(
+      tick: uint32(game.world.tick),
+      heroId: int32(100 + sender),
+      kind: ActionChat,
+      target: int32(target),
+      recipients: recipients,
+      text: copy
+    ))
+  for recipient in 0 ..< game.inboxes.len:
+    if (recipients and (1'u8 shl recipient)) != 0:
+      discard game.inboxes[recipient].push(-2, text)
 
 proc buildHeroHost(heroId: int32, llm: LlmClient = nil, policySlot = -1): Host =
   ## Builds the world-query and high-level action API for one hero.
@@ -139,15 +161,8 @@ proc buildHeroHost(heroId: int32, llm: LlmClient = nil, policySlot = -1): Host =
       result = activeGame.sendChat(player, int(args[0].asInt), text)
   let pullMailboxProc: NumericHostProc = proc(args: openArray[Value]): Value =
     ## Copies the oldest message into BASIC and consumes it on success.
-    let
-      player = int(heroId - 100)
-      inbox = activeGame.inboxes[player]
-    var runtime = activeGame.heroVms[player].runtime
-    if inbox.count == 0:
-      result = runtime.putString("")
-    else:
-      result = runtime.putString(inbox.messages[inbox.first])
-    discard inbox.pop()
+    let player = int(heroId - 100)
+    activeGame.heroVms[player].runtime.pullMailboxString(activeGame.inboxes[player])
   let mailboxIdProc: HostProc = proc(args: openArray[int32]): int32 =
     ## Returns the channel or DM sender of the last pulled message.
     activeGame.inboxes[int(heroId - 100)].lastId

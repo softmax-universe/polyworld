@@ -1,9 +1,17 @@
 import
   std/[os, random, strutils, uri],
   bumpy, chroma, jsony, silky, vmath, windy,
-  polyworld/[displays, chrome, connections, menus, roomclients, rooms, policies, viewers],
-  content, controls, game, graphics, homes, lobbies, multiplayer, presets, replays,
-  rosterstate, participantcontext, lobbyreadiness
+  polyworld/[displays, chrome, connections, menus, roomclients, rooms, policies,
+    pointers, sounds, viewers],
+  content, controls, game, graphics, homes, lobbies, multiplayer, presets,
+  rosterstate, participantcontext, lobbyreadiness, joiningseats
+
+from polyworld/cli import WindowSizeFlag, BotFlag, PlayerFlag, RecordFlag,
+  SeedFlag, DurationFlags, ServerFlag, RoomFlag
+
+when not defined(emscripten):
+  import polyworld/[replaysaves, tapes], replaylibraries, replaymenus, replays,
+    replaysettings
 
 const AppName = "Polyworld LvD"
 
@@ -19,6 +27,19 @@ proc bundledBot(name, file: string): LocalPolicy =
 proc runFrontend*() =
   ## Owns menu, lobby, match and return transitions on the same window.
   initializeGraphics()
+  var
+    captureTarget: ScreenshotTarget
+    screenshotFrame = 0
+  defer: releaseScreenshotTarget(captureTarget)
+
+  proc presentMenu() =
+    ## Captures every menu path before presentation and leaves normal cleanup active.
+    when not defined(emscripten):
+      if captureFrame(window, screenshotFrame, 30, "light_vs_dark.png"):
+        window.closeRequested = true
+    window.presentFrame(if captureActive(): 0 else: framePaceHz)
+    reportReplayFrame(0, 0)
+
   let inviteServer = inviteParameter("server")
   var
     preferences = Preferences()
@@ -26,12 +47,13 @@ proc runFrontend*() =
     error: string
     roomName: string
     matchName, namedRoom, publishedName: string
-    invite = inviteParameter("room")
+    invite = if options.roomCode.len > 0: options.roomCode
+      else: inviteParameter("room")
     joinRequested = invite.len > 0
     connection: Connection
     prepared: NetworkMatch
     preparedRevision = 0'u32
-    readyRefresh: ReadyRefresh
+    joiningSeat: JoiningSeat
     viewedRevision = 0'u32
     config = defaultConfig()
     viewedPayload: string
@@ -39,6 +61,7 @@ proc runFrontend*() =
     lobbyUi = LobbyUi()
     rosterScroll = FrameState()
     participantMenu: ParticipantContext
+    teamPicker: TeamPicker
     contextDismissGuard: bool
     rng = initRand(2026)
     publicRoom = true
@@ -52,12 +75,46 @@ proc runFrontend*() =
     playerName: string
     editingPlayer: bool
     connectRequested: bool
+  when not defined(emscripten):
+    var
+      replayPreferences = ReplayPreferences()
+      browsingReplays = false
+      replayBrowser = initReplayBrowser(Library)
+      replayAction: ReplayBrowserResult
+      unsavedReplays: seq[ReplayData]
+      retryReplaySave: bool
+
+    proc retainUnsavedReplay(problem: ref CatchableError) =
+      ## Keeps failed automatic and manual saves available on the menu.
+      window.closeRequested = false
+      if shouldRetainReplay(replayPreferences.saveReplay, problem) and
+        run != nil and
+        run.recorder != nil and not run.replayMode:
+          try:
+            unsavedReplays.add(recordingData())
+          except ReplayError:
+            discard
+
+    proc drawReplayRetry() =
+      ## Offers a retry without losing the recording when the disk is full.
+      if sk.drawReplaySaveRetry(unsavedReplays.len > 0):
+        retryReplaySave = true
+
+  template automaticReplaySave(): bool =
+    ## Enables automatic recording only for desktop games.
+    when defined(emscripten): false
+    else: replayPreferences.saveReplay and not captureActive()
+
   try:
     preferences = readLvdPreferences()
+    when not defined(emscripten):
+      replayPreferences = readReplayPreferences()
   except MenusError, IOError, OSError:
     error = getCurrentExceptionMsg()
-  preferences = effectivePreferences(preferences, inviteServer, serverAddress)
-  preferences.applyPreferences(window)
+  preferences = effectivePreferences(preferences, inviteServer, options.serverUrl)
+  preferences.applyPreferences(window, configureDisplay =
+    not captureActive() and WindowSizeFlag notin options.specifiedFlags)
+  window.updateCursorConfinement(preferences.edgeScrolling)
   roomName = defaultGameName(preferences.name)
   let bots = @[
     bundledBot("Base bot", "base")
@@ -69,17 +126,21 @@ proc runFrontend*() =
   config.maxTicks = options.maximumTicks
   config.mapSettings = mapSettings
   config.diplomacySettings = diplomacySettings
-  if opensMultiplayer(invite):
+  if opensMultiplayer(invite, options.serverUrl):
     page = MultiplayerMenu
     connectRequested = true
 
   while not window.closeRequested:
     when not defined(emscripten):
-      window.updateWindowSettings()
+      if not captureActive():
+        window.updateWindowSettings()
     launchLocal = false
     launchNetwork = false
-    if connectRequested and preferences.name.len <= 64 and
-      validName(preferences.name):
+    when not defined(emscripten):
+      replayAction = ReplayBrowserResult()
+      retryReplaySave = false
+    if connectRequested and not editingPlayer and
+      confirmedPlayerName(preferences.name):
         connectRequested = false
         try:
           preferences.server = serverUrl(preferences.server)
@@ -93,7 +154,7 @@ proc runFrontend*() =
           prepared = nil
           preparedRevision = 0
           viewedRevision = 0
-          readyRefresh = ReadyRefresh()
+          joiningSeat = JoiningSeat()
           viewedPayload = ""
           roster = RosterState()
           multiplayerHuman = -1
@@ -101,10 +162,15 @@ proc runFrontend*() =
           error = ""
         except CatchableError as problem:
           error = problem.msg
-    if connection != nil:
+    if connection != nil and not editingPlayer and
+        confirmedPlayerName(preferences.name):
       connection.pump()
       let client = connection.client
-      if client.welcomed and joinRequested and invite.len > 0 and
+      let joinedSeat = joiningSeat.claimJoiningSeat(client)
+      if joinedSeat.updated:
+        multiplayerHuman = joinedSeat.seat
+      if client.welcomed and not editingPlayer and
+        confirmedPlayerName(preferences.name) and joinRequested and invite.len > 0 and
         client.snapshot.room.len == 0:
         client.send(RoomMessage(kind: JoinRoom, room: invite))
         joinRequested = false
@@ -113,7 +179,6 @@ proc runFrontend*() =
         if page == LobbyMenu: page = MultiplayerMenu
         prepared = nil
         preparedRevision = 0
-        readyRefresh = ReadyRefresh()
         viewedRevision = 0
         viewedPayload = ""
         roster = RosterState()
@@ -135,14 +200,6 @@ proc runFrontend*() =
             except CatchableError as problem:
               error = problem.msg
           viewedRevision = client.snapshot.revision
-        try:
-          var sources = newSeq[string](networkPolicies.len)
-          for i, policy in networkPolicies:
-            sources[i] = policy.bytes
-          discard readyRefresh.refreshRetainedReady(client, sources,
-            prepared, preparedRevision)
-        except CatchableError as problem:
-          error = problem.msg
       if client.events.len > 0:
         let event = client.events[0]
         client.events.delete(0)
@@ -171,12 +228,19 @@ proc runFrontend*() =
         prepared.humanPlayerFor(connection.client.participant) + 1
       )
       options.replayPath = ""
-      options.recordPath = ""
-      options.pauseOnStart = false
-      options.speed = 1
-      let quitToMenu = runGraphics(prepared, connection)
+      var
+        quitToMenu = false
+        matchError: string
+      try:
+        quitToMenu = runGraphics(prepared, connection,
+          autoSaveReplay = automaticReplaySave())
+      except CatchableError as problem:
+        matchError = problem.msg
+        quitToMenu = connection.client.snapshot.room.len == 0
+        when not defined(emscripten):
+          retainUnsavedReplay(problem)
       preferences = effectivePreferences(
-        readLvdPreferences(), inviteServer, serverAddress
+        readLvdPreferences(), inviteServer, options.serverUrl
       )
       if quitToMenu:
         connection.close()
@@ -191,23 +255,29 @@ proc runFrontend*() =
       prepared = nil
       preparedRevision = 0
       clearPlayerCommands()
-      readyRefresh = ReadyRefresh()
       run = nil
+      if matchError.len > 0:
+        error = matchError
       continue
 
     window.onButtonPress = proc(button: Button) =
-      ## Adjusts UI scale with the same shortcuts as a browser.
+      ## Captures on clicks and adjusts UI scale with browser-style shortcuts.
+      window.captureCursorConfinement(button)
       discard window.scaleKey(
         button, preferences, sk.uiScale, AppName
       )
     window.onFrame = proc() =
       ## Draws this lifecycle state without constructing a hidden match.
+      discard beginScreenshotFrame(captureTarget, window)
+      updateSounds()
+      window.updateCursorConfinement(preferences.edgeScrolling)
       var contextInputBlocked = false
       if page != LobbyMenu:
         participantMenu.dismiss()
+      if page notin {SingleMenu, LobbyMenu}:
+        teamPicker.dismiss()
         contextDismissGuard = false
-      let needsPlayerName = preferences.name.len > 64 or
-        not validName(preferences.name)
+      let needsPlayerName = not confirmedPlayerName(preferences.name)
       if editingPlayer or (page == MultiplayerMenu and needsPlayerName):
           sk.textStyle = "Default"
           discard sk.beginSettings(window)
@@ -215,8 +285,6 @@ proc runFrontend*() =
           let
             view = window.size.vec2 / sk.uiScale
             at = (view - vec2(620, 260)) * 0.5'f
-            name = playerName.strip()
-            valid = name.len <= 64 and validName(name)
           sk.drawRect(vec2(0), view, rgbx(0, 0, 0, 110))
           sk.lobbyPanel(at, vec2(620, 260))
           sk.drawLabel(if needsPlayerName: "Please enter your player name"
@@ -225,8 +293,11 @@ proc runFrontend*() =
             sk.theme.defaultTextColor, "H1")
           sk.menuInput(window, "newPlayerName", playerName,
             at + vec2(24, 80), 572, 44)
+          let
+            name = playerName
+            valid = confirmedPlayerName(name)
           if playerName.len > 0 and not valid:
-            sk.drawLabel("Enter a shorter name without line breaks.",
+            sk.drawLabel("Choose a name other than Player (max 64 bytes, no controls).",
               at + vec2(24, 128), vec2(572, 28),
               sk.theme.disabledTextColor)
           if sk.lobbyButton("Cancel", at + vec2(24, 188), 180) or
@@ -234,6 +305,7 @@ proc runFrontend*() =
               if needsPlayerName and page == MultiplayerMenu:
                 page = HomeMenu
                 connectRequested = false
+                joinRequested = false
               editingPlayer = false
               playerName = ""
               error = ""
@@ -257,13 +329,18 @@ proc runFrontend*() =
           if error.len > 0:
             sk.menuLabel(error, at + vec2(0, 272), color = LobbyRed)
           sk.endUi()
-          window.presentFrame(framePaceHz)
-          reportReplayFrame(0, 0)
+          presentMenu()
+          return
+      when not defined(emscripten):
+        if browsingReplays:
+          replayAction = sk.drawReplayBrowser(window, replayBrowser)
+          sk.endUi()
+          presentMenu()
           return
       if page == HomeMenu:
         case sk.drawLvdHome(window, homeFocus)
-        of StayHome: discard
-        of PlaySingle:
+        of LvdStayHome: discard
+        of LvdPlaySingle:
           roster = RosterState()
           localPolicies.setLen(config.playerCount)
           if humanSeat >= config.playerCount: humanSeat = -1
@@ -272,7 +349,7 @@ proc runFrontend*() =
           lobbyUi.scroll = 0
           lobbyUi.selectedSeat = -1
           rosterScroll.scrollPos = vec2(0)
-        of PlayMultiplayer:
+        of LvdPlayMultiplayer:
           config.playerSlot = 0
           page = MultiplayerMenu
           connectRequested = preferences.server.strip().len > 0 and
@@ -280,15 +357,21 @@ proc runFrontend*() =
             (connection == nil or not connection.client.connected)
           lobbyUi.scroll = 0
           lobbyUi.selectedSeat = -1
-        of OpenSettings: page = SettingsMenu
-        of ExitGame:
+        of LvdOpenReplays:
+          when not defined(emscripten):
+            browsingReplays = true
+            replayBrowser.refreshRequested = true
+            replayBrowser.message = ""
+        of LvdOpenSettings: page = SettingsMenu
+        of LvdExitGame:
           when not defined(emscripten):
             window.closeRequested = true
         if error.len > 0:
           sk.menuLabel(error, vec2(24, 24), color = rgbx(245, 151, 139, 255))
+        when not defined(emscripten):
+          drawReplayRetry()
         sk.endUi()
-        window.presentFrame(framePaceHz)
-        reportReplayFrame(0, 0)
+        presentMenu()
         return
       var layout: LobbyLayout
       let origin =
@@ -299,7 +382,7 @@ proc runFrontend*() =
           layout =
             if page in {SingleMenu, LobbyMenu}:
               sk.beginLvdBattle(window, lobbyUi, config.playerCount,
-                participantMenu.isOpen or contextDismissGuard)
+                participantMenu.isOpen or teamPicker.isOpen or contextDismissGuard)
             else:
               sk.beginLobby(window, lobbyUi, "MULTIPLAYER", true)
           layout.origin
@@ -309,7 +392,8 @@ proc runFrontend*() =
           discard
         of MultiplayerMenu:
           let
-            connected = connection != nil and connection.client.welcomed
+            connected = not editingPlayer and confirmedPlayerName(preferences.name) and
+              connection != nil and connection.client.welcomed
             p = layout.origin + vec2(32, 144)
             totalWidth = if layout.compact: 936.0'f else: 1450.0'f
           sk.lobbyPanel(p, vec2(totalWidth, 74))
@@ -445,7 +529,8 @@ proc runFrontend*() =
             snapshot = if online: client.snapshot else: RoomMessage()
             editable = not online or snapshot.phase == rooms.Lobby
             owner = not online or snapshot.participant == client.participant
-            contextBlocked = participantMenu.isOpen or contextDismissGuard
+            contextBlocked = participantMenu.isOpen or teamPicker.isOpen or
+              contextDismissGuard
             modal = lobbyUi.selectedSeat != -1 or contextBlocked
           # Keep the underlying UI inert for the entire dismissal gesture.
           contextInputBlocked = contextBlocked
@@ -457,19 +542,28 @@ proc runFrontend*() =
             escape = window.buttonPressed[KeyEscape])
           if online and not roster.pending and snapshot.seats.len != config.playerCount:
             raise newException(MenusError, "Room roster does not match its settings")
-          sk.lvdRosterPanel(layout)
+          if teamPicker.isOpen and (not owner or not editable or roster.pending):
+            teamPicker.dismiss()
+          var occupiedSeats: seq[int]
+          for i in 0 ..< config.playerCount:
+            let occupied =
+              if online: i < snapshot.seats.len and snapshot.seats[i].owner != 0
+              else: i == humanSeat or localPolicies[i].bytes.len > 0
+            if occupied:
+              occupiedSeats.add i
+          sk.lvdRosterPanel(layout, config.diplomacySettings.enabled)
           sk.beginRoster(window, layout, rosterScroll, config.playerCount, not modal)
           var
             emptyCount = 0
             ownCount = 0
-            selfReady = readyRefresh.cosmeticReady
+            selfReady = client.cosmeticReady()
           for i in 0 ..< config.playerCount:
             let
               seat = if online and i < snapshot.seats.len: snapshot.seats[i] else: Seat()
               empty = if online: seat.owner == 0
                 else: i != humanSeat and localPolicies[i].bytes.len == 0
               mine = not online or seat.owner == client.participant
-              human = if online: seat.name == "Human" else: i == humanSeat
+              human = if online: seat.kind == HumanSeat else: i == humanSeat
             var
               name = if empty: "Add player"
                 elif human:
@@ -480,8 +574,7 @@ proc runFrontend*() =
               for participant in snapshot.participants:
                 if participant.id == seat.owner:
                   controller = participant.name
-                  if mine:
-                    controller.add(if selfReady: " / Ready" else: " / Not ready")
+                  controller.add(if participant.ready: " / Ready" else: " / Not ready")
                   if human:
                     name = participant.name
 
@@ -490,10 +583,17 @@ proc runFrontend*() =
             if empty:
               inc emptyCount
             if sk.seatButton(layout, i, rosterScroll.scrollPos.y, name, controller, human, empty,
-              editable and (mine or empty) and not modal and
-                roster.assignmentsEnabled(online), config.seed):
+              editable and (owner or mine or empty) and not modal and
+                roster.assignmentsEnabled(online), config.seed,
+              team = if config.diplomacySettings.enabled: -1
+                else: config.playerTeam(i).int):
                 lobbyUi.selectedSeat = i
-            if online and not modal and window.buttonPressed[MouseRight] and
+            if not modal and window.buttonPressed[MouseRight] and
+                not config.diplomacySettings.enabled and
+                teamBadgeHit(layout, i, rosterScroll.scrollPos.y, sk.mousePos):
+              if owner and editable and not roster.pending:
+                teamPicker.openTeamPicker(i, sk.mousePos)
+            elif online and not modal and window.buttonPressed[MouseRight] and
                 rosterCardHit(layout, i, rosterScroll.scrollPos.y, sk.mousePos):
               participantMenu.openSeat(client, i, sk.mousePos)
           sk.popClipRect()
@@ -539,10 +639,10 @@ proc runFrontend*() =
                 roster.assignmentsEnabled(online)):
                 for i in 0 ..< config.playerCount:
                   if online:
-                    if snapshot.seats[i].owner == 0:
+                    if snapshot.seats[i].owner == 0 and i != multiplayerHuman:
                       networkPolicies[i] = chosenPolicy
                       client.send(RoomMessage(kind: ClaimSeat, seat: uint32(i),
-                        name: chosenPolicy.name))
+                        name: chosenPolicy.name, seatKind: BotSeat))
                   elif i != humanSeat and localPolicies[i].bytes.len == 0:
                     localPolicies[i] = chosenPolicy
             if sk.lobbyButton("Shuffle players",
@@ -564,20 +664,22 @@ proc runFrontend*() =
                     if oldHuman == source:
                       multiplayerHuman = destination
                     client.send(RoomMessage(kind: ClaimSeat,
-                      seat: uint32(destination), name: snapshot.seats[source].name))
+                      seat: uint32(destination), name: snapshot.seats[source].name,
+                      seatKind: snapshot.seats[source].kind))
                   else:
                     localPolicies[destination] = oldPolicies[source]
                     if oldHuman == source:
                       humanSeat = destination
             sk.lobbyLabel(if online and roster.pending: "Saving roster / settings..."
-              elif online: "Host-owned slots only; guests keep their seats."
+              elif online: "The host manages all slots. Ready is only an indicator."
               else: "Fill keeps assigned humans and bots. Clear a slot to replace it.",
               fill + vec2(0, 54), layout.leftWidth - 44, tint = LobbyMuted)
           if sk.configPanel(window, lobbyUi, config, layout.right,
             layout.rightWidth, layout.panelHeight,
             owner and editable and not modal and not roster.pending,
             showControls = owner,
-            gameName = if online: addr matchName else: nil):
+            gameName = if online: addr matchName else: nil,
+            occupied = occupiedSeats):
               roster.dirty = online
           if online and owner and editable and not modal and not roster.pending and
               matchName != snapshot.name and window.buttonPressed[KeyEnter]:
@@ -595,7 +697,7 @@ proc runFrontend*() =
               layout.footer + vec2(420, 0), 190, "status",
               editable and ownCount > 0 and not roster.dirty and not roster.pending and not modal,
               iconTint = readinessColor(selfReady)):
-                readyRefresh.toggleCosmeticReady()
+                client.toggleCosmeticReady()
             if roster.dirty and owner and editable:
               if sk.lobbyButton("Apply Settings", layout.primary,
                 250, "settings", not modal and not roster.pending):
@@ -612,7 +714,10 @@ proc runFrontend*() =
                 250, "arrow_right",
                 owner and editable and not roster.pending and not modal,
                 tint = LobbyGreen):
-                  client.send(RoomMessage(kind: StartMatch))
+                  var sources = newSeq[string](networkPolicies.len)
+                  for i, policy in networkPolicies: sources[i] = policy.bytes
+                  prepared = client.requestStart(sources)
+                  preparedRevision = prepared.revision
             if sk.lobbyButton(
               if owner and snapshot.phase in {rooms.Ended, Desynced}:
                 "Return to lobby" else: "Leave room",
@@ -627,7 +732,6 @@ proc runFrontend*() =
                 page = MultiplayerMenu
                 prepared = nil
                 preparedRevision = 0
-                readyRefresh = ReadyRefresh()
                 viewedRevision = 0
                 viewedPayload = ""
                 roster = RosterState()
@@ -645,6 +749,12 @@ proc runFrontend*() =
             sk.lobbyLabel(if humanSeat < 0: "Spectating bots"
               else: "Playing seat " & $(humanSeat + 1),
               layout.left + vec2(22, layout.panelHeight - 74), 800, tint = LobbyMuted)
+          when not defined(emscripten):
+            if sk.drawReplaySaveOption(
+              window, layout.left + vec2(22, layout.panelHeight - 38),
+              replayPreferences.saveReplay, not modal
+            ):
+              replayPreferences.saveReplayPreferences()
           let selectedSeat = lobbyUi.selectedSeat
           let choice =
             if modal and not contextBlocked and lobbyUi.selectedSeat >= 0:
@@ -659,11 +769,12 @@ proc runFrontend*() =
                 chosenPolicy = selected
                 lobbyUi.selectedBot = selected.name
               if online:
+                joiningSeat.cancelJoiningSeat()
                 if choice.human:
                   client.claimHumanSeat(selectedSeat, multiplayerHuman)
                   for i, seat in snapshot.seats:
                     if i == multiplayerHuman or
-                      (seat.owner == client.participant and seat.name == "Human"):
+                      (seat.owner == client.participant and seat.kind == HumanSeat):
                         networkPolicies[i] = LocalPolicy()
                   multiplayerHuman = selectedSeat
                 else:
@@ -671,7 +782,7 @@ proc runFrontend*() =
                     multiplayerHuman = -1
                   client.send(RoomMessage(
                     kind: if choice.clear: ReleaseSeat else: ClaimSeat,
-                    seat: uint32(selectedSeat), name: selected.name
+                    seat: uint32(selectedSeat), name: selected.name, seatKind: BotSeat
                   ))
                 networkPolicies[selectedSeat] = selected
               else:
@@ -683,6 +794,8 @@ proc runFrontend*() =
                   humanSeat = -1
                 localPolicies[selectedSeat] = selected
               lobbyUi.selectedSeat = -1
+          if sk.drawTeamPicker(window, teamPicker, config):
+            roster.dirty = online
           if participantMenu.isOpen:
             sk.pushLayer(PopupsLayer)
             let
@@ -703,24 +816,76 @@ proc runFrontend*() =
             window, preferences, AppName, origin, "", height
           ):
             page = HomeMenu
-            preferences = effectivePreferences(preferences, inviteServer, serverAddress)
+            preferences = effectivePreferences(preferences, inviteServer,
+              options.serverUrl)
       except CatchableError as problem:
         error = problem.msg
       if page in {MultiplayerMenu, LobbyMenu, SettingsMenu} and
-        not participantMenu.isOpen and not contextInputBlocked and
+        not participantMenu.isOpen and not teamPicker.isOpen and
+        not contextInputBlocked and
         lobbyUi.selectedSeat == -1 and
         sk.playerButton(window, preferences.name,
           page != LobbyMenu or connection.client.snapshot.phase == rooms.Lobby):
-          playerName = preferences.name
+          playerName = if confirmedPlayerName(preferences.name): preferences.name else: ""
           editingPlayer = true
       if error.len > 0:
         sk.lobbyLabel(error, vec2(24, 0), 1400, tint = rgbx(245, 151, 139, 255))
+      when not defined(emscripten):
+        drawReplayRetry()
       sk.textStyle = "Default"
       sk.endUi()
-      window.presentFrame(framePaceHz)
-      reportReplayFrame(0, 0)
+      presentMenu()
     pollEvents()
     waitForDisplay()
+    when not defined(emscripten):
+      if retryReplaySave:
+        try:
+          unsavedReplays.retryReplaySaves(
+            proc(data: ReplayData): string =
+              ## Writes a retained game recording to its desktop library.
+              saveLibraryReplay(data)
+          )
+          error = ""
+          replayBrowser.refreshRequested = true
+        except CatchableError as problem:
+          error = "Cannot save replay: " & problem.msg
+      if browsingReplays:
+        try:
+          let selected = replayBrowser.updateReplayBrowser(Library, replayAction)
+          case selected.action
+          of BackFromReplays:
+            browsingReplays = false
+            sk.resetInteractions()
+          of PlayReplay:
+            let previousOptions = options
+            try:
+              window.onFrame = nil
+              options.replayPath = selected.path
+              options.recordPath = ""
+              options.botGroups.setLen(0)
+              options.playerSlot = 0
+              options.serverUrl = ""
+              options.roomCode = ""
+              options.specifiedFlags = options.specifiedFlags -
+                {BotFlag, PlayerFlag, RecordFlag, SeedFlag, ServerFlag, RoomFlag} -
+                DurationFlags
+              options.viewMode = 0
+              initializeMatch()
+              runGraphics()
+              preferences = effectivePreferences(
+                readLvdPreferences(), inviteServer, previousOptions.serverUrl
+              )
+              replayBrowser.message = ""
+            finally:
+              options = previousOptions
+              clearPlayerCommands()
+              run = nil
+              replayBrowser.refreshRequested = true
+          else:
+            discard
+        except CatchableError as problem:
+          replayBrowser.message = problem.msg
+        continue
     if launchLocal:
       connection.close()
       connection = nil
@@ -737,12 +902,14 @@ proc runFrontend*() =
       try:
         config.playerSlot = int32(humanSeat + 1)
         initializeLocalMatch(config, sources)
-        runGraphics()
+        runGraphics(autoSaveReplay = automaticReplaySave())
         preferences = effectivePreferences(
-          readLvdPreferences(), inviteServer, serverAddress
+          readLvdPreferences(), inviteServer, options.serverUrl
         )
       except CatchableError as problem:
         error = problem.msg
+        when not defined(emscripten):
+          retainUnsavedReplay(problem)
       page = HomeMenu
       run = nil
   window.onFrame = nil

@@ -3,7 +3,7 @@
 ## Optional first argument overrides the destination for validation/builds.
 import std/[math, os]
 import pixie, vmath
-import ../src/paths
+import ../paths
 
 const Size = 512
 

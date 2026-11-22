@@ -32,7 +32,7 @@ proc isPlayerIndex*(playerSlot: int32, index: int): bool =
   playerSlot > 0 and index == playerSlot - 1
 
 proc localGameConfig*(options: GameOptions, slotCount: int): GameConfig =
-  ## Builds the match config with names derived only from local bot files.
+  ## Builds the match config with bot filenames and the requested human name.
   let kinds = controllerKinds(slotCount, options.playerSlot)
   result = GameConfig(
     seed: options.seed,
@@ -43,6 +43,8 @@ proc localGameConfig*(options: GameOptions, slotCount: int): GameConfig =
     waitForLlm: options.waitForLlm,
     players: unnamedPlayers(slotCount)
   )
+  if options.playerSlot > 0 and options.playerName.len > 0:
+    result.players[options.playerSlot - 1].name = options.playerName
   var next = 0
   for group in options.botGroups:
     let name = group.path[group.path.rfind({'/', '\\'}) + 1 .. ^1]

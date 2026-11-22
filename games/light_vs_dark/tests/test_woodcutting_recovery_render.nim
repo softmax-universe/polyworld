@@ -1,5 +1,6 @@
 ## Native FBO integration: production selectors, roster/cache, real harvest lifecycle.
 ## Run from repo root with a private --nimcache and TMPDIR in Hermes scratch.
+import std/os
 include ../graphics
 
 let fixtureWindow = newWindow("LvD woodcutting render", ivec2(800, 800),

@@ -127,6 +127,21 @@ Add `-d:replayViewer` to each WASM command to build its replay viewer. Replay
 fixtures must match the current game versions. Check full replay playback,
 controls, resizing, and visible errors in the browser.
 
+## Replay downloads
+
+Pages using `src/polyworld/webinputs.js` can set `Module.polyworldMaxReplayBytes`
+before loading the compiled game script. Supply a positive safe integer in bytes
+in the game-owned Emscripten shell or in an earlier pre-JS file. The default is
+64 MiB. The same byte limit applies to the downloaded response body and to a
+gzip replay after decompression. URL parameters cannot change the limit.
+
+For example, add `polyworldMaxReplayBytes: 128 * 1024 * 1024` to the game's
+`Module` object to allow 128 MiB replays.
+
+This limit bounds replay input bytes. It does not impose a server match-duration
+cap. Total browser memory, download time, and the game's replay parser limits
+are separate.
+
 ## PNG comparison
 
 `-d:webPng` produces the same selected CTA content with 256 by 256 color/height

@@ -13,7 +13,8 @@ type
     ActionHeroLevelRequired,
     ActionNotDead, ActionMatchEnded,
     ActionDrafting, ActionNotDrafting, ActionNotDraftTurn,
-    ActionUnknownHero, ActionHeroTaken, ActionSilenced
+    ActionUnknownHero, ActionHeroTaken, ActionSilenced,
+    ActionMeleeOnly, ActionRangedOnly
 
   EventKind* {.size: sizeof(int32).} = enum
     EntitySpawned, EntityRespawned, EntityRemoved, Damage, Healing, Death,
@@ -56,6 +57,8 @@ proc actionErrorMessage*(error: ActionError): string =
   of ActionNotAlive: "Available when alive"
   of ActionInvalidSlot: "Invalid slot"
   of ActionUnknownItem: "Unknown item"
+  of ActionMeleeOnly: "Melee heroes only"
+  of ActionRangedOnly: "Ranged heroes only"
   of ActionInsufficientGold: "Not enough gold"
   of ActionAlreadyEquipped: "Already equipped"
   of ActionStackFull: "Stack full"

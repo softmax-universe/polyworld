@@ -77,6 +77,19 @@ block:
   doAssert CobbleSurface.float32 in connected.blends[0 ..< 16]
   doAssert DirtSurface.float32 in connected.blends[16 ..< 32]
 
+echo "Testing a hard floor boundary in both directions"
+block:
+  let layer = flatLayer(2, 1)
+  layer.tiles[0].kind = RoadTile
+  layer.tiles[1].kind = StoneTile
+  let map = buildTerrainMap([layer], Kinds, 12, chance = 1,
+    hardMaterials = [CobbleSurface])
+  for value in map.blends[0 ..< 16]:
+    doAssert value == -1 or value == DirtSurface.float32
+  for value in map.blends[16 ..< 32]:
+    doAssert value == CobbleSurface.float32
+  doAssert map.layers[0].ranges[1].y == 0
+
 echo "Testing custom materials receive details without seeding stamps"
 block:
   let layer = flatLayer(3, 1)

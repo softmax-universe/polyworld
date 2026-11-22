@@ -18,7 +18,7 @@ proc guarded(text, marker, guard: string): bool =
 for marker in ["\"Add player\", rosterAt", "\"Remove last\"", "\"Fill empty slots\"", "\"Shuffle players\""]:
   doAssert frontend.guarded(marker, "if owner:")
 doAssert "Shuffle mine" notin frontend
-doAssert "Host-owned slots only" in frontend
+doAssert "The host manages all slots" in frontend
 let onlineStart = frontend[frontend.find("if roster.dirty and owner") .. frontend.find("if sk.lobbyButton(\n              if owner")]
 doAssert "elif owner:" in onlineStart
 doAssert "showControls = owner" in frontend

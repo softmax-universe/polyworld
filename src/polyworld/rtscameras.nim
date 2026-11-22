@@ -217,7 +217,10 @@ proc rtsEdgePanAllowed*(
     true
 
 proc rtsPanDir*(
-    window: Window, edgeScrolling = FullscreenEdgeScroll
+    window: Window,
+    edgeScrolling = FullscreenEdgeScroll,
+    edgeMargin = RtsEdgePanMargin,
+    pointerConfined = false
 ): Vec2 =
   ## Returns the combined keyboard and screen-edge pan for this frame.
   if not window.focused:
@@ -225,11 +228,11 @@ proc rtsPanDir*(
   let edge =
     if rtsEdgePanAllowed(
       window.isFullscreen,
-      rtsPointerInside(window),
+      rtsPointerInside(window) or pointerConfined,
       window.mouseCaptured,
       edgeScrolling
     ):
-      rtsEdgePanDir(window.mousePos.vec2, window.size.vec2)
+      rtsEdgePanDir(window.mousePos.vec2, window.size.vec2, edgeMargin)
     else:
       vec2(0)
   rtsPanDir(rtsKeyPanDir(window), edge)

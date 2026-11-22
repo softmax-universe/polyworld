@@ -2,7 +2,7 @@
 ## choice's whole faces for the choose screen, the HUD's images and its
 ## fonts must fit it. Building it raises when they outgrow it.
 import std/os
-import ../src/app, ../src/paths, ../src/ui/cardfaces
+import ../app, ../paths, ../ui/cardfaces
 
 proc testAtlasFits() =
   let originalDir = getCurrentDir()

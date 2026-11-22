@@ -1,7 +1,7 @@
-## Direct moves retain player intent after combat, arrival and path failure.
+## Active direct moves win; successful completion restores ordinary idle combat.
 import trafficfixture
 
-block moveHoldsAfterArrival:
+block moveDoesNotDetourThenReacquires:
   let
     world = trafficFixture(0, "open").world
     soldierId = world.spawnUnit(0, SoldierUnit, tile2(38, 30))
@@ -12,21 +12,22 @@ block moveHoldsAfterArrival:
   doAssert world.applyAttack(0, soldierId, enemyId)
   doAssert world.applyMove(0, soldierId, 40, 30)
   let hp = enemy.hp
+  var arrived = false
   for tick in 0 ..< TickRate * 12:
     world.tickWorld(nil)
-    doAssert soldier.state in {UnitMoving, UnitIdle}
     doAssert soldier.targetId == NoEntity
-    doAssert soldier.holdPosition
     doAssert enemy.hp == hp
-  doAssert soldier.state == UnitIdle
+    if soldier.state == UnitIdle:
+      arrived = true
+      break
+    doAssert soldier.state == UnitMoving and soldier.holdPosition
+  doAssert arrived and not soldier.holdPosition
   doAssert length(soldier.body.pos - fixedVec2(40.5'fx, 30.5'fx)) <= 0.4'fx
   let peer = world.clone()
   doAssert Game(world: world).stateHash() == Game(world: peer).stateHash()
-  soldier.holdPosition = false
+  soldier.holdPosition = true
   doAssert Game(world: world).stateHash() != Game(world: peer).stateHash()
   world.restore(peer)
-  doAssert world.applyAttackMove(0, soldierId, 49, 30)
-  doAssert not world.units[world.unitIndex(soldierId)].holdPosition
   for tick in 0 ..< TickRate * 8:
     world.tickWorld(nil)
   doAssert not world.hasUnit(enemyId) or
@@ -48,4 +49,4 @@ block unreachableMoveDoesNotResumeChasing:
   doAssert world.applyAttackMove(0, id, 50, 30)
   doAssert not unit.holdPosition
 
-echo "Direct move priority, retained destination and explicit attack override passed"
+echo "Direct move priority, completed-move acquisition and failed-move hold passed"

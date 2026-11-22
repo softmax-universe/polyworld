@@ -7,7 +7,7 @@
 
 import
   std/[os, strformat, strutils, times],
-  polyworld/[cli, controllers, metrics, profiles, rooms, tapes, timings],
+  polyworld/[cli, controllers, metrics, profiles, tapes, timings],
   content,
   maps as mapgen,
   sim,
@@ -24,6 +24,7 @@ when defined(coworld):
     mapSize: int32 = DefaultMapSize
     expansions: int32 = 2
     minDistance: int32 = DefaultSpawnDistance
+    diplomacyMode: bool = false
     warGraceSeconds: int32 = 10
     diplomacyOfferSeconds: int32 = 60
 
@@ -34,6 +35,7 @@ when defined(coworld):
     of "maplayout": fieldName = "mapLayout"
     of "mapsize": fieldName = "mapSize"
     of "mindistance": fieldName = "minDistance"
+    of "diplomacymode": fieldName = "diplomacyMode"
     of "wargraceseconds": fieldName = "warGraceSeconds"
     of "diplomacyofferseconds": fieldName = "diplomacyOfferSeconds"
     else: discard
@@ -56,10 +58,18 @@ when defined(coworld):
     result.expansions = options.expansions
     result.minDistance = options.minDistance
     diplomacy = DiplomacySettings(
+      enabled: options.diplomacyMode,
+      neutralStart: options.diplomacyMode,
       warGraceSeconds: options.warGraceSeconds,
       offerSeconds: options.diplomacyOfferSeconds
     )
     diplomacy.validate()
+
+const SupportedFlags =
+  when defined(headless):
+    AllCommonFlags - GraphicalFlags - {NameFlag, ServerFlag, RoomFlag}
+  else:
+    AllCommonFlags - {HeadlessTickRateFlag, LlmModeFlag}
 
 var
   serverAddress* = "ws://127.0.0.1:8090/ws"
@@ -67,41 +77,29 @@ var
 
 proc usage() =
   ## Prints the command-line and compile-time configuration surface.
+  echo "Light vs Dark"
+  echo commonUsageFor(SupportedFlags)
   echo """
-Light vs Dark, a small real-time strategy match between any number of BASIC overlords.
+Bots fill the roster in order around the optional human slot.
+The default match lasts 20 minutes and uses seed 2026.
 
-  --server URL     Multiplayer relay (default ws://127.0.0.1:8090/ws).
-  --player NAME    Set the menu player display name.
-  --bot PATH[:N]   Add N players using one BASIC program (default N=1).
-  --player         Add a human player in slot 1.
-  --player:N       Insert a human in slot N (one-based).
-  --replay PATH    Play a recorded match instead of running bots.
-  --record PATH    Record this match to a replay file.
-  --seconds N      Duration in seconds (default 1200).
-  --minutes N      Duration in minutes (default 20).
-  --ticks N        Duration in ticks (default 28800).
-  --seed N         Map seed (default 2026).
   --map-layout MODE  spoke or random (default spoke).
   --map-size N     Baseline map side for two players (default 90 tiles).
   --expansions N   Nearby expansions per player (default 2).
   --min-distance N Minimum spawn separation in tiles (default 45).
+  --diplomacy      Enable negotiated diplomacy instead of fixed solo teams.
   --war-grace-seconds N  War warning; alliance withdrawal takes 2N (default 10).
   --diplomacy-offer-seconds N  Peace/alliance offer lifetime (default 60).
   --view MODE      Spectator fog: all or player number (light/dark aliases).
-  --play=false     Start the graphical transport paused.
-  --speed N        Graphical start speed: 1, 2, 4, or 16.
-  --windowSize WxH Graphical window, such as 800x400.
-  --vsync:off      Unlock the frame rate (default on).
-  --headless-tick-rate N  Wall-clock ticks per second, 0 is unlimited.
-  --llm-mode:async|barrier Wait for all requests between headless ticks.
   --help           Show this message.
 
 Compile with -d:headless for a command-line match.
 Compile with -d:emscripten for the web backend.
-Compile with -d:takeScreenshot for a deterministic capture."""
+Screenshots work in ordinary graphical builds."""
 
-proc parseGameOptions(
-  settings: var MapSettings, diplomacy: var DiplomacySettings
+proc parseGameOptions*(
+  settings: var MapSettings, diplomacy: var DiplomacySettings,
+  arguments = commandLineParams()
 ): GameOptions =
   ## Reads the command line into a validated match description.
   result = GameOptions(
@@ -110,32 +108,20 @@ proc parseGameOptions(
     seed: DefaultSeed,
     speed: 1
   )
-  let arguments = commandLineParams()
   var index = 0
   while index < arguments.len:
-    var argument = arguments[index]
-    if argument == "--player" and index + 1 < arguments.len and
-      not arguments[index + 1].startsWith("--"):
-        argument = "--player=" & arguments.argumentValue(index, "--player")
-    if argument.startsWith("--player=") and
-      not argument[9 .. ^1].allCharsInSet({'0' .. '9'}):
-        let name = argument[9 .. ^1].strip()
-        if name.len > 64 or not name.validName:
-          fail("--player requires a nonempty name of at most 64 bytes")
-        playerNameOverride = name
-    elif result.takeCommonFlag(arguments, index, argument):
+    let argument = arguments[index]
+    if result.takeCommonFlag(arguments, index, argument):
       discard
     else:
       case argument
-      of "--server":
-        serverAddress = arguments.argumentValue(index, "--server")
-        if not serverAddress.startsWith("ws://") and
-          not serverAddress.startsWith("wss://"):
-            fail("--server requires a ws:// or wss:// URL")
       of "--war-grace-seconds":
         diplomacy.warGraceSeconds = parsePositiveInt32(
           arguments.argumentValue(index, argument), argument
         )
+      of "--diplomacy":
+        diplomacy.enabled = true
+        diplomacy.neutralStart = true
       of "--diplomacy-offer-seconds":
         diplomacy.offerSeconds = parsePositiveInt32(
           arguments.argumentValue(index, argument), argument
@@ -171,9 +157,16 @@ proc parseGameOptions(
       else:
         fail("unknown argument: " & argument)
     inc index
+  result.rejectUnsupportedFlags(SupportedFlags)
+  result.resolveGamePaths()
   let count = result.botGroups.botCount + int(result.playerSlot > 0)
-  if count > 0 or result.replayPath.len > 0:
-    result.validateGameOptions(count, "supply at least one --bot or --player")
+  result.validateGameOptions(count, "supply at least one --bot or --player")
+  if result.serverUrl.len > 0 or result.roomCode.len > 0:
+    when defined(headless):
+      fail("--server and --room require the graphical client")
+    else:
+      if count > 0 or result.replayPath.len > 0:
+        fail("--server and --room use lobby seats; select players and bots in the lobby")
   if result.replayPath.len == 0 and count > 0:
     settings.validate(count)
     diplomacy.validate()
@@ -197,6 +190,13 @@ proc initializeOptions*() =
     options = coworldOptions(0)
   else:
     options = parseGameOptions(mapSettings, diplomacySettings)
+    if options.serverUrl.len > 0:
+      serverAddress = options.serverUrl
+    playerNameOverride = options.playerName
+    if options.verbose:
+      echo "LvD launch: ", options.botGroups.botCount, " bots, human slot ",
+        options.playerSlot, ", seed ", options.seed, ", ",
+        options.maximumTicks, " ticks"
   optionsInitialized = true
 
 proc initializeMatch*() =
@@ -248,6 +248,7 @@ proc initializeMatch*() =
     run.replayMode = true
     run.replayData = replayData
     run.replayPlayer = initReplayPlayer(replayData)
+    run.replayPlayer.syncCursor(0)
     run.historyPlayback = true
   else:
     let playerCount = options.botGroups.botCount + int(options.playerSlot > 0)
@@ -304,7 +305,7 @@ proc decide(w: World) =
       run.replayPlayer.data = run.recorder.data
     var action: ReplayAction
     while run.replayPlayer.takeActionAt(uint32(w.tick), action):
-      if w.applyReplayAction(action):
+      if action.kind != ActionChat and w.applyReplayAction(action):
         run.metrics.command(int(action.playerId), w.tick)
   else:
     flushPlayerCommands(run)
@@ -323,13 +324,33 @@ proc verifyTick(game: Game) =
 
 proc advanceGame*() =
   ## Advances the live world by one tick and verifies it when replaying.
+  if run.historyPlayback and run.world.tick == 0:
+    # Tick-zero messages are display records and have no simulation effects.
+    if run.recorder != nil:
+      run.replayPlayer.data = run.recorder.data
+    run.replayPlayer.syncCursor(0)
   run.world.tickWorld(decide)
   if run.historyPlayback:
+    if run.world.tick mod DecisionTicks != 0:
+      # Messages can arrive between decisions and share the same tape cursor.
+      decide(run.world)
     run.verifyTick()
   elif run.recorder != nil:
     run.recorder.recordHash(run.stateHash())
   run.sampleMetrics(run.world.over or run.world.tick >= run.maximumTicks)
   run.metrics.finishTick(run.world.tick)
+
+proc recordingData*(): ReplayData =
+  ## Captures the full recorded timeline, including ticks after a rewind.
+  if run == nil or run.recorder == nil or run.replayMode:
+    raise newException(ReplayError, "There is no live match replay to save.")
+  if run.world.tick > run.recorder.data.hashes.len:
+    raise newException(ReplayError,
+      "The recording is missing the latest simulation tick.")
+  if run.world.tick == run.recorder.data.hashes.len:
+    run.sampleMetrics(true)
+  result = run.recorder.data
+  result.metrics = run.history.replayMetrics()
 
 proc saveRecording*(path = options.recordPath) =
   ## Saves every recorded tick, keeping the original match setup.
@@ -339,10 +360,7 @@ proc saveRecording*(path = options.recordPath) =
   let directory = path.parentDir
   if directory.len > 0:
     createDir(directory)
-  if run.world.tick == run.recorder.data.hashes.len:
-    run.sampleMetrics(true)
-  run.recorder.data.metrics = run.history.replayMetrics()
-  saveReplay(path, run.recorder.data)
+  saveReplay(path, recordingData())
 
 proc describeResult*(): string =
   ## One line naming the outcome and the score behind it.
@@ -351,6 +369,17 @@ proc describeResult*(): string =
   if run.world.winner < 0:
     return "draw"
   let winner = int(run.world.winner)
+  if not run.world.diplomacy.settings.enabled:
+    let team = run.world.diplomacy.teamFor(winner.int32)
+    var
+      members = 0
+      total = 0'i64
+    for player in 0 ..< run.world.players.len:
+      if run.world.diplomacy.teamFor(player.int32) == team:
+        inc members
+        total += run.world.score(player.int32)
+    if members > 1:
+      return "Team " & $(team + 1) & " wins (score " & $total & ")"
   run.config.players[winner].displayName(winner) & " wins (score " &
     $run.world.score(int32(winner)) & ")"
 
@@ -416,5 +445,5 @@ proc runHeadless*() =
   else:
     saveRecording()
     if options.recordPath.len > 0:
-      echo &"  recorded {run.recorder.data.actions.len} commands to " &
+      echo &"  recorded {run.recorder.data.commandCount()} commands to " &
         options.recordPath

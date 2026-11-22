@@ -3,7 +3,7 @@
 ## Wasm packs that folder at /polyworld_art.
 
 const
-  DataRoot* =
+  DataRoot* {.strdefine.} =
     when defined(emscripten):
       "/polyworld_art"
     else:

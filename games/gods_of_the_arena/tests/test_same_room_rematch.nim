@@ -49,7 +49,7 @@ proc assertResultViewExits(network: NetworkMatch) =
   proc updateWindowSettings(window: tuple[closeRequested: bool]) = discard
   proc waitForDisplay() = discard
   resultViewLoop()
-proc readPreferences(name: string): string = "preserved preferences"
+proc readGotaPreferences(): string = "preserved preferences"
 const AppName = "test"
 
 proc sameRoomRematch() =
@@ -84,7 +84,7 @@ proc sameRoomRematch() =
   exchange()
   clients[0].claimHumanSeat(0)
   clients[1].claimHumanSeat(5)
-  clients[0].send(RoomMessage(kind: ClaimSeat, seat: 2, name: "Private base bot"))
+  clients[0].send(RoomMessage(kind: ClaimSeat, seat: 2, seatKind: BotSeat, name: "Private base bot"))
   exchange()
   var sources: array[HeroClassCount, string]
   sources[2] = readFile(currentSourcePath().parentDir.parentDir / "players/base.bas")
@@ -133,7 +133,8 @@ proc sameRoomRematch() =
           session.applyPacket(packet)
       exchange()
       inc ticks
-      doAssert ticks < 100
+      doAssert ticks < 100 + PreparationTicks,
+        "Draft, full preparation and both completed battles must stay bounded"
       doAssert sessions[0].game.networkHash() == sessions[1].game.networkHash()
     doAssert picks == [1, 1]
     for i, session in sessions:

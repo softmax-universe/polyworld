@@ -1,8 +1,8 @@
 ## The multiplayer preview is a scene harness: these checks need no window.
 import std/[math, random, sequtils, unittest]
 import vmath
-import ../src/scene/courtyard, ../src/modes/multiplayer, ../src/core/sim,
-  ../src/core/sessions, ../src/core/bots
+import ../scene/courtyard, ../modes/multiplayer, ../core/sim,
+  ../core/sessions, ../core/bots
 
 const Tolerance = 0.0002'f32
 
@@ -56,13 +56,13 @@ iterator handCorners(balcony: PlayerBalcony): Vec3 =
         yield center + tilted
 
 suite "Multiplayer battlefield layout":
-  test "the multiplayer layout rejects duel and invalid seat counts":
-    for count in [-1, 0, 1, 2]:
+  test "the multiplayer layout rejects invalid seat counts":
+    for count in [-1, 0, 1]:
       expect ValueError:
         discard buildMultiplayerLayout(count)
 
   test "every requested seat has its own separated radial balcony":
-    for count in [3, 4, 5, 6, 8, 12, 24, 64]:
+    for count in [2, 3, 4, 5, 6, 8, 12, 24, 64]:
       let layout = buildMultiplayerLayout(count)
       check layout.playerCount == count
       check layout.balconies.len == count
@@ -83,7 +83,7 @@ suite "Multiplayer battlefield layout":
           check cosine < cos(layout.balconyHalfAngle * 2) + Tolerance
 
   test "all five zones follow their balcony transform":
-    for count in [3, 4, 5, 6, 8, 12, 24, 64]:
+    for count in [2, 3, 4, 5, 6, 8, 12, 24, 64]:
       let layout = buildMultiplayerLayout(count)
       for balcony in layout.balconies:
         let zones = [balcony.heroZone, balcony.deckZone,
@@ -116,7 +116,7 @@ suite "Multiplayer battlefield layout":
       previousInner = layout.innerRadius
 
 suite "Multiplayer battlefield geometry and framing":
-  for count in [3, 4, 6, 8]:
+  for count in [2, 3, 4, 6, 8]:
     let
       layout = buildMultiplayerLayout(count)
       mesh = buildMultiplayerCourtyardMesh(layout)
@@ -1014,3 +1014,27 @@ block:
     doAssert (match.game.players[seat].hand & match.game.players[seat].deck).
       countIt(it.name == "Bear") == 4
   doAssert match.bots[0] == nil
+
+echo "Selected human slots preserve bot order and verbose setup output"
+block:
+  var output = ""
+  let match = newMultiplayerMatch(
+    @[precon(Warrior), precon(Warrior), precon(Warrior)],
+    humanSeat = 1,
+    seed = 90210,
+    botSources = @[
+      "if selectingClass then\nprint \"first\"\npickClass(0)\n" &
+        "deckCard(\"Archer\", 40)\nend\nend if\nendTurn()",
+      "if selectingClass then\nprint \"last\"\npickClass(2)\n" &
+        "deckCard(\"Mage\", 40)\nend\nend if\nendTurn()"],
+    botsChoose = true,
+    output = proc(event: PrintEvent) =
+      ## Retains setup output without initializing a terminal or viewer.
+      if event.kind == TextPrint:
+        output.add event.text)
+  doAssert match.seed == 90210
+  doAssert match.humanSeat == 1 and match.bots[1] == nil
+  doAssert match.game.players[0].heroClass == Archer
+  doAssert match.game.players[1].heroClass == Warrior
+  doAssert match.game.players[2].heroClass == Mage
+  doAssert output == "firstlast"

@@ -91,6 +91,15 @@ const
     ## How much better somewhere new must be before a kiting hero gives up
     ## the spot it is already making for, so it does not turn back and
     ## forth between two.
+  LandingGain = 6'i32
+    ## How much safer, as `kite` scores a tile, somewhere must be before a
+    ## cornered hero spends its Lightning to land there.
+  ShatterArea* = AbilitySpec(radiusTiles: ShatterTiles, shape: RoundArea)
+    ## The disc round a shattered Glacier whose foes it freezes, as `inArea`
+    ## judges one.
+  ShatterFoes = 3'i32
+    ## How many foes round a hero's Glacier it waits for before shooting it,
+    ## or every foe it can see if there are fewer.
   RepositionTicks* = 12'i32
     ## The slack a hero getting clear before its Sun Orb leaves itself, so
     ## the orb still comes down while the vines hold.
@@ -106,8 +115,6 @@ const
     ## for heroes and monsters alike.
   ArenaRanks = 4'i32
     ## Monsters per arena column, every other row and clear of both walls.
-  ArenaMonsterLimit* = 24
-    ## Six arena columns, leaving a gap before the heroes' column.
   ActorBodyRadius = 0.33'fx
   BodyTurnRate = 0.35'fx
   PathArrive = 0.35'fx
@@ -126,6 +133,10 @@ var
   pathThroughMonsters: bool
   ctaWalkLayer: int
   ctaWalkDestLayer: int
+  ctaWalkOrigin: TileRef
+  ctaSeparating: bool
+  iceWorld: World
+    ## The world whose Glaciers the bodies moving now bump into.
 
 proc config*(game: Game): GameConfig =
   ## Reads the match configuration owned by the live or loaded replay.
@@ -140,9 +151,19 @@ proc applyActorBody(world: World, slot: int32)
 
 ## Construction
 
+proc invalidateVision() =
+  ## Discards derived sight caches when a world or its map is replaced.
+  visionSkipWorld = nil
+  visionSkipKeys.setLen(0)
+  for level in 0 ..< LevelCount:
+    sightTerrain[level].setLen(0)
+    sightBlockers[level].setLen(0)
+    visionBlockers[level].setLen(0)
+
 proc newWorld*(setup: Setup): World =
   ## Creates the tick-zero world. Pure: no file access, no assets, no command
   ## line. Reads the generated terrain through `maps` but never mutates it.
+  invalidateVision()
   result = World()
   result.stats = newCombatStats(PartySize)
   result.setup = setup
@@ -174,6 +195,7 @@ proc clone*(world: World): World =
 
 proc restore*(world: World, snapshot: World) =
   ## Overwrites in place, keeping the caller's ref identity.
+  invalidateVision()
   world[] = snapshot[]
   world.stats = snapshot.stats.clone()
   world.actors = cloneActors(snapshot.actors)
@@ -475,7 +497,18 @@ proc refreshSpeed(actor: Actor) =
   if actor.entangledTicks > 0:
     scale = scale * int32(VineRootTicks - actor.entangledTicks) div
       int32(VineRootTicks)
+  if actor.frozen:
+    scale = scale * FrozenPercent div 100
   actor.speed = max(actor.baseSpeed * scale div 100, 1)
+
+proc freeze(actor: Actor, ticks: int16) =
+  ## Leaves an actor frozen for at least `ticks` from now.
+  if ticks <= 0:
+    return
+  let was = actor.frozen
+  actor.frozenTicks = max(actor.frozenTicks, ticks)
+  if not was:
+    actor.refreshSpeed()
 
 proc spawnLoot(
     game: Game,
@@ -561,6 +594,20 @@ proc neighbor*(tile: TileRef, facing: Facing): TileRef =
 proc walkable*(tile: TileRef): bool =
   ## Terrain-only test; occupancy is a separate question.
   isWalkable(int(tile.level), int(tile.x), int(tile.z))
+
+proc iceAt(world: World, layer, x, z: int): bool =
+  ## True while a standing Glacier fills this cell of this layer.
+  if world.isNil:
+    return false
+  for glacier in world.glaciers:
+    if int(glacier.tile.level) == layer and int(glacier.tile.x) == x and
+        int(glacier.tile.z) == z and glacier.solid(world.tick):
+      return true
+
+proc iced*(world: World, tile: TileRef): bool =
+  ## True while a standing Glacier fills this tile, so nobody can walk
+  ## into it.
+  world.iceAt(int(tile.level), int(tile.x), int(tile.z))
 
 proc planarCenter(tile: TileRef): FixedVec2 =
   ## Returns the tile-space centre of one dungeon cell.
@@ -680,11 +727,29 @@ proc bindActorBody(actor: Actor) =
   actor.body.radius = ActorBodyRadius
   actor.body.facing = angleFromFacing(actor.facing)
 
+proc onStairs(tile: TileRef): bool =
+  stairFlight(int(tile.level), int(tile.x), int(tile.z))
+
+proc stepLink(origin: TileRef, x, z: int32): EdgeLink =
+  let
+    dx = x - int32(origin.x)
+    dz = z - int32(origin.z)
+  if abs(dx) + abs(dz) != 1:
+    return
+  let facing = if dx > 0: East elif dx < 0: West elif dz > 0: South else: North
+  edgeLink(int(origin.level), int(origin.x), int(origin.z), facing.ord)
+
 proc applyActorBody(world: World, slot: int32) =
   ## Writes the body plane back onto home, facing, and the current waypoint.
   let
     actor = world.actors[slot]
+    origin = actor.home
     (x, z) = cell(actor.body.pos)
+  if int(origin.level) != ctaWalkDestLayer and
+      (origin.onStairs or stairFlight(ctaWalkDestLayer, int(x), int(z))):
+    let link = origin.stepLink(x, z)
+    if link.open and link.layer == ctaWalkDestLayer:
+      actor.home.level = int8(link.layer)
   actor.home.x = uint8(clamp(x, 0'i32, int32(GridTiles - 1)))
   actor.home.z = uint8(clamp(z, 0'i32, int32(GridTiles - 1)))
   actor.home.level = int8(preferLayer(
@@ -700,23 +765,61 @@ proc applyActorBody(world: World, slot: int32) =
     actor.next = actor.home
 
 proc ctaTilesWalkable(pos: FixedVec2): bool {.nimcall.} =
-  ## Current floor, plus the next waypoint's floor while crossing a ramp.
-  let (x, z) = cell(pos)
-  layersOpen(ctaWalkLayer, ctaWalkDestLayer, int(x), int(z))
+  ## Stair edges must match the route's actual link, even where another
+  ## floor exists underneath or a lower corridor runs along the flight.
+  let
+    (x, z) = cell(pos)
+  if not layersOpen(ctaWalkLayer, ctaWalkDestLayer, int(x), int(z)) or
+      iceWorld.iceAt(ctaWalkLayer, int(x), int(z)) or
+      iceWorld.iceAt(ctaWalkDestLayer, int(x), int(z)):
+    return false
+  let flight = stairFlight(ctaWalkLayer, int(x), int(z))
+  if ctaSeparating:
+    return not flight
+  let
+    ox = int(ctaWalkOrigin.x)
+    oz = int(ctaWalkOrigin.z)
+  if x == int32(ox) and z == int32(oz):
+    return true
+  if ctaWalkOrigin.onStairs and x != int32(ox):
+    return false
+  let changingFloors = ctaWalkLayer != ctaWalkDestLayer
+  if not ctaWalkOrigin.onStairs and not flight and
+      (not changingFloors or
+        not stairFlight(ctaWalkDestLayer, int(x), int(z))):
+    return true
+  let link = ctaWalkOrigin.stepLink(x, z)
+  link.open and link.layer in [ctaWalkLayer, ctaWalkDestLayer]
+
+proc ctaIceWalkable(layer, x, z: int): bool {.nimcall.} =
+  ## Lets a route string-pull across any floor but a Glacier.
+  not pathWorld.iceAt(layer, x, z)
 
 proc moveSpeed(actor: Actor): Fixed =
   ## Tiles walked in one tick from the actor's phase speed.
   fixed(max(actor.speed, 1)) / fixed(PhaseUnits)
 
+proc onStairs(tile: PathTile): bool =
+  stairFlight(int(tile.layer), int(tile.x), int(tile.z))
+
 proc smoothPathLayers(tiles: seq[PathTile]): seq[PathTile] =
-  ## String-pulls each same-layer run so a ramp stays an explicit waypoint.
+  ## Keeps both ends of a flight and each change of lane explicit.
+  ## Flat runs can still string-pull around corners.
   if tiles.len == 0:
     return
   var start = 0
   for i in 1 .. tiles.len:
     if i < tiles.len and tiles[i].layer == tiles[start].layer:
-      continue
-    let pulled = smoothPathTiles(tiles[start ..< i])
+      let
+        flight = tiles[start].onStairs
+        nextFlight = tiles[i].onStairs
+      if flight == nextFlight and (not flight or tiles[i].x == tiles[start].x):
+        continue
+    let pulled =
+      if not pathWorld.isNil and pathWorld.glaciers.len > 0:
+        smoothPathTiles(tiles[start ..< i], ctaIceWalkable)
+      else:
+        smoothPathTiles(tiles[start ..< i])
     if result.len > 0 and pulled.len > 0 and result[^1] == pulled[0]:
       for j in 1 ..< pulled.len:
         result.add pulled[j]
@@ -813,9 +916,9 @@ proc ctaPathWalkable(layer, x, z: int): bool {.nimcall.} =
     x: uint8(x),
     z: uint8(z)
   )
-  if not tile.walkable:
+  if not tile.walkable or pathWorld.iced(tile):
     return false
-  if tile == pathGoalTile:
+  if tile == pathGoalTile or tile.onStairs:
     return true
   let holder = pathWorld.claimant(tile)
   holder < 0 or holder == pathSlot or
@@ -840,7 +943,7 @@ proc setPath*(world: World, slot: int32, goal: TileRef,
     previousEnd = if walking: actor.path[^1].tile else: actor.home
   if actor.home == goal:
     world.clearPath(slot)
-    if offset != FixedVec2Zero:
+    if offset != FixedVec2Zero and not goal.onStairs:
       actor.path.add PathStep(tile: goal, offset: offset)
     return true
   pathWorld = world
@@ -875,6 +978,7 @@ proc setPath*(world: World, slot: int32, goal: TileRef,
     finish = pulled[^1].tileRef
     first =
       if walking and pulled.len > 1 and pulled[0].tileRef == actor.home and
+          not pulled[0].onStairs and not pulled[1].onStairs and
           (finish == previousEnd or finish != goal):
         1
       else:
@@ -889,7 +993,7 @@ proc setPath*(world: World, slot: int32, goal: TileRef,
       direction: facingToward(previous, tile)
     )
     previous = tile
-  if actor.path[^1].tile == goal:
+  if actor.path[^1].tile == goal and not goal.onStairs:
     actor.path[^1].offset = offset
   actor.pathIndex = 0
   actor.stuckTicks = 0
@@ -953,6 +1057,14 @@ proc crowdedOut(world: World, slot: int32): bool =
     if length(center - mate.body.pos) < distance:
       return true
 
+proc followingStair(actor: Actor): bool =
+  ## Includes the flat approach waypoint so a crowd at the mouth cannot
+  ## shove a walker away while it lines up with a lane.
+  for index in actor.pathIndex .. min(actor.pathIndex + 1, int32(actor.path.high)):
+    if actor.path[index].tile.onStairs:
+      return true
+  actor.home.onStairs
+
 proc followPath*(world: World, slot: int32): bool =
   ## Steers toward the next pulled waypoint. Returns false once finished.
   if world.actors[slot].pathIndex >= int32(world.actors[slot].path.len):
@@ -963,24 +1075,35 @@ proc followPath*(world: World, slot: int32): bool =
   let
     step = world.actors[slot].path[world.actors[slot].pathIndex]
     waypoint = step.tile
+    origin = world.actors[slot].home
+    index = world.actors[slot].pathIndex
+    nextIsStair = index + 1 < int32(world.actors[slot].path.len) and
+      world.actors[slot].path[index + 1].tile.onStairs
+    onFlight = origin.onStairs or waypoint.onStairs or nextIsStair
     dest = planarCenter(waypoint) + step.offset
-    radius =
-      if step.offset != FixedVec2Zero:
-        fixed(1, 1000)
+    remaining = dest - world.actors[slot].body.pos
+    arrived =
+      if onFlight:
+        abs(remaining.x) <= 0.001'fx and abs(remaining.y) <= 0.001'fx
+      elif step.offset != FixedVec2Zero:
+        length(remaining) <= fixed(1, 1000)
       else:
-        PathArrive
-  if length(dest - world.actors[slot].body.pos) <= radius or
-      world.crowdedOut(slot):
+        length(remaining) <= PathArrive
+  if (arrived and
+      (not onFlight or origin == waypoint)) or
+      (not onFlight and world.crowdedOut(slot)):
     world.actors[slot].home = waypoint
     inc world.actors[slot].pathIndex
     world.actors[slot].stuckTicks = 0
     return world.followPath(slot)
   let before = world.actors[slot].body.pos
-  ctaWalkLayer = int(world.actors[slot].home.level)
+  iceWorld = world
+  ctaWalkOrigin = origin
+  ctaWalkLayer = int(origin.level)
   ctaWalkDestLayer = int(waypoint.level)
   steer(
     world.actors[slot].body,
-    dest - world.actors[slot].body.pos,
+    remaining,
     world.actors[slot].moveSpeed,
     BodyTurnRate,
     ctaTilesWalkable
@@ -1014,11 +1137,12 @@ proc advancePath*(world: World, slot: int32): bool =
 proc stepToward*(world: World, slot: int32, goal: TileRef,
     offset = FixedVec2Zero): bool =
   ## Sets or updates a walk path. Movement happens in `advancePath`.
+  let targetOffset = if goal.onStairs: FixedVec2Zero else: offset
   if world.actors[slot].path.len == 0 or
       world.actors[slot].pathIndex >= int32(world.actors[slot].path.len) or
       world.pathGoal(slot) != goal or
-      world.actors[slot].path[^1].offset != offset:
-    if not world.setPath(slot, goal, offset):
+      world.actors[slot].path[^1].offset != targetOffset:
+    if not world.setPath(slot, goal, targetOffset):
       return false
   true
 
@@ -1543,14 +1667,16 @@ proc packAim(game: Game, slot, targetSlot: int32, ticks: int32): TileRef =
 proc aimAt(game: Game, slot, targetSlot: int32): TileRef =
   ## Where an ability winding up at a target is aimed this tick: the
   ## target's tile, or for one that leads a pack, the middle of its pack
-  ## as it will stand once the effect has landed and taken hold.
+  ## as it will stand once the effect has landed and, for vines, taken
+  ## hold.
   let
     actor = game.world.actors[slot]
     spec = Abilities[actor.action]
   if not spec.leadsPack:
     return game.world.actors[targetSlot].home
+  let hold = if actor.action == Entangle: VineLeadTicks else: 0'i16
   game.packAim(slot, targetSlot,
-    int32(spec.impactTicks - actor.actionTicks + VineLeadTicks))
+    int32(spec.impactTicks - actor.actionTicks + hold))
 
 proc beginAbility(game: Game, slot: int32, ability: Ability, target: int32) =
   ## Starts an ability's wind-up and pins its aim to where the target
@@ -1594,9 +1720,9 @@ proc pickUp(game: Game, slot, itemIndex: int32) =
   actor.cooldowns[int(ChainAxe)] = Abilities[ChainAxe].cooldownTicks
 
 proc chooseAttack(game: Game, slot, targetSlot: int32): Ability =
-  ## Picks a hero's attack on a target: the best ready one that already
-  ## reaches it, otherwise the longest-reaching one the hero can pay for,
-  ## which it then closes to, or waits on while it cools down.
+  ## Picks a hero's attack on a target: the best one it can pay for that
+  ## already reaches it, which it waits on while it cools down, otherwise
+  ## the longest-reaching one it can pay for, which it then closes to.
   let
     actor = game.world.actors[slot]
     distance = tileDistance(actor.home, game.world.actors[targetSlot].home)
@@ -1606,8 +1732,7 @@ proc chooseAttack(game: Game, slot, targetSlot: int32): Ability =
     let spec = Abilities[ability]
     if actor.mana < spec.manaCost:
       continue
-    if actor.cooldowns[int(ability)] == 0 and
-        distance <= int32(spec.rangeTiles):
+    if distance <= int32(spec.rangeTiles):
       return ability
     if spec.rangeTiles > Abilities[result].rangeTiles:
       result = ability
@@ -1701,6 +1826,76 @@ proc roominess(tile: TileRef): int32 =
           TileRef(level: tile.level, x: uint8(x), z: uint8(z)).walkable:
         inc result
 
+type Threats = object
+  ## The foes a hero getting clear weighs a tile against, and which of them
+  ## vines hold.
+  tiles: seq[TileRef]
+  held: seq[bool]
+
+proc threatsNear(game: Game, slot: int32, reach: int32): Threats =
+  ## Every foe closer to a hero than `reach`.
+  let actor = game.world.actors[slot]
+  for other in PartySize ..< game.world.actors.len:
+    let
+      foe = game.world.actors[other]
+      distance = tileDistance(actor.home, foe.home)
+    if foe.alive and distance >= 0 and distance < reach:
+      result.tiles.add foe.home
+      result.held.add foe.rooted
+
+proc room(threats: Threats, tile: TileRef, index: int): int32 =
+  ## How safe a tile is from one foe, up to `KiteReach`.
+  let distance = tileDistance(tile, threats.tiles[index])
+  if threats.held[index] and distance >= 2: KiteReach
+  else: min(distance, KiteReach)
+
+proc nearest(threats: Threats, tile: TileRef): int32 =
+  result = KiteReach
+  for index in 0 ..< threats.tiles.len:
+    result = min(result, threats.room(tile, index))
+
+proc safety(threats: Threats, tile: TileRef): int32 =
+  ## A tile's score to a hero getting clear: farthest from the nearest foe
+  ## first, then open floor round it, then far from the rest of them.
+  result = 4 * threats.nearest(tile) + 2 * roominess(tile)
+  for index in 0 ..< threats.tiles.len:
+    result += threats.room(tile, index)
+
+proc safestTile(
+    game: Game,
+    slot: int32,
+    threats: Threats,
+    steps: int32,
+    usable: proc(tile: TileRef): bool
+): (TileRef, int32) =
+  ## The usable tile within `steps` of a hero that scores safest, the
+  ## nearest of equals, and its score: its own tile when none beats it.
+  let actor = game.world.actors[slot]
+  var
+    best = actor.home
+    bestScore = threats.safety(actor.home)
+    bestStep = 0'i32
+  for dz in -steps .. steps:
+    for dx in -steps .. steps:
+      let
+        x = int32(actor.home.x) + dx
+        z = int32(actor.home.z) + dz
+      if x < 0 or z < 0 or x >= GridTiles or z >= GridTiles:
+        continue
+      let tile = TileRef(level: actor.home.level, x: uint8(x), z: uint8(z))
+      if tile == actor.home or not usable(tile):
+        continue
+      let
+        tileScore = threats.safety(tile)
+        step = max(abs(dx), abs(dz))
+      if tileScore > bestScore or
+          (tileScore == bestScore and best != actor.home and
+            step < bestStep):
+        best = tile
+        bestScore = tileScore
+        bestStep = step
+  (best, bestScore)
+
 proc kite(game: Game, slot: int32, anchor: TileRef, leash: int32): bool =
   ## Walks a kiting hero to the tile within `KiteSteps` that leaves it
   ## safest: farthest from the nearest foe first, then from the rest of
@@ -1711,34 +1906,13 @@ proc kite(game: Game, slot: int32, anchor: TileRef, leash: int32): bool =
   ## foe is near, when nowhere there is better, or when `HemmedFoes` stand
   ## at its elbow: backing into a wall of bodies would only stop it
   ## swinging.
-  let actor = game.world.actors[slot]
-  var
-    threats: seq[TileRef]
-    held: seq[bool]
-  for other in PartySize ..< game.world.actors.len:
-    let
-      foe = game.world.actors[other]
-      distance = tileDistance(actor.home, foe.home)
-    if foe.alive and distance >= 0 and distance < KiteReach + KiteSteps:
-      threats.add foe.home
-      held.add foe.rooted
-  if threats.len == 0:
+  let
+    actor = game.world.actors[slot]
+    threats = game.threatsNear(slot, KiteReach + KiteSteps)
+  if threats.tiles.len == 0:
     return false
-  proc room(tile: TileRef, index: int): int32 =
-    ## How safe a tile is from one foe, up to `KiteReach`.
-    let distance = tileDistance(tile, threats[index])
-    if held[index] and distance >= 2: KiteReach
-    else: min(distance, KiteReach)
-  proc nearest(tile: TileRef): int32 =
-    result = KiteReach
-    for index in 0 ..< threats.len:
-      result = min(result, room(tile, index))
-  proc score(tile: TileRef): int32 =
-    result = 4 * nearest(tile) + 2 * roominess(tile)
-    for index in 0 ..< threats.len:
-      result += room(tile, index)
   var elbow = 0'i32
-  for threat in threats:
+  for threat in threats.tiles:
     if tileDistance(actor.home, threat) <= 1:
       inc elbow
   if elbow >= HemmedFoes:
@@ -1747,40 +1921,38 @@ proc kite(game: Game, slot: int32, anchor: TileRef, leash: int32): bool =
     tile.walkable and tile.level == actor.home.level and
       (not game.world.claimed(tile) or
         game.world.claimant(tile) == slot) and
+      not game.world.iced(tile) and
       game.world.visible(slot, tile) and
       (leash < 0 or tileDistance(tile, anchor) <= leash)
-  var
-    best = actor.home
-    bestScore = score(actor.home)
-    bestStep = 0'i32
-  for dz in -KiteSteps .. KiteSteps:
-    for dx in -KiteSteps .. KiteSteps:
-      let
-        x = int32(actor.home.x) + dx
-        z = int32(actor.home.z) + dz
-      if x < 0 or z < 0 or x >= GridTiles or z >= GridTiles:
-        continue
-      let tile = TileRef(level: actor.home.level, x: uint8(x), z: uint8(z))
-      if tile == actor.home or not usable(tile):
-        continue
-      let
-        tileScore = score(tile)
-        step = max(abs(dx), abs(dz))
-      if tileScore > bestScore or
-          (tileScore == bestScore and best != actor.home and
-            step < bestStep):
-        best = tile
-        bestScore = tileScore
-        bestStep = step
+  let (best, bestScore) = game.safestTile(slot, threats, KiteSteps, usable)
   if best == actor.home:
     return false
   # Already making for somewhere nearly as good, it keeps going there.
   let goal = game.world.pathGoal(slot)
   if actor.moving and goal != actor.home and usable(goal) and
       tileDistance(goal, actor.home) <= KiteSteps + 1 and
-      score(goal) + KiteSettle >= bestScore:
+      threats.safety(goal) + KiteSettle >= bestScore:
     return true
   game.world.stepToward(slot, best)
+
+proc landingSpot(game: Game, slot: int32): (bool, TileRef) =
+  ## Where Lightning lands a cornered hero: the free tile within its range
+  ## that leaves it safest, judged as a kiting hero judges a step. False
+  ## when nowhere it can land is safer by `LandingGain`.
+  let
+    actor = game.world.actors[slot]
+    reach = int32(Abilities[Lightning].rangeTiles)
+    threats = game.threatsNear(slot, KiteReach + reach)
+  if threats.tiles.len == 0:
+    return
+  proc usable(tile: TileRef): bool =
+    tile.walkable and tile.level == actor.home.level and
+      not game.world.claimed(tile) and not game.world.iced(tile) and
+      game.world.visible(slot, tile)
+  let (best, bestScore) = game.safestTile(slot, threats, reach, usable)
+  if best != actor.home and
+      bestScore >= threats.safety(actor.home) + LandingGain:
+    result = (true, best)
 
 proc vinesToBurn(game: Game, slot: int32, held: var int32): int32 =
   ## The patch of a hero's own vines its Sun Orb is saved for, and in
@@ -1812,12 +1984,112 @@ proc vinesToBurn(game: Game, slot: int32, held: var int32): int32 =
       held = inside
       result = int32(index)
 
+proc freeFloor(world: World, tile: TileRef): bool =
+  ## True for floor nobody stands on, no Glacier fills and no loot lies on,
+  ## where a Glacier can go up.
+  if not tile.walkable or world.claimed(tile) or world.iced(tile):
+    return false
+  for item in world.items:
+    if item.carrier == 0 and item.tile == tile:
+      return false
+  true
+
+proc glacierSpot(game: Game, slot, targetSlot: int32): (bool, TileRef) =
+  ## Where a hero raises its Glacier: on the free tile nearest the middle
+  ## of its target's pack as that will stand when the ice goes up, within
+  ## the Glacier's reach of the hero. False when none near the pack is.
+  let
+    actor = game.world.actors[slot]
+    spec = Abilities[Glacier]
+    middle = game.packAim(slot, targetSlot, int32(spec.impactTicks))
+  var nearest = high(int32)
+  for dz in -2'i32 .. 2:
+    for dx in -2'i32 .. 2:
+      let
+        x = int32(middle.x) + dx
+        z = int32(middle.z) + dz
+      if x < 0 or z < 0 or x >= GridTiles or z >= GridTiles:
+        continue
+      let tile = TileRef(level: middle.level, x: uint8(x), z: uint8(z))
+      let distance = tileDistance(actor.home, tile)
+      if distance < 0 or distance > int32(spec.rangeTiles) or
+          not game.world.freeFloor(tile) or
+          not game.world.visible(slot, tile):
+        continue
+      if dx * dx + dz * dz < nearest:
+        nearest = dx * dx + dz * dz
+        result = (true, tile)
+
+proc glacierToShatter(game: Game, slot: int32): int32 =
+  ## The hero's own Glacier it shoots an Icicle into now, or -1: the one
+  ## with the most foes round it, once `ShatterFoes` stand there, or every
+  ## foe the hero can see, or before it would melt with any there at all.
+  ## Only while the Icicle is ready, and the Glacier in its reach.
+  let
+    actor = game.world.actors[slot]
+    spec = Abilities[Icicle]
+    landing = game.world.tick + int32(spec.impactTicks)
+  result = -1
+  if Icicle notin ClassAttacks[actor.heroClass] or
+      actor.cooldowns[int(Icicle)] > 0 or actor.mana < spec.manaCost:
+    return
+  var seen = 0'i32
+  for other in PartySize ..< game.world.actors.len:
+    if game.world.actors[other].alive and
+        game.world.actorCanSee(slot, int32(other)):
+      inc seen
+  var held = 0'i32
+  for index, glacier in game.world.glaciers:
+    let distance = tileDistance(actor.home, glacier.tile)
+    if glacier.side != actor.kind or distance < 0 or
+        distance > int32(spec.rangeTiles) or
+        not glacier.solid(landing) or
+        not game.world.visible(slot, glacier.tile):
+      continue
+    var round = 0'i32
+    for victim in game.world.actors:
+      if victim.alive and victim.kind != glacier.side and
+          game.world.inArea(ShatterArea, glacier.tile, glacier.tile, victim):
+        inc round
+    let lastChance =
+      not glacier.solid(landing + RepositionTicks)
+    if round > held and
+        (round >= min(ShatterFoes, seen) or lastChance):
+      held = round
+      result = int32(index)
+
+proc cornered(game: Game, slot: int32): bool =
+  ## True when a hero that can strike itself away with Lightning has a foe
+  ## it can see at its elbow that vines do not hold.
+  let
+    actor = game.world.actors[slot]
+    spec = Abilities[Lightning]
+  if Lightning notin HeroAbilities[actor.heroClass] or
+      actor.cooldowns[int(Lightning)] > 0 or actor.mana < spec.manaCost:
+    return false
+  for other in PartySize ..< game.world.actors.len:
+    let foe = game.world.actors[other]
+    if foe.alive and not foe.rooted and
+        tileDistance(actor.home, foe.home) in 0'i32 .. 1'i32 and
+        game.world.actorCanSee(slot, int32(other)):
+      return true
+
+proc castAtTile(game: Game, slot: int32, ability: Ability, tile: TileRef) =
+  ## Starts an ability aimed at one tile of floor and pays for it.
+  game.world.clearPath(slot)
+  game.world.faceTile(slot, tile)
+  game.world.actors[slot].mana -= Abilities[ability].manaCost
+  game.beginAbility(slot, ability, game.world.actors[slot].id)
+  game.world.actors[slot].aim = tile
+
 proc fight(game: Game, slot, targetSlot: int32): bool =
   ## A hero's next move against a target. With its own vines holding foes
   ## and its Sun Orb ready, it saves the orb for them: it gets clear of
   ## whatever is on its heels, staying in the orb's reach of the vines, and
   ## throws it into them once clear with a crowd held, or before they let
-  ## go. Otherwise: a skill the moment one is ready; under a cloak, getting
+  ## go. With its own Glacier crowded round, it shoots an Icicle into it.
+  ## Caught at arm's length with Lightning ready, it strikes itself away.
+  ## Otherwise: a skill the moment one is ready; under a cloak, getting
   ## clear; for a hero that kites, keeping away from what is on its heels
   ## and out of a crowd; and otherwise its plain attack.
   let orb = Abilities[SunOrb]
@@ -1841,8 +2113,23 @@ proc fight(game: Game, slot, targetSlot: int32): bool =
       game.beginAbility(slot, SunOrb, game.world.actors[slot].id)
       game.world.actors[slot].aim = middle
       return true
+  let ice = game.glacierToShatter(slot)
+  if ice >= 0:
+    game.castAtTile(slot, Icicle, game.world.glaciers[ice].tile)
+    return true
+  if game.cornered(slot):
+    let (found, landing) = game.landingSpot(slot)
+    if found:
+      game.castAtTile(slot, Lightning, landing)
+      return true
   var ability = game.readySkill(slot, targetSlot)
   if ability == SunOrb and vines >= 0:
+    ability = NoAbility
+  if ability == Glacier:
+    let (found, spot) = game.glacierSpot(slot, targetSlot)
+    if found:
+      game.castAtTile(slot, Glacier, spot)
+      return true
     ability = NoAbility
   if ability != NoAbility:
     let
@@ -1866,8 +2153,17 @@ proc fight(game: Game, slot, targetSlot: int32): bool =
   if limit > 0:
     # With too many on its heels it gets clear while it has room to, and
     # it never walks in among a crowd to swing at one of them: it holds,
-    # and lets them come or waits on its skills.
-    if game.onHeels(slot) >= limit and game.kite(slot, actor.home, -1):
+    # and lets them come or waits on its skills. A hero that shoots stops
+    # to shoot whenever its shot is ready and reaches, and gives ground
+    # between shots.
+    let
+      spec = Abilities[attack]
+      shooting = spec.rangeTiles > 1 and
+        actor.cooldowns[int(attack)] == 0 and
+        tileDistance(actor.home, game.world.actors[targetSlot].home) <=
+          int32(spec.rangeTiles)
+    if not shooting and game.onHeels(slot) >= limit and
+        game.kite(slot, actor.home, -1):
       return true
     if tileDistance(actor.home, game.world.actors[targetSlot].home) >
         int32(Abilities[attack].rangeTiles) and
@@ -1947,6 +2243,76 @@ proc guard(actor: Actor, ticks, percent: int16) =
   actor.guardTicks = ticks
   actor.guardPercent = percent
 
+const RerouteTiles = 8'i32
+  ## How far from a Glacier going up walkers take a fresh route round it.
+
+proc raiseGlacier(game: Game, slot: int32, aim: TileRef) =
+  ## Raises a hero's Glacier on the tile it aimed at, or if someone has
+  ## stepped onto that since, the first free one round it. Whoever was
+  ## walking nearby takes a fresh route round the ice.
+  let actor = game.world.actors[slot]
+  var
+    spot = aim
+    found = false
+  for (dx, dz) in [(0'i32, 0'i32), (1, 0), (0, 1), (-1, 0), (0, -1),
+      (1, 1), (-1, 1), (-1, -1), (1, -1)]:
+    let
+      x = int32(aim.x) + dx
+      z = int32(aim.z) + dz
+    if x < 0 or z < 0 or x >= GridTiles or z >= GridTiles:
+      continue
+    let tile = TileRef(level: aim.level, x: uint8(x), z: uint8(z))
+    if game.world.freeFloor(tile):
+      spot = tile
+      found = true
+      break
+  if not found:
+    return
+  game.world.glaciers.add IceBlock(side: actor.kind, tile: spot,
+    raised: game.world.tick)
+  for other in 0 ..< game.world.actors.len:
+    let walker = game.world.actors[other]
+    if not walker.alive or not walker.moving or
+        tileDistance(walker.home, spot) notin 0'i32 .. RerouteTiles:
+      continue
+    let
+      goal = game.world.pathGoal(int32(other))
+      offset = walker.path[^1].offset
+    if not game.world.setPath(int32(other), goal, offset):
+      game.world.clearPath(int32(other))
+
+proc shatterGlacier(game: Game, slot: int32, aim: TileRef) =
+  ## Breaks the standing Glacier an Icicle was shot at, freezing every foe
+  ## of whoever raised it within `ShatterTiles`.
+  for index in 0 ..< game.world.glaciers.len:
+    let glacier = game.world.glaciers[index]
+    if glacier.tile != aim or not glacier.solid(game.world.tick):
+      continue
+    game.world.glaciers[index].shattered = game.world.tick
+    for victim in game.world.actors:
+      if victim.alive and victim.kind != glacier.side and
+          game.world.inArea(ShatterArea, glacier.tile, glacier.tile, victim):
+        victim.freeze(ShatterFreezeTicks)
+    return
+
+proc strikeAway(game: Game, slot: int32, aim: TileRef) =
+  ## Lightning lands its caster on the tile it aimed at, if that is still
+  ## free, in an instant: nothing walks it there.
+  let actor = game.world.actors[slot]
+  if aim.level != actor.home.level or not aim.walkable or
+      game.world.iced(aim) or
+      (game.world.claimed(aim) and game.world.claimant(aim) != slot):
+    return
+  game.world.clearPath(slot)
+  for tile in [actor.home, actor.next]:
+    if game.world.claimant(tile) == slot:
+      game.world.release(tile)
+  actor.home = aim
+  actor.next = aim
+  actor.phase = 0
+  actor.body.pos = planarCenter(aim)
+  game.world.claim(aim, slot)
+
 proc applyAbility(game: Game, slot: int32) =
   ## Lands an ability's effect on its last release tick, never on an
   ## animation frame: the client warps its clip to match, not the other way
@@ -1999,6 +2365,20 @@ proc applyAbility(game: Game, slot: int32) =
   if ability == Entangle:
     game.world.vines.add VinePatch(side: actor.kind, center: actor.aim,
       sprouted: game.world.tick)
+    return
+  if ability == Glacier:
+    game.raiseGlacier(slot, actor.aim)
+    return
+  if ability == Lightning:
+    game.strikeAway(slot, actor.aim)
+    return
+  if ability == Blizzard:
+    # Its first wave lands this tick, with the others; see `tendStorms`.
+    game.world.storms.add Storm(side: actor.kind, caster: actor.id,
+      center: actor.aim, started: game.world.tick)
+    return
+  if ability == Icicle and actor.target == actor.id:
+    game.shatterGlacier(slot, actor.aim)
     return
 
   if spec.radiusTiles > 0:
@@ -2075,6 +2455,7 @@ proc strike(game: Game, slot, targetSlot: int32, ability: Ability) =
     game.world.actors[targetSlot].slowTicks = max(
       game.world.actors[targetSlot].slowTicks, spec.slowTicks)
     game.world.actors[targetSlot].refreshSpeed()
+  game.world.actors[targetSlot].freeze(spec.freezeTicks)
   if game.world.actors[targetSlot].hp <= 0:
     game.killActor(targetSlot)
 
@@ -2154,6 +2535,40 @@ proc tendVines(game: Game) =
     if actor.entangledTicks != before:
       actor.refreshSpeed()
 
+proc tendIce(game: Game) =
+  ## Clears away Glaciers that have melted or whose pieces have gone.
+  let tick = game.world.tick
+  var kept = 0
+  for index in 0 ..< game.world.glaciers.len:
+    if not game.world.glaciers[index].gone(tick):
+      game.world.glaciers[kept] = game.world.glaciers[index]
+      inc kept
+  game.world.glaciers.setLen(kept)
+
+proc tendStorms(game: Game) =
+  ## Clears away spent Blizzards and lands this tick's waves: every one
+  ## strikes everyone in its disc not on its side, as its caster's blow. A
+  ## Blizzard whose caster has fallen still falls but no longer hurts.
+  let tick = game.world.tick
+  var kept = 0
+  for index in 0 ..< game.world.storms.len:
+    if not game.world.storms[index].gone(tick):
+      game.world.storms[kept] = game.world.storms[index]
+      inc kept
+  game.world.storms.setLen(kept)
+  for storm in game.world.storms:
+    if not storm.waveLands(tick):
+      continue
+    let caster = game.world.actorSlot(storm.caster)
+    if caster < 0:
+      continue
+    for other in 0 ..< game.world.actors.len:
+      let victim = game.world.actors[other]
+      if victim.alive and victim.kind != storm.side and
+          game.world.inArea(Abilities[Blizzard], storm.center, storm.center,
+            victim):
+        game.strike(caster, int32(other), Blizzard)
+
 proc trackTarget(game: Game, slot: int32) =
   ## Keeps a winding-up actor turned to what it is about to hit: the spot
   ## an area lands on, or the actor a single blow or spell is aimed at.
@@ -2177,8 +2592,12 @@ proc trackTarget(game: Game, slot: int32) =
 proc advanceAction(game: Game, slot: int32) =
   ## Steps an ability through anticipation, release and recovery. The
   ## effect lands on the last release tick and only then; until recovery
-  ## ends the actor stays committed, neither deciding nor moving.
+  ## ends the actor stays committed, neither deciding nor moving. Frost
+  ## holds a frozen actor's ability still one tick in `FrostStallTicks`.
   if game.world.actors[slot].action == NoAbility:
+    return
+  if game.world.actors[slot].frozen and
+      game.world.actors[slot].frozenTicks mod FrostStallTicks == 0:
     return
   let spec = Abilities[game.world.actors[slot].action]
   inc game.world.actors[slot].actionTicks
@@ -2341,7 +2760,7 @@ proc applyHeroAction*(
     )
     if not tile.walkable:
       return false
-    game.world.stepToward(slot, tile, action.offset)
+    result = game.world.stepToward(slot, tile, action.offset)
   of ActionAttackTarget:
     let targetSlot = game.world.actorSlot(action.first)
     if targetSlot < 0:
@@ -2352,7 +2771,7 @@ proc applyHeroAction*(
       return false
     if not game.world.actorCanSee(slot, targetSlot):
       return false
-    game.fight(slot, targetSlot)
+    result = game.fight(slot, targetSlot)
   of ActionPickupTarget:
     let itemIndex = game.world.itemIndex(action.first)
     if itemIndex < 0 or game.world.items[itemIndex].carrier != 0:
@@ -2371,7 +2790,7 @@ proc applyHeroAction*(
     # In reach, the hero takes it now or holds there while picking cools down.
     game.world.clearPath(slot)
     game.pickUp(slot, itemIndex)
-    true
+    result = true
   of ActionUseItem:
     if action.first < 0 or action.first >= InventorySlots:
       return false
@@ -2409,7 +2828,7 @@ proc applyHeroAction*(
       game.world.actors[slot].inventory[action.first] = 0
       game.world.deleteItem(itemIndex)
       game.world.actors[slot].refreshSpeed()
-    true
+    result = true
   of ActionDropItem:
     if action.first < 0 or action.first >= InventorySlots:
       return false
@@ -2423,7 +2842,7 @@ proc applyHeroAction*(
       game.world.items[itemIndex].weight
     game.world.actors[slot].inventory[action.first] = 0
     game.world.actors[slot].refreshSpeed()
-    true
+    result = true
   of ActionHealTarget:
     if actor.heroClass != ClericClass or
         actor.cooldowns[int(Bloom)] != 0 or
@@ -2440,9 +2859,9 @@ proc applyHeroAction*(
       return false
     game.world.actors[slot].mana -= Abilities[Bloom].manaCost
     game.beginAbility(slot, Bloom, target.id)
-    true
+    result = true
   else:
-    false
+    result = false
 
 
 ## Monster behaviour
@@ -2699,6 +3118,8 @@ proc tickWorld*(
       game.advanceAction(int32(slot))
       game.radiateHeat(int32(slot))
     game.tendVines()
+    game.tendIce()
+    game.tendStorms()
 
   profileBlock "movement":
     for slot in 0 ..< game.world.actors.len:
@@ -2717,6 +3138,11 @@ proc tickWorld*(
           continue
         if game.world.actors[i].home.level != game.world.actors[j].home.level:
           continue
+        if game.world.actors[i].followingStair or
+            game.world.actors[j].followingStair:
+          continue
+        iceWorld = game.world
+        ctaSeparating = true
         ctaWalkLayer = int(game.world.actors[i].home.level)
         ctaWalkDestLayer = ctaWalkLayer
         # A hero standing still or swinging holds its ground; whoever walks
@@ -2728,6 +3154,7 @@ proc tickWorld*(
           game.world.actors[i].planted,
           game.world.actors[j].planted
         )
+        ctaSeparating = false
     for slot in 0 ..< game.world.actors.len:
       if game.world.actors[slot].alive:
         ctaWalkDestLayer = int(game.world.actors[slot].home.level)
@@ -2754,6 +3181,10 @@ proc tickWorld*(
     if game.world.actors[slot].slowTicks > 0:
       dec game.world.actors[slot].slowTicks
       if game.world.actors[slot].slowTicks == 0:
+        game.world.actors[slot].refreshSpeed()
+    if game.world.actors[slot].frozenTicks > 0:
+      dec game.world.actors[slot].frozenTicks
+      if game.world.actors[slot].frozenTicks == 0:
         game.world.actors[slot].refreshSpeed()
     if game.world.actors[slot].heatTicks > 0:
       dec game.world.actors[slot].heatTicks

@@ -4,9 +4,9 @@ import
   std/[strformat, strutils, times, monotimes],
   chroma, pixie, silky, vmath, windy,
   polyworld/[stats, metrics, actioncam, chrome, configs, gameuis, inputs, pathing, player, rtscameras,
-    stackpanels, profiles, networks],
+    sounds, stackpanels, profiles, networks],
   assets, content, sim, game, controls, layouts, shops, maps, events, drafts, cameras, tooltips,
-  deathhud
+  deathhud, matchtiming
 
 const
   ## Icons draw at power-of-two sizes so the 128 and 256 px source art
@@ -99,6 +99,30 @@ proc deathHudPanel(chrome: HudChrome): GameUiPanel =
   result.size = vec2(260, 60)
   result.origin = vec2(floor((chrome.layout.size.x - result.size.x) / 2),
     chrome.heroes.origin.y + chrome.heroes.size.y + 10)
+  if run.world.preparationTicksLeft() > 0:
+    result.origin.y += 54
+
+proc preparationHudText*(world: World): string =
+  ## Round up applied simulation ticks, never wall time or render interpolation.
+  let ticks = world.preparationTicksLeft()
+  if ticks > 0:
+    let seconds = (ticks + TickRate - 1) div TickRate
+    result = "PREPARATION " & $(seconds div 60) & ":" &
+      align($(seconds mod 60), 2, '0')
+
+proc preparationHudPanel(chrome: HudChrome): GameUiPanel =
+  result.size = vec2(300, 44)
+  result.origin = vec2(floor((chrome.layout.size.x - result.size.x) / 2),
+    chrome.heroes.origin.y + chrome.heroes.size.y + 10)
+
+proc drawPreparationHud(sk: Silky, chrome: HudChrome) =
+  let text = preparationHudText(run.world)
+  if text.len == 0:
+    return
+  let panel = preparationHudPanel(chrome)
+  sk.draw9Patch("window.9patch", sk.theme.windowPatch, panel.origin, panel.size)
+  sk.drawLabel(text, panel.origin + vec2(12, 4), panel.size - vec2(24, 8),
+    sk.theme.defaultTextColor, "Bold", CenterAlign)
 
 proc drawDeathHud(sk: Silky, chrome: HudChrome) =
   ## Ownership is independent of selection/camera; ticks remain authoritative.
@@ -111,14 +135,39 @@ proc drawDeathHud(sk: Silky, chrome: HudChrome) =
   sk.drawLabel(text, panel.origin + vec2(12, 4), panel.size - vec2(24, 8),
     sk.theme.defaultTextColor, "H1", CenterAlign)
 
+proc localHudHeroId*(): int32 =
+  ## playerSlot is one-based packed order, never a stable lobby seat.
+  if run != nil and run.world != nil and not run.replayMode and
+      not networkSpectator and options.playerSlot > 0 and
+      options.playerSlot <= run.world.heroes.len:
+    let hero = run.world.heroes[options.playerSlot - 1]
+    if hero != nil:
+      return hero.id
+
+proc hudDetailId(primaryId: int32, actionCam: ActionCam): int32 =
+  ## Inspection and the spectator director never replace a human's own HUD.
+  let own = localHudHeroId()
+  if own != 0: own
+  elif actionCam.enabled and actionCam.locked: actionCam.lockId
+  else: primaryId
+
 proc transportAvailable*(): bool =
-  not defined(gotaTestRoom) and run.world.phase != Drafting and
+  not defined(gotaTestRoom) and run != nil and run.world != nil and
+    run.world.phase != Drafting and localHudHeroId() == 0 and
     (not run.networked or networkSpectator)
 
 proc keepDraftPlaying*(world: World, transport: var Player) =
   ## Draft deadlines always advance, including paused startup and rewind.
   if world.phase == Drafting:
     transport.playing = true
+
+proc applyStartupPause*(
+    world: World, transport: var Player, pending: var bool
+) =
+  ## Applies one requested launch pause after mandatory drafting has finished.
+  if pending and world.phase != Drafting:
+    pending = false
+    transport.pause()
 
 proc currentLayout*(window: Window): GameUiLayout =
   ## Reserves timeline space only when the transport controls are visible.
@@ -194,17 +243,23 @@ proc currentStats(): lent StatsTable =
       inc index
   statsTable
 
+proc matchStatsOptions(): StatsOptions =
+  StatsOptions(headline: "TIME REMAINING", headlineSuffix: "  " & run.remainingMatchText())
+
 proc statsContains(window: Window, mouse: Vec2): bool =
   ## Tests the overlay before allowing input through to the existing HUD.
   if not statsState.visible(window.tabHeld):
     return false
   statsState.mouseOverStats(window, currentLayout(window),
-    currentStats(), mouse)
+    currentStats(), mouse, matchStatsOptions())
 
 proc hudClicked(window: Window, sk: Silky, panel: GameUiPanel): bool =
   ## Keeps covered HUD controls from receiving an overlay click.
   not window.statsContains(sk.mousePos) and
-    not hudTooltip.tooltipContains(sk.mousePos) and chrome.clicked(window, sk, panel)
+    not mouseOverDebugMenu(sk.mousePos) and
+    not hudTooltip.tooltipContains(sk.mousePos) and
+    (localHudHeroId() == 0 or window.buttonPressed[MouseLeft]) and
+    chrome.clicked(window, sk, panel)
 
 proc drawBuyback(
     sk: Silky,
@@ -264,6 +319,7 @@ proc drawBuyback(
     CenterAlign
   )
   if enabled and window.hudClicked(sk, button):
+    playSound(ClickSound)
     queueBuyback(hero.id)
     armedAbility = -1
     armedItem = -1
@@ -271,6 +327,18 @@ proc drawBuyback(
 proc currentChrome(window: Window): HudChrome =
   ## Places every textured HUD panel for the current window.
   placeChrome(currentLayout(window))
+
+proc inspectionPanel*(window: Window): GameUiPanel =
+  ## One shared passive inspection rectangle, clear of ribbon and death plate.
+  let chrome = currentChrome(window)
+  result = chrome.layout.inspectionPanel(chrome.score, chrome.heroes)
+  if run.world.preparationTicksLeft() > 0 and
+      result.overlaps(preparationHudPanel(chrome)):
+    let preparation = preparationHudPanel(chrome)
+    result.origin.y = preparation.origin.y + preparation.size.y + 10
+
+proc mouseOverInspection*(window: Window, mouse: Vec2,
+    primaryId: int32, viewMode = 0'i32): bool
 
 proc mouseOverUi*(
     window: Window,
@@ -287,7 +355,9 @@ proc mouseOverUi*(
     hudTooltip.tooltipContains(mouse):
       return true
   let chrome = currentChrome(window)
-  if primaryId == 0:
+  if mouseOverInspection(window, mouse, primaryId):
+    return true
+  if primaryId == 0 and localHudHeroId() == 0:
     result = mouseOverPanels(
       mouse,
       chrome.layout,
@@ -397,8 +467,10 @@ proc isPicked(id: int32, selectedIds: openArray[int32]): bool =
 
 proc selectedUnit(id: int32, viewMode: int32): SelectedUnit {.measure.} =
   ## Builds the current flat view of one selectable world object.
+  if run == nil or run.world == nil or id == 0:
+    return
   for hero in run.world.heroes:
-    if hero.id == id:
+    if hero != nil and hero.id == id:
       if not visibleInView(viewMode, hero.team, hero.position):
         return SelectedUnit()
       let
@@ -548,6 +620,54 @@ proc selectedUnit(id: int32, viewMode: int32): SelectedUnit {.measure.} =
         level: 1
       )
 
+proc hudSelection(primaryId: int32, actionCam: ActionCam,
+    viewMode: int32): SelectedUnit =
+  ## Own hero is always available; external spectator filters apply only to watches.
+  selectedUnit(hudDetailId(primaryId, actionCam),
+    if localHudHeroId() != 0: 0'i32 else: viewMode)
+
+type InspectionInfo = object
+  id: int32
+  name, title, hp, mana: string
+
+proc inspectionInfo(primaryId, viewMode: int32): InspectionInfo =
+  ## Passive inspection is human-only and never overrides current human sight.
+  let own = localHudHeroId()
+  if own == 0 or primaryId == 0 or primaryId == own:
+    return
+  let mode = run.world.heroes[options.playerSlot - 1].team.ord.int32 + 1
+  let unit = selectedUnit(primaryId, mode)
+  if unit.id == 0 or unit.hp <= 0 or unit.status in ["Respawning", "Dying", "Fallen"]:
+    return
+  result.id = unit.id
+  result.name = unit.classLabel
+  result.title = unit.callsign
+  if unit.kind == SelectedHero:
+    let slot = run.world.heroIndex(unit.id)
+    if slot in 0 ..< run.config.players.len:
+      result.name = run.config.players[slot].displayName(slot)
+    result.title.add "  Lv " & $unit.level
+  result.hp = &"HP {int(unit.hp)} / {int(unit.maxHp)}"
+  if unit.maxMana > 0:
+    result.mana = &"Mana {int(unit.mana)} / {int(unit.maxMana)}"
+
+proc mouseOverInspection*(window: Window, mouse: Vec2,
+    primaryId: int32, viewMode = 0'i32): bool =
+  inspectionInfo(primaryId, viewMode).id != 0 and
+    window.inspectionPanel().contains(mouse)
+
+proc drawInspection(sk: Silky, window: Window, primaryId, viewMode: int32) =
+  let info = inspectionInfo(primaryId, viewMode)
+  if info.id == 0:
+    return
+  let panel = window.inspectionPanel()
+  sk.draw9Patch("window.9patch", sk.theme.windowPatch, panel.origin, panel.size)
+  for i, text in [info.name, info.title, info.hp, info.mana]:
+    if text.len > 0:
+      sk.drawLabel(sk.fittedLabel(text, panel.size.x - 24, "Small"),
+        panel.origin + vec2(12, 8 + i.float32 * 25),
+        vec2(panel.size.x - 24, 24), sk.theme.defaultTextColor, "Small")
+
 proc selectHeroCard(
     primaryId: var int32,
     selectedIds: var seq[int32],
@@ -562,6 +682,12 @@ proc selectHeroCard(
       found = true
       break
   if not found:
+    return
+  playSound(SelectSound)
+  if localHudHeroId() != 0:
+    primaryId = id
+    selectedIds = @[id]
+    followSelection = false
     return
   if not additive:
     selectedIds.setLen(0)
@@ -828,6 +954,8 @@ proc drawHeroPortrait(
     selected = picked,
     iconSize = IconSmall
   )
+  sk.hoverSound(portrait, not statsState.visible(window.tabHeld) and
+    not hudTooltip.tooltipContains(sk.mousePos))
   if window.hudClicked(sk, portrait):
     actionCam.takeManual()
     selectHeroCard(
@@ -837,9 +965,7 @@ proc drawHeroPortrait(
       hero.id,
       window.actionDown(ShiftInput)
     )
-    if options.playerSlot > 0 and
-        not run.replayMode and
-        hero.id == run.world.heroes[options.playerSlot - 1].id:
+    if localHudHeroId() != 0 and hero.id == localHudHeroId():
       focusPlayerHero = true
 
 proc drawHeroMeters(
@@ -940,9 +1066,35 @@ proc drawUi*(
     focusPlayerHero: var bool,
     attackMoveArmed: var bool,
     attackMoveHeld: bool,
-    networkStats: NetworkStats = nil
+    networkStats: NetworkStats = nil,
+    extraTabs: openArray[DebugTab] = [],
+    graphicsExtension: proc(sk: Silky, window: Window) = nil
 ) {.measure.} =
   ## Draws every Silky HUD panel for the current frame.
+  let creep = footmanById(run.world, primaryId)
+  hudScratch.setLen(0)
+  if creep.id == 0:
+    hudScratch.add "Select a pikeman to inspect its waypoints."
+  else:
+    hudScratch.addHudInt(creep.waypointIndex)
+    hudScratch.add '/'
+    hudScratch.addHudInt(creep.creepWaypointCount())
+    hudScratch.add " cleared - "
+    case creep.state
+    of Fighting:
+      hudScratch.add "Chasing / fighting"
+    of Dying:
+      hudScratch.add "Dying"
+    else:
+      hudScratch.add "Marching"
+  # Register debugging first so changing HUD contents cannot shift its hit IDs.
+  # The popup layer keeps these controls above the later world HUD draws.
+  sk.pushLayer(PopupsLayer)
+  try:
+    sk.drawDebugMenu(window, addr showCreepWaypoints, hudScratch,
+      networkStats, extraTabs, graphicsExtension)
+  finally:
+    sk.popLayer()
   if run.world.phase == Drafting:
     hudTooltip.clearTooltip()
     sk.drawDraft(window, currentLayout(window).size, transport.playing)
@@ -952,7 +1104,7 @@ proc drawUi*(
         followSelection, addr statsState.toggled
       )
     return
-  if shopOpen and options.playerSlot > 0 and not run.replayMode:
+  if shopOpen and localHudHeroId() != 0:
     # Shop cards already show their full descriptions inline; no hover route.
     hudTooltip.clearTooltip()
     sk.drawShop(window, run.world, run.world.heroes[options.playerSlot - 1],
@@ -974,11 +1126,11 @@ proc drawUi*(
     inventory = inventoryPanel.inventoryPanels()
     details = chrome.details.detailsPanels()
     hudTime = currentHudTime()
+  sk.drawPreparationHud(chrome)
   sk.drawDeathHud(chrome)
-  let detailId =
-    if actionCam.enabled and actionCam.locked: actionCam.lockId
-    else: primaryId
-  var selection = selectedUnit(detailId, viewMode)
+  sk.drawInspection(window, primaryId, viewMode)
+  let detailId = hudDetailId(primaryId, actionCam)
+  var selection = hudSelection(primaryId, actionCam, viewMode)
   if tooltipGame != run or tooltipSelection != detailId or
       tooltipSize != chrome.layout.size:
     hudTooltip.clearTooltip()
@@ -991,16 +1143,20 @@ proc drawUi*(
     basic = GameUiPanel(
       origin: details.portrait.origin + vec2(0, 158), size: vec2(40)
     )
-    controlsHero = options.playerSlot > 0 and not run.replayMode and
-      selection.kind == SelectedHero and
-      selection.id == run.world.heroes[options.playerSlot - 1].id
+    controlsHero = localHudHeroId() != 0 and
+      selection.kind == SelectedHero and selection.id == localHudHeroId()
+    hoverEnabled = not statsState.visible(window.tabHeld) and
+      not hudTooltip.tooltipContains(sk.mousePos) and
+      not mouseOverDebugMenu(sk.mousePos) and not run.historyPlayback
     attackClicked = controlsHero and selection.hp > 0 and
       window.hudClicked(sk, basic)
+  sk.hoverSound(basic, hoverEnabled and controlsHero and selection.hp > 0)
   if (window.mousePressed(MouseLeft) or window.mousePressed(MouseRight)) and
     mouseOverUi(window, sk.mousePos, primaryId) and not attackClicked:
       attackMoveArmed = attackMoveHeld
   if attackClicked:
     attackMoveArmed = attackMoveHeld or not attackMoveArmed
+    playSound(if attackMoveArmed: SelectSound else: CancelSound)
     armedAbility = -1
     armedItem = -1
   if selection.id != 0:
@@ -1183,13 +1339,13 @@ proc drawUi*(
         of SelectedHero:
           "champion"
       sk.drawWellImage(portrait, glyph, teamColor, iconSize = IconLarge)
+    sk.hoverSound(portrait, hoverEnabled and controlsHero)
     if window.hudClicked(sk, portrait) and
         selection.kind == SelectedHero and
-        options.playerSlot > 0 and
-        not run.replayMode and
-        selection.id == run.world.heroes[options.playerSlot - 1].id:
+        localHudHeroId() != 0 and selection.id == localHudHeroId():
       actionCam.takeManual()
       focusPlayerHero = true
+      playSound(SelectSound)
     if selection.kind == SelectedHero:
       let
         melee = selection.attackCasting == MeleeCast
@@ -1239,8 +1395,7 @@ proc drawUi*(
         sk.drawCooldownSweep(
           well, remaining, if empty: spec.rechargeTicks else: spec.cooldownTicks
         )
-        if options.playerSlot > 0 and not run.replayMode and
-          selection.id == run.world.heroes[options.playerSlot - 1].id:
+        if localHudHeroId() != 0 and selection.id == localHudHeroId():
             let
               hero = run.world.heroes[options.playerSlot - 1]
               upgrade = GameUiPanel(
@@ -1249,16 +1404,23 @@ proc drawUi*(
               )
               clickedUpgrade = hero.abilityLevelError(slot) == NoActionError and
                 window.hudClicked(sk, upgrade)
+            sk.hoverSound(well, hoverEnabled and selection.hp > 0 and
+              (hero.abilityLevelError(slot) == NoActionError or
+                (selection.abilityLevels[slot] > 0 and remaining <= 0 and
+                  selection.mana >= spec.manaCost.float32)))
             if window.hudClicked(sk, well):
               armedItem = -1
               armedAbility = -1
               if clickedUpgrade or window.actionDown(ShiftInput):
                   queueLevelAbility(selection.id, slot.ord.int32)
+                  playSound(if hero.abilityLevelError(slot) == NoActionError:
+                    ClickSound else: ErrorSound)
                   armedAbility = -1
               else:
-                discard activatePlayerAbility(
+                let accepted = activatePlayerAbility(
                   run.world, selection.id, slot.ord.int32
                 )
+                playSound(if accepted: SelectSound else: ErrorSound)
             if armedAbility == slot.ord.int32:
               let color = rgbx(255, 223, 133, 255)
               sk.drawRect(well.origin, vec2(well.size.x, 3), color)
@@ -1277,8 +1439,13 @@ proc drawUi*(
             item.itemSpec.cooldownTicks)
         else:
           sk.drawWellImage(well, "")
+        sk.hoverSound(well, hoverEnabled and controlsHero and
+          selection.hp > 0 and item != NoItem and
+          (item == PortalScroll or item.itemSpec.kind == Consumable) and
+          selection.itemCooldowns[i] <= 0)
         if controlsHero and selection.hp > 0 and
           window.hudClicked(sk, well):
+            playSound(if item == NoItem: ErrorSound else: SelectSound)
             activatePlayerItem(
               run.world,
               selection.id,
@@ -1286,25 +1453,19 @@ proc drawUi*(
               epochTime(),
               window.buttonPressed[DoubleClick]
             )
-  let playerHero =
-    options.playerSlot > 0 and not run.replayMode
-  let playerHeroId =
-    if playerHero:
-      run.world.heroes[options.playerSlot - 1].id
-    else:
-      0'i32
+  let playerHeroId = localHudHeroId()
+  let playerHero = playerHeroId != 0
   if playerHero:
     sk.drawTab(inventory.shop, hovered = sk.hovered(inventory.shop))
     sk.drawSprite("shop", inventory.shop.origin + vec2(6, 6), vec2(16))
     sk.drawLabel("SHOP  " & ShopInput.actionLabel, inventory.shop.origin + vec2(28, 0),
       inventory.shop.size - vec2(28, 0), rgbx(247, 221, 143, 255), "Small")
     if window.hudClicked(sk, inventory.shop):
+      playSound(ClickSound)
       shopOpen = true
       armedAbility = -1
       armedItem = -1
-  let inventoryHero =
-    if playerHero: selectedUnit(playerHeroId, viewMode)
-    else: selection
+  let inventoryHero = selection
   for slot in 0 ..< InventorySlots:
     let
       slotPanel = inventory.slots[slot]
@@ -1316,8 +1477,14 @@ proc drawUi*(
         item.itemSpec.cooldownTicks)
     else:
       sk.drawSlot(slotPanel)
+    sk.hoverSound(slotPanel, hoverEnabled and playerHero and
+      inventoryHero.id == playerHeroId and inventoryHero.hp > 0 and
+      item != NoItem and
+      (item == PortalScroll or item.itemSpec.kind == Consumable) and
+      inventoryHero.itemCooldowns[slot] <= 0)
     if playerHero and inventoryHero.id != 0 and inventoryHero.hp > 0 and
       window.hudClicked(sk, slotPanel):
+        playSound(if item == NoItem: ErrorSound else: SelectSound)
         activatePlayerItem(
           run.world,
           playerHeroId,
@@ -1491,8 +1658,7 @@ proc drawUi*(
             "Small",
             CenterAlign
           )
-        if options.playerSlot > 0 and not run.replayMode and
-          selection.id == run.world.heroes[options.playerSlot - 1].id:
+        if localHudHeroId() != 0 and selection.id == localHudHeroId():
             let hero = run.world.heroes[options.playerSlot - 1]
             if hero.abilityLevelError(slot) == NoActionError:
               let upgrade = GameUiPanel(
@@ -1604,23 +1770,6 @@ proc drawUi*(
       followSelection,
       addr statsState.toggled
     )
-  let creep = footmanById(run.world, primaryId)
-  hudScratch.setLen(0)
-  if creep.id == 0:
-    hudScratch.add "Select a pikeman to inspect its waypoints."
-  else:
-    hudScratch.addHudInt(creep.waypointIndex)
-    hudScratch.add '/'
-    hudScratch.addHudInt(creep.creepWaypointCount())
-    hudScratch.add " cleared - "
-    case creep.state
-    of Fighting:
-      hudScratch.add "Chasing / fighting"
-    of Dying:
-      hudScratch.add "Dying"
-    else:
-      hudScratch.add "Marching"
-  sk.drawDebugMenu(window, addr showCreepWaypoints, hudScratch, networkStats)
   statsState.syncDirector(actionCam, statsTable, window.tabHeld)
   if shopOpen or window.statsContains(sk.mousePos) or
       mouseOverDebugMenu(sk.mousePos):
@@ -1666,7 +1815,8 @@ proc drawStatsOverlay*(sk: Silky, window: Window) {.measure.} =
   if not statsState.visible(window.tabHeld):
     return
   sk.drawStatsOverlay(
-    window, currentLayout(window), statsState, currentStats(), run.history
+    window, currentLayout(window), statsState, currentStats(), run.history,
+    matchStatsOptions()
   )
 
 when defined(gotaTestRoom):

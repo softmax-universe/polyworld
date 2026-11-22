@@ -1,7 +1,7 @@
 ## Native, headless two-human binary relay chat acceptance.
-import std/unicode
-import jsony, polyworld/[rooms, roomclients, relays, mailboxes]
-import ../[humancommunication, multiplayer, presets, sim, content]
+import std/[sequtils, unicode]
+import jsony, polyworld/[rooms, roomclients, relays, mailboxes, tapes]
+import ../[humancommunication, multiplayer, presets, sim, content, replays]
 
 var relay = Relay()
 var now = 0.0
@@ -29,6 +29,7 @@ for client in clients: client.opened()
 exchange()
 var config = defaultConfig(3)
 config.maxTicks = 400
+config.diplomacySettings.enabled = true
 config.diplomacySettings.warGraceSeconds = 1
 config.mapSettings = MapSettings(layout: RandomLayout, size: 90, expansions: 0)
 clients[0].send(RoomMessage(kind: CreateRoom, name: "Human communication QA",
@@ -39,15 +40,12 @@ exchange()
 for i, client in clients:
   client.claimHumanSeat(i)
   exchange()
-clients[0].send(RoomMessage(kind: ClaimSeat, seat: 2, name: "Bot"))
+clients[0].send(RoomMessage(kind: ClaimSeat, seat: 2, name: "Bot", seatKind: BotSeat))
 exchange()
 let sessions = [prepareNetworkMatch(clients[0], ["", "", ""]),
   prepareNetworkMatch(clients[1], ["", "", ""])]
-for i, session in sessions:
-  clients[i].send(RoomMessage(kind: Ready, revision: session.revision,
-    hash: session.game.networkHash()))
-  exchange()
-clients[0].send(RoomMessage(kind: StartMatch))
+clients[0].send(RoomMessage(kind: StartMatch, revision: clients[0].snapshot.revision,
+  hash: setupHash(clients[0].snapshot)))
 exchange()
 for i, session in sessions:
   session.start(clients[i].events[0])
@@ -190,3 +188,34 @@ block feedBound:
     doAssert ui[i].feed.len == MaxHumanChatLines
     doAssert sessions[i].game.inboxes[2].count == MaxMailboxMessages
   echo "PASS bounded feed continues when unread bot mailboxes reach capacity"
+
+block replayTranscript:
+  let data = decodeReplay(encodeReplay(sessions[0].game.recorder.data))
+  doAssert data.actions == sessions[1].game.recorder.data.actions
+  let chats = data.actions.filterIt(it.kind == ActionChat)
+  doAssert chats.len == MaxHumanChatLines + 7
+  doAssert chats[0].tick == 1, "Use delivery tick, not the preceding tick"
+  doAssert chats[0].playerId == 0
+  doAssert chats[0].text == "Hi 雪🙂"
+  doAssert chats[1].playerId == 1
+  let playback = newGame(sessions[0].game.world.map,
+    int32(data.header.setup.maximumTicks), data.header.setup.diplomacySettings)
+  playback.replayMode = true
+  playback.replayData = data
+  let cursor = initReplayPlayer(data)
+  var feed: HumanCommunication
+  proc replay(world: World) =
+    ## Replays all accepted gameplay commands independently of chat display.
+    var action: ReplayAction
+    while cursor.takeActionAt(uint32(world.tick), action):
+      if action.kind != ActionChat:
+        doAssert world.applyReplayAction(action)
+  feed.syncChatFeed(playback)
+  doAssert feed.feed.len == 0
+  for tick in 1 .. data.hashes.len:
+    playback.world.tickWorld(replay)
+    feed.syncChatFeed(playback)
+    doAssert playback.stateHash() == data.hashes[tick - 1]
+  doAssert feed.feed == ui[0].feed
+  doAssert feed.feed.len == MaxHumanChatLines
+  echo "PASS matching peer transcripts, exact delivery ticks and replay hashes"

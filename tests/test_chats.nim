@@ -15,9 +15,13 @@ import ../games/light_vs_dark/maps as lvdMaps
 import ../games/light_vs_dark/sim as lvdSim
 
 const Program = """
+publicText$ = pullMailbox$()
+publicId = mailboxId()
 sent = sendChat(mailboxSelf(), "private hello")
 message$ = pullMailbox$()
 from = mailboxId()
+empty$ = pullMailbox$()
+afterEmpty = mailboxId()
 """
 
 const CtaProgram = """
@@ -80,6 +84,8 @@ proc checkMailboxes[T](game: T) =
     while inbox.count > 0:
       discard inbox.pop()
   for tick in 1 .. 300:
+    when T isnot ctaSim.Game:
+      doAssert send(0, -2, "public hello") == game.inboxes.len
     game.world.tick = int32(tick)
     when T is ctaSim.Game:
       for slot in 0'i32 ..< ctaContent.PartySize:
@@ -103,6 +109,10 @@ proc checkMailboxes[T](game: T) =
           "nearby hello"
       else:
         doAssert vm.runtime.getGlobal("sent") == 1
+        doAssert vm.runtime.getStringGlobal("publicText$") == "public hello"
+        doAssert vm.runtime.getGlobal("publicId") == -2
+        doAssert vm.runtime.getStringGlobal("empty$") == ""
+        doAssert vm.runtime.getGlobal("afterEmpty") == NoMailboxId
         doAssert vm.runtime.getGlobal("from") == index
         doAssert vm.runtime.getString(vm.runtime.getGlobalValue("message$")) ==
           "private hello"

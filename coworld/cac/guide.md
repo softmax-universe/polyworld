@@ -19,8 +19,8 @@ Start with a bundled player, which lists the game's values and calls:
 class precons, and `players/archer_warrior.bas` an Archer deck with Warrior
 cards. They play
 alike and differ only in their setup.
-The same source is available under `games/cac/src/core/bots.nim`, and the
-cards are in `games/cac/src/baseset.nim`; `cac --cards` prints them all.
+The same source is available under `games/cac/core/bots.nim`, and the
+cards are in `games/cac/baseset.nim`; `cac --cards` prints them all.
 `games/cac/README.md` is the full bot reference, with a working example.
 
 ## Class and deck selection

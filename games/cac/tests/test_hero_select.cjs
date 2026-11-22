@@ -115,7 +115,7 @@ function choicePoint(viewport, index, target = 'hero') {
   async function humanChoice({name, index, target = 'hero', players = 2,
       viewport = {width: 1440, height: 900}, density = 1, outside = false, animate = false}) {
     const page = await createPage(viewport, density);
-    await page.goto(`${base}/cac.html?human=1&players=${players}&seed=42`, {waitUntil: 'domcontentloaded'});
+    await page.goto(`${base}/cac.html?player=1&players=${players}&seed=42`, {waitUntil: 'domcontentloaded'});
     await waitStatus(page, /Choose your (class|hero)/);
     await page.locator('#loading').waitFor({state: 'hidden', timeout: 30000});
     assert.match(await status(page), /Human player/);

@@ -60,10 +60,14 @@ type
     seekSerial*: int
     automaticSeek*: bool
     tickRate: int32
+    customSpeed: int32
 
 proc speed*(player: Player): int32 =
   ## Returns the selected realtime multiplier.
-  PlayerSpeeds[player.speedIndex]
+  if player.customSpeed > 0:
+    player.customSpeed
+  else:
+    PlayerSpeeds[player.speedIndex]
 
 proc timelineEnd*(player: Player): int32 =
   ## Returns the right edge of the scrubber.
@@ -77,11 +81,19 @@ proc inHistory*(player: Player): bool =
   (not player.live) or player.tick < player.recordedTicks
 
 proc speedIndexOf*(value: int32): int =
-  ## Maps a requested multiplier onto 1x, 2x, 4x, or 16x.
+  ## Finds the nearest preset at or below a requested multiplier.
   result = 0
   for i, speed in PlayerSpeeds:
     if speed <= value:
       result = i
+
+proc setPlaybackSpeed*(player: var Player, multiplier: int32) =
+  ## Sets an exact realtime multiplier while retaining the nearest UI preset.
+  let value = max(multiplier, 1)
+  player.speedIndex = speedIndexOf(value)
+  player.customSpeed =
+    if PlayerSpeeds[player.speedIndex] == value: 0
+    else: value
 
 proc initPlayer*(
     live: bool,
@@ -95,7 +107,7 @@ proc initPlayer*(
   result.durationTicks = max(durationTicks, 0)
   result.playing = playing
   result.repeating = repeating
-  result.speedIndex = speedIndexOf(speed)
+  result.setPlaybackSpeed(speed)
   result.restoreTick = -1
   result.targetTick = -1
 
@@ -172,6 +184,7 @@ proc togglePlay*(player: var Player) =
 proc setSpeed*(player: var Player, index: int) =
   ## Selects one of the four transport multipliers.
   player.speedIndex = clamp(index, 0, PlayerSpeeds.high)
+  player.customSpeed = 0
 
 proc reachedEnd(player: Player): bool =
   ## Returns whether playback has no further ticks to consume.
@@ -195,7 +208,7 @@ proc startFrame*(player: var Player, dt: float32, tickRate: int32) =
     return
   player.accumulator = min(
     player.accumulator + dt * player.speed.float32,
-    0.25'f32
+    0.25'f32 * player.speed.float32
   )
 
 proc shouldTick*(
@@ -223,6 +236,8 @@ proc shouldTick*(
       return player.tick < player.targetTick
     return epochTime() - frameStart < CatchUpSeconds
   if not player.playing:
+    return false
+  if frameStart > 0 and epochTime() - frameStart >= CatchUpSeconds:
     return false
   let step = 1.0'f32 / max(player.tickRate, 1).float32
   if player.accumulator >= step:
@@ -385,7 +400,7 @@ proc drawTransport*(
   elif window.clicked(sk, loopBtn, keyboardAliases):
     player.repeating = not player.repeating
   for i, button in speeds:
-    sk.drawIcon(button, SpeedIcons[i], player.speedIndex == i)
+    sk.drawIcon(button, SpeedIcons[i], player.speed == PlayerSpeeds[i])
     if window.clicked(sk, button, keyboardAliases):
       player.setSpeed(i)
   let

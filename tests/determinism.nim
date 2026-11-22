@@ -169,7 +169,8 @@ proc verifyCta(bytes: string) =
         return
       var action: ctaReplays.ReplayAction
       while player.takeActionAt(uint32(game.world.tick), actor.id, action):
-        discard ctaSim.applyHeroAction(game, slot, action))
+        if action.kind != ctaReplays.ActionChat:
+          discard ctaSim.applyHeroAction(game, slot, action))
     doAssert ctaSim.stateHash(game) == expected, "CTA replay hash mismatch"
   doAssert player.finished
   echo "CTA: two identical recordings, verified ", data.hashes.len, " ticks"

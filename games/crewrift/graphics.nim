@@ -715,6 +715,7 @@ proc drawReplayControls(
 
 proc runGraphics*(initial: Options) =
   ## Runs the playable native or browser viewer with fixed simulation ticks.
+  configureCapture(initial.capture, "crewrift.png")
   var
     options = initial
     game = newGame(options)
@@ -728,6 +729,7 @@ proc runGraphics*(initial: Options) =
       durationTicks = (game.world.config.maxTicks +
         game.world.config.roleRevealTicks).int32,
       speed = options.speed.int32,
+      playing = not options.pauseOnStart,
       repeating = game.playback
     )
     actionCam = initActionCam(
@@ -738,6 +740,7 @@ proc runGraphics*(initial: Options) =
       mapSpan = MapColumns.float32
     )
     clock: ViewingClock
+    renderedFrames = 0
     captureFrames = 0
   if existsEnv("SHOW_TILES"):
     try:
@@ -809,7 +812,7 @@ proc runGraphics*(initial: Options) =
     "Crewrift / Polyworld",
     AtlasPath,
     ivec2(options.width.int32, options.height.int32),
-    true
+    options.vsync
   )
   sk.builder = builder
   defer:
@@ -819,7 +822,9 @@ proc runGraphics*(initial: Options) =
     terrain = loadShipSkin()
     markers = initShapeRenderer()
     starField = initStarField()
+    captureTarget: ScreenshotTarget
   defer:
+    captureTarget.releaseScreenshotTarget()
     terrain.clearFromGpu()
     markers.closeShapeRenderer()
     starField.close()
@@ -947,7 +952,7 @@ proc runGraphics*(initial: Options) =
       state.typing = false
       state.text.setLen(0)
       syncTransport()
-    if options.screenshot.len > 0 and captureFrames == 0:
+    if captureActive() and renderedFrames == 0:
       for i in 0 ..< options.captureTicks:
         game.advance(slot, record = true)
       syncTransport()
@@ -973,7 +978,7 @@ proc runGraphics*(initial: Options) =
           state.camera.distance
         )
         state.camera.overview = false
-    if captureFrames == 0:
+    if renderedFrames == 0:
       state.camera.target =
         if slot < 0:
           worldPoint(MapWidth div 2 - 48, MapHeight div 2)
@@ -1022,6 +1027,7 @@ proc runGraphics*(initial: Options) =
         blocked = mouseOverDebugMenu(window.mousePos.vec2)
       )
     scene.beginCharacters(window, view, projection, eye)
+    discard captureTarget.beginScreenshotFrame(window)
     scene.renderer.clearScreen(color(0.025, 0.045, 0.085, 1))
     starField.draw(
       vp,
@@ -1106,7 +1112,7 @@ proc runGraphics*(initial: Options) =
           elif moving: CrewClips[1]
           else: CrewClips[0]
       visuals[i].position = mix(visuals[i].position, position, damping(20, dt))
-      if captureFrames == 0 or restoreTick >= 0 or
+      if renderedFrames == 0 or restoreTick >= 0 or
         game.world.phase != Playing or
         length(visuals[i].position - position) > 5:
           visuals[i].position = position
@@ -1134,15 +1140,8 @@ proc runGraphics*(initial: Options) =
     )
     sk.drawDebugMenu(window)
     sk.endUi()
-    inc captureFrames
-    if options.screenshot.len > 0 and captureFrames >= 3:
-      let screenshot = newImage(window.size.x, window.size.y)
-      glReadPixels(
-        0, 0, window.size.x, window.size.y, GL_RGBA, GL_UNSIGNED_BYTE,
-        screenshot.data[0].addr
-      )
-      screenshot.flipVertical()
-      screenshot.writeFile(options.screenshot)
+    inc renderedFrames
+    if captureFrame(window, captureFrames):
       break
     window.swapBuffers()
     waitForDisplay()

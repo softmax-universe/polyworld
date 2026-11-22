@@ -16,6 +16,8 @@ import
 const
   LevelCount* = 6      ## surface, pyramid, rooms, caves, lava hall, vault
   PartySize* = 4
+  ArenaMonsterLimit* = 24
+    ## Six arena columns, leaving a gap before the heroes' column.
   InventorySlots* = 2
   ChatLines* = 16      ## ring buffer of recent party chatter
   TilesPerLevel* = GridTiles * GridTiles
@@ -101,7 +103,8 @@ type
   Ability* = enum
     NoAbility,
     SwordAttack, Taunt, LionGuard,
-    MeteorStrike, FrostLance, VoidPortal,
+    Icicle, Glacier, Lightning,
+      ## The Arcanist's cold storm, with `Blizzard` at the end.
     PiercingArrow, BowAttack, ShadowCloak,
     Bloom, Entangle, SunOrb,
     HealingPotion, ChainAxe, CrystalCrown, ArcaneGateway, BattleHorn,
@@ -117,8 +120,10 @@ type
       ## The other monster ranks' melee attacks; see `RankAttacks`.
     HailOfArrows,
       ## The archer's ultimate.
-    Heat
+    Heat,
       ## The Fighter's burning aura.
+    Blizzard
+      ## The Arcanist's ultimate.
 
 const
   AbilityCount* = int(Ability.high) + 1
@@ -127,9 +132,9 @@ const
     "sword_attack",
     "duelist_glove",
     "lion_guard",
-    "meteor_strike",
-    "frost_lance",
-    "void_portal",
+    "cta_icicle",
+    "cta_glacier",
+    "cta_lightning",
     "verdant_arrow",
     "ranger_bow",
     "shadow_cloak",
@@ -163,7 +168,8 @@ const
     "",
     "",
     "hail_of_arrows",
-    "rage_crucible"
+    "rage_crucible",
+    "cta_blizzard"
   ]
 
 type
@@ -207,6 +213,11 @@ type
       ## How long a hit stops its victim's feet.
     slowTicks*: int16
       ## How long a hit leaves its victim walking at `SlowPercent` speed.
+    freezeTicks*: int16
+      ## How long a hit leaves its victim frozen; see `FrozenPercent`.
+    aimsAtTile*: bool
+      ## Aimed at a free tile of floor rather than at a foe: what it
+      ## raises, or where its caster lands, goes there.
     onSelf*: bool
       ## Cast round the user, whoever it is fighting. Range is then how close
       ## a foe must be before it is worth casting.
@@ -237,16 +248,21 @@ const Abilities*: array[Ability, AbilitySpec] = [
   # LionGuard: braces behind the shield.
   AbilitySpec(anticipationTicks: 6, releaseTicks: 1, recoverTicks: 6,
     cooldownTicks: 48),
-  # MeteorStrike: a fireball lobbed onto a spot.
-  AbilitySpec(anticipationTicks: 12, releaseTicks: 6, recoverTicks: 8,
-    cooldownTicks: 36, manaCost: 12, rangeTiles: 7, damage: 22, spread: 8,
-    radiusTiles: 1),
-  # FrostLance: a quick shard thrown straight.
-  AbilitySpec(anticipationTicks: 8, releaseTicks: 3, recoverTicks: 8,
-    cooldownTicks: 96, manaCost: 16, rangeTiles: 5, damage: 10, spread: 4),
-  # VoidPortal
-  AbilitySpec(anticipationTicks: 14, releaseTicks: 2, recoverTicks: 8,
-    cooldownTicks: 240, manaCost: 20, rangeTiles: 4),
+  # Icicle: the Arcanist's quick, cheap shard. It chips at its target and
+  # leaves it frozen for a moment, or shatters a Glacier it is shot at. It
+  # reaches as far as the Arcanist's light, past the bow and the casters'
+  # bolts: the heavy artillery outranges everything.
+  AbilitySpec(anticipationTicks: 5, releaseTicks: 3, recoverTicks: 4,
+    cooldownTicks: 6, manaCost: 3, rangeTiles: 8, damage: 6, spread: 3,
+    freezeTicks: 6),
+  # Glacier: a block of ice raised on one tile, solid to everyone, until an
+  # Icicle shatters it and freezes every foe round it; see `GlacierTicks`.
+  AbilitySpec(anticipationTicks: 10, releaseTicks: 3, recoverTicks: 6,
+    cooldownTicks: 288, manaCost: 25, rangeTiles: 7, aimsAtTile: true),
+  # Lightning: the Arcanist is struck away to a tile up to four off. Range
+  # is how far it can land.
+  AbilitySpec(anticipationTicks: 6, releaseTicks: 2, recoverTicks: 4,
+    cooldownTicks: 192, manaCost: 15, rangeTiles: 4, aimsAtTile: true),
   # PiercingArrow: a held draw, then one shot through a whole line of foes.
   AbilitySpec(anticipationTicks: 12, releaseTicks: 3, recoverTicks: 6,
     cooldownTicks: 96, rangeTiles: 6, damage: 18, spread: 6,
@@ -363,7 +379,12 @@ const Abilities*: array[Ability, AbilitySpec] = [
   # small hit each `HeatPeriodTicks`; `damage` is one of those.
   AbilitySpec(anticipationTicks: 8, releaseTicks: 2, recoverTicks: 6,
     cooldownTicks: 240, rangeTiles: 2, damage: 2, spread: 1,
-    radiusTiles: 2, shape: RoundArea, onSelf: true)
+    radiusTiles: 2, shape: RoundArea, onSelf: true),
+  # Blizzard: a long call to the sky over the pack, then shards fall on the
+  # whole disc in waves; `damage` is one wave. See `BlizzardTicks`.
+  AbilitySpec(anticipationTicks: 18, releaseTicks: 4, recoverTicks: 8,
+    cooldownTicks: 480, manaCost: 45, rangeTiles: 8, damage: 12, spread: 4,
+    radiusTiles: 3, shape: RoundArea, tracksTarget: true, leadsPack: true)
 ]
 
 proc impactTicks*(spec: AbilitySpec): int16 =
@@ -425,6 +446,7 @@ type
     tauntedBy*: int32          ## the hero's actor id
     entangledTicks*: int16     ## ticks it has stood in vines, up to
                                ## `VineRootTicks`
+    frozenTicks*: int16        ## ticks left frozen; see `FrozenPercent`
     deathTicks*: int16
     state*: MonsterState
     stateTicks*: int16
@@ -518,26 +540,28 @@ const
   ]
   HeroAbilities*: array[HeroClass, array[4, Ability]] = [
     [SwordAttack, Taunt, Heat, BlazingBlade],
-    [MeteorStrike, FrostLance, VoidPortal, LightningStorm],
+    [Icicle, Glacier, Lightning, Blizzard],
     [BowAttack, PiercingArrow, ShadowCloak, HailOfArrows],
     [HammerAttack, Bloom, Entangle, SunOrb]
   ]
   ClassAttacks*: array[HeroClass, seq[Ability]] = [
     @[SwordAttack],
-    @[MeteorStrike, SwordAttack],
+    @[Icicle, SwordAttack],
     @[BowAttack],
     @[HammerAttack]
   ]
     ## The attacks each class picks from, best first. The last is free, so a
-    ## hero always has something to fall back on; only the bow cools down.
+    ## hero always has something to fall back on: the Arcanist swings its
+    ## staff only once it cannot pay for an Icicle.
   ClassSkills*: array[HeroClass, seq[Ability]] = [
     @[Taunt, Heat, BlazingBlade],
-    @[],
+    @[Blizzard, Glacier],
     @[HailOfArrows, PiercingArrow, ShadowCloak],
     @[Entangle, SunOrb]
   ]
     ## What a class fires the moment it is ready and a foe is in its range,
-    ## ahead of any attack, in this order.
+    ## ahead of any attack, in this order. The Arcanist's Lightning and the
+    ## Icicle it shatters a Glacier with are its own decisions; see `fight`.
   RankAttacks*: array[MonsterRank, Ability] = [
     RakingClaw, HeavyCleave, HexBolt, CrushingSlam, SwarmBite
   ]
@@ -563,7 +587,7 @@ const
   ClassDamage*: array[HeroClass, int32] = [150, 125, 135, 100]
     ## Percentage of base ability damage, so one table tunes how hard the
     ## party hits without touching the ability timings the client animates to.
-  ClassCrowdLimit*: array[HeroClass, int32] = [0, 0, 0, 2]
+  ClassCrowdLimit*: array[HeroClass, int32] = [0, 2, 0, 2]
     ## How many foes on its heels a class runs from rather than stand and
     ## trade blows with, and how many round its target it will not walk in
     ## among; 0 stands its ground. See `ChaseTiles` and `CrowdTiles`.
@@ -632,6 +656,26 @@ const
     ## How long spent vines take to sink away, holding nothing.
   VineBurnTicks* = 18'i16
     ## How long vines Sun Orb sets alight take to burn away, holding nothing.
+  FrozenPercent* = 75'i32
+    ## How fast a frozen actor walks, and how fast its ability plays out, as
+    ## a share of normal.
+  FrostStallTicks* = 4'i16
+    ## A frozen actor's ability stands still one tick in this many, which is
+    ## `FrozenPercent` of its normal pace.
+  GlacierTicks* = 192'i16
+    ## How long a Glacier stands before it melts, if no Icicle shatters it.
+  GlacierMeltTicks* = 12'i16
+    ## How long a melting Glacier takes to sink away, solid to no one.
+  GlacierShardTicks* = 12'i16
+    ## How long a shattered Glacier's pieces stay on the floor.
+  ShatterTiles* = 2'i16
+    ## The radius of the disc round a shattered Glacier that freezes foes.
+  ShatterFreezeTicks* = 24'i16
+    ## How long a shattered Glacier freezes them for.
+  BlizzardTicks* = 72'i16
+    ## How long a Blizzard's shards keep falling.
+  BlizzardWaveTicks* = 12'i16
+    ## How often a wave of them lands, the first on the cast's release.
 
   RegenerationIdleTicks* = 72'i16    ## calm needed before wounds close
   RegenerationPeriodTicks* = 12'i32  ## how often a point of healing lands
@@ -688,6 +732,23 @@ type VinePatch* = object
   burned*: int32       ## the tick a Sun Orb set them alight, 0 if never
   burnedFrom*: TileRef ## where that orb landed, which the fire runs out from
 
+type IceBlock* = object
+  ## A block of ice on one tile. Nobody can walk into it while it stands,
+  ## for `GlacierTicks`, unless an Icicle shatters it first; then it stays,
+  ## solid to no one, while it melts or its pieces lie on the floor.
+  side*: ActorKind     ## who raised it; a shatter freezes the other side
+  tile*: TileRef
+  raised*: int32       ## the tick it went up on
+  shattered*: int32    ## the tick an Icicle broke it, 0 if never
+
+type Storm* = object
+  ## A Blizzard over one disc of floor: a wave of shards lands on everyone in
+  ## it not on its side every `BlizzardWaveTicks`, for `BlizzardTicks`.
+  side*: ActorKind
+  caster*: int32       ## the actor id whose blows the waves are
+  center*: TileRef
+  started*: int32      ## the tick its first wave landed on
+
 type World* = ref object
   ## Everything the simulation may read or write. Adding a field here means
   ## `hashy(world[])` changes, and `games/call_to_adventure/tests/test_sim.nim` fails until the
@@ -700,6 +761,8 @@ type World* = ref object
   items*: seq[Item]
   doors*: seq[Door]
   vines*: seq[VinePatch]                   ## oldest first
+  glaciers*: seq[IceBlock]                 ## oldest first
+  storms*: seq[Storm]                      ## oldest first
   claims*: seq[uint16]                     ## tile -> actor slot + 1, 0 free
   explored*: seq[uint8]                    ## one bit per tile, party-shared
   visible*: array[PartySize, seq[uint8]]   ## one bit per tile, per hero
@@ -778,6 +841,32 @@ proc gone*(patch: VinePatch, tick: int32): bool =
     tick - patch.burned >= int32(VineBurnTicks)
   else:
     tick - patch.sprouted >= int32(VineTicks + VineWitherTicks)
+
+template frozen*(actor: Actor): bool =
+  ## True while frost slows this actor's feet and its abilities.
+  actor.frozenTicks > 0
+
+proc solid*(glacier: IceBlock, tick: int32): bool =
+  ## True while a Glacier still stands in the way: raised, not yet melted,
+  ## and not shattered.
+  glacier.shattered == 0 and tick - glacier.raised < int32(GlacierTicks)
+
+proc gone*(glacier: IceBlock, tick: int32): bool =
+  ## True once a Glacier has melted or its pieces have all gone.
+  if glacier.shattered != 0:
+    tick - glacier.shattered >= int32(GlacierShardTicks)
+  else:
+    tick - glacier.raised >= int32(GlacierTicks + GlacierMeltTicks)
+
+proc waveLands*(storm: Storm, tick: int32): bool =
+  ## True on the ticks a Blizzard's waves land.
+  let age = tick - storm.started
+  age >= 0 and age < int32(BlizzardTicks) and
+    age mod int32(BlizzardWaveTicks) == 0
+
+proc gone*(storm: Storm, tick: int32): bool =
+  ## True once a Blizzard has dropped its last shard.
+  tick - storm.started >= int32(BlizzardTicks)
 
 template planted*(actor: Actor): bool =
   ## True for a hero with no route to walk, who stays put when bumped.

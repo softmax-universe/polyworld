@@ -6,16 +6,18 @@ proc clientFor(id: uint32): RoomClient =
   config.maxTicks = TickRate * 15
   config.mapSettings = MapSettings(layout: RandomLayout, size: 90, expansions: 0)
   result = RoomClient(identity: lvdIdentity(), participant: id, match: 1,
-    began: true, welcomed: true)
+    began: true, welcomed: true, connected: true)
   result.snapshot = RoomMessage(kind: RoomState, revision: 2, phase: Playing,
     tickRate: uint32(TickRate), payload: config.toJson(), seats: @[
       Seat(owner: 1, name: "Human"), Seat(owner: 2, name: "Human")], participants: @[
       Participant(id: 1, name: "Alice"), Participant(id: 2, name: "Bob")])
+  result.initialSnapshot = result.snapshot
+  result.appliedSeats = result.snapshot.seats
 
 let a = prepareNetworkMatch(clientFor(1), ["", ""])
 let b = prepareNetworkMatch(clientFor(2), ["", ""])
 let event = RoomMessage(kind: BeginMatch, revision: 2, match: 1,
-  hash: a.game.networkHash())
+  hash: setupHash(a.client.snapshot))
 a.start(event)
 b.start(event)
 let unit = a.game.world.units[0]
@@ -36,7 +38,8 @@ doAssert commands.len == 2
 doAssert decodeSubmission(commands[1].payload).append, "Wire must preserve append"
 doAssert not decodeSubmission(commands[0].payload).append
 for tick in 1'u32 .. uint32(TickRate * 15):
-  let packet = RoomMessage(kind: TickPacket, match: 1, tick: tick,
+  let packet = RoomMessage(kind: TickPacket,
+    seats: a.client.snapshot.seats, match: 1, tick: tick,
     commands: (if tick == 1: commands else: @[]))
   a.applyPacket(packet)
   b.applyPacket(packet)
@@ -79,6 +82,6 @@ block invalidAppendKindsAndVersionsAreRejected:
   try: old.validate()
   except ReplayError: refused = true
   doAssert refused, "Old gameplay requires its archived client"
-  doAssert LvdNetworkProtocol == 3 # Packed-seat mapping retains append semantics.
+  doAssert LvdNetworkProtocol == 4 # Packed-seat mapping retains append semantics.
 
 echo "LvD network order queue replay passed"

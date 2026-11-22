@@ -1,17 +1,20 @@
 import std/unittest
 import jsony, polyworld/[rooms, roomclients, tapes, mailboxes]
-import ../[multiplayer, presets, sim, replays, content, controls]
+import ../[multiplayer, presets, sim, replays, content, controls, humancommunication]
 
 proc sparseClient(id: uint32): RoomClient =
   var config = defaultConfig(4)
+  config.diplomacySettings.enabled = true
   config.maxTicks = 12
   config.mapSettings = MapSettings(layout: RandomLayout, size: 90, expansions: 0)
   result = RoomClient(identity: lvdIdentity(), participant: id, match: 1,
-    began: true, welcomed: true)
+    began: true, welcomed: true, connected: true)
   result.snapshot = RoomMessage(kind: RoomState, revision: 2, phase: Playing,
     tickRate: uint32(TickRate), payload: config.toJson(), seats: @[
       Seat(), Seat(owner: 1, name: "Human"), Seat(), Seat(owner: 2, name: "Human")],
     participants: @[Participant(id: 1, name: "Alice"), Participant(id: 2, name: "Bob")])
+  result.initialSnapshot = result.snapshot
+  result.appliedSeats = result.snapshot.seats
 
 suite "LvD sparse preparation":
   test "packed human selection and empty stable seats stay distinct":
@@ -28,6 +31,12 @@ suite "LvD sparse preparation":
     let peer = sparseClient(1)
     host.snapshot.seats[3].name = "Private bot"
     peer.snapshot.seats[3].name = "Private bot"
+    host.snapshot.seats[3].kind = BotSeat
+    peer.snapshot.seats[3].kind = BotSeat
+    host.initialSnapshot = host.snapshot
+    peer.initialSnapshot = peer.snapshot
+    host.appliedSeats = host.snapshot.seats
+    peer.appliedSeats = peer.snapshot.seats
     let a = prepareNetworkMatch(host, ["ignored", "ignored", "ignored",
       "a = offerPeace(0)\na = sendChat(-2, \"hello\")"])
     let b = prepareNetworkMatch(peer, [])
@@ -35,7 +44,7 @@ suite "LvD sparse preparation":
     check a.game.brains[1] != nil
     check b.game.brains[1] == nil
     let event = RoomMessage(kind: BeginMatch, match: 1, revision: 2,
-      hash: a.game.networkHash())
+      hash: setupHash(a.client.snapshot))
     a.start(event)
     b.start(event)
     var commands: seq[Command]
@@ -46,23 +55,35 @@ suite "LvD sparse preparation":
         commands.add Command(participant: 2, seat: message.seat,
           sequence: message.sequence, payload: message.payload)
     require commands.len == 2
-    let packet = RoomMessage(kind: TickPacket, match: 1, tick: 1, commands: commands)
+    let packet = RoomMessage(kind: TickPacket,
+      seats: a.client.snapshot.seats, match: 1, tick: 1, commands: commands)
     a.applyPacket(packet)
     b.applyPacket(packet)
     check a.game.inboxes[0].count == 1
     check a.game.networkHash() == b.game.networkHash()
-    check a.game.recorder.data.actions.len == 1
+    check a.game.recorder.data.actions.len == 2
     check a.game.recorder.data.actions[0].playerId == 1
+    check a.game.recorder.data.actions == b.game.recorder.data.actions
+    check a.game.recorder.data.actions[0].kind == ActionDiplomacy
+    check a.game.recorder.data.actions[1].kind == ActionChat
+    check a.game.recorder.data.actions[1].playerId == 1
+    var feed: HumanCommunication
+    feed.observeHumanPacket(b, packet)
+    check feed.feed.len == 1
+    check feed.feed[0].player == 1
+    check feed.feed[0].name == "Private bot"
+    check feed.feed[0].text == "hello"
 
   test "a stable-seat payload cannot impersonate another packed player":
     let session = prepareNetworkMatch(sparseClient(2), [])
     session.start(RoomMessage(kind: BeginMatch, match: 1, revision: 2,
-      hash: session.game.networkHash()))
+      hash: setupHash(session.client.snapshot)))
     let baseline = session.game.networkHash()
     let spoof = ReplayAction(kind: ActionDiplomacy, playerId: 0,
       first: 1, second: int32(DeclareWar))
     expect RoomsError:
-      session.applyPacket(RoomMessage(kind: TickPacket, match: 1, tick: 1,
+      session.applyPacket(RoomMessage(kind: TickPacket,
+        seats: session.client.snapshot.seats, match: 1, tick: 1,
         commands: @[Command(participant: 2, seat: 3, payload: spoof.encodeSubmission())]))
     check session.game.networkHash() == baseline
     check session.game.world.tick == 0
@@ -75,7 +96,7 @@ suite "LvD sparse preparation":
     check a.game.config.players[1].name == "Bob"
     check a.game.networkHash() == b.game.networkHash()
     let event = RoomMessage(kind: BeginMatch, match: 1, revision: 2,
-      hash: a.game.networkHash())
+      hash: setupHash(a.client.snapshot))
     a.start(event)
     b.start(event)
     var commands: seq[Command]
@@ -95,7 +116,8 @@ suite "LvD sparse preparation":
             seat: message.seat, sequence: message.sequence, payload: message.payload)
     require commands.len == 2
     for tick in 1'u32 .. 12'u32:
-      let packet = RoomMessage(kind: TickPacket, match: 1, tick: tick,
+      let packet = RoomMessage(kind: TickPacket,
+        seats: a.client.snapshot.seats, match: 1, tick: tick,
         commands: (if tick == 1: commands else: @[]))
       a.applyPacket(packet)
       b.applyPacket(packet)

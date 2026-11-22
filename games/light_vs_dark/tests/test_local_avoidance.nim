@@ -57,8 +57,12 @@ block denseEnemyEnvelope:
       w.units[i].body.pos = fixedVec2(40.5'fx,40.5'fx)
       w.units[i].tile = tile2(40,40)
     w.tickWorld(nil)
-    doAssert w.units[0].body.pos.x < 40'fx,
-      "A prefix-limited query must not let a mover enter omitted enemy bodies"
+    let
+      pos = w.units[0].body.pos
+      radius = w.units[0].body.radius * 2
+    doAssert pos.x + radius < 40'fx or pos.x - radius > 41'fx or
+        pos.y + radius < 40'fx or pos.y - radius > 41'fx,
+      "A mover may route around dense enemies but must not enter their envelope"
 
 block opposingEnemyBodies:
   let f = trafficFixture(2, "opposing")
@@ -67,7 +71,6 @@ block opposingEnemyBodies:
   # even while ordinary movement suppresses attack acquisition.
   for tick in 0 ..< 120:
     f.world.tickWorld(nil)
-    for unit in f.world.units: doAssert unit.passingTicks == 0
     doAssert f.world.units[0].body.pos.x < f.world.units[1].body.pos.x
 
 block attackMoveCrossing:

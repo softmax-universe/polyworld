@@ -27,35 +27,35 @@ class FrontendRosterTests(unittest.TestCase):
         self.assertNotIn("rosterFirst", source)
         self.assertNotIn("RosterPageSize", source)
 
-    def test_local_seats_and_fill_ignore_online_draft_flags(self):
+    def test_local_drafts_and_online_slot_permissions(self):
         source = FRONTEND.read_text()
         seat = expression_after(source, "name, controller, human, empty,\n")
-        seat = seat.removesuffix(", config.seed")
+        seat = seat.split(", config.seed", 1)[0]
         fill = expression_after(source, 'fill + vec2(444, 0), 198, "cross",\n')
-        scratch = Path.home() / ".hermes/cache/scratch"
+        scratch = Path(tempfile.gettempdir()) / "polyworld-relay-refactor"
         scratch.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=scratch) as directory:
             path = Path(directory) / "roster_gate.nim"
-            path.write_text(
-                "import games/light_vs_dark/rosterstate\n" if
-                (ROOT / "games/light_vs_dark/rosterstate.nim").exists() else ""
-            )
+            path.write_text("import games/light_vs_dark/rosterstate\n")
             with path.open("a") as output:
-                output.write("let online = false\nlet editable = true\n"
-                             "let mine = true\nlet empty = true\n"
-                             "let modal = false\nlet configDirty = true\n"
-                             "let configPending = true\nlet emptyCount = 1\n"
-                             "let roster = RosterState(dirty: true, pendingPayload: \"old\")\n"
-                             if "roster." in seat + fill else
-                             "let online = false\nlet editable = true\n"
-                             "let mine = true\nlet empty = true\n"
-                             "let modal = false\nlet configDirty = true\n"
-                             "let configPending = true\nlet emptyCount = 1\n")
+                output.write("var online = false\nlet editable = true\n"
+                             "var mine = true\nvar empty = true\nvar owner = true\n"
+                             "let modal = false\nlet emptyCount = 1\n"
+                             "var roster = RosterState(dirty: true, pendingPayload: \"old\")\n")
                 output.write(f'doAssert ({seat}), "local seats are blocked by online draft state"\n')
                 output.write(f'doAssert ({fill}), "local Fill is blocked by online draft state"\n')
+                output.write("online = true\nroster = RosterState()\n"
+                             "mine = false\nempty = false\nowner = true\n")
+                output.write(f'doAssert ({seat}), "host cannot manage another controller slot"\n')
+                output.write("owner = false\n")
+                output.write(f'doAssert not ({seat}), "guest can overwrite another controller slot"\n')
+                output.write("mine = true\n")
+                output.write(f'doAssert ({seat}), "guest cannot manage their own slot"\n')
+                output.write("mine = false\nempty = true\n")
+                output.write(f'doAssert ({seat}), "guest cannot claim an empty slot"\n')
             dependencies = []
             dependency_root = Path(os.environ.get("POLYWORLD_DEPS", ROOT.parent))
-            for line in (ROOT / "coworld/dependencies.lock").read_text().splitlines():
+            for line in (ROOT / "nimby.lock").read_text().splitlines():
                 fields = line.split()
                 if not fields:
                     continue

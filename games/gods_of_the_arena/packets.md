@@ -1,6 +1,6 @@
 # GotA packets
 
-Payload protocol **1**, gameplay **72**, outer protocol **3**.
+Payload protocol **5**, gameplay **84**, outer protocol **5**.
 [Outer packets](../../docs/gameserver-packets.md) carry these blobs unchanged.
 
 ## Identity
@@ -10,13 +10,29 @@ Sent inside Hello; GotA requires ten seats at 24 ticks/second.
 | Field | Nim type | Value |
 | --- | --- | --- |
 | game | `string` | `gods_of_the_arena` |
-| gameplay | `uint32` | 72 |
-| protocol | `uint32` | 1 |
+| gameplay | `uint32` | 84 |
+| protocol | `uint32` | 5 |
 
 ## Setup payload
 
 JSON in CreateRoom, ConfigureRoom and RoomState, capped at 65,536 bytes.
-Clients normalize names from room seats and force `playerSlot = 0`.
+Clients normalize names from typed room seats and force `playerSlot = 0`.
+The relay distributes this JSON without interpreting it. StartMatch hashes the
+shared initial slot responsibilities, owning participant names, tick rate and
+exact JSON bytes through `setupHash`. ReadyStatus is cosmetic. Every game uses
+the same startup rule; GotA validates its world with ReportHash at tick zero.
+
+BeginMatch preserves the initial setup for late joins and reconnects. Live slot
+ownership changes do not rewrite that initial setup. The relay stamps commands
+with the participant and controller kind that were authorized when accepted.
+GotA checks the command's hero/slot mapping, without comparing old commands to
+the latest room roster. Tick packets carry the roster after their commands.
+
+Hosts can replace or remove any slot and kick participants during a match;
+guests may claim empty slots and release their own. Human or bot takeover of an
+existing hero is immediate. Slots that had no hero at startup are reserved for
+the next match; the relay does not invent a hero or change the game's draft.
+A participant assigned multiple human slots uses its first slot in the hero UI.
 
 | Field | Nim value type | Carries / default |
 | --- | --- | --- |
@@ -265,10 +281,18 @@ even when delivery is restricted to a team inbox.
 | --- | --- |
 | 1 | Require current match and exactly world.tick + 1. |
 | 2 | Validate every command: seat ownership, complete decoding, valid kind/offsets and matching heroId. |
-| 3 | Deliver mailbox messages in packet order; queue actions for packet.tick. |
+| 3 | Record every command at packet.tick in one ordered tape, deliver mailbox messages in packet order, and queue hero actions for packet.tick. |
 | 4 | Run one simulation tick; actions execute in packet order in the action phase. |
 | 5 | Publish action results, sample metrics, send AppliedTick and required hashes. |
 | 6 | Run only locally owned bot decisions and submit their commands. |
+
+## Local match reminders
+
+Each client derives the three-minute reminder from its simulated battle clock,
+after drafting and preparation. The relay has no countdown, draft policy,
+announcement payload, or game-specific command category. The reminder is local
+system text retained as a game-owned replay action; it is never
+attributed to the relay or submitted as a network command.
 
 ## Results, pause and hashes
 
@@ -282,12 +306,30 @@ even when delivery is restricted to a team inbox.
 | Quit | Controller: AbortMatch then LeaveRoom. Spectator: LeaveRoom only. |
 | Hash upper 32 bits | Hashy digest of normalized immutable config JSON. |
 | Hash lower 32 bits | Existing stateHash: map, draft, RNG, units, navigation, spells, shots and combat stats; exact fields in sim.nim. |
-| Hash exclusions | Private VMs, mailbox queues, rendering and local performance. Two 32-bit digests, not a cryptographic 64-bit state hash. |
-| Hash timing | Ready at setup; ReportHash at tick 0, 24, 48, etc.; FinishMatch at actual final tick. Comparisons are mandatory. |
-| Replay | Format 6; records hero action attempts, setup, hashes and metrics, not mailbox commands or outer envelopes. Wall-clock pauses add no replay ticks. |
+| Hash exclusions | Private VMs, chat history, mailbox queues, rendering and local performance. Two 32-bit digests, not a cryptographic 64-bit state hash. |
+| Hash timing | Shared setupHash at StartMatch/BeginMatch; ReportHash of simulation at tick 0, 24, 48, etc.; FinishMatch at actual final tick. Comparisons are mandatory. |
+| Replay | Format 8; records setup, hashes, metrics and one ordered tape containing hero action attempts, human all/team text, policy broadcast/team/direct messages and locally generated match reminders. Equal-tick actions preserve their original order. Outer envelopes are not saved. Wall-clock pauses add no replay ticks. |
 | Catch-up | Relay history includes mailbox messages and command ownership/order. Spectators reconstruct without VMs. |
 | Reconnect | Original client retains simulation and private VMs. No state snapshots, VM transfers or automatic desync repair. |
 | Versioning | Exact versions only. Payload changes bump GotaNetworkProtocol; gameplay changes bump ReplayGameVersion. |
+
+## Replay text actions
+
+Text uses the same `ReplayAction` sequence as hero commands. These game-owned
+replay kinds do not add outer relay packet types or change network categories.
+
+| Field | Human chat | Policy chat | Local system notice |
+| --- | --- | --- | --- |
+| `kind` | 25 | 26 | 27 |
+| `heroId` | Sender hero ID | Sender hero ID | 0 |
+| `first` | -2 for all, -1 for team | -2 for all, -1 for team, mailbox index for direct | -2 |
+| `text` | Validated human UTF-8 | Original policy bytes | Validated human UTF-8 |
+| `slot`, `second`, `offset` | Zero | Zero | Zero |
+
+Every text action contains 1 to 1,024 bytes. Gameplay actions have empty text.
+The tape allows at most one million text actions and 64 MiB of total text; the
+complete encoded replay also has a 64 MiB limit. Human replay viewers scan the
+action tape, hide policy messages, and use action indices as message identities.
 
 ## Source
 

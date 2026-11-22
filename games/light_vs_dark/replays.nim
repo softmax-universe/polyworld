@@ -1,22 +1,22 @@
-## Light vs Dark action-only replay format and playback cursor.
+## Light vs Dark ordered command replay and playback cursor.
 ##
-## A replay contains the match config, accepted commands, and one canonical
-## simulation hash per tick. It never stores bot source or private logs.
+## A replay contains the match config, accepted commands, player messages,
+## and one canonical simulation hash per tick. It never stores bot source.
 
 import
   std/os,
   fixxy,
-  polyworld/[bodies, tapes, metrics],
+  polyworld/[bodies, tapes, metrics, mailboxes],
   content, maps, diplomacies
 
 export fixxy
 
 const
   ReplayGame* = "light_vs_dark"
-  ReplayFormatVersion* = 6'u16
+  ReplayFormatVersion* = 9'u16
   ## This client supports only this gameplay version. Bump it when rules change.
   ## Older replays use their archived client; never add compatibility branches.
-  ReplayGameVersion* = 34'u16
+  ReplayGameVersion* = 50'u16
 
   ActionMove* = 1'u8
   ActionAttack* = 2'u8
@@ -28,11 +28,15 @@ const
   ActionAttackMove* = 8'u8
   ActionDiplomacy* = 9'u8
   ActionResearch* = 10'u8
-  ActionKindHigh* = ActionResearch
+  ActionDeposit* = 11'u8
+  ActionChat* = 12'u8
+  ActionKindHigh* = ActionChat
 
   MaxReplayBytes* = 64 * 1024 * 1024
   MaxReplayActions* = 4_000_000
   MaxReplayHashes* = 10_000_000
+  MaxReplayChats* = 64 * 1024
+    ## Bounds chat actions; the full tape also obeys MaxReplayBytes.
   MaxMatchTicks* = uint32(TickRate) * 60 * 60
     ## One hour, an absolute ceiling well above any configured match.
 
@@ -63,7 +67,7 @@ type
     playerId*: int32
     kind*: uint8
     append*: bool
-      ## Append to a unit FIFO; only move, attack-move, attack and harvest.
+      ## Appends a unit order to its FIFO instead of replacing its assignment.
     offset*: FixedVec2
       ## Movement and ground aim offsets from the named tile center.
     entityId*: int32
@@ -73,17 +77,34 @@ type
       ##   Move      x, y, unused
       ##   Attack    target id, unused, unused
       ##   Harvest   mine id or tile index, tree flag, unused
+      ##   Deposit   depot id, zero, zero
       ##   Build     building kind, x, y
       ##   Train     unit kind, unused, unused
       ##   Research  research category, zero, zero (next sequential tier)
       ##   SetRally  x, y, unused
       ##   Cancel    unused, unused, unused
       ##   Diplomacy target player, command kind, offer ID
+    target*: int32
+      ## Chat only: -2 for broadcasts or a zero-based direct recipient.
+    text*: string
+      ## Chat only: bounded mailbox bytes, filtered as UTF-8 for public display.
 
   ReplayHeader* = TapeHeader[Setup]
-  ReplayData* = ActionTape[Setup, ReplayAction, ReplayMetrics]
-  ReplayRecorder* = TapeRecorder[Setup, ReplayAction, ReplayMetrics]
-  ReplayPlayer* = TapePlayer[Setup, ReplayAction, ReplayMetrics]
+  ReplayData* = object
+    header*: ReplayHeader
+    config*: GameConfig
+    actions*: seq[ReplayAction]
+    hashes*: seq[uint64]
+    metrics*: ReplayMetrics
+
+  ReplayRecorder* = ref object
+    data*: ReplayData
+    chatCount*: int
+      ## Append-only count derived from chat actions, never serialized.
+
+  ReplayPlayer* = ref object
+    data*: ReplayData
+    actionIndex*: int
 
 proc fail(message: string) {.noreturn.} =
   ## Raises one Light vs Dark replay error.
@@ -106,12 +127,35 @@ proc initReplayRecorder*(setup: Setup): ReplayRecorder =
   ## Creates an in-memory recorder owning the complete replay data.
   ReplayRecorder(data: initReplayData(setup))
 
+proc commandCount*(data: ReplayData): int =
+  ## Counts gameplay commands without including presentation chat actions.
+  for action in data.actions:
+    if action.kind != ActionChat:
+      inc result
+
+proc validateChat(action: ReplayAction, setup: Setup) =
+  ## Validates message routing and bytes independently of decision ticks.
+  if action.playerId < 0 or int(action.playerId) >= setup.players.len:
+    fail("replay chat names an unknown sender")
+  if action.target < -2 or action.target == -1 or
+    int(action.target) >= setup.players.len:
+      fail("replay chat names an unknown target")
+  if action.text.len == 0 or action.text.len > MaxChatBytes:
+    fail("replay chat has an invalid message length")
+  if action.tick > setup.maximumTicks:
+    fail("replay chat exceeds the configured duration")
+  if action.append or action.entityId != NoEntity or
+    action.first != 0 or action.second != 0 or action.third != 0 or
+    action.offset != FixedVec2Zero:
+      fail("replay chat has an invalid command payload")
+
 proc record*(recorder: ReplayRecorder, action: ReplayAction) =
   ## Appends one accepted command in deterministic tick order.
   if recorder == nil:
     return
   if action.append and action.kind notin
-      {ActionMove, ActionAttackMove, ActionAttack, ActionHarvest}:
+      {ActionMove, ActionAttackMove, ActionAttack, ActionHarvest, ActionDeposit,
+        ActionBuild}:
     fail("replay action kind cannot append unit orders")
   if not action.offset.validTileOffset:
     fail("replay point offset is outside its tile")
@@ -120,7 +164,15 @@ proc record*(recorder: ReplayRecorder, action: ReplayAction) =
   if action.playerId < 0 or
     int(action.playerId) >= recorder.data.header.setup.players.len:
       fail("replay action names an unknown player")
+  if action.kind == ActionChat:
+    action.validateChat(recorder.data.header.setup)
+    if recorder.chatCount >= MaxReplayChats:
+      fail("replay chat limit exceeded")
+  elif action.target != 0 or action.text.len > 0:
+    fail("replay command has an unexpected chat payload")
   recorder.data.actions.appendAction(action, MaxReplayActions)
+  if action.kind == ActionChat:
+    inc recorder.chatCount
 
 proc recordAction*(
     recorder: ReplayRecorder,
@@ -149,7 +201,13 @@ proc recordAction*(
 
 proc recordHash*(recorder: ReplayRecorder, hash: uint64) =
   ## Appends the canonical simulation hash for one completed tick.
-  recordHash(recorder, hash, MaxReplayHashes)
+  if recorder == nil:
+    return
+  recorder.data.hashes.appendHash(
+    hash,
+    recorder.data.header.setup.maximumTicks,
+    MaxReplayHashes
+  )
 
 proc validateSetup(setup: Setup) =
   ## Validates the immutable match description.
@@ -171,7 +229,7 @@ proc validateSetup(setup: Setup) =
     fail("replay setup has no deterministic content fingerprint")
   try:
     setup.mapSettings.validate(setup.players.len)
-    setup.diplomacySettings.validate()
+    setup.diplomacySettings.validate(setup.players.len)
   except LvdError as error:
     fail(error.msg)
   for index, player in setup.players:
@@ -189,7 +247,8 @@ proc validateSetup(setup: Setup) =
 proc validateAction*(action: ReplayAction, setup: Setup) =
   ## Validates one command's kind, ownership range, and payload bounds.
   if action.append and action.kind notin
-      {ActionMove, ActionAttackMove, ActionAttack, ActionHarvest}:
+      {ActionMove, ActionAttackMove, ActionAttack, ActionHarvest, ActionDeposit,
+        ActionBuild}:
     fail("replay action kind cannot append unit orders")
   if not action.offset.validTileOffset:
     fail("replay point offset is outside its tile")
@@ -199,6 +258,11 @@ proc validateAction*(action: ReplayAction, setup: Setup) =
     fail("replay action names an unknown player")
   if action.tick > setup.maximumTicks:
     fail("replay action exceeds the configured duration")
+  if action.kind == ActionChat:
+    action.validateChat(setup)
+    return
+  if action.target != 0 or action.text.len > 0:
+    fail("replay command has an unexpected chat payload")
   if action.tick == 0 or action.tick mod uint32(setup.decisionTicks) != 0:
     fail("replay action did not land on a decision tick")
 
@@ -209,6 +273,11 @@ proc validateAction*(action: ReplayAction, setup: Setup) =
         fail("replay action names a tile outside the map")
 
   case action.kind
+  of ActionDeposit:
+    if not action.entityId.isUnitId or not action.first.isPlayerBuildingId or
+        action.second != 0 or action.third != 0 or
+        action.offset != FixedVec2Zero:
+      fail("replay deposit command is invalid")
   of ActionResearch:
     if not action.entityId.isPlayerBuildingId or
         action.first notin 0'i32 .. ResearchKind.high.ord.int32 or
@@ -248,6 +317,8 @@ proc validateAction*(action: ReplayAction, setup: Setup) =
       fail("replay build does not name a peon")
     if action.first < 0 or action.first > int32(BuildableHigh.ord):
       fail("replay build names an unbuildable structure")
+    if action.offset != FixedVec2Zero:
+      fail("replay build has an unused tile offset")
     requireTile(action.second, action.third)
   of ActionTrain:
     if not action.entityId.isPlayerBuildingId:
@@ -265,7 +336,7 @@ proc validateAction*(action: ReplayAction, setup: Setup) =
     fail("replay action kind is invalid")
 
 proc validate*(data: ReplayData) =
-  ## Validates versions, setup bounds, command payloads, and hash coverage.
+  ## Validates setup, commands, message bounds, and recorded tick coverage.
   data.config.validateConfig(data.header.setup.players.len)
   if data.config.seed != data.header.setup.mapSeed or
     data.config.maxTicks != int32(data.header.setup.maximumTicks):
@@ -282,13 +353,19 @@ proc validate*(data: ReplayData) =
     fail("replay hash limit exceeded")
   if data.hashes.len > int(setup.maximumTicks):
     fail("replay hashes exceed the configured duration")
-  var lastTick = 0'u32
+  var
+    lastTick = 0'u32
+    chatCount = 0
   for index, action in data.actions:
     if action.tick > uint32(data.hashes.len):
       fail("replay action exceeds the recorded duration")
     if index > 0 and action.tick < lastTick:
       fail("replay actions move backward in time")
     action.validateAction(setup)
+    if action.kind == ActionChat:
+      inc chatCount
+      if chatCount > MaxReplayChats:
+        fail("replay chat limit exceeded")
     lastTick = action.tick
   try:
     data.metrics.validate(
@@ -300,12 +377,12 @@ proc validate*(data: ReplayData) =
     fail(error.msg)
 
 proc encodeReplay*(data: ReplayData): string =
-  ## Encodes the action tape and its CPU telemetry in one payload.
+  ## Encodes commands, chat, and original CPU telemetry in one payload.
   data.validate()
   encodeReplayFile(ReplayGame, ReplayGameVersion, data, MaxReplayBytes)
 
 proc decodeReplay*(bytes: string): ReplayData =
-  ## Returns the complete replay, including its original CPU telemetry.
+  ## Returns the complete replay, including messages and CPU telemetry.
   result = decodeReplayFile(
     ReplayGame,
     ReplayGameVersion,
@@ -338,4 +415,41 @@ proc loadReplay*(path: string): ReplayData =
 proc initReplayPlayer*(data: ReplayData): ReplayPlayer =
   ## Creates a playback cursor over validated command data.
   data.validate()
-  initTapePlayer(data)
+  ReplayPlayer(data: data)
+
+proc finished*(player: ReplayPlayer): bool =
+  ## Returns whether every recorded command has been consumed.
+  player == nil or
+    replayFinished(player.actionIndex, player.data.actions.len)
+
+proc syncCursor*(player: ReplayPlayer, tick: uint32) =
+  ## Points the command cursor past every action at or before this tick.
+  if player == nil:
+    return
+  player.actionIndex = player.data.actions.actionIndexAfter(tick)
+
+proc takeActionAt*(
+    player: ReplayPlayer,
+    tick: uint32,
+    action: var ReplayAction
+): bool =
+  ## Consumes one command at an exact tick without allocating a sequence.
+  if player == nil:
+    return false
+  player.data.actions.takeActionAt(player.actionIndex, tick, action)
+
+proc hashAt*(
+    player: ReplayPlayer,
+    tick: uint32,
+    hash: var uint64
+): bool =
+  ## Reads the recorded hash for one completed tick.
+  if player == nil:
+    return false
+  player.data.hashes.hashAt(tick, hash)
+
+proc actionsAt*(player: ReplayPlayer, tick: uint32): seq[ReplayAction] =
+  ## Consumes every command recorded for one exact tick.
+  var action: ReplayAction
+  while player.takeActionAt(tick, action):
+    result.add action

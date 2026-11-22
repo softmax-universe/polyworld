@@ -5,7 +5,7 @@
 ## that can flow back into `World`.
 
 import
-  std/[math, times],
+  std/[math, os, strutils, times],
   fixxy, opengl, pixie, vmath, windy, silky,
   polyworld/[actioncam, assets, characters, chargen, chrome, clickmarks,
     common, gameuis, inputs, occlusions, pathing, player, profiles, quadterrain, rtscameras,
@@ -24,9 +24,6 @@ import
   layouts,
   democamera,
   scorecard
-
-when defined(takeScreenshot):
-  import std/[os, strutils]
 
 const
   WindowTitle = "Heartleaf"
@@ -120,6 +117,7 @@ proc renderTime(ticks: int32): float32 =
 
 proc runGraphics*() =
   ## Runs the native or Emscripten spectator.
+  configureCapture(options.capture, "heartleaf.png")
   startGameProfile()
   profileBlock "atlas":
     let builder = newHudAtlas(4096)
@@ -133,9 +131,12 @@ proc runGraphics*() =
       gameWindowSize(options.windowWidth, options.windowHeight),
       options.vsync
     )
+  var screenshotTarget: ScreenshotTarget
+  defer: releaseScreenshotTarget(screenshotTarget)
+  discard beginScreenshotFrame(screenshotTarget, window)
   let splash = startSplash(sk, window)
   var captureLayer = AllLayer
-  when defined(takeScreenshot):
+  if captureActive():
     case getEnv("HEARTLEAF_LAYER")
     of "ground": captureLayer = GroundLayer
     of "buildings": captureLayer = BuildingsLayer
@@ -538,7 +539,9 @@ proc runGraphics*() =
 
   ## Frame
 
-  var lastFrameTime = epochTime()
+  var
+    lastFrameTime = epochTime()
+    screenshotFrame = 0
   const Step = 1.0'f32 / float32(TickRate)
 
   proc advanceRenderedGame() =
@@ -547,7 +550,7 @@ proc runGraphics*() =
     advanceGame()
     captureCheckpoint()
 
-  when defined(takeScreenshot):
+  if captureActive():
     if existsEnv("HEARTLEAF_LAYER"):
       cameraDistance = 1402'f * 0.044'f / 2 / TownCameraScale
       cameraTarget = TownCameraTarget
@@ -561,11 +564,10 @@ proc runGraphics*() =
       while run.world.tick < wanted and
           run.world.tick < run.maximumTicks and not run.world.over:
         advanceGame()
-    var screenshotFrame = 0
-
   holdSplash(sk, window, splash)
   window.onFrame = proc() =
     profileBlock "frame":
+      discard beginScreenshotFrame(screenshotTarget, window)
       let dt = frameDelta(lastFrameTime, Step)
       let recorded =
         if run.recorder != nil: int32(run.recorder.data.hashes.len)
@@ -658,6 +660,7 @@ proc runGraphics*() =
             if captureLayer == AllLayer:
               drawWorldVillagers()
           scene.sunDepthPass = false
+        discard beginScreenshotFrame(screenshotTarget, window)
         if captureLayer in {BuildingsLayer, VegetationLayer, PropsLayer}:
           glClearColor(0, 0, 0, 0)
         else:
@@ -758,15 +761,12 @@ proc runGraphics*() =
           if speedClicked:
             snapFollowCamera()
           sk.endUi()
-      when defined(takeScreenshot):
-        captureScreenshot(
-          window,
-          screenshotFrame,
-          3,
-          "heartleaf.png"
-        )
-      profileBlock "present":
-        window.presentFrame(framePaceHz)
+      if captureFrame(window, screenshotFrame, 30, "heartleaf.png"):
+        when not defined(emscripten):
+          window.closeRequested = true
+      else:
+        profileBlock "present":
+          window.presentFrame(framePaceHz)
     if noteProfileFrame():
       when not defined(emscripten):
         window.closeRequested = true

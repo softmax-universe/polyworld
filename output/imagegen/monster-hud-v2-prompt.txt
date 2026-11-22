@@ -1,0 +1,19 @@
+Use case: precise-object-edit.
+Asset type: revised high-fidelity game HUD mockup.
+
+Image 1 is the clean EDIT TARGET. Image 2 is the user's red-marked LAYOUT GUIDANCE for this same image. The red strokes are annotations, not artwork; remove every red stroke in the result.
+
+Revise ONLY the lower fantasy HUD. Keep the game world above it, camera, blue creature, terrain, trees, village buildings, and existing world labels unchanged. Preserve the established hand-painted woodland materials: willow roots, worn dark stone, aged brass, and occasional blue crystal. This is a proportion and usability refinement, not a new art direction.
+
+Make the central CHAT noticeably wider and taller, with substantially more actual usable text area. It should be the clear dominant panel, approximately 57–60% of the usable HUD width. The minimap at left should occupy approximately 17–18%, and the creature/inventory panel at right approximately 23–25%. Keep the central chat's top elevated above the compact side sections, following the general stepped silhouette in the marked reference.
+
+Most importantly reclaim the pixels wasted on ornament, especially BELOW the chat input. REMOVE the wide bottom waterfall, the broad intertwined-root pedestal, and the heavy horizontal stone plinth. Replace these with a very slim 10–14 pixel stone-and-brass rim. Reduce the thick upper chat border to a slim decorative edge, with a much smaller blue crystal accent. Thin both chat dividers and the input border; expand the black text interior into the reclaimed space. The input field should sit near the true bottom edge with only a slim rim and small padding below it. Keep restrained leaves and roots at corners rather than covering long strips of screen. Do not accomplish this by shrinking text.
+
+Show the entire outer silhouette. Add a clearly visible strip of game background around the HUD: about 35–45 pixels of space on BOTH left and right sides and 18–24 pixels below it, relative to a roughly 1600-pixel-wide output. Every outer side rail and bottom corner must be completely visible within the canvas. No decorations, inventory slots, minimap edges, or frame sides may be cropped. Preserve wide landscape composition.
+
+Keep all existing functional content:
+- Left: complete square minimap with Willow, Bracken, Reedbank, blue Moss marker, and camera viewport rectangle; do not crop the map to a rectangle.
+- Middle: same four dialogue lines, unchanged, in bright white large readable type. More transcript room above the wide "Talk to Moss..." input and "Send" button. Dark charcoal slightly translucent interior, quiet behind the text. No chat header.
+- Right: complete Moss portrait, "Moss", "Energy 93%" and green energy bar, "Carrying 6/6", and ALL six inventory slots with the original icons, captions, and quantities: Berries 2, Grain 0, Fish 0, Pine 1, Oak 1, Stone 2. Keep this information readable and fully visible, compact the frame rather than cutting content.
+
+Do not add text, controls, decorative banners, or new content. Do not draw annotation lines. No watermark. The result should have the same beautiful old fantasy-game craftsmanship, but considerably more useful chat space and complete visible edges.

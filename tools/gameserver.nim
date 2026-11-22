@@ -1,7 +1,7 @@
 import
-  std/[monotimes, os],
+  std/[monotimes, os, strutils],
   mummy,
-  polyworld/[cli, relays, rooms]
+  polyworld/[relays, rooms]
 
 const MaxConnections = 256
 
@@ -17,6 +17,14 @@ type
 
 var inbox: Channel[Input]
 
+proc argumentValue(arguments: seq[string], index: var int): string =
+  ## Consumes the required value following one server option.
+  let option = arguments[index]
+  inc index
+  if index >= arguments.len:
+    quit(option & " requires a value")
+  arguments[index]
+
 proc serverConfig(): tuple[port: Port, address: string] =
   ## Reads listening options before opening sockets or starting threads.
   var value = getEnv("PORT", "8090")
@@ -26,21 +34,25 @@ proc serverConfig(): tuple[port: Port, address: string] =
   while index < arguments.len:
     case arguments[index]
     of "--port":
-      value = arguments.argumentValue(index, "--port")
+      value = arguments.argumentValue(index)
     of "--address":
-      result.address = arguments.argumentValue(index, "--address")
+      result.address = arguments.argumentValue(index)
     of "--help", "-h":
       echo "Usage: gameserver [--port NUMBER] [--address ADDRESS]"
       echo "Port defaults to PORT or 8090; BIND defaults to 127.0.0.1."
       quit(0)
     else:
-      fail("unknown argument: " & arguments[index])
+      quit("unknown argument: " & arguments[index])
     inc index
-  let port = parsePositiveInt32(value, "port")
-  if port > 65535:
-    fail("port must be between 1 and 65535")
+  var port: int
+  try:
+    port = parseInt(value)
+  except ValueError:
+    quit("port must be an integer between 1 and 65535")
+  if port notin 1 .. 65535:
+    quit("port must be between 1 and 65535")
   if result.address.len == 0:
-    fail("address must not be empty")
+    quit("address must not be empty")
   result.port = Port(port)
 
 proc request(request: Request) {.gcsafe.} =

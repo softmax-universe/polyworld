@@ -1,9 +1,12 @@
 ## Shared Silky HUD chrome for Polyworld games.
 
 import
-  std/[math, strutils, times, unicode],
-  chroma, pixie, silky, vmath, windy,
-  gameuis, inputs, profiles, quadterrain, rtscameras, networks
+  std/[math, strutils, tables, times, unicode],
+  bumpy, chroma, pixie, silky, vmath, windy,
+  bars, daycycles, gameuis, hovers, inputs, profiles, quadterrain, rtscameras,
+  networks, sounds
+
+export daycycles
 
 const
   PanelAccent* = rgbx(83, 91, 108, 255)
@@ -19,7 +22,6 @@ const
   BarFillName = "barfill.9patch"
   BarTrackPatch = 7
   BarFillPatch = 5
-  BarInset = 3.0'f32
   KeyPipName = "pip.medium"
   KeyPipSize = 28.0'f32
   KeyPipInset = 2.0'f32
@@ -29,8 +31,6 @@ const
   UiCrispSteps* = [0.25'f32, 0.5'f32, 1.0'f32, 2.0'f32, 4.0'f32]
   HudReferenceSize* = vec2(1920, 1080)
   HudDoubleScaleSize = HudReferenceSize * 2.0'f * 0.8'f
-  HudDaySeconds* = 300'i32
-    ## Wall-clock seconds in one in-game day. A 20 minute match is four days.
   DebugWindowTitle* = "Debug"
   DebugWindowOrigin* = vec2(360, 32)
   DebugWindowSize* = vec2(460, 380)
@@ -50,6 +50,10 @@ type
     CustomUiScale = "Custom"
   SparkStyle* = enum
     Linear, Stepped
+  DebugTab* = object
+    ## Game-owned tuning controls drawn inside the shared debug window.
+    label*: string
+    draw*: proc(sk: Silky, window: Window)
   SparkSample* = object
     tick*: int32
     value*: int64
@@ -60,7 +64,7 @@ var
   uiScaleReference* = 1.0'f
   hudScratch*: string
   debugMenuOpen* = false
-  debugNetwork = false
+  debugTab* = 0
   interpolateVisuals* = true
   showPaths* = false
   showTiles* = false
@@ -76,6 +80,7 @@ var
   fpsNowText = "  0.00"
   fpsAvgText = "frame   0.00 ms"
   fpsStdText = "  0.00 ms std"
+  hoverStates: Table[pointer, HoverState]
 
 proc sparkPoints*(
     panel: GameUiPanel,
@@ -276,39 +281,6 @@ proc writeClock*(s: var string, hour, minute: int) =
   s.add ':'
   s.addPad2(minute)
 
-proc hudDayTicks*(tickRate: int32): int32 =
-  ## Ticks in one in-game day at this simulation rate.
-  tickRate * HudDaySeconds
-
-proc clockMinutes(tick, tickRate: int32): int =
-  ## Absolute spectator minutes since 8:00 on day 1.
-  8 * 60 + int(tick) * 24 * 60 div int(hudDayTicks(tickRate))
-
-proc clockHour*(tick, tickRate: int32): float32 =
-  ## The accelerated spectator clock in hours, 0 ..< 24 with a fraction.
-  float32(clockMinutes(tick, tickRate) mod (24 * 60)) / 60
-
-proc clockHour*(tick: float32, tickRate: int32): float32 =
-  ## The same accelerated clock from a fractional tick (whole ticks plus
-  ## the frame's sub-tick blend), continuous instead of stepping once per
-  ## whole game minute — the sun and its shadows glide with it.
-  var minutes =
-    8.0'f32 * 60.0'f32 +
-    tick * 24.0'f32 * 60.0'f32 / float32(hudDayTicks(tickRate))
-  minutes = minutes - float32(24 * 60) * floor(minutes / float32(24 * 60))
-  minutes / 60.0'f32
-
-proc hudClock*(
-    tick, tickRate: int32
-): tuple[day, hour, minute: int] =
-  ## Converts simulation ticks into day, hour, and minute.
-  let
-    totalMinutes = clockMinutes(tick, tickRate)
-    minuteOfDay = totalMinutes mod (24 * 60)
-  result.day = totalMinutes div (24 * 60) + 1
-  result.hour = minuteOfDay div 60
-  result.minute = minuteOfDay mod 60
-
 proc formatAmount*(value: int): string =
   ## Writes a thousands-separated count into the shared HUD scratch.
   writeAmount(hudScratch, value)
@@ -462,6 +434,18 @@ proc drawSlot*(
       "slot.9patch"
   sk.draw9Patch(name, SlotPatch, panel.origin, panel.size)
 
+proc hoverSound*(sk: Silky, panel: GameUiPanel, enabled = true) =
+  ## Plays a quiet cue on pointer entry, without repeating during hover or drag.
+  if hoverStates.mgetOrPut(cast[pointer](sk), HoverState()).hoverEntered(
+    sk.frameStartTime,
+    sk.mousePos,
+    rect(panel.origin, panel.size),
+    sk.clipRect,
+    enabled,
+    sk.mouseConsumed or sk.buttonDown[MouseLeft]
+  ):
+    playSound(HoverSound)
+
 proc drawTab*(
     sk: Silky,
     panel: GameUiPanel,
@@ -469,6 +453,7 @@ proc drawTab*(
     hovered = false
 ) =
   ## Draws one theme tab 9-patch.
+  sk.hoverSound(panel, hovered)
   let name =
     if selected:
       "panel.tab.selected.9patch"
@@ -523,10 +508,24 @@ proc fittedLabel*(
       return result & "..."
     result = candidate
 
-proc barPatch(size: Vec2, wanted: int): int =
-  ## Returns a 9-patch border that still fits inside size.
-  let cap = min(int(size.x / 2), int(size.y / 2))
-  min(wanted, max(cap, 1))
+proc drawBarTexture(sk: Silky, name: string, cap: int, bounds: BarRect,
+    color: ColorRGBX) =
+  ## Draws proportional end caps and a horizontally uniform center column.
+  let
+    uv = sk.atlas.entries[name]
+    sourceSize = vec2(uv.width.float32, uv.height.float32)
+    density =
+      when compiles(uv.pixelScale):
+        max(uv.pixelScale, 1)
+      else:
+        1
+    sourceCap = (cap * max(sk.sliceScale, 1) * density).float32
+  for slice in barSlices(bounds, sourceSize, sourceCap, sk.uiScale):
+    if slice.bounds.size.x <= 0 or slice.bounds.size.y <= 0:
+      continue
+    sk.drawQuad(slice.bounds.position, slice.bounds.size,
+      vec2(uv.x.float32, uv.y.float32) + slice.sourcePosition,
+      slice.sourceSize, color)
 
 proc drawBar*(
     sk: Silky,
@@ -537,40 +536,26 @@ proc drawBar*(
     color: ColorRGBX
 ) =
   ## Draws one compact resource bar with a clamped fill.
+  let bounds = barBounds(position, size, sk.uiScale)
+  if bounds.size.x <= 0 or bounds.size.y <= 0:
+    return
   let ratio =
     if maximum <= 0:
       0.0'f32
     else:
       clamp(value / maximum, 0.0'f32, 1.0'f32)
   if BarTrackName in sk.atlas.entries:
-    sk.draw9Patch(
-      BarTrackName,
-      barPatch(size, BarTrackPatch),
-      position,
-      size
-    )
+    sk.drawBarTexture(BarTrackName, BarTrackPatch, bounds,
+      rgbx(255, 255, 255, 255))
   else:
-    sk.drawRect(position, size, BarBack)
+    sk.drawRect(bounds.position, bounds.size, BarBack)
   if ratio <= 0:
     return
-  let
-    inset = min(BarInset, size.y / 6.0'f32)
-    innerPos = position + vec2(inset)
-    innerSize = vec2(
-      max(size.x - inset * 2, 1),
-      max(size.y - inset * 2, 1)
-    )
-    fillSize = vec2(max(innerSize.x * ratio, 1), innerSize.y)
+  let fill = barFill(bounds, ratio, sk.uiScale)
   if BarFillName in sk.atlas.entries:
-    sk.draw9Patch(
-      BarFillName,
-      barPatch(fillSize, BarFillPatch),
-      innerPos,
-      fillSize,
-      color
-    )
+    sk.drawBarTexture(BarFillName, BarFillPatch, fill, color)
   else:
-    sk.drawRect(innerPos, fillSize, color)
+    sk.drawRect(fill.position, fill.size, color)
 
 proc drawSprite*(
     sk: Silky,
@@ -912,7 +897,7 @@ proc fpsChart(sk: Silky, window: Window) =
       tint rgbx(190, 190, 190, 180)
 
 proc mouseOverDebugMenu*(mouse: Vec2): bool =
-  ## Returns whether the pointer is over the F1 debug window.
+  ## Returns whether the pointer is over the shared debug window.
   if not debugMenuOpen or DebugWindowTitle notin subWindowStates:
     return false
   let state = subWindowStates[DebugWindowTitle]
@@ -1012,12 +997,20 @@ proc networkPanel(sk: Silky, window: Window, stats: NetworkStats) =
 proc drawDebugMenu*(
     sk: Silky, window: Window,
     creepWaypoints: ptr bool = nil, waypointStatus = "",
-    network: NetworkStats = nil
+    network: NetworkStats = nil,
+    extraTabs: openArray[DebugTab] = [],
+    graphicsExtension: proc(sk: Silky, window: Window) = nil
 ) =
-  ## Draws the shared F1 debug window when it is open.
+  ## Draws graphics, network and optional game-owned debugging controls.
   noteFps()
   if not debugMenuOpen:
     return
+  when defined(gotaDebugInputProbe):
+    if sk.buttonPressed[MouseLeft] or sk.buttonReleased[MouseLeft]:
+      echo "DEBUG_INPUT mouse=", sk.mousePos, " pressed=",
+        sk.buttonPressed[MouseLeft], " released=", sk.buttonReleased[MouseLeft],
+        " down=", sk.buttonDown[MouseLeft], " tab=", debugTab
+  debugTab = clamp(debugTab, 0, extraTabs.len + 1)
   sk.beginDsl()
   try:
     subWindow(
@@ -1026,14 +1019,25 @@ proc drawDebugMenu*(
       DebugWindowOrigin,
       vec2(500, min(860.0'f, window.size.y.float32 / sk.uiScale - 64))
     ):
-      group "debugTabs":
-        box 440, 32
-        layout LeftToRight
-        itemSpacing 20
-        radioButton "Rendering", debugNetwork, false
-        radioButton "Network", debugNetwork, true
-      if debugNetwork:
+      for row in 0 ..< (extraTabs.len + 3) div 2:
+        group "debugTabs" & $row:
+          box 440, 32
+          layout LeftToRight
+          itemSpacing 20
+          for index in row * 2 .. min(row * 2 + 1, extraTabs.len + 1):
+            let label =
+              if index == 0: "Graphics"
+              elif index == 1: "Networking"
+              else: extraTabs[index - 2].label
+            radioButton label, debugTab, index
+            when defined(gotaDebugInputProbe):
+              if sk.buttonReleased[MouseLeft]:
+                echo "DEBUG_TAB index=", index, " selected=", debugTab
+      if debugTab == 1:
         sk.networkPanel(window, network)
+      elif debugTab >= 2:
+        if extraTabs[debugTab - 2].draw != nil:
+          extraTabs[debugTab - 2].draw(sk, window)
       else:
         group "fpsRow":
           box(
@@ -1099,6 +1103,8 @@ proc drawDebugMenu*(
           checkBox "Creep waypoints", creepWaypoints[]
           text "creepWaypointStatus":
             characters waypointStatus
+        if graphicsExtension != nil:
+          graphicsExtension(sk, window)
   finally:
     sk.endDsl()
 

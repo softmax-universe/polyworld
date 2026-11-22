@@ -57,7 +57,7 @@ bitwise, so compare host results explicitly: `IF canPlay(i) = 1 AND n > 0`.
 From `games/cac`:
 
 ```sh
-nim c -d:headless -o:build/cac-headless src/cac.nim
+nim c -d:headless -o:build/cac-headless cac.nim
 ./build/cac-headless --bot my.bas --bot players/warrior.bas --seed 3
 for s in $(seq 1 100); do ./build/cac-headless --bot my.bas --bot players/warrior.bas --seed $s; done | grep -c '^Match winner_0'
 ```
@@ -70,8 +70,8 @@ illegal deck is printed.
 Give these to your human; they open a window:
 
 ```sh
-nim c src/cac.nim
-./cac --human --bot my.bas      # play against the bot
+nim c cac.nim
+./cac --player --bot my.bas      # play against the bot
 ./cac --replay m.replay         # watch a recorded match
 ```
 

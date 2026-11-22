@@ -1,7 +1,7 @@
 import std/times
 import jsony
 import polyworld/[rooms, relays, roomclients, player, tapes, mailboxes, metrics]
-import ../[bots, multiplayer, replays, sim, spectator]
+import ../[bots, maps, multiplayer, replays, sim, spectator]
 
 var relay = Relay()
 var clients: seq[RoomClient]
@@ -38,7 +38,7 @@ exchange()
 viewer.send(RoomMessage(kind: JoinRoom, room: owner.snapshot.room))
 exchange()
 for i in 0 ..< 10:
-  owner.send(RoomMessage(kind: ClaimSeat, seat: uint32(i), name: "Bot"))
+  owner.send(RoomMessage(kind: ClaimSeat, seat: uint32(i), seatKind: BotSeat, name: "Bot"))
 exchange()
 var sources = newSeq[string](10)
 for source in sources.mitems:
@@ -47,11 +47,10 @@ let controller = prepareNetworkMatch(owner, sources)
 let watched = prepareNetworkMatch(viewer, [])
 doAssert not controller.isSpectator, "Bot ownership is still control"
 doAssert watched.isSpectator
-owner.send(RoomMessage(kind: Ready, revision: controller.revision,
-  hash: controller.game.networkHash))
+owner.send(RoomMessage(kind: ReadyStatus, flag: true))
 exchange()
 owner.send(RoomMessage(kind: StartMatch, revision: controller.revision,
-  hash: controller.game.networkHash()))
+  hash: setupHash(owner.snapshot)))
 exchange()
 controller.start(owner.events[0])
 watched.start(viewer.events[0])
@@ -103,6 +102,14 @@ while watched.game.world.tick < p.targetTick: stream.advance()
 let hash = watched.game.stateHash
 let actions = watched.game.recorder.data.actions
 let hashes = watched.game.recorder.data.hashes
+var chatActions: seq[ReplayAction]
+var gameplayCount = 0'i64
+for action in actions:
+  if action.isChatAction(): chatActions.add action
+  if action.isGameplayAction(): inc gameplayCount
+doAssert chatActions.len == 1 and chatActions[0].kind == ActionPolicyChat
+doAssert chatActions[0].text == "Buffered mailbox"
+doAssert actions == controller.game.recorder.data.actions
 doAssert watched.game.history.frames.len == controller.game.history.frames.len,
   "First spectator traversal must sample every metrics interval"
 doAssert watched.game.history.frames[^1].tick == 744
@@ -119,6 +126,24 @@ for slot in 0 ..< 10:
   rows.add row
   commands += row.commands
 doAssert commands > 0, "Fixture must exercise accepted commands and APM"
+# A replay with the same gameplay commands but no chat must produce the same
+# world and command metrics; rejected gameplay commands need not count as APM.
+var gameplayOnly = watched.game.recorder.data
+gameplayOnly.actions = @[]
+for action in actions:
+  if action.isGameplayAction(): gameplayOnly.actions.add action
+let noChat = newGame(
+  generateMap(gameplayOnly.config.seed, gameplayOnly.config.mapPreset),
+  gameplayOnly.config.spawnIntervalTicks, 0, true, gameplayOnly)
+noChat.historyPlayback = true
+noChat.replayPlayer = initReplayPlayer(gameplayOnly)
+for tick in 1 .. gameplayOnly.hashes.len: noChat.tickWorld(nil)
+doAssert noChat.hashCheck.mismatches == 0 and noChat.stateHash() == hash
+for slot, row in rows:
+  let withoutChat = noChat.metrics.read(slot, 744)
+  doAssert row.commands == withoutChat.commands
+  doAssert row.values[ApmMetric] == withoutChat.values[ApmMetric],
+    "Policy chat must not count as gameplay commands or APM"
 stream.restoreTo(500)
 while watched.game.world.tick < 744: stream.advance()
 doAssert watched.game.stateHash == hash
@@ -130,6 +155,8 @@ doAssert watched.game.stateHash == hash
 doAssert hash == controller.game.stateHash
 doAssert watched.game.recorder.data.actions == actions
 doAssert watched.game.recorder.data.hashes == hashes
+doAssert watched.game.recorder.data.actions.len == int(gameplayCount) + chatActions.len,
+  "Spectator rewinds must not duplicate any canonical action"
 doAssert watched.game.history == history, "Seeks must not append/rewrite metrics history"
 for slot, row in rows:
   doAssert watched.game.metrics.read(slot, 744) == row,

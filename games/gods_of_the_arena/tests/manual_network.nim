@@ -49,7 +49,7 @@ while true:
     if not claimed:
       claimed = true
       for i in seatStart ..< seatStart + seatCount:
-        client.send(RoomMessage(kind: ClaimSeat, seat: uint32(i), name: "Base"))
+        client.send(RoomMessage(kind: ClaimSeat, seat: uint32(i), seatKind: BotSeat, name: "Base"))
     var full = true
     for seat in client.snapshot.seats:
       if seat.owner == 0:
@@ -59,26 +59,22 @@ while true:
         revision = client.snapshot.revision
         session = prepareNetworkMatch(client, sources)
         client.send(RoomMessage(
-          kind: Ready, revision: revision, hash: session.game.networkHash()
+          kind: ReadyStatus, flag: true
         ))
         ready = true
         startRequested = false
     if ready and client.snapshot.participant == client.participant and
       not startRequested:
-        var everyoneReady = true
-        for seat in client.snapshot.seats:
-          for participant in client.snapshot.participants:
-            if seat.owner == participant.id and not participant.ready:
-              everyoneReady = false
-        if everyoneReady:
-          client.send(RoomMessage(kind: StartMatch))
-          startRequested = true
+        client.send(RoomMessage(kind: StartMatch, revision: client.snapshot.revision,
+          hash: setupHash(client.snapshot)))
+        startRequested = true
   if client.events.len > 0:
     if session == nil:
       session = prepareNetworkMatch(client, sources)
     session.start(client.events[0])
     client.events.setLen(0)
   if session != nil and session.started and not session.finished:
+    session.resumeControls()
     var packet: RoomMessage
     while client.takeTick(packet):
       session.applyPacket(packet)

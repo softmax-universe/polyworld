@@ -68,14 +68,16 @@ macro offscreenComposite(): untyped =
   error("Missing outline composite")
 offscreenComposite()
 
-proc checkTarget(kind: string, armed = false, invalid = "") =
+proc checkTarget(kind: string, armed = false, invalid = "", rally = false) =
+  ## Drives a contextual click through production picking and command routing.
+  let hooks = GraphicsHooks()
   run = Game(world: newWorld(generateMap(DefaultSeed), TickRate * 60))
   viewMode = 1
   let sampleMine = run.world.buildings[0]
   run.world.buildings.setLen(0)
   run.world.units.setLen(0)
   clearPlayerCommands()
-  lineGesture.cancelLine()
+  cancelGameplayGestures()
   cameraTarget = vec3(0)
   cameraEye = vec3(0, 16, 16)
   let half = run.world.map.side div 2
@@ -97,6 +99,16 @@ proc checkTarget(kind: string, armed = false, invalid = "") =
     structure.footprint = BuildingTable[structure.kind].footprint
     run.world.buildings.add structure
     target = structure.id
+  if rally:
+    let index = run.world.buildings.len.int32
+    run.world.buildings.add Building(id: FirstBuildingId, owner: 0,
+      kind: TownHallBuilding, origin: tile2(half-8, half-3), hp: 500,
+      state: BuildingComplete,
+      footprint: BuildingTable[TownHallBuilding].footprint)
+    run.world.buildingSlot.setLen(run.world.map.mines.len + 1)
+    run.world.buildingSlot[run.world.map.mines.len] = index
+    selectedIds = @[FirstBuildingId]
+    primaryId = FirstBuildingId
   var clickMarks = initClickMarks(orderMarkSettings(false))
   var attackClickMarks = initClickMarks(orderMarkSettings(true))
   var targetFlash: TargetFeedback
@@ -148,14 +160,11 @@ proc checkTarget(kind: string, armed = false, invalid = "") =
     window.onButtonPress(KeyA)
     window.onButtonRelease(KeyA)
     require attackMoveArmed
-    window.state.buttonDown = {MouseLeft}
-    window.state.perFrame = PerFrame(buttonPressed: {MouseLeft})
-  else:
-    window.state.buttonDown = {MouseRight}
-    window.state.perFrame = PerFrame(buttonPressed: {MouseRight})
-    updatePlayerOrder(vp, focused = invalid != "focus")
-    window.state.buttonDown = {}
-    window.state.perFrame = PerFrame(buttonReleased: {MouseRight})
+  window.state.buttonDown = {MouseRight}
+  window.state.perFrame = PerFrame(buttonPressed: {MouseRight})
+  updatePlayerOrder(vp, focused = invalid != "focus")
+  window.state.buttonDown = {}
+  window.state.perFrame = PerFrame(buttonReleased: {MouseRight})
   if invalid == "full": window.state.buttonDown.incl KeyLeftShift
   let before = run.stateHash()
   updatePlayerOrder(vp, focused = invalid != "focus")
@@ -169,6 +178,24 @@ proc checkTarget(kind: string, armed = false, invalid = "") =
     check targetFlash.kind == NoTargetFlash
     return
   require run.submissions.len == 1
+  if rally:
+    let
+      action = run.submissions[0]
+      destination =
+        if kind == "tree": tile2(tile mod run.world.map.side,
+          tile div run.world.map.side)
+        else: run.world.buildings[0].origin
+    check action.kind == ActionSetRally
+    check action.entityId == FirstBuildingId
+    check action.first == destination.x.int32
+    check action.second == destination.y.int32
+    check not action.append
+    check selectedIds == @[FirstBuildingId]
+    check targetFlash.target == target
+    check targetFlash.kind ==
+      (if kind == "tree": HarvestTreeFlash else: HarvestEntityFlash)
+    check run.stateHash() == before
+    return
   let attack = kind in ["unit", "building"]
   check run.submissions[0].kind == (if attack: ActionAttack else: ActionHarvest)
   check run.submissions[0].first == target
@@ -237,6 +264,10 @@ suite "LvD target flash":
     checkTarget("tree")
   test "contextual mine flashes actual assembled mine green":
     checkTarget("mine")
+  test "town hall right click on a tree queues a wood rally":
+    checkTarget("tree", rally = true)
+  test "town hall right click on a mine queues a gold rally":
+    checkTarget("mine", rally = true)
   test "contextual enemy unit flashes animated mesh red":
     checkTarget("unit")
   test "contextual enemy building flashes actual building red":

@@ -49,20 +49,16 @@ try:
       var occupied = 0
       for current in client.snapshot.seats:
         if current.owner != 0: inc occupied
-      # Host first readies its single seat; guest waits for that consent.
-      if not host and client.snapshot.seats[seat].owner == 0:
-        var hostReady = false
-        for participant in client.snapshot.participants:
-          if participant.id == client.snapshot.participant: hostReady = participant.ready
-        if hostReady and not guestClaimSent:
-          client.claimHumanSeat(seat)
-          guestClaimSent = true
+      if not host and client.snapshot.seats[seat].owner == 0 and not guestClaimSent:
+        client.claimHumanSeat(seat)
+        guestClaimSent = true
       if (occupied == 2 or (host and occupied == 1)) and revision != client.snapshot.revision:
         session = prepareNetworkMatch(client, [])
         revision = session.revision
-        client.send(RoomMessage(kind: Ready, revision: revision, hash: session.game.networkHash()))
-      if host and occupied == 2 and session != nil and controllersReady(client.snapshot) and not started:
-        client.send(RoomMessage(kind: StartMatch))
+        client.send(RoomMessage(kind: ReadyStatus, flag: true))
+      if host and occupied == 2 and session != nil and not started:
+        client.send(RoomMessage(kind: StartMatch, revision: client.snapshot.revision,
+          hash: setupHash(client.snapshot)))
         started = true
     for event in client.events:
       doAssert session != nil
@@ -75,6 +71,7 @@ try:
     client.events.setLen(0)
     if session != nil and session.started and not session.finished:
       # Match the rendered controller frame: flush UI intents, then take ticks.
+      session.resumeControls()
       session.flushSubmissions()
       var packet: RoomMessage
       while connection.takeTick(packet, 24):
@@ -82,7 +79,7 @@ try:
         echo "TICK role=", role, " tick=", run.world.tick, " turn=", run.world.draftTurn,
           " phase=", run.world.phase, " active=", run.world.draftHeroId(), " hash=", run.stateHash()
         if session.finished: break
-      if run.world.phase == Drafting and
+      if session.liveControlReady() and run.world.phase == Drafting and
           run.world.heroIndex(run.world.draftHeroId()) == options.playerSlot.int - 1:
         doAssert picks == 0, "UI prompted the same human again after one pick"
         inc picks

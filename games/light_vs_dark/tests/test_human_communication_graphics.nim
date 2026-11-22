@@ -1,6 +1,6 @@
 ## Native production graphics callbacks, not source-string route assertions.
-## Separate from the art-free suite: creates a real Windy GL window.
-import std/[macros, importutils]
+## Uses hidden native GL; focus is supplied to the callback harness explicitly.
+import std/[macros, importutils, os, strutils]
 import windy/internal
 import polyworld/mailboxes
 import ../presets
@@ -8,19 +8,22 @@ include ../graphics
 privateAccess(Window)
 
 proc renameDirector(node: NimNode): NimNode {.compileTime.} =
+  ## Routes local camera and focus inputs into extracted production callbacks.
   if node.kind == nnkIdent and node.strVal == "actionCam": return ident("director")
+  if node.kind == nnkDotExpr and node.repr == "window.focused":
+    return ident("fixtureFocused")
   result = copyNimNode(node)
   for item in node: result.add renameDirector(item)
 
 macro productionCallback(name: static[string]): untyped =
+  ## Uses the final gameplay callback after resource-loading setup.
+  result = newStmtList()
   for node in parseStmt(staticRead("../graphics.nim")):
     if node.kind == nnkProcDef and node[0].repr == "runGraphics*":
       for child in node[^1]:
         if child.kind == nnkAsgn and child[0].repr == "window." & name and
             child[1].kind == nnkLambda:
-          return renameDirector(child)
-  # Missing rune callback is deliberately a runtime assertion in RED.
-  result = newStmtList()
+          result = renameDirector(child)
 
 macro productionRoutine(name: static[string]): untyped =
   for node in parseStmt(staticRead("../graphics.nim")):
@@ -37,7 +40,7 @@ macro finishProductionUi(): untyped =
     for child in node:
       let found = search(child)
       if found != nil: return found
-  result = search(parseStmt(staticRead("../graphics.nim")))
+  result = renameDirector(search(parseStmt(staticRead("../graphics.nim"))))
   if result == nil: error("Missing production post-Silky rune restoration")
 
 window = newWindow("LvD communication callback regression", ivec2(1200, 800), visible = false)
@@ -46,10 +49,14 @@ loadExtensions()
 glClearColor(0, 0, 0, 1)
 let atlas = buildUiAtlas(factionOrder(DefaultSeed.int64))
 sk = newSilky(window, atlas.atlasImage, atlas.atlas)
-window.visible = true
+var
+  fixtureFocused = true
+  target = initCaptureTarget(window.size)
+glBindFramebuffer(GL_FRAMEBUFFER, target.framebuffer)
 pollEvents()
-doAssert window.focused, "Camera polling regression needs a focused native window"
+doAssert not window.visible
 var config = defaultConfig(2)
+config.diplomacySettings.enabled = true
 config.maxTicks = 100
 config.mapSettings = MapSettings(layout: RandomLayout, size: 90, expansions: 0)
 run = newLocalMatch(config, ["", ""])
@@ -63,6 +70,7 @@ var matchMenu = HiddenMatchMenu
 var preferences = readLvdPreferences()
 var director = initActionCam(subjectMode = true)
 let network: NetworkMatch = nil
+let hooks = GraphicsHooks()
 var scene: CharacterScene
 productionRoutine("playerMode")
 productionRoutine("selectionTarget")
@@ -141,6 +149,15 @@ release(KeyEscape)
 finishHumanCommunicationFrame()
 doAssert run.inboxes[1].count == 0
 block diplomacyPanel:
+  for size in [vec2(800, 600), vec2(1200, 800), vec2(1920, 1080)]:
+    let
+      layout = initGameUiLayout(size)
+      minimap = layout.panel(GameUiRegion.TopRight, PanelMinimap)
+      button = layout.diplomacyButtonPanel()
+    doAssert button.origin.y >= minimap.origin.y + minimap.size.y
+    doAssert button.origin.x >= 0 and button.origin.y >= 0
+    doAssert button.origin.x + button.size.x <= size.x
+    doAssert button.origin.y + button.size.y <= size.y
   var colors = @[rgbx(230, 100, 100, 255), rgbx(100, 100, 230, 255)]
   proc drawHud(at: Vec2, pressed: set[Button] = {}) =
     sk.uiScale = gameUiScale(window)
@@ -153,6 +170,28 @@ block diplomacyPanel:
     finishProductionUi()
     finishHumanCommunicationFrame()
     window.state.perFrame = PerFrame()
+  let
+    diplomacyButton = currentLayout(window).diplomacyButtonPanel()
+    diplomacyCenter = diplomacyButton.origin + diplomacyButton.size / 2
+  doAssert window.mouseOverUi(diplomacyCenter),
+    "Diplomacy button must block commands to the world behind it"
+  drawHud(diplomacyCenter)
+  let screenshotPath = getEnv("LVD_DIPLOMACY_FIXTURE")
+  if screenshotPath.len > 0:
+    let
+      minimap = currentLayout(window).panel(GameUiRegion.TopRight, PanelMinimap)
+      left = max(0'i32, int32((minimap.origin.x - 8) * sk.uiScale))
+      top = max(0'i32, int32((minimap.origin.y - 8) * sk.uiScale))
+      right = min(window.size.x,
+        int32((minimap.origin.x + minimap.size.x + 8) * sk.uiScale))
+      bottom = min(window.size.y,
+        int32((diplomacyButton.origin.y + diplomacyButton.size.y + 8) * sk.uiScale))
+      screenshot = newImage(right - left, bottom - top)
+    glReadPixels(left, window.size.y - bottom, right - left, bottom - top,
+      GL_RGBA, GL_UNSIGNED_BYTE,
+      screenshot.data[0].addr)
+    screenshot.flipVertical()
+    screenshot.writeFile(screenshotPath)
   # Typing the default keyboard-select alias while hovering Diplomacy cannot
   # turn a text character into a panel toggle.
   customBindingsEnabled = true
@@ -161,7 +200,7 @@ block diplomacyPanel:
   release(KeyEnter)
   press(KeyZ)
   press(KeyTab)
-  drawHud(vec2(60, 216), {KeyZ})
+  drawHud(diplomacyCenter, {KeyZ})
   doAssert humanCommunicationTyping(), "Typed select alias clicked Diplomacy"
   doAssert not director.manualPanel, "Typed Tab must not engage the stats director"
   release(KeyTab)
@@ -169,8 +208,13 @@ block diplomacyPanel:
   press(KeyEscape)
   release(KeyEscape)
   finishHumanCommunicationFrame()
-  drawHud(vec2(60, 216), {MouseLeft})
+  drawHud(diplomacyCenter, {MouseLeft})
   doAssert humanCommunicationBlocksGameplay(), "Diplomacy button must open panel"
+  drawHud(diplomacyCenter, {MouseLeft})
+  doAssert not humanCommunicationBlocksGameplay(),
+    "Diplomacy button must also close its panel"
+  drawHud(diplomacyCenter, {MouseLeft})
+  doAssert humanCommunicationBlocksGameplay(), "Diplomacy button must reopen panel"
   let layout = currentLayout(window)
   let width = min(660'f32, layout.size.x - 24)
   let rows = max(1, min(6, int((layout.size.y - 148) / 92)))
@@ -192,11 +236,14 @@ block diplomacyPanel:
   press(KeyEscape)
   release(KeyEscape)
   finishHumanCommunicationFrame()
+  run.world.diplomacy.settings.enabled = false
+  drawHud(diplomacyCenter, {MouseLeft})
+  doAssert not humanCommunicationBlocksGameplay(),
+    "Fixed team icon must not open negotiation controls"
 press(KeyEnter)
 release(KeyEnter)
 press(KeyS) # Deliberately lose its release while unfocused.
-window.visible = false
-pollEvents()
+fixtureFocused = false
 window.onFocusChange()
 doAssert not humanCommunicationTyping()
 doAssert not window.runeInputEnabled
@@ -205,6 +252,7 @@ doAssert not humanCommunicationBlocksGameplay(), "Focus loss clears held-key qua
 press(KeyEscape)
 doAssert matchMenu == PauseMenu, "Escape outside communication still opens pause"
 release(KeyEscape)
+target.close()
 window.close()
 window = nil
 run = nil

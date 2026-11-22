@@ -41,6 +41,11 @@ proc send(relay: Relay, connection: int, message: RoomMessage) =
   relay.receive(connection, decoded, 0)
   relay.flush()
 
+proc start(relay: Relay, connection: int, room: RelayRoom) =
+  ## Starts from the current shared setup without any readiness gate.
+  relay.send(connection, RoomMessage(kind: StartMatch,
+    revision: room.revision, hash: setupHash(relay.state(room))))
+
 echo "Testing generic room envelopes and authoritative ticks"
 var relay = Relay()
 let
@@ -55,42 +60,65 @@ let room = relay.rooms[0]
 relay.expectError(3, RoomMessage(kind: JoinRoom, room: room.id))
 relay.send(2, RoomMessage(kind: JoinRoom, room: room.id))
 relay.send(1, RoomMessage(kind: ClaimSeat, seat: 0, name: "Human"))
-relay.send(2, RoomMessage(kind: ClaimSeat, seat: 1, name: "Private bot"))
-relay.expectError(1, RoomMessage(kind: ClaimSeat, seat: 1, name: "Steal"))
-relay.send(1, RoomMessage(kind: Ready, revision: room.revision, hash: 99))
+relay.send(2, RoomMessage(kind: ClaimSeat, seat: 1, name: "Private bot", seatKind: BotSeat))
+relay.expectError(2, RoomMessage(kind: ClaimSeat, seat: 0, name: "Steal"))
+relay.send(1, RoomMessage(kind: ReadyStatus, flag: true))
 relay.expectError(2, RoomMessage(kind: ConfigureRoom, number: 2))
 relay.send(1, RoomMessage(
   kind: ConfigureRoom, name: "Chess", number: 2, tickRate: 24, payload: "new"
 ))
-doAssert not relay.guest(first).ready
-relay.expectError(1, RoomMessage(kind: Ready, revision: room.revision - 1))
-relay.send(1, RoomMessage(kind: Ready, revision: room.revision, hash: 99))
-relay.send(2, RoomMessage(kind: Ready, revision: room.revision, hash: 99))
-relay.send(1, RoomMessage(kind: StartMatch))
+relay.expectError(1, RoomMessage(kind: StartMatch,
+  revision: room.revision - 1, hash: setupHash(relay.state(room))))
+relay.start(1, room)
 doAssert room.phase == Playing
-relay.expectError(1, RoomMessage(
-  kind: SubmitCommand, match: room.match, seat: 1, sequence: 1
-))
+# A revoked or foreign slot discards the command while retaining its receipt.
+let discarded = RoomMessage(
+  kind: SubmitCommand, match: room.match, seat: 1, sequence: 1,
+  payload: "in-flight command"
+)
+for attempt in 0 .. 1:
+  relay.receive(1, decode(discarded.encode()), 0)
+  var acknowledged = false
+  for output in relay.outgoing:
+    if output.connection == 1 and output.bytes.len > 0:
+      let message = decode(output.bytes)
+      if message.kind == CommandAck:
+        doAssert message.sequence == 1 and message.flag and message.tick == 0
+        acknowledged = true
+  doAssert acknowledged and room.pending.len == 0
+  relay.flush()
+var changedDiscard = discarded
+changedDiscard.payload = "altered discarded command"
+relay.expectError(1, changedDiscard)
+changedDiscard = discarded
+changedDiscard.seatKind = BotSeat
+relay.expectError(1, changedDiscard)
 for connection in [2, 1]:
   relay.send(connection, RoomMessage(
     kind: SubmitCommand, match: room.match, seat: uint32(connection - 1),
-    sequence: 1, payload: "\x00\xffgame bytes " & $connection
+    seatKind: (if connection == 2: BotSeat else: HumanSeat),
+    sequence: (if connection == 1: 2'u64 else: 1'u64),
+    payload: "\x00\xffgame bytes " & $connection
   ))
 relay.send(1, RoomMessage(
   kind: SubmitCommand, match: room.match, seat: 0,
-  sequence: 1, payload: "\x00\xffgame bytes 1"
+  sequence: 2, payload: "\x00\xffgame bytes 1"
 ))
 doAssert room.pending.len == 2
 relay.expectError(1, RoomMessage(
   kind: SubmitCommand, match: room.match, seat: 0,
-  sequence: 1, payload: "changed retransmission"
+  sequence: 2, payload: "changed retransmission"
 ))
 relay.advance(0.05)
 relay.flush()
 doAssert room.tick == 1
 let packet = decode(room.history[0])
 doAssert packet.commands[0].participant == second
+doAssert packet.commands[0].seatKind == BotSeat
+doAssert packet.commands[1].seatKind == HumanSeat
+doAssert packet.seats == room.seats
 doAssert packet.commands[1].participant == first
+doAssert packet.commands[1].sequence == 2
 relay.advance(0.1)
 relay.flush()
 doAssert room.tick == 2 and decode(room.history[1]).commands.len == 0
@@ -139,8 +167,8 @@ relay.send(3, RoomMessage(
 ))
 let race = relay.rooms[1]
 relay.send(3, RoomMessage(kind: ClaimSeat, seat: 0, name: "Car"))
-relay.send(3, RoomMessage(kind: Ready, revision: race.revision, hash: 55))
-relay.send(3, RoomMessage(kind: StartMatch))
+relay.start(3, race)
+relay.send(3, RoomMessage(kind: ReportHash, match: race.match, tick: 0, hash: 55))
 relay.advance(0.02)
 doAssert race.tick == 1
 for length in 0 ..< 24:
@@ -199,11 +227,9 @@ let stoppedTick = race.tick
 relay.advance(6.3)
 doAssert race.tick == stoppedTick
 
-# Starting another match cannot preserve old checkpoints or readiness.
+# Starting another match cannot preserve old simulation checkpoints.
 relay.send(3, RoomMessage(kind: ReturnLobby))
-relay.expectError(3, RoomMessage(kind: StartMatch))
-relay.send(3, RoomMessage(kind: Ready, revision: race.revision, hash: 999))
-relay.send(3, RoomMessage(kind: StartMatch))
+relay.start(3, race)
 relay.send(3, RoomMessage(
   kind: ReportHash, match: race.match, tick: 0, hash: 999
 ))
@@ -230,19 +256,16 @@ for connection in 1 .. 2:
   relay.send(connection, RoomMessage(
     kind: ClaimSeat, seat: uint32(connection - 1), name: "Seat"
   ))
-  relay.send(connection, RoomMessage(
-    kind: Ready, revision: hashRoom.revision, hash: uint64(connection)
-  ))
-# Claiming the second seat invalidates the first client's readiness.
-relay.send(1, RoomMessage(kind: Ready, revision: hashRoom.revision, hash: 1))
-relay.send(1, RoomMessage(kind: StartMatch))
+relay.start(1, hashRoom)
+for connection in 1 .. 2:
+  relay.send(connection, RoomMessage(kind: ReportHash,
+    match: hashRoom.match, tick: 0, hash: uint64(connection)))
 doAssert hashRoom.phase == Desynced and hashRoom.tick == 0
 relay.send(1, RoomMessage(kind: ReturnLobby))
+relay.start(1, hashRoom)
 for connection in 1 .. 2:
-  relay.send(connection, RoomMessage(
-    kind: Ready, revision: hashRoom.revision, hash: 1
-  ))
-relay.send(1, RoomMessage(kind: StartMatch))
+  relay.send(connection, RoomMessage(kind: ReportHash,
+    match: hashRoom.match, tick: 0, hash: 1))
 relay.advance(0.05)
 relay.flush()
 relay.send(1, RoomMessage(
@@ -267,10 +290,22 @@ relay.disconnect(1)
 doAssert relay.guest(hashRoom.owner).connection == 9
 relay.flush()
 
-# Completed setup retains seat ownership for spectators after controllers leave.
-let historicalSeats = hashRoom.seats
+# The live roster releases departed controllers, while initial setup stays fixed.
+let historicalSeats = @[hashRoom.seats[0], hashRoom.seats[1]]
 relay.send(2, RoomMessage(kind: LeaveRoom))
-doAssert hashRoom.seats == historicalSeats
+doAssert hashRoom.seats[1].owner == 0
+discard relay.connect(8, "test-puzzle")
+relay.receive(8, RoomMessage(kind: JoinRoom, room: hashRoom.id), 0)
+var receivedInitial = false
+for output in relay.outgoing:
+  if output.connection == 8 and output.bytes.len > 0:
+    let message = decode(output.bytes)
+    if message.kind == BeginMatch:
+      doAssert message.seats == historicalSeats
+      doAssert message.hash == setupHash(message)
+      receivedInitial = true
+doAssert receivedInitial
+relay.flush()
 relay.send(9, RoomMessage(kind: ReturnLobby))
 doAssert hashRoom.seats[1].owner == 0
 # Reconnection preserves setup only while another connected watcher keeps it alive.
@@ -295,12 +330,11 @@ relay.send(1, RoomMessage(
   kind: CreateRoom, name: "Pause test", number: 1, tickRate: 1
 ))
 let pausedRoom = relay.rooms[0]
-relay.send(1, RoomMessage(kind: ClaimSeat, seat: 0, name: "Bot"))
+relay.send(1, RoomMessage(kind: ClaimSeat, seat: 0, name: "Bot", seatKind: BotSeat))
 relay.send(2, RoomMessage(kind: JoinRoom, room: pausedRoom.id))
-relay.send(1, RoomMessage(
-  kind: Ready, revision: pausedRoom.revision, hash: 10
-))
-relay.send(1, RoomMessage(kind: StartMatch))
+relay.start(1, pausedRoom)
+relay.send(1, RoomMessage(kind: ReportHash,
+  match: pausedRoom.match, tick: 0, hash: 10))
 relay.expectError(2, RoomMessage(
   kind: PauseMatch, match: pausedRoom.match, flag: true
 ))
@@ -334,7 +368,7 @@ relay.send(1, RoomMessage(
 # Pending commands remain assigned to the next tick during pause.
 relay.send(1, RoomMessage(
   kind: SubmitCommand, match: pausedRoom.match, seat: 0,
-  sequence: 1, payload: "pending"
+  seatKind: BotSeat, sequence: 1, payload: "pending"
 ))
 let reconnectToken = relay.guest(pauseOwner).token
 relay.disconnect(1)

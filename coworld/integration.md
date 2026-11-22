@@ -25,13 +25,13 @@ coworld build --project coworld/cac --version VERSION
 ```
 
 Local builds use sibling dependency checkouts, such as `/Users/me/p/zippy`.
-`nimby.lock` and `coworld/dependencies.lock` pin the same revisions.
+`nimby.lock` is the single dependency lock for development, CI, and Coworld.
 The sync tool reuses checkouts at those revisions and preserves local branches
 and edits. Updates require clean checkouts and fast-forward merges. Set
 `POLYWORLD_DEPS` explicitly to use a separate cache of detached pinned checkouts,
 as the container build does. Run
 `nim r coworld/tools/sync_dependencies.nim --latest` to resolve upstream HEADs and
-update both locks. Ordinary builds never update revisions implicitly.
+update the lock. Ordinary builds never update revisions implicitly.
 The build hook validates the asset commit in `coworld/assets.json`. `POLYWORLD_ART`
 can point at a checkout of that revision. Each game's `assets.nim` declarations
 select its browser models, textures, and UI files. Emscripten builds automatically

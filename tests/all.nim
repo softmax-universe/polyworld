@@ -11,11 +11,17 @@ import ../games/gods_of_the_arena/tests/test_abilities as TestGotaAbilities
 import determinism
 import
   test_cli,
+  test_screenshots,
   ../games/crewrift/tests/test_sim as TestCrewrift,
+  ../games/crewrift/tests/test_bots as TestCrewriftBots,
   ../games/crewrift/tests/test_skins as TestCrewriftSkins,
   test_annotations,
   test_policy_hosts,
   test_tapes,
+  test_replaysettings,
+  test_replaysaves,
+  test_replaylibraries,
+  test_replay_browser,
   test_policy_packages,
   test_tensors,
   ../games/gods_of_the_arena/tests/test_tensor_matches as TestTensorMatches,
@@ -27,6 +33,8 @@ import
   ../games/gods_of_the_arena/tests/test_observations as TestGotaObservations,
   ../games/gods_of_the_arena/tests/test_targets as TestGotaTargets,
   ../games/gods_of_the_arena/tests/test_replays as TestGotaReplays,
+  ../games/gods_of_the_arena/tests/test_replay_library as TestGotaReplayLibrary,
+  ../games/gods_of_the_arena/tests/test_recording_library as TestGotaRecordingLibrary,
   ../games/gods_of_the_arena/tests/test_attacks as TestGotaAttacks,
   ../games/gods_of_the_arena/tests/test_decisions as TestGotaDecisions,
   ../games/gods_of_the_arena/tests/test_events as TestGotaEvents,
@@ -43,15 +51,33 @@ import
   test_llms,
   test_llm_hosts,
   test_rooms,
+  test_generic_relay,
+  test_cosmetic_ready,
   test_room_codes,
   test_relay_async_hashes,
   test_relay_readiness,
+  test_start_intent,
   test_sparse_rooms,
   test_room_resize,
-  test_galcon_relay_support,
+  test_opaque_setup,
   test_client_loading_gap,
   test_roomclients,
   test_networks,
   ../games/gods_of_the_arena/tests/test_multiplayer as TestGotaMultiplayer
+
+# Exercise game adapters against the shared relay, including live ownership,
+# reconnect recovery, and warnings derived only from the local simulation.
+import
+  ../games/gods_of_the_arena/tests/test_live_slots as TestGotaLiveSlots,
+  ../games/gods_of_the_arena/tests/test_auto_seats as TestGotaAutoSeats,
+  ../games/gods_of_the_arena/tests/test_match_notice_network as TestGotaLocalNotices,
+  ../games/light_vs_dark/tests/test_live_slots as TestLvdLiveSlots,
+  ../games/light_vs_dark/tests/test_replay_library as TestLvdReplayLibrary,
+  ../games/light_vs_dark/tests/test_recording_library as TestLvdRecordingLibrary,
+  ../games/light_vs_dark/tests/test_match_clock as TestLvdLocalNotices,
+  ../games/cac/tests/test_network as TestCacNetwork,
+  ../games/cac/tests/test_network_catchup as TestCacCatchup
+
+import test_ordered_replays
 
 echo "CI tests passed"

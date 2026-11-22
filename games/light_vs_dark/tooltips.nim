@@ -10,7 +10,7 @@ const TooltipDelay* = 0.5
 
 type
   TooltipTargetKind* = enum
-    NoCommandTooltip, BuildingCommandTooltip, UnitCommandTooltip, ResearchCommandTooltip
+    NoCommandTooltip, BuildingCommandTooltip, UnitCommandTooltip, ResearchCommandTooltip, CancelCommandTooltip
   TooltipTarget* = object
     kind*: TooltipTargetKind
     building*: BuildingKind
@@ -117,7 +117,7 @@ proc buildingDetails*(kind: BuildingKind, player = LightPlayer): DetailTooltip =
     of StablesBuilding:
       "Unlocks armored troops at the Barracks together with a Blacksmith. This building does not train units itself."
     of ChurchBuilding:
-      "A training site for Clerics. Clerics currently fight with piercing attacks; they do not heal allies."
+      "A training site for Clerics. Clerics automatically heal nearby friendly and allied living units using regenerating mana."
     of BlacksmithBuilding:
       "Unlocks advanced Barracks troops together with their other required buildings. Select it and open Upgrades to research Tempered Edges or Runed Plating."
     of GoldMineBuilding:
@@ -178,7 +178,7 @@ proc unitDetails*(kind: UnitKind, player = LightPlayer): DetailTooltip =
     of CatapultUnit:
       "A slow siege fighter with long-range piercing attacks. Splash hits hostile units and structures neighbouring the impact tile."
     of ClericUnit:
-      "A fragile piercing-damage fighter. Despite its name, this unit currently does not heal allies."
+      "A support fighter that automatically heals nearby friendly and allied living units, including itself. Lowest health ratio first, then lowest ID. Never heals enemies, neutral units, buildings or catapults. Healing does not interrupt movement or queued orders."
     of SummonUnit:
       "A powerful trained combat unit. Light and Dark versions have different health, damage types and attack reach."
   result.rows = @[
@@ -193,6 +193,13 @@ proc unitDetails*(kind: UnitKind, player = LightPlayer): DetailTooltip =
     ("Sight", $stats.sightTiles & " tiles"),
     ("Move speed", number(TickRate.float / stats.stepTicks.float) & " tiles/s")
   ]
+  if kind == ClericUnit:
+    result.rows.add ("Heal", $ClericHealAmount & " HP (capped at missing HP)")
+    result.rows.add ("Heal range", $ClericHealRange & " tiles (king-move)")
+    result.rows.add ("Heal interval", tooltipSeconds(ClericHealCooldown))
+    result.rows.add ("Mana", $ClericMaxMana)
+    result.rows.add ("Mana cost", $ClericHealManaCost)
+    result.rows.add ("Mana regen", "1 per " & tooltipSeconds(ClericManaRegenTicks))
   if stats.splash > 0: result.rows.add ("Splash damage", $stats.splash)
   if kind == PeonUnit:
     result.rows.add ("Gold per trip", $GoldPerTrip)

@@ -3,7 +3,7 @@
 import std/[math, os]
 import opengl, pixie, vmath, windy
 # `post` names the post-processor below, so the module goes by another name.
-import ../src/scene/courtyard, ../src/scene/post as postfx, ../src/paths
+import ../scene/courtyard, ../scene/post as postfx, ../paths
 
 const Width = 640
 const Height = 400

@@ -1,7 +1,7 @@
 import
   std/strutils,
   bumpy, chroma, pixie, silky, vmath, windy,
-  assets, chrome, homes, menus
+  assets, chrome, homes, menus, sounds
 
 const
   LobbyCanvas = vec2(1514, 970)
@@ -12,6 +12,11 @@ const
   LobbyMuted* = rgbx(170, 175, 181, 255)
 
 type
+  LobbyBotMenu* = object
+    open*: bool
+    pressed: bool
+    pressedOption: int = -1
+    scroll: float32
   LobbyLayout* = object
     origin*, left*, right*, footer*, primary*: Vec2
     leftWidth*, rightWidth*, panelHeight*: float32
@@ -24,6 +29,8 @@ type
     roomListOverflow*: bool
     selectedSeat*: int = -1
     selectedBot*: string = "Base bot"
+    selectedSeatBot*: string = "Base bot"
+    fillBotMenu*, seatBotMenu*: LobbyBotMenu
     configPage*: int
   SlotChoice* = object
     chosen*: bool
@@ -123,7 +130,9 @@ proc lobbyButton*(
     "LobbyBody",
     CenterAlign
   )
-  interaction == Released
+  result = interaction == Released
+  if result:
+    playSound(ClickSound)
 
 proc playerButton*(
   sk: Silky, window: Window, name: string, enabled = true
@@ -159,6 +168,93 @@ proc lobbySelect*[T](
     sk.popLayout()
   else:
     sk.lobbyLabel($value, at, width, tint = LobbyMuted)
+
+proc lobbyBotPopup*(at, size, view: Vec2, count: int): Rect =
+  ## Opens above the selector when needed and keeps its popup in the viewport.
+  let
+    width = min(size.x, max(0.0'f, view.x - 16))
+    height = min(size.y * count.float32, max(0.0'f, view.y - 16))
+    below = at.y + size.y
+    top = if below + height <= view.y - 8: below else: at.y - height
+  rect(
+    clamp(at.x, 8.0'f, max(8.0'f, view.x - width - 8)),
+    clamp(top, 8.0'f, max(8.0'f, view.y - height - 8)),
+    width,
+    height
+  )
+
+proc lobbyBotSelect*(
+    sk: Silky, window: Window, value: var string, options: openArray[string],
+    menu: var LobbyBotMenu, at: Vec2, width: float32, enabled = true
+) =
+  ## Selects a bot using a themed popup that stays reachable near screen edges.
+  if not enabled or options.len == 0:
+    menu = LobbyBotMenu()
+    sk.lobbyLabel(if options.len == 0: "No bot policies" else: value,
+      at, width, tint = LobbyMuted)
+    return
+  let
+    height = sk.atlas.fonts[sk.textStyle].lineHeight +
+      sk.theme.padding.float32 * 2
+    bounds = rect(at, vec2(width, height))
+    interaction = sk.interact(bounds, true)
+  if interaction == Pressed:
+    menu.pressed = true
+  if window.buttonReleased[MouseLeft]:
+    if menu.pressed and interaction == Released:
+      menu.open = not menu.open
+      menu.scroll = 0
+      playSound(ClickSound)
+    menu.pressed = false
+  if window.buttonPressed[KeyEscape]:
+    menu = LobbyBotMenu()
+  let tint = if menu.open or interaction in {Pressed, Held, Hovered}:
+    sk.theme.dropdownHoverBgColor else: sk.theme.dropdownBgColor
+  sk.draw9Patch("dropdown.9patch", sk.theme.dropdownPatch, at,
+    bounds.wh, tint)
+  let arrowSize = sk.getImageSize("droparrow")
+  sk.drawLabel(value, at + vec2(sk.theme.padding.float32, 0),
+    vec2(width - arrowSize.x - sk.theme.padding.float32 * 3, height),
+    sk.theme.defaultTextColor, sk.textStyle)
+  sk.drawImage("droparrow", at + vec2(
+    width - arrowSize.x - sk.theme.padding.float32,
+    (height - arrowSize.y) / 2
+  ))
+  if menu.open:
+    let popup = lobbyBotPopup(at, bounds.wh, sk.rootSize, options.len)
+    sk.pushLayer(PopupsLayer)
+    sk.pushRawClipRect(popup)
+    sk.draw9Patch("dropdown.9patch", sk.theme.dropdownPatch,
+      popup.xy, popup.wh, sk.theme.dropdownPopupBgColor)
+    if overlaps(sk.mousePos, popup):
+      menu.scroll += window.scrollDelta.y * ScrollSpeed.float32
+    menu.scroll = clamp(menu.scroll, 0.0'f,
+      max(0.0'f, height * options.len.float32 - popup.h))
+    for i, option in options:
+      let
+        row = rect(popup.xy + vec2(0, i.float32 * height - menu.scroll),
+          vec2(popup.w, height))
+        interaction = sk.interact(row, true)
+      if interaction == Pressed:
+        menu.pressedOption = i
+      if interaction == Released and menu.pressedOption == i:
+        value = option
+        menu.open = false
+        playSound(SelectSound)
+      if interaction in {Pressed, Held, Hovered}:
+        sk.drawRect(row.xy, row.wh, sk.theme.menuPopupHoverColor)
+      elif value == option:
+        sk.drawRect(row.xy, row.wh, sk.theme.menuPopupSelectedColor)
+      sk.drawLabel(option, row.xy + vec2(sk.theme.padding.float32, 0),
+        row.wh - vec2(sk.theme.padding.float32 * 2, 0),
+        sk.theme.defaultTextColor, sk.textStyle)
+    if window.buttonPressed[MouseLeft] and
+      not overlaps(sk.mousePos, bounds) and not overlaps(sk.mousePos, popup):
+        menu.open = false
+    sk.popClipRect()
+    sk.popLayer()
+  if window.buttonReleased[MouseLeft] or not menu.open:
+    menu.pressedOption = -1
 
 proc lobbyNumber*[T: SomeNumber](
     sk: Silky, label: string, value: var T, at: Vec2,
@@ -212,7 +308,7 @@ proc beginLobby*(
     )
     scrollingRooms = multiplayer and ui.roomListOverflow and
       overlaps(sk.mousePos, roomList)
-  if not scrollingRooms:
+  if not scrollingRooms and not ui.fillBotMenu.open and not ui.seatBotMenu.open:
     ui.scroll += window.scrollDelta.y * ScrollSpeed.float32
   ui.scroll = clamp(ui.scroll, 0.0'f, max(0.0'f, canvas.y - view.y))
   result.origin = vec2((view.x - canvas.x) / 2, -ui.scroll)
@@ -291,12 +387,18 @@ proc seatPicker*(
     400, "LobbyHeading")
   if sk.lobbyButton("Play as you", at + vec2(24, 72), 472, "character"):
     result = SlotChoice(chosen: true, human: true)
-  for i, bot in bots:
-    if i >= 4:
-      break
-    if sk.lobbyButton(bot.name, at + vec2(24, 124 + i.float32 * 48),
-      472, "settings"):
-        result = SlotChoice(chosen: true, bot: i)
+  var botNames: seq[string]
+  for bot in bots:
+    botNames.add bot.name
+  if botNames.len > 0 and ui.selectedSeatBot notin botNames:
+    ui.selectedSeatBot = botNames[0]
+  sk.lobbyLabel("Bot policy", at + vec2(24, 124), 472)
+  if sk.lobbyButton("Add bot", at + vec2(24, 220),
+    472, "settings", bots.len > 0):
+      for i, bot in bots:
+        if bot.name == ui.selectedSeatBot:
+          result = SlotChoice(chosen: true, bot: i)
+          break
   if sk.lobbyButton("Choose local .bas / .zip...", at + vec2(24, 324),
     472, "cross"):
       result = SlotChoice(chosen: true, file: true)
@@ -305,4 +407,19 @@ proc seatPicker*(
   if sk.lobbyButton("Cancel", at + vec2(270, 376), 226, "arrow_left") or
     window.buttonPressed[KeyEscape]:
       ui.selectedSeat = -1
+  # Draw last so dropdown rows cover the modal's other controls.
+  if bots.len > 0:
+    sk.lobbyBotSelect(
+      window,
+      ui.selectedSeatBot,
+      botNames,
+      ui.seatBotMenu,
+      at + vec2(24, 164),
+      472
+    )
+  else:
+    sk.lobbyLabel("No bundled bots", at + vec2(24, 164),
+      472, tint = LobbyMuted)
+  if result.chosen or ui.selectedSeat < 0:
+    ui.seatBotMenu = LobbyBotMenu()
   sk.popLayer()

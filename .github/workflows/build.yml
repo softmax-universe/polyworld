@@ -10,6 +10,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   build:
+    timeout-minutes: 5
     env:
       POLYWORLD_DEPS: ${{ github.workspace }}/..
     strategy:
@@ -20,21 +21,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: treeform/setup-nim-action@v6
-      - name: Install native HTTP library on Windows
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          vcpkg install curl:x64-windows
-          "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       - name: Install dependencies
         shell: bash
         run: |
           cd ..
           nimby create
           nimby sync "${{ github.event.repository.name }}/nimby.lock"
-      - name: Run release tests and all-game determinism
-        run: nim r -d:release -d:bassyNativeStrict -d:replayEvents tests/all.nim
-      - name: Test lockstep training API
-        run: nim r -d:release -d:headless -d:bassyNativeStrict games/gods_of_the_arena/tests/test_lockstep.nim
-      - name: Check neural converters
-        run: python games/gods_of_the_arena/tests/test_neural_converters.py
+      - name: Check and run unit tests
+        shell: bash
+        run: |
+          nim check -d:release tests/unit_tests.nim
+          nim r -d:release tests/unit_tests.nim

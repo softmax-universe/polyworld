@@ -535,14 +535,20 @@ block woodFlowsAndTreesFall:
   doAssert w.applyHarvest(LightPlayer, peon, treeIndex, 1),
     "a peon would not chop a tree"
 
-  let edits = w.terrainEdits.len
-  w.run(TickRate * 100)
+  let
+    edits = w.terrainEdits.len
+    trips = (int32(WoodPerTree) + WoodPerTrip - 1) div WoodPerTrip
+  for tick in 0 ..< TickRate * 25 * trips:
+    w.tickWorld(noDecisions)
+    doAssert w.units[w.unitIndex(peon)].carryWood <= WoodPerTrip,
+      "a woodcutter exceeded its carrying capacity"
+    if w.players[LightPlayer].woodGathered >= int32(WoodPerTree): break
   doAssert w.players[LightPlayer].wood > StartingWood,
-    "one hundred seconds of chopping produced no wood"
+    "chopping and returning to the hall produced no wood"
   let gained = w.players[LightPlayer].wood - StartingWood
   doAssert gained mod WoodPerTrip == 0, "wood arrived in a partial load"
   doAssert w.treeWood[treeIndex] == 0,
-    "a tree survived four full trips"
+    "a tree survived after its full wood supply was gathered"
   doAssert w.terrainEdits.len >= edits + 1,
     "felling a tree did not log a terrain edit"
   var felledAssigned = false
@@ -787,17 +793,17 @@ block losingEverythingLosesTheMatch:
   for index in 0 ..< w.units.len:
     if w.units[index].owner == DarkPlayer:
       w.damageEntity(w.units[index].id, w.units[index].hp)
-  w.run(1)
-  doAssert w.over, "a player with nothing left did not lose"
+  w.run(TownHallDefeatGraceTicks)
+  doAssert w.over, "a player without a Town Hall did not lose after grace"
   doAssert w.winner == LightPlayer, &"the wrong player won: {w.winner}"
 
-block reachingTheCapDecidesOnScore:
+block reachingTheCapWithoutEliminationDraws:
   var w = newWorld(map, TickRate * 4)
   w.players[LightPlayer].goldGathered = 50_000
   w.run(TickRate * 4)
   doAssert w.over, "the match did not end at its tick limit"
-  doAssert w.winner == LightPlayer,
-    "the richer player did not win on score"
+  doAssert w.winner == -1,
+    "A score lead must not decide elimination victory"
 
 echo "Testing attack-move engages enemies that a move walks past"
 block attackMoveFightsOnTheWay:

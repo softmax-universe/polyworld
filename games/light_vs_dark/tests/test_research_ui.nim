@@ -41,6 +41,21 @@ block prerequisite:
         break
     if built: break
   doAssert built
+# Keep a living hall while this fixture changes the selected producer kind.
+block preserveHall:
+  var built = false
+  for y in 1'i32 ..< run.world.map.side - 4:
+    for x in 1'i32 ..< run.world.map.side - 4:
+      if run.world.canPlace(FarmBuilding, x, y):
+        doAssert run.world.applyBuild(0, run.world.units[0].id, FarmBuilding.ord.int32, x, y)
+        run.world.buildings[^1].kind = TownHallBuilding
+        run.world.buildings[^1].state = BuildingComplete
+        run.world.buildings[^1].hp = 1000
+        discard run.world.applyCancel(0, run.world.units[0].id)
+        built = true
+        break
+    if built: break
+  doAssert built
 selectedIds = @[primaryId]
 var director = initActionCam(subjectMode = true)
 let colors = @[rgbx(230,100,100,255), rgbx(100,100,230,255)]
@@ -60,8 +75,6 @@ proc drawHud(at: Vec2, pressed: set[Button] = {}) =
 sk.beginUi(window, window.size)
 let build = sk.beginFrame(currentLayout(window).panel(GameUiRegion.BottomRight, PanelBuild)).buildPanels()
 sk.endUi()
-drawHud(build.tabs[2].origin + vec2(10), {MouseLeft})
-doAssert commandTab == 2
 let click = build.contents.origin + vec2(30,30)
 let before = run.stateHash()
 drawHud(click, {MouseLeft})
@@ -84,7 +97,7 @@ proc noCommand(at = click) =
   run.flushPlayerCommands()
   doAssert run.submissions.len == count
 noCommand() # researching
-noCommand(build.contents.origin + vec2(138,30)) # other category, busy producer
+noCommand(build.slots[1].origin + vec2(30)) # other category, busy producer
 # Cancel uses the authoritative path, then verify replay/watch/chat guards.
 doAssert run.world.applyCancel(0, primaryId)
 run.replayMode = true
@@ -98,7 +111,7 @@ humanCommunicationRelease(KeyEnter)
 noCommand()
 resetHumanCommunication()
 producer.state = BuildingUnderConstruction
-noCommand()
+doAssert run.world.contextualActions(0, selectedIds) == {CancelSiteShortcut}
 producer.state = BuildingComplete
 run.world.players[0].gold = 0
 noCommand()
@@ -107,16 +120,23 @@ producer.owner = 1
 noCommand()
 producer.owner = 0
 primaryId = NoEntity
+selectedIds = @[]
 noCommand()
 primaryId = run.world.units[0].id
+selectedIds = @[primaryId]
 noCommand()
 primaryId = producerId
+selectedIds = @[primaryId]
 # Each producer offers only its catalog; each tier clicks through Controls.
 for kind in ResearchKind:
   producer.kind = researchBuilding(kind)
   doAssert kind in run.world.researchKinds(0, primaryId)
-  let slotIndex = if kind == RunedPlating: 1 else: 0
-  let at = build.contents.origin + vec2(30 + slotIndex.float32 * 108,30)
+  let targetAction = ShortcutAction(ResearchArrowsShortcut.ord + kind.ord)
+  var slotIndex = 0
+  for action in run.world.contextualActions(0, selectedIds):
+    if action == targetAction: break
+    inc slotIndex
+  let at = build.slots[slotIndex].origin + vec2(30)
   for tier in 1'i32 .. MaxResearchLevel:
     let count = run.submissions.len
     let baseline = run.stateHash()
@@ -132,7 +152,7 @@ for kind in ResearchKind:
     let card = run.world.researchCard(0, primaryId, kind)
     doAssert card.active and card.ticksRemaining == researchStats(kind,tier).ticks
     for tick in 0 ..< card.ticks: run.world.tickWorld(nil)
-    doAssert run.world.researchLevel(0, kind) == tier
+    doAssert run.world.researchLevel(0, kind) == tier, $kind & " tier=" & $tier & " defeated=" & $run.world.players[0].defeated
   doAssert run.world.researchCard(0, primaryId, kind).researchStatus == "MAX LEVEL"
   noCommand(at)
 # Full production HUD and tooltip in a real offscreen framebuffer.

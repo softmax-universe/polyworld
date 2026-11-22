@@ -1,5 +1,5 @@
 ## Execute real order-input and render code; assert commands AND GPU pixels.
-import std/[unittest, macros, importutils]
+import std/[unittest, macros, importutils, os]
 import windy/internal
 include ../graphics
 privateAccess(Window)
@@ -115,6 +115,7 @@ proc checkOrder(attack, minimap: bool, drag = false, enemy = false,
     preferences: Preferences
     network: NetworkMatch
     scene: CharacterScene
+    hooks: GraphicsHooks
     actionCam = initActionCam(subjectMode = true)
   feedbackRoutine("buttonHandler")
   feedbackRoutine("releaseHandler")

@@ -24,9 +24,10 @@ suite "LvD roster":
     check humanAfterRemoval(-1, 0) == -1
 
 suite "LvD menu entry":
-  test "server overrides do not skip home, room invites do":
+  test "explicit server launches and room invites open multiplayer":
     check not opensMultiplayer("")
     check opensMultiplayer("room-code")
+    check opensMultiplayer("", "ws://127.0.0.1:9911/ws")
 
 when not defined(headless):
   import polyworld/menus
@@ -38,7 +39,8 @@ when not defined(headless):
       check effectivePreferences(stored, "", configured).server == configured
       check effectivePreferences(stored, "wss://query.example/ws", configured).server ==
         "wss://query.example/ws"
-      check effectivePreferences(stored, "", Preferences().server) == stored
+      check effectivePreferences(stored, "", Preferences().server).server ==
+        Preferences().server
       check effectivePreferences(stored, "", "") == stored
 
     test "server query survives settings and local match preference reloads":
@@ -51,12 +53,12 @@ when not defined(headless):
       # Graphics reads and saves its own preferences while the local match runs.
       # Returning must load those edits, but not its stale/default relay address.
       stored.name = "After match"
-      stored.soundMuted = true
+      stored.mainVolume = 0
       stored.uiScalePercent = 125
       effective = effectivePreferences(stored, queryServer, Preferences().server)
       check effective.server == queryServer
       check effective.name == "After match"
-      check effective.soundMuted
+      check effective.mainVolume == 0
       check effective.uiScalePercent == 125
       check stored.server == Preferences().server
 

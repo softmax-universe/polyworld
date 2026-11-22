@@ -76,7 +76,9 @@ block allBots:
 block multipleOpponents:
   let
     map = generateMap(42, 4)
-    game = newGame(map, 1000, DiplomacySettings(neutralStart: true))
+    game = newGame(
+      map, 1000, DiplomacySettings(enabled: true, neutralStart: true)
+    )
     centre = map.side div 2
     attacker = game.world.spawnUnit(0, SoldierUnit, tile2(centre, centre))
     enemy = game.world.spawnUnit(2, PeonUnit, tile2(centre + 1, centre))
@@ -111,12 +113,12 @@ block elimination:
     map = generateMap(1, 5)
     w = newWorld(map, 1000)
   w.defeat(1)
-  w.tickWorld(nil)
+  for _ in 0 ..< TownHallDefeatGraceTicks: w.tickWorld(nil)
   doAssert w.players[1].defeated
   doAssert not w.over
   for player in [0'i32, 2'i32, 3'i32]:
     w.defeat(player)
-  w.tickWorld(nil)
+  for _ in 0 ..< TownHallDefeatGraceTicks: w.tickWorld(nil)
   doAssert w.over and w.winner == 4
   doAssert w.scores() == @[0, 0, 0, 0, 1]
 
@@ -129,7 +131,7 @@ block timeLimit:
   doAssert tied.over and tied.winner == -1
   winner.players[3].goldGathered = 50000
   winner.tickWorld(nil)
-  doAssert winner.winner == 3
+  doAssert winner.winner == -1, "A score lead is not elimination victory"
 
 block solo:
   let w = newWorld(generateMap(1, 1), 3)

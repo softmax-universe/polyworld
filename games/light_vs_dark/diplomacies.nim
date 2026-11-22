@@ -1,4 +1,5 @@
 import
+  polyworld/rooms,
   content, maps
 
 type
@@ -10,8 +11,12 @@ type
     DeclareWar, WithdrawWar, OfferPeace, OfferAlliance,
     AcceptOffer, DeclineOffer, WithdrawOffer, EndAlliance
   DiplomacySettings* = object
+    enabled*: bool = false
+      ## Fixed teams are the default; negotiation must be explicitly enabled.
+    teams*: seq[int32]
+      ## Empty assignments give each player their own zero-based team.
     neutralStart*: bool = false
-      ## Opt into negotiated diplomacy; ordinary FFA starts at war.
+      ## Starts negotiated matches at peace instead of immediate war.
     warGraceSeconds*: int32 = 10
     offerSeconds*: int32 = 60
   Relation* = object
@@ -26,16 +31,38 @@ type
     pairs*: seq[Relation]
 
 proc validate*(settings: DiplomacySettings) =
-  ## Rejects invalid timings before converting seconds to ticks.
+  ## Rejects invalid timings and team identifiers before match creation.
   if settings.warGraceSeconds notin 1'i32 .. 3600'i32 or
     settings.offerSeconds notin 1'i32 .. 3600'i32:
       raise newException(LvdError, "Diplomacy delays must be 1 .. 3600 seconds.")
+  if settings.teams.len > MaxSeats:
+    raise newException(LvdError, "Team assignments exceed roster capacity.")
+  for team in settings.teams:
+    if team < 0 or team >= MaxSeats:
+      raise newException(LvdError, "Team numbers exceed roster capacity.")
+
+proc validate*(settings: DiplomacySettings, players: int) =
+  ## Requires explicit team assignments to cover the complete match roster.
+  settings.validate()
+  if settings.teams.len notin [0, players]:
+    raise newException(LvdError, "Team assignments must match the player roster.")
+
+proc teamFor*(settings: DiplomacySettings, player: int32): int32 =
+  ## Resolves fixed team identity, with independent players as the default.
+  if player >= 0 and player < settings.teams.len:
+    settings.teams[player]
+  else:
+    player
+
+proc teamFor*(diplomacy: Diplomacy, player: int32): int32 =
+  ## Returns the configured team independently of temporary relationships.
+  diplomacy.settings.teamFor(player)
 
 proc initDiplomacy*(players: int, settings = DiplomacySettings()): Diplomacy =
-  ## FFA opponents are hostile immediately; neutral diplomacy is opt-in.
-  settings.validate()
+  ## Initializes immutable teams or negotiated bilateral relationships.
+  settings.validate(players)
   let count = int64(players) * int64(players - 1) div 2
-  if players < 1 or count > int64(high(int)):
+  if players notin 1 .. MaxSeats or count > int64(high(int)):
     raise newException(LvdError, "Invalid diplomacy roster size.")
   result = Diplomacy(
     settings: settings,
@@ -43,9 +70,20 @@ proc initDiplomacy*(players: int, settings = DiplomacySettings()): Diplomacy =
     nextOfferId: 1,
     pairs: newSeq[Relation](int(count))
   )
-  if not settings.neutralStart:
-    for pair in result.pairs.mitems:
-      pair.state = AtWar
+  if result.settings.teams.len == 0:
+    result.settings.teams = newSeq[int32](players)
+    for player in 0 ..< players:
+      result.settings.teams[player] = player.int32
+  var index = 0
+  for first in 0'i32 ..< players.int32:
+    for second in first + 1 ..< players.int32:
+      if not settings.enabled:
+        result.pairs[index].state =
+          if settings.teamFor(first) == settings.teamFor(second): Allied
+          else: AtWar
+      elif not settings.neutralStart:
+        result.pairs[index].state = AtWar
+      inc index
 
 proc pairIndex*(diplomacy: Diplomacy, first, second: int32): int =
   ## Finds the unique pair record, or -1 for self and invalid players.
@@ -119,6 +157,8 @@ proc apply*(
   offerId = 0'i32
 ): bool =
   ## Validates one explicit command without changing rejected state.
+  if not diplomacy.settings.enabled:
+    return false
   let index = diplomacy.pairIndex(player, other)
   if index < 0:
     return false

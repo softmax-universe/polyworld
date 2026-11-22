@@ -1,7 +1,7 @@
 import std/[strutils]
 
 const
-  RoomProtocolVersion* = 4'u32
+  RoomProtocolVersion* = 5'u32
   RoomHeaderBytes* = 64
   MaxWireBytes* = 256 * 1024
   MaxPayloadBytes* = 64 * 1024
@@ -16,10 +16,13 @@ type
     Lobby, Playing, Waiting, Ended, Desynced
   MessageKind* = enum
     Hello, Welcome, ListRooms, RoomList, CreateRoom, JoinRoom, RoomState,
-    ConfigureRoom, ClaimSeat, ReleaseSeat, Ready, StartMatch, BeginMatch,
+    ConfigureRoom, ClaimSeat, ReleaseSeat, StartMatch, BeginMatch,
     SubmitCommand, CommandAck, TickPacket, AppliedTick, Catchup, CaughtUp,
     ReportHash, MatchStatus, LeaveRoom, KickParticipant, ReturnLobby,
-    FinishMatch, Received, Keepalive, Failure, AbortMatch, PauseMatch, ResizeRoom, Prepared, ReadyStatus
+    FinishMatch, Received, Keepalive, Failure, AbortMatch, PauseMatch,
+    ResizeRoom, ReadyStatus
+  SeatKind* = enum
+    HumanSeat, BotSeat
   GameIdentity* = object
     game*: string
     gameplay*, protocol*: uint32
@@ -30,10 +33,12 @@ type
   Seat* = object
     owner*: uint32
     name*: string
+    kind*: SeatKind
   Command* = object
     participant*, seat*: uint32
     sequence*: uint64
     payload*: string
+    seatKind*: SeatKind
   RoomListing* = object
     id*, name*: string
     phase*: RoomPhase
@@ -49,6 +54,7 @@ type
     room*, name*, token*, payload*, detail*: string
     participant*, seat*, revision*, match*, tick*, number*, tickRate*: uint32
     sequence*, hash*: uint64
+    seatKind*: SeatKind
     flag*: bool
     phase*: RoomPhase
     participants*: seq[Participant]
@@ -123,13 +129,56 @@ proc putCommand*(bytes: var string, command: Command) =
   ## Writes an opaque game command and its authoritative ownership.
   bytes.put32(command.participant)
   bytes.put32(command.seat)
+  bytes.put32(uint32(command.seatKind))
   bytes.put64(command.sequence)
   bytes.putString(command.payload)
+
+proc getSeatKind(reader: var PacketReader): SeatKind =
+  ## Rejects unknown controller kinds before converting the wire value.
+  let value = reader.get32()
+  if value > uint32(SeatKind.high):
+    reject("Unknown seat controller kind")
+  SeatKind(value)
+
+proc putSeats(bytes: var string, seats: openArray[Seat]) =
+  ## Writes the bounded ordered routing roster.
+  if seats.len > MaxSeats:
+    reject("Too many seats")
+  bytes.put32(uint32(seats.len))
+  for seat in seats:
+    bytes.put32(seat.owner)
+    bytes.put32(uint32(seat.kind))
+    bytes.putString(seat.name)
+
+proc getSeats(reader: var PacketReader): seq[Seat] =
+  ## Reads routing metadata without interpreting game configuration.
+  for i in 0 ..< reader.count(MaxSeats):
+    result.add Seat(owner: reader.get32(), kind: reader.getSeatKind(),
+      name: reader.getString(96))
+
+proc setupHash*(snapshot: RoomMessage): uint64 =
+  ## Hashes exact setup bytes and slot responsibilities, never ready state.
+  var bytes = "Polyworld room setup v5"
+  bytes.put32(snapshot.tickRate)
+  bytes.putSeats(snapshot.seats)
+  for seat in snapshot.seats:
+    var name: string
+    if seat.owner != 0:
+      for participant in snapshot.participants:
+        if participant.id == seat.owner:
+          name = participant.name
+          break
+    bytes.putString(name)
+  bytes.putString(snapshot.payload)
+  result = 14695981039346656037'u64
+  for value in bytes:
+    result = (result xor uint64(ord(value))) * 1099511628211'u64
 
 proc getCommand(reader: var PacketReader): Command =
   ## Reads a command without interpreting game data.
   result.participant = reader.get32()
   result.seat = reader.get32()
+  result.seatKind = reader.getSeatKind()
   result.sequence = reader.get64()
   result.payload = reader.getString(MaxCommandBytes)
 
@@ -170,7 +219,7 @@ proc encode*(message: RoomMessage): string =
       result.put32(uint32(room.phase))
       result.put32(room.occupied)
       result.put32(room.seats)
-  of RoomState:
+  of RoomState, BeginMatch:
     result.putString(message.room)
     result.putString(message.name)
     result.put32(message.participant)
@@ -185,33 +234,34 @@ proc encode*(message: RoomMessage): string =
       result.putString(participant.name)
       result.put32(uint32(participant.connected))
       result.put32(uint32(participant.ready))
-    result.put32(uint32(message.seats.len))
-    for seat in message.seats:
-      result.put32(seat.owner)
-      result.putString(seat.name)
+    result.putSeats(message.seats)
+    if message.kind == BeginMatch:
+      result.put64(message.hash)
   of ClaimSeat:
     result.put32(message.seat)
+    result.put32(message.participant)
+    result.put32(uint32(message.seatKind))
     result.putString(message.name)
   of ReleaseSeat:
     result.put32(message.seat)
-  of Ready, Prepared, StartMatch:
-    result.put32(message.revision)
-    result.put64(message.hash)
-  of BeginMatch:
+  of StartMatch:
     result.put32(message.revision)
     result.put64(message.hash)
   of SubmitCommand:
     result.put32(message.seat)
+    result.put32(uint32(message.seatKind))
     result.put64(message.sequence)
     result.putString(message.payload)
   of CommandAck:
     result.put64(message.sequence)
     result.put32(message.tick)
+    result.put32(uint32(message.flag))
   of TickPacket:
     result.put32(message.tick)
     result.put32(uint32(message.commands.len))
     for command in message.commands:
       result.putCommand(command)
+    result.putSeats(message.seats)
   of AppliedTick, Catchup:
     result.put32(message.tick)
   of CaughtUp:
@@ -290,7 +340,7 @@ proc decode*(bytes: string): RoomMessage =
         phase: reader.readPhase(), occupied: reader.get32(),
         seats: reader.get32()
       )
-  of RoomState:
+  of RoomState, BeginMatch:
     result.room = reader.getString(64)
     result.name = reader.getString(96)
     result.participant = reader.get32()
@@ -313,30 +363,36 @@ proc decode*(bytes: string): RoomMessage =
       participant.connected = connected == 1
       participant.ready = ready == 1
       result.participants.add participant
-    for i in 0 ..< reader.count(MaxSeats):
-      result.seats.add Seat(owner: reader.get32(), name: reader.getString(96))
+    result.seats = reader.getSeats()
+    if result.kind == BeginMatch:
+      result.hash = reader.get64()
   of ClaimSeat:
     result.seat = reader.get32()
+    result.participant = reader.get32()
+    result.seatKind = reader.getSeatKind()
     result.name = reader.getString(96)
   of ReleaseSeat:
     result.seat = reader.get32()
-  of Ready, Prepared, StartMatch:
-    result.revision = reader.get32()
-    result.hash = reader.get64()
-  of BeginMatch:
+  of StartMatch:
     result.revision = reader.get32()
     result.hash = reader.get64()
   of SubmitCommand:
     result.seat = reader.get32()
+    result.seatKind = reader.getSeatKind()
     result.sequence = reader.get64()
     result.payload = reader.getString(MaxCommandBytes)
   of CommandAck:
     result.sequence = reader.get64()
     result.tick = reader.get32()
+    let discarded = reader.get32()
+    if discarded > 1:
+      reject("Invalid command acknowledgement flag")
+    result.flag = discarded == 1
   of TickPacket:
     result.tick = reader.get32()
     for i in 0 ..< reader.count(MaxCommandsPerTick):
       result.commands.add reader.getCommand()
+    result.seats = reader.getSeats()
   of AppliedTick, Catchup:
     result.tick = reader.get32()
   of CaughtUp:

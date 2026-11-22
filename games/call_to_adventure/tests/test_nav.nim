@@ -2,7 +2,7 @@ import
   std/[os, tempfiles],
   bassy,
   polyworld/[bodies, cli, pathing],
-  ../[bots, content, replays, sim]
+  ../[bots, content, maps, replays, sim]
 
 proc flatFloor(width, depth: int): QuadLayer =
   ## Builds connected tiles for an isolated navigation scenario.
@@ -129,6 +129,80 @@ block:
   world.actors[slot].body.facing = FixedPi
   world.finishPath(slot, goal, 300)
   world.finishPath(slot, start, 300)
+
+echo "Testing CTA actors use a straight lane in both directions on each flight"
+block:
+  let dungeon = generateMap(2026)
+  for stair in dungeon.ramps:
+    let
+      top = TileRef(level: int8(stair.upper),
+        x: uint8(stair.topX), z: uint8(stair.topZ))
+      bottom = TileRef(level: int8(stair.lower),
+        x: uint8(stair.bottomX), z: uint8(stair.bottomZ))
+      world = newWorld(Setup(seed: 2026))
+      slot = world.walker(top, ClassSpeeds[RogueClass])
+      actor = world.actors[slot]
+    for goal in [bottom, top]:
+      # Start off-centre so entering a stair must first line up with the lane.
+      actor.body.pos.x += 0.27'fx
+      doAssert world.setPath(slot, goal)
+      var flightTicks = 0
+      for _ in 0 ..< 320:
+        discard world.advancePath(slot)
+        let home = actor.home
+        doAssert home.walkable
+        if stairFlight(int(home.level), int(home.x), int(home.z)):
+          inc flightTicks
+          doAssert home.x == top.x
+          doAssert abs(actor.body.pos.x - (fixed(int32(top.x)) + 0.5'fx)) <
+            0.002'fx, "the actor drifted out of its stair lane: " &
+            $actor.body.pos & " tile " & $home & " goal " & $goal &
+            " waypoints " & $actor.path
+        if not actor.moving:
+          break
+      doAssert actor.home == goal and flightTicks > 0, $actor.home & " -> " & $goal
+
+echo "Testing crowded stair routes retain their entry lane"
+block:
+  let
+    dungeon = generateMap(2026)
+    stair = dungeon.ramps[0]
+    world = newWorld(Setup(seed: 2026))
+    start = TileRef(level: int8(stair.upper), x: uint8(stair.topX - 1),
+      z: uint8(stair.topZ))
+    goal = TileRef(level: int8(stair.lower), x: uint8(stair.bottomX + 1),
+      z: uint8(stair.bottomZ))
+    slot = world.walker(start, ClassSpeeds[RogueClass])
+  discard world.walker(TileRef(level: int8(stair.lower),
+    x: start.x, z: uint8(stair.topZ + 3)), ClassSpeeds[WizardClass])
+  var lane = -1
+  doAssert world.setPath(slot, goal)
+  for step in world.actors[slot].path:
+    if stairFlight(int(step.tile.level), int(step.tile.x), int(step.tile.z)):
+      if lane < 0:
+        lane = int(step.tile.x)
+      doAssert int(step.tile.x) == lane
+  doAssert lane >= 0
+  world.finishPath(slot, goal, 380)
+
+echo "Testing the whole party can walk through the Surface stair mouth"
+block:
+  let game = newGame(2026)
+  let stair = game.dungeon.ramps[0]
+  let landing = TileRef(level: int8(stair.lower),
+    x: uint8(stair.bottomX), z: uint8(stair.bottomZ))
+  var crossed: set[HeroClass]
+  for _ in 0 ..< 650:
+    game.tickWorld(proc(game: Game, slot: int32) =
+      discard game.world.stepToward(slot, landing)
+    )
+    for slot in 0 ..< PartySize:
+      let actor = game.world.actors[slot]
+      if actor.home.level == landing.level:
+        crossed.incl actor.heroClass
+    if crossed == {low(HeroClass) .. high(HeroClass)}:
+      break
+  doAssert crossed == {low(HeroClass) .. high(HeroClass)}, $crossed
 
 echo "Testing CTA navigation recovers after a moving target reverses"
 block:

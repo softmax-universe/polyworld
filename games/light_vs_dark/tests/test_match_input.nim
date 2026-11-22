@@ -38,7 +38,27 @@ suite "LvD match menu input isolation":
     run = Game(world: newWorld(generateMap(47, 3), 100))
     var
       matchMenu = HiddenMatchMenu
+      preferences: Preferences
       actionCam = initActionCam(subjectMode = true)
+      fixtureConfined, observedConfined: bool
+      observedMode: EdgeScrollMode
+      panReads: int
+    proc cursorConfined(current: Window): bool =
+      ## Supplies the native click latch without capturing the user's cursor.
+      doAssert current == window
+      fixtureConfined
+    proc rtsPanDir(current: Window,
+        edgeScrolling = FullscreenEdgeScroll,
+        edgeMargin = RtsEdgePanMargin, pointerConfined = false): Vec2 =
+      ## Observes the production camera's policy and confinement arguments.
+      doAssert current == window
+      observedMode = edgeScrolling
+      observedConfined = pointerConfined
+      inc panReads
+      if edgeScrolling == AlwaysEdgeScroll and pointerConfined:
+        vec2(1, 0)
+      else:
+        vec2(0)
     actionCam.takeManual()
     graphicsRoutine("playerMode")
     graphicsRoutine("selectionTarget")
@@ -109,6 +129,25 @@ suite "LvD match menu input isolation":
     check not minimapPanning
     check not lineGesture.active
 
+    # The camera must use the saved mode and the current native click latch.
+    finishHumanCommunicationFrame()
+    window.state.buttonDown = {}
+    window.state.perFrame = PerFrame()
+    sk.mousePos = vec2(800, 500)
+    for mode in EdgeScrollMode:
+      for confined in [false, true]:
+        preferences.edgeScrolling = mode
+        fixtureConfined = confined
+        cameraTarget = vec3(0)
+        followSelection = false
+        let previousReads = panReads
+        updateCamera(0.1, focused = true)
+        check panReads == previousReads + 1
+        check observedMode == mode
+        check observedConfined == confined
+        check (cameraTarget.x > 0) == (mode == AlwaysEdgeScroll and confined)
+    check not window.visible
+
   test "menu entry cancels immediately and menu/UI bindings remain usable":
     window = newWindow("LvD menu bindings", ivec2(1600, 1000), visible = false)
     defer:
@@ -125,6 +164,12 @@ suite "LvD match menu input isolation":
       network: NetworkMatch
       scene: CharacterScene
       actionCam = initActionCam(subjectMode = true)
+      captureCalls: seq[Button]
+    let hooks = GraphicsHooks()
+    proc captureCursorConfinement(current: Window, button: Button) =
+      ## Records dispatch before input gates without moving the system cursor.
+      doAssert current == window
+      captureCalls.add(button)
     graphicsRoutine("playerMode")
     graphicsRoutine("buttonHandler")
     graphicsRoutine("releaseHandler")
@@ -133,6 +178,17 @@ suite "LvD match menu input isolation":
       window.onButtonPress(button)
       window.state.buttonDown.excl button
       window.onButtonRelease(button)
+
+    for page in [HiddenMatchMenu, PauseMenu, MatchSettings]:
+      for capturing in [false, true]:
+        matchMenu = page
+        bindingCapture = capturing
+        captureCalls.setLen(0)
+        window.onButtonPress(MouseLeft)
+        doAssert captureCalls == @[MouseLeft],
+          "The first physical click must reach confinement before UI gates."
+    bindingCapture = false
+    matchMenu = HiddenMatchMenu
 
     pendingBuild = -1
     attackMoveArmed = false

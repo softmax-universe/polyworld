@@ -42,7 +42,7 @@ try:
       if host: writeFile(prefix & ".room", client.snapshot.room)
       client.claimHumanSeat(if host: 0 else: 5)
       if host:
-        client.send(RoomMessage(kind: ClaimSeat, seat: 2, name: "Private base bot"))
+        client.send(RoomMessage(kind: ClaimSeat, seat: 2, seatKind: BotSeat, name: "Private base bot"))
       claimed = true
     if client.snapshot.phase == Lobby and client.snapshot.seats.len == 10:
       if session.returnedToLobby():
@@ -87,10 +87,12 @@ try:
       picks = 0
       echo "START role=", role, " round=", completed + 1, " match=", event.match
     if session != nil and session.started and not session.finished:
+      session.resumeControls()
       run = session.game
       options.playerSlot = int32(session.humanHeroIndex() + 1)
       let active = run.world.draftHeroId()
-      if picks == 0 and active != 0 and run.world.heroIndex(active) == session.humanHeroIndex():
+      if session.liveControlReady() and picks == 0 and active != 0 and
+          run.world.heroIndex(active) == session.humanHeroIndex():
         inc picks
         queueDraft(active, if host: 0 else: 1)
         session.flushSubmissions()

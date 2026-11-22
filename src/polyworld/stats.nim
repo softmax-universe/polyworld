@@ -1,10 +1,7 @@
 import
-  std/algorithm,
+  std/[algorithm, os],
   chroma, pixie, silky, vmath, windy,
-  actioncam, chrome, gameuis, inputs, metrics
-
-when defined(takeScreenshot):
-  import std/os
+  actioncam, chrome, gameuis, inputs, metrics, screenshots
 
 const
   StatsWidth* = 1440.0'f
@@ -46,11 +43,11 @@ type
     finalTable: StatsTable
   StatsOptions* = object
     ## Opt-in presentation; defaults preserve all existing game layouts.
-    headline*, headlineSuffix*: string
+    headline*, headlineSuffix*, statusText*: string
     individualPlayers*: bool
     scores*: seq[int64] ## Optional game-owned Score values indexed by stable slot.
   StatsLayout* = object
-    panel*, headline*, header*, body*: GameUiPanel
+    panel*, headline*, kills*, status*, header*, body*: GameUiPanel
     contentHeight*, maxScroll*: float32
   StatsColumn = object
     label: string
@@ -202,10 +199,12 @@ proc statsLayout*(layout: GameUiLayout, table: StatsTable,
   let
     area = layout.gameAreaSize
     headline = if options.headline.len > 0: StatsKillsHeight else: 0.0'f
-    kills = (if table.kind == GotaStats: StatsKillsHeight else: 0.0'f) + headline
+    killsHeight = if table.kind == GotaStats: StatsKillsHeight else: 0.0'f
+    statusHeight = if options.statusText.len > 0: StatsHeaderHeight else: 0.0'f
+    topHeight = headline + killsHeight + statusHeight
     content = table.rows.len.float32 * StatsRowHeight +
       bands.float32 * StatsBandHeight
-    height = min(content + StatsHeaderHeight + kills + StatsPadding * 2,
+    height = min(content + StatsHeaderHeight + topHeight + StatsPadding * 2,
       max(area.y - layout.margin * 2, 0))
     width = min(StatsWidth, max(area.x - layout.margin * 2, 0))
   result.panel = layout.panel(GameUiRegion.Center, vec2(width, height))
@@ -213,14 +212,22 @@ proc statsLayout*(layout: GameUiLayout, table: StatsTable,
     origin: result.panel.origin + vec2(StatsPadding),
     size: vec2(max(width - StatsPadding * 2, 0), headline)
   )
+  result.kills = GameUiPanel(
+    origin: result.headline.origin + vec2(0, headline),
+    size: vec2(result.headline.size.x, killsHeight)
+  )
+  result.status = GameUiPanel(
+    origin: result.kills.origin + vec2(0, killsHeight),
+    size: vec2(max(width - StatsPadding * 2, 0), statusHeight)
+  )
   result.header = GameUiPanel(
-    origin: result.panel.origin + vec2(StatsPadding, StatsPadding + kills),
+    origin: result.status.origin + vec2(0, statusHeight),
     size: vec2(max(width - StatsPadding * 2, 0), StatsHeaderHeight)
   )
   result.body = GameUiPanel(
     origin: result.header.origin + vec2(0, StatsHeaderHeight),
     size: vec2(result.header.size.x,
-      max(height - StatsPadding * 2 - kills - StatsHeaderHeight, 0))
+      max(height - StatsPadding * 2 - topHeight - StatsHeaderHeight, 0))
   )
   result.contentHeight = content
   result.maxScroll = max(content - result.body.size.y, 0)
@@ -271,9 +278,8 @@ proc drawStats*(sk: Silky, window: Window, layout: GameUiLayout,
     state: var StatsState, current: StatsTable, history: MetricHistory,
     options = StatsOptions()) =
   ## Draws the overlay after the normal world, HUD, and transport pass.
-  when defined(takeScreenshot):
-    if existsEnv("SHOW_STATS"):
-      state.toggled = true
+  if captureActive() and existsEnv("SHOW_STATS"):
+    state.toggled = true
   let table = state.displayedTable(
     current,
     window.buttonPressed[KeySpace] or
@@ -295,8 +301,11 @@ proc drawStats*(sk: Silky, window: Window, layout: GameUiLayout,
   if options.headline.len > 0:
     sk.drawLabel(sk.fittedStatsHeadline(options, slots.headline.size.x),
       slots.headline.origin, slots.headline.size, GoldColor, "H1", CenterAlign)
+  if options.statusText.len > 0:
+    sk.drawLabel(sk.fittedLabel(options.statusText, slots.status.size.x),
+      slots.status.origin, slots.status.size, GoldColor, align = CenterAlign)
   if table.kind == GotaStats:
-    let center = slots.panel.origin + vec2(slots.panel.size.x / 2, 16)
+    let center = slots.kills.origin + vec2(slots.kills.size.x / 2, 0)
     sk.drawLabel($table.kills[1], center - vec2(132, 0), vec2(88, 48),
       BlueColor, "H1", align = RightAlign)
     sk.drawLabel("KILLS", center - vec2(42, 0), vec2(84, 48),
@@ -455,9 +464,8 @@ proc drawStatsOverlay*(sk: Silky, window: Window, layout: GameUiLayout,
     state: var StatsState, current: StatsTable, history: MetricHistory,
     options = StatsOptions()) =
   ## Draws the readable overlay in its own pass after the ordinary HUD.
-  when defined(takeScreenshot):
-    if existsEnv("SHOW_STATS"):
-      state.toggled = true
+  if captureActive() and existsEnv("SHOW_STATS"):
+    state.toggled = true
   if not state.visible(window.tabHeld):
     return
   let

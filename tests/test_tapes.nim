@@ -1,10 +1,33 @@
 import
-  std/strutils,
+  std/[os, strutils, tempfiles],
   polyworld/tapes
 
 type TapeAction = object
   tick*: uint32
   kind*: uint8
+
+echo "Testing replay files create missing output directories"
+block:
+  let
+    directory = createTempDir("polyworld_tape_", "")
+    path = directory / "nested" / "match.replay"
+  defer: removeDir(directory)
+  saveReplayFile(path, "test", 1, "commands")
+  doAssert loadReplayFile(path, "test", 1, string) == "commands"
+
+echo "Testing invalid replay output creates no directories"
+block:
+  let
+    directory = createTempDir("polyworld_invalid_tape_", "")
+    parent = directory / "nested"
+    path = parent / "match.replay"
+  defer: removeDir(directory)
+  try:
+    saveReplayFile(path, "test", 1, "too large", maxBytes = 1)
+    doAssert false, "Invalid replay data must be rejected"
+  except ReplayError:
+    discard
+  doAssert not dirExists(parent)
 
 echo "Testing action order and exact-tick playback"
 block:
@@ -124,6 +147,51 @@ block:
   doAssert player.hashAt(4, hash) and hash == 0x44
   player.syncCursor(0)
   doAssert not player.finished
+
+echo "Testing mixed game commands keep one replay order"
+block:
+  type
+    Setup = object
+      maximumTicks*: uint32
+    CommandKind = enum
+      Move, Chat
+    Command = object
+      tick*: uint32
+      kind*: CommandKind
+      target*: int
+      text*: string
+    CommandTape = ActionTape[Setup, Command]
+  let
+    setup = Setup(maximumTicks: 2)
+    recorder = initTapeRecorder[Setup, Command](setup, 2, 1)
+    commands = @[
+      Command(tick: 0, kind: Chat, text: "opening"),
+      Command(tick: 1, kind: Move, target: 3),
+      Command(tick: 1, kind: Chat, text: "hello 🙂"),
+      Command(tick: 1, kind: Move, target: 7),
+      Command(tick: 1, kind: Chat, text: "hello 🙂"),
+      Command(tick: 2, kind: Chat, text: "team reply")]
+  for command in commands:
+    recorder.data.actions.appendAction(command, 10)
+  recorder.recordHash(0x11, 10)
+  recorder.recordHash(0x22, 10)
+  let
+    bytes = encodeReplayFile("command_test", 1, recorder.data)
+    decoded = decodeReplayFile("command_test", 1, bytes, CommandTape)
+    player = initTapePlayer(decoded)
+  doAssert decoded == recorder.data
+  doAssert player.actionsAt(0) == commands[0 .. 0]
+  doAssert player.actionsAt(1) == commands[1 .. 4],
+    "Same-tick chat and movement must keep their original interleaving"
+  doAssert player.actionsAt(2) == commands[5 .. 5]
+  doAssert player.finished
+  player.syncCursor(0)
+  doAssert not player.finished
+  doAssert player.actionsAt(1) == commands[1 .. 4]
+  player.syncCursor(1)
+  doAssert player.actionsAt(2) == commands[5 .. 5]
+  var hash: uint64
+  doAssert player.hashAt(2, hash) and hash == 0x22
 
 echo "Testing replay completion rejects divergence and missing ticks"
 block:

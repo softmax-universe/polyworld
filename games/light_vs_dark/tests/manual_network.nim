@@ -84,7 +84,7 @@ proc main() =
             echo "CREATED private=true room=", client.snapshot.room
           else:
             echo "JOINED room=", client.snapshot.room
-          client.send(RoomMessage(kind: ClaimSeat, seat: uint32(seat), name: "base"))
+          client.send(RoomMessage(kind: ClaimSeat, seat: uint32(seat), seatKind: BotSeat, name: "base"))
         let full = client.snapshot.seats[0].owner != 0 and
           client.snapshot.seats[1].owner != 0
         if full and client.snapshot.phase == Lobby and revision != client.snapshot.revision:
@@ -96,26 +96,20 @@ proc main() =
           require(session.game.brains[seat] != nil and
             session.game.brains[1 - seat] == nil, "Only the owned private policy may run")
           revision = client.snapshot.revision
-          client.send(RoomMessage(kind: Ready, revision: revision,
-            hash: session.game.networkHash()))
           startRequested = false
-          echo "READY revision=", revision, " localBrain=", seat,
+          echo "LOADED revision=", revision, " localBrain=", seat,
             " remoteBrain=nil hash=", session.game.networkHash()
         if seat == 0 and session != nil and client.snapshot.phase == Lobby and
             not startRequested:
-          var everyoneReady = true
-          for currentSeat in client.snapshot.seats:
-            var ownerReady = false
-            for participant in client.snapshot.participants:
-              if participant.id == currentSeat.owner: ownerReady = participant.ready
-            everyoneReady = everyoneReady and ownerReady
-          if everyoneReady:
-            client.send(RoomMessage(kind: StartMatch))
-            startRequested = true
-            echo "START requested"
+          client.send(RoomMessage(kind: StartMatch, revision: revision,
+            hash: setupHash(client.snapshot)))
+          startRequested = true
+          echo "START requested"
       for event in client.events:
-        require(session != nil, "BeginMatch arrived before local preparation")
-        session.start(event)
+        if session == nil or session.revision != event.revision:
+          session = prepareNetworkMatch(client, sources)
+        if not session.started:
+          session.start(event)
         echo "STARTED match=", client.match
       client.events.setLen(0)
       if session != nil and session.started and not session.finished and client.welcomed:
@@ -134,24 +128,28 @@ proc main() =
         let data = loadReplay(replayFile)
         require(data.hashes.len == ticks, "Recording does not cover every tick")
         var playerActions: array[2, int]
-        for action in data.actions: inc playerActions[action.playerId]
+        for action in data.actions:
+          if action.kind != ActionChat:
+            inc playerActions[action.playerId]
         require(playerActions[0] > 0 and playerActions[1] > 0,
           "Both separately owned bots must contribute accepted actions")
         let
           playback = newGame(session.game.world.map, int32(ticks),
             data.header.setup.diplomacySettings)
           cursor = initReplayPlayer(data)
+        cursor.syncCursor(0)
         proc replay(world: World) =
           var action: ReplayAction
           while cursor.takeActionAt(uint32(world.tick), action):
-            require(world.applyReplayAction(action), "Replay action was rejected")
+            if action.kind != ActionChat:
+              require(world.applyReplayAction(action), "Replay action was rejected")
         for tick in 1 .. data.hashes.len:
           playback.world.tickWorld(replay)
           require(playback.stateHash() == data.hashes[tick - 1],
             "Replay hash mismatch at tick " & $tick)
         require(playback.stateHash() == session.game.stateHash(), "Replay final hash differs")
         report = Result(name: name, participant: client.participant, seat: seat,
-          tick: int(session.game.world.tick), actions: data.actions.len,
+          tick: int(session.game.world.tick), actions: data.commandCount(),
           replayTicks: data.hashes.len, hash: session.game.stateHash(),
           networkHash: session.game.networkHash(), reconnected: reconnected)
         writeFile(resultFile, report.toJson())

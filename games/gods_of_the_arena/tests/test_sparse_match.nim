@@ -1,16 +1,16 @@
 import jsony
-import polyworld/[rooms, roomclients, tapes]
-import ../[maps, multiplayer, replays, sim]
+import polyworld/[rooms, roomclients, tapes, metrics]
+import ../[content, maps, multiplayer, replays, sim]
 
 let config = parseConfig("{\"maxTicks\":48,\"draftMode\":\"open\"}")
 let base = readFile("games/gods_of_the_arena/players/base.bas")
-var snapshot = RoomMessage(kind: RoomState, revision: 1, tickRate: 24,
+var snapshot = RoomMessage(kind: RoomState, phase: rooms.Playing, revision: 1, tickRate: 24,
   payload: config.toJson(), seats: newSeq[Seat](10),
   participants: @[Participant(id: 1, name: "Alice"), Participant(id: 2, name: "Bob")])
 snapshot.seats[3] = Seat(owner: 1, name: "Human")
-snapshot.seats[8] = Seat(owner: 2, name: "Base bot")
-let a = RoomClient(began: true, welcomed: true, match: 1, participant: 1, snapshot: snapshot)
-let b = RoomClient(began: true, welcomed: true, match: 1, participant: 2, snapshot: snapshot)
+snapshot.seats[8] = Seat(owner: 2, kind: BotSeat, name: "Base bot")
+let a = RoomClient(began: true, connected: true, welcomed: true, match: 1, participant: 1, snapshot: snapshot, initialSnapshot: snapshot)
+let b = RoomClient(began: true, connected: true, welcomed: true, match: 1, participant: 2, snapshot: snapshot, initialSnapshot: snapshot)
 var sources = newSeq[string](10)
 sources[8] = base
 sources[0] = base # stale source on an empty slot must be ignored
@@ -21,15 +21,15 @@ doAssert first.game.world.heroes[0].id == FirstHeroId + 3
 doAssert first.game.world.heroes[1].id == FirstHeroId + 8
 doAssert first.game.world.heroes[0].team != first.game.world.heroes[1].team
 doAssert first.game.world.draftOrder.len == 2
-let begin = RoomMessage(kind: BeginMatch, revision: 1, match: 1, hash: first.game.networkHash())
-doAssert second.game.networkHash() == begin.hash
+let begin = RoomMessage(kind: BeginMatch, revision: 1, match: 1, hash: setupHash(snapshot))
+doAssert second.game.networkHash() == first.game.networkHash()
 first.start(begin)
 second.start(begin)
 var tick = 0'u32
 var botCommands = 0
 while not first.finished:
   inc tick
-  var packet = RoomMessage(kind: TickPacket, match: 1, tick: tick)
+  var packet = RoomMessage(kind: TickPacket, match: 1, tick: tick, seats: snapshot.seats)
   # Drive draft from the real seat identifiers, not packed hero indices.
   let id = first.game.world.draftHeroId()
   if id == FirstHeroId + 3:
@@ -42,17 +42,39 @@ while not first.finished:
     if message.kind == SubmitCommand:
       inc botCommands
       doAssert message.seat == 8
-      packet.commands.add Command(participant: 2, seat: message.seat,
+      packet.commands.add Command(participant: 2, seat: message.seat, seatKind: BotSeat,
         sequence: message.sequence, payload: message.payload)
   b.outgoing.setLen(0)
   a.outgoing.setLen(0)
   first.applyPacket(packet)
   second.applyPacket(packet)
   doAssert first.game.stateHash() == second.game.stateHash()
-  doAssert tick < 100
+  if tick == 12:
+    # Save a live sparse match through the same telemetry path as the menu.
+    first.game.sampleMetrics(true)
+    var paused = first.game.recorder.data
+    paused.metrics = first.game.history.replayMetrics()
+    doAssert paused.config.players.len == HeroClassCount
+    doAssert paused.header.setup.heroes.len == 2
+    doAssert paused.metrics.final.len == 2
+    let restored = decodeReplay(encodeReplay(paused))
+    doAssert restored.actions == paused.actions
+    doAssert restored.hashes == paused.hashes
+    doAssert restored.metrics == paused.metrics
+    var invalid = paused
+    invalid.metrics.final.setLen(HeroClassCount)
+    var rejected = false
+    try:
+      discard encodeReplay(invalid)
+    except ReplayError:
+      rejected = true
+    doAssert rejected, "Replay telemetry must match active heroes, not empty slots"
+  doAssert tick < uint32(100 + PreparationTicks)
 doAssert botCommands > 0, "An actual sparse bot must submit commands"
+first.game.recorder.data.metrics = first.game.history.replayMetrics()
 let data = decodeReplay(encodeReplay(first.game.recorder.data))
 data.validate()
+doAssert data.metrics.final.len == data.header.setup.heroes.len
 let replay = newGame(generateMap(data.config.seed, data.config.mapPreset),
   data.config.spawnIntervalTicks, 0, true, data)
 replay.historyPlayback = true

@@ -1,4 +1,4 @@
-"""Protect LvD compact home routing while preserving other games' layout."""
+"""Protect LvD compact main menu routing while preserving other games' layout."""
 import pathlib
 import re
 import unittest

@@ -56,7 +56,7 @@ and select the compiler version used for this guide:
 ```sh
 nimble install -y nimby
 export PATH="$HOME/.nimble/bin:$HOME/.local/bin:$PATH"
-nimby use 2.2.10
+nimby use 2.4.0
 export PATH="$HOME/.nimby/nim/bin:$PATH"
 nim --version
 git lfs version
@@ -74,18 +74,17 @@ Run this block from the directory where you want that workspace:
 mkdir gota-workspace
 cd gota-workspace
 git lfs install
-git clone https://github.com/Metta-AI/polyworld.git
-git clone https://github.com/Metta-AI/polyworld_art.git
+git clone https://github.com/softmax-universe/polyworld.git
+git clone https://github.com/softmax-universe/polyworld_art.git
 git -C polyworld_art lfs pull
 nimby create
-nimby install polyworld/polyworld.nimble
 nimby sync polyworld/nimby.lock
 cd polyworld
 ```
 
-The install step includes dependencies declared in the Nimble file. The sync
-step then applies the repository's dependency lock file.
-Run both steps from `gota-workspace`, not from inside the `polyworld` checkout.
+The sync step installs the repositories and exact revisions recorded in
+`nimby.lock`. Run it from `gota-workspace` so dependencies become siblings of
+the `polyworld` checkout.
 Assets now live in `polyworld_art`, not the older `polyworld_data` repository.
 For assets stored elsewhere, set `POLYWORLD_ART` to that checkout's absolute path.
 

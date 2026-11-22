@@ -1,6 +1,6 @@
 import std/[strutils, unittest]
 import jsony, polyworld/[rooms, roomclients, relays]
-import ../[lobbies, multiplayer, presets, content, lobbyreadiness]
+import ../[lobbies, multiplayer, presets, content]
 let source = readFile("games/light_vs_dark/frontend.nim")
 doAssert "roomName = defaultGameName(preferences.name)" in source
 when declared(defaultGameName):
@@ -139,51 +139,36 @@ suite "LvD name-only real relay operation":
     check guest.snapshot.name == before.name
     check guest.snapshot.revision == before.revision
 
-  test "retained intent requires both controllers to refresh revision-bound hashes":
+  test "rename keeps cosmetic readiness and start uses the new setup revision":
     let f = nameLobby(false)
     let host = f.clients[0]
     let guest = f.clients[1]
-    var hostPrepared = prepareNetworkMatch(host, [])
-    var guestPrepared = prepareNetworkMatch(guest, [])
-    var hostRevision = hostPrepared.revision
-    var guestRevision = guestPrepared.revision
-    var hostRefresh, guestRefresh: ReadyRefresh
     for client in f.clients:
-      client.send(RoomMessage(kind: Ready, revision: client.snapshot.revision,
-        hash: hostPrepared.game.networkHash()))
+      client.send(RoomMessage(kind: ReadyStatus, flag: true))
     f.exchange()
-    let oldRevision = hostRevision
-    let oldHash = hostPrepared.game.networkHash()
+    let oldRevision = host.snapshot.revision
+    let oldHash = setupHash(host.snapshot)
     check host.renameGame("空 白 🙂 \"ready\": (retained)")
     f.exchange()
     check host.snapshot.revision > oldRevision
     check f.relay.guest(host.participant).ready
     check f.relay.guest(guest.participant).ready
-    host.send(RoomMessage(kind: StartMatch))
+    host.send(RoomMessage(kind: StartMatch, revision: oldRevision, hash: oldHash))
     f.exchange()
-    check host.error == ""
+    check host.error.len > 0
     check host.snapshot.phase == Lobby
-    guest.send(RoomMessage(kind: Ready, revision: oldRevision, hash: oldHash))
+    host.error = ""
+    let hostPrepared = requestStart(host, [])
     f.exchange()
-    check guest.error.len > 0
-    guest.error = ""
-    check hostRefresh.refreshRetainedReady(host, [], hostPrepared, hostRevision)
-    check hostRevision == host.snapshot.revision
-    f.exchange()
-    check host.error == ""
-    check host.snapshot.phase == Lobby
-    check guestRefresh.refreshRetainedReady(guest, [], guestPrepared, guestRevision)
-    check guestRevision == guest.snapshot.revision
-    check hostPrepared.game.networkHash() == guestPrepared.game.networkHash()
-    f.exchange()
-    check not hostRefresh.refreshRetainedReady(host, [], hostPrepared, hostRevision)
-    check not guestRefresh.refreshRetainedReady(guest, [], guestPrepared, guestRevision)
     check host.error == ""
     check guest.error == ""
     check host.snapshot.phase == Playing
     check guest.snapshot.phase == Playing
     require host.events.len == 1
     require guest.events.len == 1
+    let guestPrepared = prepareNetworkMatch(guest, [])
     hostPrepared.start(host.events[0])
     guestPrepared.start(guest.events[0])
+    f.exchange()
     check hostPrepared.started and guestPrepared.started
+    check hostPrepared.game.networkHash() == guestPrepared.game.networkHash()

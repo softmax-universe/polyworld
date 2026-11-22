@@ -15,8 +15,8 @@ proc consider(point, position: WorldPoint, id: int32,
       selected = id
 
 proc nearbyTarget*(world: World, team: Team, point: WorldPoint,
-    healing = false): int32 =
-  ## Finds a living visible enemy, or an allied hero for healing, within two tiles.
+    healing = false, denyingHeroId = 0'i32): int32 =
+  ## Finds visible enemies, healing allies, or explicitly requested creep denies.
   var best = int64(2 * WorldScale) * (2 * WorldScale)
   for hero in world.heroes:
     if hero.id == 0 or hero.hp <= 0 or hero.state == Dying or
@@ -25,8 +25,13 @@ proc nearbyTarget*(world: World, team: Team, point: WorldPoint,
     consider(point, hero.position, hero.id, best, result)
   if healing:
     return
+  let
+    denier = world.heroById(denyingHeroId)
+    canDeny = denier.id != 0 and denier.team == team and
+      denier.hp > 0 and denier.state != Dying
   for unit in world.footmen:
-    if not world.hostile(unit, team, engageResting = true) or
+    let deniable = canDeny and world.canDeny(denier, unit.id)
+    if (not world.hostile(unit, team, engageResting = true) and not deniable) or
       not world.visible(team, unit.position):
         continue
     consider(point, unit.position, unit.id, best, result)

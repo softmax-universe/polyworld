@@ -9,14 +9,16 @@ proc session(): NetworkMatch =
   config.maxTicks = TickRate * 10
   config.mapSettings = MapSettings(layout: RandomLayout, size: 90, expansions: 0)
   let client = RoomClient(identity: lvdIdentity(), participant: 1, match: 1,
-    began: true, welcomed: true)
+    began: true, welcomed: true, connected: true)
   client.snapshot = RoomMessage(kind: RoomState, revision: 2, phase: Playing,
     tickRate: uint32(TickRate), payload: config.toJson(), seats: @[
       Seat(owner: 1, name: "Human"), Seat(owner: 2, name: "Human")],
     participants: @[Participant(id: 1, name: "A"), Participant(id: 2, name: "B")])
+  client.initialSnapshot = client.snapshot
+  client.appliedSeats = client.snapshot.seats
   result = prepareNetworkMatch(client, ["", ""])
   result.start(RoomMessage(kind: BeginMatch, revision: 2, match: 1,
-    hash: result.game.networkHash()))
+    hash: setupHash(result.client.snapshot)))
 
 let reference = session()
 let delayed = session()
@@ -43,7 +45,8 @@ let unit = reference.game.world.units[0]
 let action = ReplayAction(kind: ActionMove, playerId: 0, entityId: unit.id,
   first: int32(unit.tile.x), second: int32(unit.tile.y))
 for tick in 1'u32 .. 48'u32:
-  let packet = RoomMessage(kind: TickPacket, match: 1, tick: tick,
+  let packet = RoomMessage(kind: TickPacket,
+    seats: reference.client.snapshot.seats, match: 1, tick: tick,
     commands: (if tick == 1: @[Command(participant: 1, seat: 0, sequence: 1,
       payload: encodeSubmission(action))] else: @[]))
   reference.applyPacket(packet)

@@ -15,7 +15,7 @@ import
   bassy,
   polyworld/[policyhosts, llms, mailboxes, bodies, metrics, profiles],
   content, maps,
-  sim
+  sim, replays, scriptlines
 
 when defined(coworld):
   import polyworld/coworld
@@ -119,7 +119,8 @@ template game(): World = activeGame.world
 
 proc unitFlags(unit: Unit, own: bool): int32 =
   ## Packs idle, failed-order, and carrying bits for one snapshot unit.
-  if unit.state == UnitIdle:
+  if unit.state == UnitIdle and
+      (not own or (not unit.hasGoal and unit.orderQueue.len == 0)):
     result = result or FlagIdle
   if own and unit.orderFailed:
     result = result or FlagOrderFailed
@@ -286,7 +287,7 @@ proc overlordLimits*(): Limits =
   result.maxArrayElements = 65_536
   result.maxGlobals = 1_024
   result.maxHostData = 64
-  result.maxHostFunctions = 128
+  result.maxHostFunctions = 256
   result.maxRoutines = 128
   result.maxParameters = 16
   result.maxRegisters = 512
@@ -304,26 +305,58 @@ proc observedAt(index: int32): Observed =
     return Observed(owner: -1)
   snapshot[index]
 
+proc scriptUnit(w: World, player, id: int32): int32 =
+  ## Limits live order and cargo readers to this player's living units.
+  let index = w.unitIndex(id)
+  if index < 0: return -1
+  let unit = w.units[index]
+  if unit.owner != player or unit.hp <= 0 or unit.state == UnitDying: return -1
+  index
+
+proc scriptBuilding(w: World, player, id: int32): int32 =
+  ## Limits live production and rally readers to this player's structures.
+  let index = w.buildingIndex(id)
+  if index < 0: return -1
+  let building = w.buildings[index]
+  if building.owner != player or building.hp <= 0 or
+      building.state == BuildingDying:
+    return -1
+  index
+
 proc deliverChat*(
-  game: Game, sender, target: int, text: openArray[char]
+  game: Game, sender, target: int, text: openArray[char], tick = -1'i32
 ): int32 =
-  ## Routes global broadcasts and direct messages between players.
+  ## Records authoritative chat and routes broadcasts and direct messages.
   if sender notin 0 ..< game.inboxes.len or
-    target < -2 or target == -1 or target >= game.inboxes.len:
+    target < -2 or target == -1 or target >= game.inboxes.len or
+    text.len == 0 or text.len > MaxChatBytes:
       return 0
-  let id = int32(if target < 0: target else: sender)
+  let id = receivedChatId(sender, target)
   for recipient in 0 ..< game.inboxes.len:
-    case target
-    of -2:
-      discard
-    else:
-      if recipient != target:
-        continue
-    if game.inboxes[recipient].push(id, text):
-      inc result
+    if (target == -2 or recipient == target) and
+      game.inboxes[recipient].count < MaxMailboxMessages:
+        inc result
+  if game.recorder != nil and (result > 0 or game.networked):
+    var copy = newString(text.len)
+    for i, ch in text:
+      copy[i] = ch
+    game.recorder.record(ReplayAction(
+      kind: ActionChat,
+      tick: uint32(if tick < 0: game.world.tick else: tick),
+      playerId: int32(sender),
+      target: int32(target),
+      text: copy
+    ))
+  for recipient in 0 ..< game.inboxes.len:
+    if target == -2 or recipient == target:
+      discard game.inboxes[recipient].push(id, text)
 
 proc sendChat*(game: Game, sender, target: int, text: openArray[char]): int32 =
   ## Networked mailboxes receive only authoritative relay deliveries.
+  if game.replayMode or game.historyPlayback or
+    (game.recorder != nil and (game.recorder.chatCount >= MaxReplayChats or
+      game.recorder.data.actions.len >= MaxReplayActions)):
+      return 0
   if not game.networked:
     return game.deliverChat(sender, target, text)
   if sender notin 0 ..< game.inboxes.len or target < -2 or target == -1 or
@@ -351,6 +384,7 @@ proc buildOverlordHost*(playerId: int32, llm: LlmClient = nil, policySlot = -1):
   result = initPolicyHost(policySlot)
   let services = if llm == nil: newLlmClient(0, LlmConfig()) else: llm
   services.addFunctions(result)
+  result.bindLineCommands(playerId, proc(): Game = activeGame)
   let sendChatProc: NumericHostProc = proc(args: openArray[Value]): Value =
     ## Sends script text through the game's routing rules.
     let player = int(playerId)
@@ -358,15 +392,8 @@ proc buildOverlordHost*(playerId: int32, llm: LlmClient = nil, policySlot = -1):
       result = activeGame.sendChat(player, int(args[0].asInt), text)
   let pullMailboxProc: NumericHostProc = proc(args: openArray[Value]): Value =
     ## Copies the oldest message into BASIC and consumes it on success.
-    let
-      player = int(playerId)
-      inbox = activeGame.inboxes[player]
-    var runtime = activeGame.brains[player].runtime
-    if inbox.count == 0:
-      result = runtime.putString("")
-    else:
-      result = runtime.putString(inbox.messages[inbox.first])
-    discard inbox.pop()
+    let player = int(playerId)
+    activeGame.brains[player].runtime.pullMailboxString(activeGame.inboxes[player])
   let mailboxIdProc: HostProc = proc(args: openArray[int32]): int32 =
     ## Returns the channel or DM sender of the last pulled message.
     activeGame.inboxes[int(playerId)].lastId
@@ -521,26 +548,9 @@ proc buildOverlordHost*(playerId: int32, llm: LlmClient = nil, policySlot = -1):
   discard result.addFunction("nearestMine", 2, nearestMineProc, 40)
 
   let nearestTreeProc: HostProc = proc(arguments: openArray[int32]): int32 =
-    ## Trees are terrain rather than intelligence, so they are not fogged.
-    ## Returns a flat tile index, which is what `harvest` wants for wood.
-    ## Rings are scanned outward and ties inside a ring go to the lowest
-    ## index, so the same question always gets the same answer.
-    result = -1
-    for radius in 0'i32 ..< game.map.side:
-      for dy in -radius .. radius:
-        for dx in -radius .. radius:
-          if max(abs(dx), abs(dy)) != radius:
-            continue
-          let
-            x = arguments[0] + dx
-            y = arguments[1] + dy
-          if not game.map.inGrid(x, y):
-            continue
-          let index = game.map.tileIndex(x, y)
-          if game.treeWood[index] > 0 and (result < 0 or index < result):
-            result = index
-      if result >= 0:
-        return
+    ## Uses the same distance ranking and stable ties as human woodcutters.
+    if not game.map.inGrid(arguments[0], arguments[1]): return -1
+    game.nearestTree(tile2(arguments[0], arguments[1]))
   discard result.addFunction("nearestTree", 2, nearestTreeProc, 160)
 
   let nearestDropOffProc: HostProc = proc(
@@ -572,6 +582,110 @@ proc buildOverlordHost*(playerId: int32, llm: LlmClient = nil, policySlot = -1):
     int32(game.canPlace(BuildingKind(arguments[0]), arguments[1],
       arguments[2]))
   discard result.addFunction("canPlace", 3, canPlaceProc, 20)
+
+  let canPlaceForProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Includes the selected builder's own occupancy exception.
+    if args[1] notin 0'i32 .. BuildableHigh.ord.int32: return 0
+    let size = BuildingTable[BuildingKind(args[1])].footprint
+    if args[2] < 0 or args[3] < 0 or args[2] > game.map.side - size.width or
+        args[3] > game.map.side - size.depth or
+        game.scriptUnit(playerId, args[0]) < 0:
+      return 0
+    int32(game.canPlace(playerId, BuildingKind(args[1]), args[2], args[3], args[0]))
+  discard result.addFunction("canPlaceFor", 4, canPlaceForProc, 20)
+
+  let canQueueBuildProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Checks an unpaid plan against the same queue and placement rules as Shift.
+    int32(game.canQueueBuild(playerId, args[0], args[1], args[2], args[3]))
+  discard result.addFunction("canQueueBuild", 4, canQueueBuildProc, 40)
+
+  let queuedOrderCountProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Counts pending unit orders, excluding the active one.
+    let index = game.scriptUnit(playerId, args[0])
+    if index < 0: 0 else: game.units[index].orderQueue.len.int32
+  discard result.addFunction("queuedOrderCount", 1, queuedOrderCountProc, 4)
+
+  template queuedReader(name: string, absent: int32, value: untyped) =
+    ## Exposes one own pending order field without leaking enemy plans.
+    let callback: HostProc = proc(args: openArray[int32]): int32 =
+      let index = game.scriptUnit(playerId, args[0])
+      if index < 0 or args[1] < 0 or args[1] >= game.units[index].orderQueue.len:
+        return absent
+      let order {.inject.} = game.units[index].orderQueue[args[1]]
+      value
+    discard result.addFunction(name, 2, callback, 4)
+  queuedReader("queuedOrderKind", 0, order.kind.int32)
+  queuedReader("queuedOrderFirst", -1, order.first)
+  queuedReader("queuedOrderSecond", -1, order.second)
+  queuedReader("queuedOrderThird", -1, order.third)
+
+  template queuedPointReader(name: string, horizontal: static bool) =
+    ## Returns the original decimal destination in script tile coordinates.
+    let callback: NumericHostProc = proc(args: openArray[Value]): Value =
+      let index = game.scriptUnit(playerId, args[0].asInt)
+      let slot = args[1].asInt
+      if index < 0 or slot < 0 or slot >= game.units[index].orderQueue.len:
+        return -1'i32
+      let order = game.units[index].orderQueue[slot]
+      case order.kind
+      of ActionMove, ActionAttackMove:
+        when horizontal: fixed(order.first) + order.offset.x
+        else: fixed(order.second) + order.offset.y
+      of ActionBuild:
+        when horizontal: fixed(order.second)
+        else: fixed(order.third)
+      else: fixed(-1)
+    discard result.addFunction(name, 2, callback, 4)
+  queuedPointReader("queuedOrderX", true)
+  queuedPointReader("queuedOrderY", false)
+
+  template cargoReader(name: string, field: untyped) =
+    ## Separates own gold and wood cargo for deliberate drop-off commands.
+    let callback: HostProc = proc(args: openArray[int32]): int32 =
+      let index = game.scriptUnit(playerId, args[0])
+      if index < 0: 0 else: game.units[index].field
+    discard result.addFunction(name, 1, callback, 4)
+  cargoReader("carriedGold", carryGold)
+  cargoReader("carriedWood", carryWood)
+
+  template productionReader(name: string, absent: int32, value: untyped) =
+    ## Reads current own production and rally state, including earlier commands.
+    let callback: HostProc = proc(args: openArray[int32]): int32 =
+      let index = game.scriptBuilding(playerId, args[0])
+      if index < 0: return absent
+      let building {.inject.} = game.buildings[index]
+      value
+    discard result.addFunction(name, 1, callback, 4)
+  productionReader("trainingCount", 0, building.queueLength)
+  productionReader("trainingTicks", 0, building.trainTicks)
+  productionReader("rallyKind", -1,
+    (if building.hasRally: building.rallyKind.ord.int32 else: -1'i32))
+  productionReader("rallyX", -1,
+    (if building.hasRally: building.rally.x.int32 else: -1'i32))
+  productionReader("rallyY", -1,
+    (if building.hasRally: building.rally.y.int32 else: -1'i32))
+  productionReader("researchKind", -1,
+    (if building.researchTicks > 0: building.researchKind.ord.int32 else: -1'i32))
+  productionReader("researchTicks", 0, building.researchTicks)
+
+  let trainingKindProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Reads a production slot, with slot zero being the unit in training.
+    let index = game.scriptBuilding(playerId, args[0])
+    if index < 0 or args[1] < 0 or args[1] >= game.buildings[index].queueLength:
+      return -1
+    game.buildings[index].queue[args[1]].int32 - 1
+  discard result.addFunction("trainingKind", 2, trainingKindProc, 4)
+
+  let canResearchProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Checks costs, prerequisites, ownership, and ongoing research.
+    if args[1] notin 0'i32 .. ResearchKind.high.ord.int32: return 0
+    int32(game.canResearch(playerId, args[0], ResearchKind(args[1])))
+  discard result.addFunction("canResearch", 2, canResearchProc, 8)
+  let researchLevelProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Returns this player's completed research tier.
+    if args[0] notin 0'i32 .. ResearchKind.high.ord.int32: return 0
+    game.researchLevel(playerId, ResearchKind(args[0]))
+  discard result.addFunction("researchLevel", 1, researchLevelProc, 4)
 
   ## Static tables, exposed as calls rather than documented constants, so a
   ## balance change is one edit to `content` and old scripts keep working.
@@ -631,35 +745,61 @@ proc buildOverlordHost*(playerId: int32, llm: LlmClient = nil, policySlot = -1):
   ## Commands. One per replay action kind, one per validator, each returning
   ## one on acceptance and zero on refusal, and each refusing outright if the
   ## named entity is not this player's.
-  let moveUnitProc: NumericHostProc = proc(
-      arguments: openArray[Value]
-  ): Value =
-    let (x, y, offset) = splitTilePoint(fixedVec2(
-      arguments[1].asFixed, arguments[2].asFixed))
-    int32(activeGame.applyMove(playerId, arguments[0].asInt, x, y, offset))
-  discard result.addFunction("moveUnit", 3, moveUnitProc, 400)
+  template pointCommand(name: string, attack, appendOrder: static bool) =
+    ## Preserves decimal destinations for immediate and queued movement.
+    let callback: NumericHostProc = proc(args: openArray[Value]): Value =
+      let (x, y, offset) = splitTilePoint(fixedVec2(
+        args[1].asFixed, args[2].asFixed))
+      when attack:
+        int32(activeGame.applyAttackMove(playerId, args[0].asInt, x, y,
+          offset, append = appendOrder))
+      else:
+        int32(activeGame.applyMove(playerId, args[0].asInt, x, y,
+          offset, append = appendOrder))
+    discard result.addFunction(name, 3, callback, 400)
+  pointCommand("moveUnit", false, false)
+  pointCommand("queueMove", false, true)
+  pointCommand("attackMove", true, false)
+  pointCommand("queueAttackMove", true, true)
 
-  let attackMoveProc: NumericHostProc = proc(
-      arguments: openArray[Value]
-  ): Value =
-    let (x, y, offset) = splitTilePoint(fixedVec2(
-      arguments[1].asFixed, arguments[2].asFixed))
-    int32(activeGame.applyAttackMove(playerId, arguments[0].asInt, x, y, offset))
-  discard result.addFunction("attackMove", 3, attackMoveProc, 400)
+  template attackCommand(name: string, appendOrder: static bool) =
+    ## Uses the ordinary ownership, visibility, and hostility validation.
+    let callback: HostProc = proc(args: openArray[int32]): int32 =
+      int32(activeGame.applyAttack(playerId, args[0], args[1], append = appendOrder))
+    discard result.addFunction(name, 2, callback, 120)
+  attackCommand("attackUnit", false)
+  attackCommand("queueAttack", true)
 
-  let attackUnitProc: HostProc = proc(arguments: openArray[int32]): int32 =
-    int32(activeGame.applyAttack(playerId, arguments[0], arguments[1]))
-  discard result.addFunction("attackUnit", 2, attackUnitProc, 120)
+  template harvestCommand(name: string, appendOrder: static bool) =
+    ## Assigns a mine or tree now or after the worker's current orders.
+    let callback: HostProc = proc(args: openArray[int32]): int32 =
+      int32(activeGame.applyHarvest(playerId, args[0], args[1], args[2],
+        append = appendOrder))
+    discard result.addFunction(name, 3, callback, 60)
+  harvestCommand("harvest", false)
+  harvestCommand("queueHarvest", true)
 
-  let harvestProc: HostProc = proc(arguments: openArray[int32]): int32 =
-    int32(activeGame.applyHarvest(playerId, arguments[0], arguments[1],
-      arguments[2]))
-  discard result.addFunction("harvest", 3, harvestProc, 60)
+  template buildCommand(name: string, appendOrder: static bool) =
+    ## Starts a building or queues an unpaid plan for the same worker.
+    let callback: HostProc = proc(args: openArray[int32]): int32 =
+      int32(activeGame.applyBuild(playerId, args[0], args[1], args[2], args[3],
+        append = appendOrder))
+    discard result.addFunction(name, 4, callback, 300)
+  buildCommand("build", false)
+  buildCommand("queueBuild", true)
 
-  let buildProc: HostProc = proc(arguments: openArray[int32]): int32 =
-    int32(activeGame.applyBuild(playerId, arguments[0], arguments[1],
-      arguments[2], arguments[3]))
-  discard result.addFunction("build", 4, buildProc, 300)
+  template depositCommand(name: string, appendOrder: static bool) =
+    ## Delivers cargo through the same town hall and wood-only mill rules.
+    let callback: HostProc = proc(args: openArray[int32]): int32 =
+      int32(activeGame.applyDeposit(playerId, args[0], args[1], append = appendOrder))
+    discard result.addFunction(name, 2, callback, 60)
+  depositCommand("deposit", false)
+  depositCommand("queueDeposit", true)
+
+  let researchProc: HostProc = proc(args: openArray[int32]): int32 =
+    ## Starts paid research through the authoritative recording wrapper.
+    int32(activeGame.applyResearch(playerId, args[0], args[1]))
+  discard result.addFunction("research", 2, researchProc, 60)
 
   let trainProc: HostProc = proc(arguments: openArray[int32]): int32 =
     int32(activeGame.applyTrain(playerId, arguments[0], arguments[1]))
@@ -687,39 +827,35 @@ proc buildOverlordHost*(playerId: int32, llm: LlmClient = nil, policySlot = -1):
 
 ## Lifecycle
 
-proc loadBots*(
-  game: Game, sources: openArray[string]
-) =
-  ## Compiles one script per player and gives each its own runtime.
+proc loadBot*(game: Game, player: int, source: string) =
+  ## Replaces one local controller without changing simulation or inbox state.
+  doAssert player in 0 ..< game.world.players.len
+  game.brains[player] = nil
+  when not defined(coworld):
+    if source.len == 0: return
+  let
+    limits = overlordLimits()
+    schema = buildOverlordHost(0)
+    llm = newLlmClient(player)
+    program =
+      when defined(coworld): compilePlayer(source, schema, limits, player)
+      else: compile(source, schema, limits)
+  game.brains[player] = OverlordVm(
+    runtime: initRuntime(program, buildOverlordHost(player.int32, llm, player), limits),
+    ready: true,
+    prepareDecision: llm.decisionCallback(),
+    pollRequests: llm.requestPoller()
+  )
+  llm.bindRuntime(game.brains[player].runtime)
+  bindOverlordData(program)
+  when defined(coworld):
+    game.brains[player].output = playerPrinter(player)
+
+proc loadBots*(game: Game, sources: openArray[string]) =
+  ## Creates independent local runtimes after initializing game mailboxes.
   doAssert sources.len == game.world.players.len
-  let limits = overlordLimits()
-  let schema = buildOverlordHost(0)
-  for inbox in game.inboxes.mitems:
-    inbox = newMailbox()
-  var bound = false
-  for player in 0'i32 ..< int32(game.world.players.len):
-    when not defined(coworld):
-      if sources[player].len == 0:
-        continue
-    let llm = newLlmClient(int(player))
-    let source = sources[player]
-    let program =
-      when defined(coworld):
-        compilePlayer(source, schema, limits, int(player))
-      else:
-        compile(source, schema, limits)
-    game.brains[player] = OverlordVm(
-      runtime: initRuntime(program, buildOverlordHost(player, llm, int(player)), limits),
-      ready: true,
-      prepareDecision: llm.decisionCallback(),
-      pollRequests: llm.requestPoller()
-    )
-    llm.bindRuntime(game.brains[player].runtime)
-    if not bound:
-      bindOverlordData(program)
-      bound = true
-    when defined(coworld):
-      game.brains[player].output = playerPrinter(int(player))
+  for inbox in game.inboxes.mitems: inbox = newMailbox()
+  for player, source in sources: game.loadBot(player, source)
 
 proc runDecision(game: Game, player: int32) =
   ## Runs one player's script for one decision.

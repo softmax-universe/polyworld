@@ -9,7 +9,7 @@ const
   PanelResources* = vec2(432, 56)
   PanelMinimap* = vec2(282, 320)
   PanelSelection* = vec2(364, 225)
-  PanelBuild* = vec2(358, 226)
+  PanelBuild* = vec2(358, 310)
 
 type
   MinimapPanels* = object
@@ -21,9 +21,8 @@ type
     units*: array[9, GameUiPanel]
 
   BuildPanels* = object
-    tabs*: array[3, GameUiPanel]
     contents*: GameUiPanel
-    slots*: array[8, GameUiPanel]
+    slots*: array[16, GameUiPanel]
 
 proc showPlaybackControls*(replayMode: bool, playerSlot: int32,
     participant = 0'u32, seats: openArray[Seat] = []): bool =
@@ -35,6 +34,11 @@ proc showPlaybackControls*(replayMode: bool, playerSlot: int32,
     for seat in seats:
       if seat.owner == participant: return false
   true
+
+proc resourcePanel*(layout: GameUiLayout): GameUiPanel =
+  ## Anchors the resource ribbon just left of the top-right minimap.
+  result = layout.panel(GameUiRegion.TopRight, PanelResources)
+  result.origin.x -= PanelMinimap.x + 48
 
 proc resourcePanels*(panel: GameUiPanel): array[3, GameUiPanel] =
   ## Places three equal resource cells across the top ribbon.
@@ -53,6 +57,13 @@ proc minimapPanels*(panel: GameUiPanel): MinimapPanels =
   for i in countdown(result.views.high, 0):
     result.views[i] = buttons.take(vec2(32), 11)
 
+proc diplomacyButtonPanel*(layout: GameUiLayout): GameUiPanel =
+  ## Anchors the diplomacy shortcut just below the minimap's right edge.
+  let minimap = layout.panel(GameUiRegion.TopRight, PanelMinimap)
+  result.size = vec2(48)
+  result.origin = minimap.origin + vec2(minimap.size.x - result.size.x,
+    minimap.size.y + 8)
+
 proc selectionPanels*(panel: GameUiPanel, workerCargo = false): SelectionPanels =
   ## Separates the main selection column from the three-by-three unit grid.
   var columns = panel.stack(LeftToRight, vec2(14))
@@ -70,12 +81,7 @@ proc selectionPanels*(panel: GameUiPanel, workerCargo = false): SelectionPanels 
     stackGrid(result.details, vec2(56), 3, vec2(10, 8), result.units)
 
 proc buildPanels*(panel: GameUiPanel): BuildPanels =
-  ## Stacks command tabs over two rows of four build or train buttons.
+  ## A single contextual palette, with no navigation strip.
   var rows = panel.stack(TopToBottom, vec2(20, 12))
-  var tabs = rows.takeRow(28, 14).stack(LeftToRight)
-  for tab in result.tabs.mitems:
-    tab = tabs.take(vec2(102, 28), 4)
   result.contents = rows.takeRest()
-  stackGrid(
-    result.contents, vec2(72), 4, vec2(10), result.slots
-  )
+  stackGrid(result.contents, vec2(64), 4, vec2(10), result.slots)

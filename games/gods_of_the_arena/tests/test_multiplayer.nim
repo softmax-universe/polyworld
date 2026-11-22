@@ -68,6 +68,25 @@ proc advanceClients() =
       if session.game.world.tick == tick:
         doAssert session.game.stateHash == sessions[0].game.stateHash
 
+proc assertDisconnectedControllerCanStart() =
+  ## Host intent starts the timeline while disconnected controllers catch up.
+  let r = Relay()
+  for c in 1 .. 2:
+    r.receive(c, RoomMessage(kind: Hello, identity: gotaIdentity(),
+      name: "Controller " & $c), 0)
+  r.receive(1, RoomMessage(kind: CreateRoom, name: "Connectivity test",
+    number: 2, tickRate: 24), 0)
+  let room = r.rooms[0]
+  r.receive(2, RoomMessage(kind: JoinRoom, room: room.id), 0)
+  r.receive(1, RoomMessage(kind: ClaimSeat, seat: 0, name: "Human"), 0)
+  r.receive(2, RoomMessage(kind: ClaimSeat, seat: 1, name: "Human"), 0)
+  r.disconnect(2)
+  r.receive(1, RoomMessage(kind: StartMatch, revision: room.revision,
+    hash: setupHash(r.state(room))), 0)
+  doAssert room.phase == Playing
+
+assertDisconnectedControllerCanStart()
+
 echo "Testing distributed GotA policies and packet-only advancement"
 let
   first = addClient()
@@ -84,10 +103,10 @@ let roomId = first.snapshot.room
 second.send(RoomMessage(kind: JoinRoom, room: roomId))
 third.send(RoomMessage(kind: JoinRoom, room: roomId))
 exchange()
-echo "Testing one human slot per participant with multiple bot slots"
+echo "Testing human slot presentation with multiple owned slots"
 first.claimHumanSeat(0)
 second.claimHumanSeat(1)
-first.send(RoomMessage(kind: ClaimSeat, seat: 9, name: "Base bot"))
+first.send(RoomMessage(kind: ClaimSeat, seat: 9, seatKind: BotSeat, name: "Base bot"))
 exchange()
 first.claimHumanSeat(3, 0)
 first.claimHumanSeat(6, 3)
@@ -98,24 +117,26 @@ doAssert first.snapshot.seats[0].owner == 0
 doAssert first.snapshot.seats[3].owner == 0
 doAssert first.snapshot.seats[9].owner == first.participant
 try:
-  first.claimHumanSeat(1, 6)
+  second.claimHumanSeat(6, 1)
   doAssert false, "Another participant's human slot must remain theirs"
 except RoomsError:
   discard
-doAssert first.outgoing.len == 0
+doAssert second.outgoing.len == 0
 first.send(RoomMessage(kind: ClaimSeat, seat: 3, name: "Human"))
 exchange()
-try:
-  discard prepareNetworkMatch(first, [])
-  doAssert false, "Duplicate human slots must fail setup validation"
-except RoomsError:
-  discard
+discard prepareNetworkMatch(first, [])
+doAssert first.snapshot.humanSeatFor(first.participant) == 3,
+  "Multiple human slots retain deterministic first-slot presentation"
 first.claimHumanSeat(6)
 exchange()
 doAssert first.snapshot.seats[3].owner == 0
 for seat in 0 ..< 10:
+  first.send(RoomMessage(kind: ReleaseSeat, seat: uint32(seat)))
+exchange()
+for seat in 0 ..< 10:
   clients[seat mod 3].send(RoomMessage(
     kind: ClaimSeat, seat: uint32(seat),
+    seatKind: if seat < 2: HumanSeat else: BotSeat,
     name: if seat < 2: "Human" else: "Seat " & $seat
   ))
 exchange()
@@ -133,11 +154,11 @@ for client in clients:
     doAssert (vm != nil) ==
       (seat >= 2 and client.snapshot.seats[seat].owner == client.participant)
   client.send(RoomMessage(
-    kind: Ready, revision: session.revision, hash: session.game.networkHash
+    kind: ReadyStatus, flag: true
   ))
 exchange()
 first.send(RoomMessage(kind: StartMatch, revision: sessions[0].revision,
-  hash: sessions[0].game.networkHash()))
+  hash: setupHash(first.snapshot)))
 exchange()
 for session in sessions:
   doAssert session.client.events.len == 1
@@ -145,7 +166,7 @@ for session in sessions:
   session.client.events.setLen(0)
 exchange()
 var disconnectedTick = 0'u32
-for iteration in 0 ..< 600:
+for iteration in 0 ..< 600 + PreparationTicks:
   now += 1.0 / 23
   if iteration mod 60 == 0:
     for client in clients:

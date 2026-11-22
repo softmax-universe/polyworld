@@ -55,7 +55,8 @@ proc miningTrace(queued = false): seq[uint64] =
       doAssert Game(world: checkpoint).stateHash() == Game(world: w).stateHash()
       checkpoint = nil
       checkpointChecked = true
-    elif not checkpointChecked and w.units[1].passingTicks > 0:
+    elif not checkpointChecked and
+        length(w.units[0].body.pos - w.units[1].body.pos) < 1'fx:
       checkpoint = w.clone()
     # Friendly rubber circles can overlap during a pass. Progress, bounded
     # displacement, terrain legality and repeated deposits are the contract.
@@ -71,10 +72,7 @@ proc miningTrace(queued = false): seq[uint64] =
       doAssert not w.units[i].orderFailed
       if queued and deposits[i] == 0:
         doAssert w.units[i].orderQueue.len == 1
-      if w.units[i].passingTicks > 0:
-        doAssert w.units[i].sourceId == w.buildings[mine].id
-        doAssert w.units[i].state in {UnitToMine, UnitToDropGold}
-  doAssert checkpointChecked, "Snapshot during the yield must resume deterministically"
+  doAssert checkpointChecked, "Snapshot during close traffic must resume deterministically"
   echo "head-on mining deposits: ", deposits, "; passed: ", passed
   doAssert passed, "Opposing workers must actually pass after body separation"
   for i, count in deposits:
@@ -108,7 +106,6 @@ proc pathTrace(walls: int): seq[uint64] =
     for i in 0 .. 1:
       doAssert w.applyMove(0, w.units[i].id, int32(destinations[i].x),
         int32(destinations[i].y), fixedVec2(0.1'fx, 0'fx))
-    var lockedPoint = FixedVec2Zero
     for tick in 0 ..< TickRate * 12:
       let before = [w.units[0].body.pos, w.units[1].body.pos]
       w.tickWorld(nil)
@@ -120,47 +117,23 @@ proc pathTrace(walls: int): seq[uint64] =
           "Passing must walk at ordinary speed, not teleport"
         doAssert unit.goal == destinations[i]
         doAssert not unit.orderFailed
-        if unit.passingTicks > 0:
-          doAssert i == 1, "Only the higher ID yields"
-          if lockedPoint != FixedVec2Zero:
-            doAssert unit.passingPoint == lockedPoint, "Never flip sides during a pass"
-          lockedPoint = unit.passingPoint
-          doAssert unit.state == UnitMoving
+        if abs(unit.body.pos.y - (fixed(int32(arena(0, 0).y)) + 0.5'fx)) >
+            0.05'fx:
           lateral = true
-        elif i == 1:
-          lockedPoint = FixedVec2Zero
         # Corners of the worker footprint remain on open terrain.
         for dx in [-unit.body.radius, unit.body.radius]:
           for dy in [-unit.body.radius, unit.body.radius]:
             let point = unit.body.pos + fixedVec2(dx, dy)
             doAssert w.tileOpen(whole(point.x), whole(point.y))
       # Contact is intentionally soft; it is not resolved in a single tick.
-    if walls == 3:
-      doAssert not lateral
-      # Compressible friendly circles can pass within the one-tile corridor;
-      # the hard footprint/corner assertions above still apply every tick.
+    # Compressible friendly circles can pass within a one-tile corridor;
+    # the hard footprint/corner assertions above still apply every tick.
     for i in 0 .. 1:
       let point = fixedVec2(fixed(int32(destinations[i].x)) + 0.6'fx,
         fixed(int32(destinations[i].y)) + 0.5'fx)
       doAssert length(w.units[i].body.pos - point) <= 0.001'fx
       doAssert w.units[i].state == UnitIdle
   if walls != 3: doAssert lateral
-
-block passingStateIsHashed:
-  let w = fixture()
-  let unit = w.units[1]
-  let initial = Game(world: w).stateHash()
-  unit.passingPeer = w.units[0].id
-  doAssert Game(world: w).stateHash() != initial
-  let peerHash = Game(world: w).stateHash()
-  unit.passingTicks = 10
-  doAssert Game(world: w).stateHash() != peerHash
-  let timerHash = Game(world: w).stateHash()
-  unit.passingPoint = fixedVec2(1'fx, 2'fx)
-  doAssert Game(world: w).stateHash() != timerHash
-  let pointHash = Game(world: w).stateHash()
-  unit.passingForward = fixedVec2(-1'fx, 0'fx)
-  doAssert Game(world: w).stateHash() != pointHash
 
 for walls in 0 .. 3:
   doAssert pathTrace(walls) == pathTrace(walls), "Repeated passing hashes diverged"

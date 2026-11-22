@@ -2,6 +2,7 @@
 
 {.warning[UnusedImport]: off.}
 import
+  test_options,
   test_content,
   test_maps,
   test_replays,

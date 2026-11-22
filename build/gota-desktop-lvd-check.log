@@ -1,0 +1,22 @@
+Hint: used config file '/Users/me/.nimby/nim/config/nim.cfg' [Conf]
+Hint: used config file '/Users/me/.nimby/nim/config/config.nims' [Conf]
+Hint: used config file '/Users/me/p/nim.cfg' [Conf]
+Hint: used config file '/Users/me/p/polyworld/config.nims' [Conf]
+Hint: used config file '/Users/me/p/polyworld/games/light_vs_dark/config.nims' [Conf]
+..................................................................................................................................................................................................................................
+/Users/me/p/windy/src/windy/platforms/macos/platform.nim(14, 9) Hint: Using OpenGL backend [User]
+........................................................................................................................
+/Users/me/p/windy/src/windy/platforms/macos/objc.nim(159, 14) Hint: 'addProtocol' is declared but not used [XDeclaredButNotUsed]
+.....................................................
+/Users/me/p/polyworld/games/light_vs_dark/sim.nim(390, 3) Hint: 'splashHits' is declared but not used [XDeclaredButNotUsed]
+..................................................................
+/Users/me/p/polyworld/games/light_vs_dark/ui.nim(106, 6) Hint: 'canShowTrain' is declared but not used [XDeclaredButNotUsed]
+/Users/me/p/polyworld/games/light_vs_dark/ui.nim(121, 6) Hint: 'commandPortraitColor' is declared but not used [XDeclaredButNotUsed]
+/Users/me/p/polyworld/games/light_vs_dark/ui.nim(22, 3) Hint: 'IconSmall' is declared but not used [XDeclaredButNotUsed]
+..............
+/Users/me/p/polyworld/games/light_vs_dark/graphics.nim(11, 29) Warning: imported and not used: 'strutils' [UnusedImport]
+/Users/me/p/polyworld/games/light_vs_dark/graphics.nim(11, 14) Warning: imported and not used: 'os' [UnusedImport]
+....
+/Users/me/p/polyworld/games/light_vs_dark/frontend.nim(5, 76) Warning: imported and not used: 'replays' [UnusedImport]
+Hint: 
+285871 lines; 6.717s; 1018.867MiB peakmem; proj: /Users/me/p/polyworld/games/light_vs_dark/lvd.nim; out: unknownOutput [SuccessX]

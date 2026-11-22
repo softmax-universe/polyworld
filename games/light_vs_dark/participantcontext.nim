@@ -17,7 +17,7 @@ proc dismiss*(menu: var ParticipantContext) =
 
 proc canKick*(client: RoomClient, participant: uint32): bool =
   if client == nil or not client.connected or not client.welcomed or
-      client.snapshot.room.len == 0 or client.snapshot.phase != Lobby or
+      client.snapshot.room.len == 0 or
       client.participant == 0 or client.snapshot.participant != client.participant or
       participant == 0 or participant == client.participant:
     return false
@@ -35,11 +35,11 @@ proc openSeat*(menu: var ParticipantContext, client: RoomClient, seat: int, at: 
   menu.dismiss()
   if client == nil or not client.connected or not client.welcomed or
       client.participant == 0 or client.snapshot.participant != client.participant or
-      client.snapshot.phase != Lobby or client.snapshot.room.len == 0 or
+      client.snapshot.room.len == 0 or
       seat notin 0 ..< client.snapshot.seats.len:
     return
   let slot = client.snapshot.seats[seat]
-  if slot.name == "Human":
+  if slot.kind == HumanSeat:
     menu.openParticipant(client, slot.owner, at)
   elif slot.owner != 0:
     menu = ParticipantContext(target: slot.owner, room: client.snapshot.room,
@@ -48,13 +48,13 @@ proc openSeat*(menu: var ParticipantContext, client: RoomClient, seat: int, at: 
 proc valid(menu: ParticipantContext, client: RoomClient): bool =
   if client == nil or not client.connected or not client.welcomed or
       client.participant == 0 or client.snapshot.participant != client.participant or
-      client.snapshot.phase != Lobby or client.snapshot.room != menu.room:
+      client.snapshot.room != menu.room:
     return false
   if menu.botSeat < 0: return client.canKick(menu.target)
   if menu.botSeat >= client.snapshot.seats.len: return false
   let slot = client.snapshot.seats[menu.botSeat]
   slot.owner == menu.target and slot.owner != 0 and
-    slot.name == menu.botName and slot.name != "Human"
+    slot.name == menu.botName and slot.kind == BotSeat
 
 proc label*(menu: ParticipantContext, client: RoomClient): string =
   if menu.botSeat >= 0: "Remove bot" else: "Kick player"

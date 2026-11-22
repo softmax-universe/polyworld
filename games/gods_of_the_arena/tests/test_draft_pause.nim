@@ -31,6 +31,19 @@ for live in [false, true]:
 run.world.phase = Playing
 run.networked = false
 doAssert transportAvailable(), "Local battle transport remains available"
+block:
+  var
+    transport = initPlayer(live = true, durationTicks = 2000)
+    pending = true
+  run.world.phase = Drafting
+  run.world.applyStartupPause(transport, pending)
+  doAssert pending and transport.playing
+  run.world.phase = Playing
+  run.world.applyStartupPause(transport, pending)
+  doAssert not pending and not transport.playing
+  transport.playing = true
+  run.world.applyStartupPause(transport, pending)
+  doAssert transport.playing, "The launch pause must only apply once"
 run.networked = true
 networkSpectator = true
 doAssert transportAvailable(), "Spectator battle transport remains available"

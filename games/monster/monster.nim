@@ -61,6 +61,8 @@ when defined(headless):
       raise newException(MonsterError,
         "Creature request failed: " & brain.failure)
     echo "Moss: ", brain.reply.speech
+    if brain.notice.len > 0:
+      echo brain.notice
     if world.active or world.actions.len > 0:
       raise newException(MonsterError, "Creature action plan did not finish.")
     world.saveWorld(savePath)
@@ -242,7 +244,8 @@ else:
       let spoken = sk.drawUi(
         window, world, chat, brain.messages,
         brain.pending or brain.explanationPending,
-        brain.available(), brain.failure, cameraTarget, cameraDistance,
+        brain.available(), (if brain.failure.len > 0: brain.failure else: brain.notice),
+        cameraTarget, cameraDistance,
         following
       )
       sk.endUi()

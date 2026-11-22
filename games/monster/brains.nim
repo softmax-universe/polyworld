@@ -163,7 +163,7 @@ type
     lessons*: seq[string]
     pending*: bool
     explanationPending*: bool
-    failure*: string
+    failure*, notice*: string
     model*: string
     reply*: BrainReply
     client: LlmClient
@@ -598,12 +598,13 @@ proc stopConversation*(brain: Brain, text: string) =
   brain.explaining = false
   brain.explanationPending = false
   brain.failure.setLen(0)
+  brain.notice.setLen(0)
   brain.reply = BrainReply(speech: "I stopped.")
   if brain.messages.len <= MaxMessages - 2:
     brain.messages.add Message(role: PlayerMessage, text: text.strip())
     brain.messages.add Message(role: CreatureMessage, text: brain.reply.speech)
   else:
-    brain.failure = "Stopped. " & FullHistoryMessage
+    brain.notice = "Stopped. The transcript has no room to record this turn."
   brain.saveVisible()
 
 proc requestFailure(brain: Brain): string =

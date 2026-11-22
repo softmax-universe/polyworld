@@ -47,7 +47,8 @@ const
     "Ironhide Chief", "Infernal Duke"
   ]
   NeutralTargetHeight* = 0.816'f
-  NeutralRosterPath* = DataRoot & "/characters/chargen/cta.json"
+  CharacterDir = "characters/chargen"
+  NeutralRosterPath* = DataRoot & "/" & CharacterDir & "/cta.json"
   CreepPresets* = ["Purple Creep", "Blue Creep"]
   CreepClips* = [
     "Jog_Fwd_Loop", "Sword_Idle", "Death01", "Dance_Loop", "Sword_Attack",
@@ -104,11 +105,11 @@ type
   NeutralRoster = object
     mobs: seq[NeutralRecipe]
 
-proc neutralRecipes*(): array[6, NeutralRecipe] =
+proc neutralRecipes*(path = NeutralRosterPath): array[6, NeutralRecipe] =
   ## Selects six approved melee recipes without loading the full CTA cast.
   var roster: NeutralRoster
   try:
-    roster = readFile(NeutralRosterPath).fromJson(NeutralRoster)
+    roster = readFile(path).fromJson(NeutralRoster)
   except IOError, JsonError:
     raise newException(ChargenError,
       "Cannot read neutral roster: " & getCurrentExceptionMsg())
@@ -194,24 +195,24 @@ proc deathEyesPart*(manifest: Manifest): PartItem =
           return item
   raise newException(ChargenError, "Missing Dead X eyes.")
 
-proc generatedCharacterAssets*(): seq[Asset] =
+proc generatedCharacterAssets*(artRoot = DataRoot): seq[Asset] =
   ## Packs generated characters with only their selected meshes and clips.
   let
-    directory = DataRoot / "characters/chargen"
-    manifest = readManifest(directory)
+    sourceDir = artRoot / CharacterDir
+    manifest = readManifest(sourceDir)
   for path in ["manifest.json", manifest.skinPalette, manifest.hairPalette,
       manifest.pupilPalette, manifest.hatPalette]:
-    result.add fileAsset(directory / path)
+    result.add fileAsset(CharacterDir / path)
   # Discovery reads part descriptors, but only selected meshes are loaded.
   for category in manifest.categories:
-    for path in walkFiles(directory / category.directory / "*.json"):
-      result.add fileAsset(path)
-  result.add modelAsset(directory / manifest.rig)
+    for path in walkFiles(sourceDir / category.directory / "*.json"):
+      result.add fileAsset(relativePath(path, artRoot))
+  result.add modelAsset(CharacterDir / manifest.rig)
   for path in manifest.deathEyesPart().files:
-    result.add modelAsset(directory / path, textureSize = 512)
+    result.add modelAsset(CharacterDir / path, textureSize = 512)
   result.add fileAsset(NeutralRosterPath)
   var presets: seq[Preset]
-  for recipe in neutralRecipes():
+  for recipe in neutralRecipes(artRoot / NeutralRosterPath.assetName):
     presets.add recipe.preset
   for team in 0 ..< CreepPresets.len:
     for kind in CreepKind:
@@ -223,16 +224,16 @@ proc generatedCharacterAssets*(): seq[Asset] =
     for category in inventory.categories:
       for item in category.items:
         for path in item.files:
-          result.add modelAsset(directory / path, textureSize = 512)
+          result.add modelAsset(CharacterDir / path, textureSize = 512)
         for path in [item.texture, item.pupilMask]:
           if path.len > 0:
-            result.add imageAsset(directory / path, 512)
+            result.add imageAsset(CharacterDir / path, 512)
   for clip in manifest.clips:
     if clip.name in CreepClips or clip.name in GodClips or
       clip.name in HeroClips:
-        result.add modelAsset(directory / clip.file)
+        result.add modelAsset(CharacterDir / clip.file)
 
-proc browserAssets*(): seq[Asset] =
+proc browserAssets*(artRoot = DataRoot): seq[Asset] =
   ## Declares every presentation asset reachable by an arena match.
   result = hudAssets(LogoPath)
   result.add soundAssets()
@@ -259,7 +260,7 @@ proc browserAssets*(): seq[Asset] =
   for team in 0 ..< FortFactions.len:
     for path in fortModelPaths(team):
       result.add modelAsset(path, textureSize = 512)
-  result.add generatedCharacterAssets()
+  result.add generatedCharacterAssets(artRoot)
   for path in HeroPortraitPaths:
     result.add fileAsset(path)
   for hero in HeroClass:

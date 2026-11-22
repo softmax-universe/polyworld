@@ -7,8 +7,10 @@ proc main() =
   ## Builds GOTA's browser assets without creating a graphics context.
   if paramCount() != 2:
     raise newException(AssetError, "Usage: pack_assets <data> <output>")
-  let packed = packAssets(
-    browserAssets(), paramStr(1), paramStr(2), logo = LogoPath)
+  let
+    artRoot = paramStr(1)
+    packed = packAssets(
+      browserAssets(artRoot), artRoot, paramStr(2), logo = LogoPath)
   var bytes = 0
   for file in packed:
     bytes += file.bytes

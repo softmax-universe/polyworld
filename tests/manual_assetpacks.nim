@@ -77,5 +77,5 @@ proc checkModels(game: string, declarations: seq[Asset], source: string) =
 block:
   let source = getEnv("POLYWORLD_ART", "../polyworld_art")
   checkModels("cta", ctaAssets.browserAssets(), source)
-  checkModels("gota", gotaAssets.browserAssets(), source)
+  checkModels("gota", gotaAssets.browserAssets(source), source)
   checkModels("lvd", lvdAssets.browserAssets(), source)

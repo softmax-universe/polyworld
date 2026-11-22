@@ -24,8 +24,9 @@ class Planner(BaseHTTPRequestHandler):
         actions = []
         if prompt == "Walk to Willow.":
             actions.append(dict(kind="move", target="village", x=0, z=0, duration=0))
-        elif prompt == "Go home.":
-            actions.append(dict(kind="move", target="home", x=0, z=0, duration=0))
+        elif prompt in ("Gather berries.", "Gather stone."):
+            source = "berries" if prompt == "Gather berries." else "stone"
+            actions.append(dict(kind="gather", target=source, x=0, z=0, duration=0))
         lessons = ["Use wild berries."] if prompt == "Use wild berries." else []
         decision = dict(speech="OK", actions=actions, lessons=lessons)
         body = json.dumps({"status": "completed", "output": [{
@@ -41,6 +42,15 @@ class Planner(BaseHTTPRequestHandler):
         pass
 
 
+def planner_state(context):
+    observation = context[-1]["content"].split("\n[Teacher says]\n", 1)[0]
+    return json.loads(observation.split("\n", 1)[1])
+
+
+def position(state):
+    return state["x"], state["z"]
+
+
 def check_session(binary, root, server):
     # Keep both inference traffic and saves independent of the caller's setup.
     env = {**os.environ, "COWORLD_LLM_ENDPOINT": f"http://127.0.0.1:{server.server_port}",
@@ -54,13 +64,16 @@ def check_session(binary, root, server):
                               env=env, text=True, capture_output=True, timeout=10)
 
     save = root / "session"
-    # 125 conversational turns plus two movement turns with one world event each.
+    # 125 conversational turns plus two physical turns with one world event each.
     orders = ["Use wild berries."] + [f"Remember order {i}." for i in range(124)]
-    orders.extend(["Walk to Willow.", "Go home."])
+    orders.extend(["Walk to Willow.", "Gather berries."])
     for prompt in orders:
         result = launch(save, prompt)
         assert result.returncode == 0, result.stderr
-    assert "Arrived at home." in result.stdout
+    berry_state = json.loads(result.stdout.splitlines()[-1])
+    home = next(place for place in berry_state["places"] if place["id"] == "home")
+    assert berry_state["carrying"] == "6 berries"
+    assert position(berry_state) != position(home)
     assert server.prompts == orders
     history = [entry["content"] for entry in server.context[:-1] if entry["role"] == "user"]
     assert [text for text in history if not text.startswith("[World event]")] == orders[:-1]
@@ -72,22 +85,48 @@ def check_session(binary, root, server):
     assert saved["lessons"] == ["Use wild berries."]
     messages = saved["messages"]
     assert len(messages) == 256
-    assert messages[-1] == {"role": "event", "text": "Arrived at home."}
+    assert messages[-1]["role"] == "event" and "Gathered 6 berries" in messages[-1]["text"]
     assert [m["text"] for m in messages if m["role"] == "player"] == orders
 
+    world_file = save / "world.json"
+    original_world = world_file.read_bytes()
     for _ in range(2):
-        result = launch(save, "Walk to Willow.")
+        result = launch(save, "Gather stone.")
         assert result.returncode == 1, result.stderr
         assert "Conversation memory is full" in result.stderr
-        assert "new --save-dir" in result.stderr
+        assert "new --save-dir to start a separate world" in result.stderr
         assert memory.read_bytes() == full
         assert server.prompts == orders
 
-    result = launch(root / "fresh", "Walk to Willow.")
+    fresh = root / "fresh"
+    result = launch(fresh, "Gather stone.")
+    assert result.returncode == 0, result.stderr
+    start = planner_state(server.context)
+    assert position(start) == position(home) and start["carrying"] == "empty"
+    assert not any(m["role"] in ("user", "assistant") for m in server.context[:-1])
+    stone_state = json.loads(result.stdout.splitlines()[-1])
+    assert stone_state["carrying"] == "6 stone" and position(stone_state) != position(home)
+    fresh_memory = fresh / "conversation.json"
+    first_turn = json.loads(fresh_memory.read_bytes())
+    assert first_turn["lessons"] == []
+    assert [m["role"] for m in first_turn["messages"]] == ["player", "creature", "event"]
+    assert first_turn["messages"][0]["text"] == "Gather stone."
+
+    result = launch(fresh, "Walk to Willow.")
     assert result.returncode == 0 and "Arrived at village." in result.stdout, result
-    assert server.prompts == orders + ["Walk to Willow."]
-    assert not any(m["role"] == "user" for m in server.context[:-1])
-    print("256 saved messages survived two rejected launches. A fresh save reached Willow.")
+    reopened = planner_state(server.context)
+    assert position(reopened) == position(stone_state) and reopened["carrying"] == "6 stone"
+    arrived = json.loads(result.stdout.splitlines()[-1])
+    assert arrived["carrying"] == "6 stone" and position(arrived) != position(reopened)
+    second_turn = json.loads(fresh_memory.read_bytes())
+    assert second_turn["messages"][:3] == first_turn["messages"]
+    assert [m["text"] for m in second_turn["messages"][3:]] == [
+        "Walk to Willow.", "OK", "Arrived at village."
+    ]
+    assert server.prompts == orders + ["Gather stone.", "Walk to Willow."]
+    assert memory.read_bytes() == full and world_file.read_bytes() == original_world
+    print("Full save preserved. New Moss started empty at home and carried six stone "
+          "to Willow after reload.")
 
 
 if __name__ == "__main__":

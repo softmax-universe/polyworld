@@ -12,7 +12,8 @@ const
   MaxLessonBytes = 320
   MaxSaveBytes = MaxResponseBytes
   FullHistoryMessage = "Conversation memory is full. No history was discarded. " &
-    "Use a new --save-dir to start a fresh conversation."
+    "Use a new --save-dir to start a separate world. Moss starts at home " &
+    "with empty pockets and no lessons or chat history."
   CanceledRequestMessage =
     "Moss stopped. The previous request is still settling."
   BrainInstructions = """

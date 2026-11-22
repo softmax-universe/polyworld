@@ -59,8 +59,8 @@ def check_session(binary, root, server):
                 "COWORLD_LLM_MODEL", "COGAME_ORACLE_MODEL"):
         env.pop(key, None)
 
-    def launch(save, prompt):
-        return subprocess.run([binary, "--save-dir", save, "--prompt", prompt],
+    def launch(save, prompt, *options):
+        return subprocess.run([binary, *options, "--save-dir", save, "--prompt", prompt],
                               env=env, text=True, capture_output=True, timeout=10)
 
     save = root / "session"
@@ -125,8 +125,24 @@ def check_session(binary, root, server):
     ]
     assert server.prompts == orders + ["Gather stone.", "Walk to Willow."]
     assert memory.read_bytes() == full and world_file.read_bytes() == original_world
-    print("Full save preserved. New Moss started empty at home and carried six stone "
-          "to Willow after reload.")
+    # Each process restores the same full save. The tick proves it saved again.
+    previous = json.loads(original_world)
+    for _ in range(2):
+        result = launch(save, "stop", "--offline")
+        assert result.returncode == 0, result.stderr
+        assert "Moss: I stopped." in result.stdout
+        assert "no room to record this turn" in result.stdout
+        current = json.loads(world_file.read_bytes())
+        assert current["tick"] > previous["tick"]
+        assert not current["creature"]["moving"]
+        assert current["creature"]["position"] == previous["creature"]["position"]
+        assert current["creature"]["cargo"] == previous["creature"]["cargo"]
+        assert memory.read_bytes() == full
+        assert server.prompts == orders + ["Gather stone.", "Walk to Willow."]
+        previous = current
+
+    print("New Moss carried six stone to Willow after reload. Offline stop saved the "
+          "full world on both launches without changing history or calling the planner.")
 
 
 if __name__ == "__main__":

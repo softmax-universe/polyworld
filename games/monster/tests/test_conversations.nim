@@ -395,6 +395,47 @@ block:
     doAssert world.villagers[target].health == 100
     doAssert requests.peek() == 0
 
+  block stopWithFullTranscript:
+    let directory = createTempDir("monster-stop-", "")
+    defer: removeDir(directory)
+    let
+      worldPath = directory / "world.json"
+      memoryPath = directory / "conversation.json"
+      brain = newBrain(memoryPath, enabled = false)
+    defer: brain.close()
+    for i in 0 ..< MaxMessages:
+      brain.messages.add Message(role: PlayerMessage, text: "Order " & $i)
+    brain.saveBrain()
+    let full = readFile(memoryPath)
+
+    var world = fixture(false)
+    let start = world.creature.position
+    world.instruct(@[
+      CreatureAction(kind: MoveAction, target: "river"),
+      CreatureAction(kind: MoveAction, target: "home")
+    ])
+    for i in 0 ..< TickRate:
+      world.step()
+      if world.creature.position != start: break
+    let interrupted = world.creature.position
+    doAssert interrupted != start and world.creature.moving
+    doAssert world.active and world.actions.len == 1
+    doAssert world.speak(brain, "stop") and brain.failure.len == 0
+    doAssert not world.active and not world.creature.moving and world.actions.len == 0
+    for i in 0 ..< TickRate * 2:
+      world.frame(brain)
+    doAssert world.creature.position == interrupted
+    world.saveWorld(worldPath)
+
+    var reopened = fixture(false)
+    reopened.restoreWorld(worldPath)
+    for i in 0 ..< TickRate * 2:
+      reopened.frame(brain)
+    doAssert reopened.creature.position == interrupted
+    doAssert not reopened.active and not reopened.creature.moving and reopened.actions.len == 0
+    doAssert readFile(memoryPath) == full
+    doAssert requests.peek() == 0
+
   block serviceFailure:
     var world = fixture(true)
     let brain = fixtureBrain()

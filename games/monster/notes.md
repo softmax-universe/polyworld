@@ -312,7 +312,10 @@ nim r -d:headless games/monster/monster.nim \
 ```
 
 For a headless check without a service, use the local stop command. It
-prints `Moss: I stopped.` and saves the turn in the specified directory.
+prints `Moss: I stopped.` and saves the world in the specified directory.
+If the transcript has fewer than two slots left, Moss still stops and clears
+its queued actions. The launcher reports that the turn could not be recorded
+and keeps the existing history.
 
 ```sh
 nim r -d:headless games/monster/monster.nim --offline \

@@ -242,7 +242,11 @@ so a save can reach the request limit before the message limit. A planner
 turn needs room for both the instruction and its reply. With fewer than two
 slots left, Moss keeps the earlier orders and refuses the new turn before
 contacting the planner. Reopening the same save preserves that history and
-limit. Choose a new, empty `--save-dir` to issue orders in a fresh world.
+limit. Choose a new, empty `--save-dir` to start a separate world. Moss
+starts at the home glade with empty pockets, no standing lessons, and no
+chat history. Reuse that directory on the next launch to continue from its
+saved position with its cargo and conversation. The original directory keeps
+the previous world and its full transcript.
 Sleep does not compact memory yet.
 Unfinished creature orders stop when a saved game is reopened. Villagers
 choose new work from their saved needs and supplies. Earlier food-only and
@@ -268,7 +272,8 @@ nim r games/monster/tests/test_voice_launch.nim
 To exercise the message limit through the public launcher, build the headless
 game once and run the loopback session check. It creates temporary saves,
 fills one transcript with short turns, reopens it at the limit, and checks
-that a new world can still carry out an order.
+the starting position, cargo, and history in a new world. It then reloads
+that world and sends Moss to Willow with the supplies gathered there.
 
 ```sh
 mkdir -p tmp

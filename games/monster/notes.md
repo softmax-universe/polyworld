@@ -238,9 +238,12 @@ separate creature. `--seed:N` selects a seeded landscape and a separate default
 save. Memory holds up to 256 messages (including world events and feedback)
 and 64 lessons. Each instruction can use up to 4096 bytes. A full model
 request, including history and the current observation, must fit in 64 KiB,
-so a save can reach the request limit before the message limit. Start a fresh
-save directory to continue after exhausting memory. Sleep does not compact
-memory yet.
+so a save can reach the request limit before the message limit. A planner
+turn needs room for both the instruction and its reply. With fewer than two
+slots left, Moss keeps the earlier orders and refuses the new turn before
+contacting the planner. Reopening the same save preserves that history and
+limit. Choose a new, empty `--save-dir` to issue orders in a fresh world.
+Sleep does not compact memory yet.
 Unfinished creature orders stop when a saved game is reopened. Villagers
 choose new work from their saved needs and supplies. Earlier food-only and
 single-village saves migrate automatically; Willow's progress, conversation,
@@ -260,6 +263,17 @@ nim r -d:silkyTesting games/monster/tests/test_ui.nim
 nim r games/monster/tests/test_selection_render.nim
 nim r games/monster/tests/test_voices.nim
 nim r games/monster/tests/test_voice_launch.nim
+```
+
+To exercise the message limit through the public launcher, build the headless
+game once and run the loopback session check. It creates temporary saves,
+fills one transcript with short turns, reopens it at the limit, and checks
+that a new world can still carry out an order.
+
+```sh
+mkdir -p tmp
+nim c -d:headless --out:tmp/monster-memory games/monster/monster.nim
+python3 games/monster/tests/test_memory_session.py tmp/monster-memory
 ```
 
 Measure production, meals, reserves, hunger, warmth, and work/leisure time

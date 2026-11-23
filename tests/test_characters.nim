@@ -196,6 +196,22 @@ block:
   doAssert front.inFrustum(mat4()) == false
   doAssert front.transformed(translate(vec3(0, 0, 9))).inFrustum(mat4())
 
+echo "Panning the camera brings a stationary box into and out of view"
+block:
+  let
+    box = AABounds(min: vec3(19, -1, -11), max: vec3(21, 1, -9))
+    projection = ortho(-5'f32, 5, -5, 5, 0.1, 100)
+  proc visibleFrom(cameraX: float32): bool =
+    let
+      eye = vec3(cameraX, 0, 0)
+      view = lookAt(eye, eye + vec3(0, 0, -1), vec3(0, 1, 0))
+    box.inFrustum(projection * view)
+
+  doAssert not visibleFrom(0)
+  doAssert visibleFrom(14.5) # Right edge at 19.5, box center still outside.
+  doAssert visibleFrom(20)
+  doAssert not visibleFrom(27)
+
 echo "Shadow batching retains skinning, cutouts, and triangle indices"
 block:
   let

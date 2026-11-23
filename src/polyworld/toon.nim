@@ -257,8 +257,10 @@ proc toonDepthVert(
       vertexWeights.y * toonJointMatrices[vertexJoints.y.int] +
       vertexWeights.z * toonJointMatrices[vertexJoints.z.int] +
       vertexWeights.w * toonJointMatrices[vertexJoints.w.int]
-  gl_Position =
-    toonDepthLightMvp * toonModel * (skin * vec4(vertexPosition, 1.0'f))
+  # Match toonVert and the world-space bounds even when weights sum to
+  # slightly less or more than one.
+  let worldPos = (toonModel * (skin * vec4(vertexPosition, 1.0'f))).xyz
+  gl_Position = toonDepthLightMvp * vec4(worldPos, 1.0'f)
   uv = vertexUV
   parts = vertexUV1
   opacity = vertexColor.a

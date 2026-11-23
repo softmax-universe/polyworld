@@ -3,10 +3,10 @@
 A native Polyworld prototype about teaching one creature through conversation.
 Moss uses the Light versus Dark Elemental as its temporary appearance.
 
-Use Nim 2.2.10 or newer and the dependencies pinned in `nimby.lock`.
-In a fresh workspace, run `nimby create` and `nimby sync polyworld/nimby.lock`
-from the directory containing the `polyworld` checkout. If you already have
-those dependencies, set `POLYWORLD_DEPS` to the directory containing them.
+Use Nim 2.2.10 or newer. From the directory containing the `polyworld`
+checkout, run `nimby sync polyworld/nimby.lock` to install the pinned
+dependencies. If those packages are already available elsewhere, set
+`POLYWORLD_DEPS` to the directory containing them.
 The window and hidden captures also load models, fonts, and textures from
 the sibling `polyworld_art` checkout with its Git LFS files present.
 See [local setup](../../readme.md#run-locally).

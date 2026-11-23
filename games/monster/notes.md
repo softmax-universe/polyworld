@@ -277,9 +277,17 @@ that world and sends Moss to Willow with the supplies gathered there.
 
 ```sh
 mkdir -p tmp
-nim c -d:headless --out:tmp/monster-memory games/monster/monster.nim
-python3 games/monster/tests/test_memory_session.py tmp/monster-memory
+if nim c -d:headless --out:tmp/monster-memory games/monster/monster.nim; then
+  python3 games/monster/tests/test_memory_session.py tmp/monster-memory
+else
+  echo 'Build failed. For dependency errors, point POLYWORLD_DEPS at the packages pinned in nimby.lock and rerun this block.' >&2
+  false
+fi
 ```
+
+For example, if Nim cannot import `curly` or find `newCurly`, clear any
+stale override with `unset CURLY_PATH`. If needed, set
+`export POLYWORLD_DEPS=/path/to/pinned/packages`, then rerun the block above.
 
 Measure production, meals, reserves, hunger, warmth, and work/leisure time
 without rendering, external services, or modifying a save:

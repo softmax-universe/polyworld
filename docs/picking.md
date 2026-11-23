@@ -28,3 +28,6 @@ For several objects, compare their hit distances to choose the nearest.
 
 `pickCharacter` uses this check and keeps its double-sided selection and `-1`
 result for misses. Run `nim r tests/test_picking.nim` to test it.
+
+To check whether a whole object's bounds are in view before drawing it, see
+[Checking object bounds before drawing](frustums.md).

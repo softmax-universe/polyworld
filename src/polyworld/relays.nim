@@ -538,8 +538,14 @@ proc receive*(
   if room == nil:
     reject("Join a room first")
   if message.kind in {SubmitCommand, AppliedTick, Catchup, ReportHash,
-      FinishMatch, AbortMatch, PauseMatch} and message.match != room.match:
-    reject("Stale match identifier")
+      FinishMatch, AbortMatch, PauseMatch}:
+    # A peer may send the previous match's traffic before receiving the reopened
+    # lobby. Its history and receipts are already retired, including in a rematch.
+    if message.match > 0 and (message.match < room.match or
+        (message.match == room.match and room.phase == Lobby)):
+      return
+    if message.match != room.match:
+      reject("Stale match identifier")
   case message.kind
   of ConfigureRoom, ResizeRoom:
     if guest.id != room.owner:

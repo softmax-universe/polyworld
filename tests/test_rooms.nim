@@ -321,6 +321,39 @@ relay.receive(10, RoomMessage(
 doAssert relay.guest(hashRoom.owner).name == "Restored"
 doAssert hashRoom.seats == lobbySeats
 doAssert hashRoom.revision == lobbyRevision + 1
+relay.flush()
+
+# An owner can reopen a completed room while another player's final traffic is in flight.
+relay.send(11, RoomMessage(kind: ClaimSeat, seat: 1, name: "Rematch opponent"))
+relay.start(10, hashRoom)
+relay.advance(0.05)
+relay.flush()
+relay.advance(0.1)
+relay.flush()
+doAssert hashRoom.tick == 2
+let completedMatch = hashRoom.match
+relay.send(10, RoomMessage(kind: FinishMatch, match: completedMatch, tick: 2, hash: 21))
+relay.advance(0.15)
+relay.flush()
+doAssert hashRoom.phase == Ended
+relay.send(10, RoomMessage(kind: ReturnLobby))
+doAssert hashRoom.phase == Lobby and hashRoom.history.len == 0
+let latePackets = [RoomMessage(kind: Catchup, match: completedMatch, tick: 1),
+  RoomMessage(kind: FinishMatch, match: completedMatch, tick: 2, hash: 21),
+  RoomMessage(kind: SubmitCommand, match: completedMatch, seat: 1, sequence: 1, payload: "late")]
+for packet in latePackets:
+  relay.receive(11, decode(packet.encode()), 0)
+  doAssert relay.outgoing.len == 0
+relay.start(10, hashRoom)
+doAssert hashRoom.match > completedMatch
+for packet in latePackets:
+  relay.receive(11, decode(packet.encode()), 0)
+  doAssert relay.outgoing.len == 0
+doAssert hashRoom.phase == Playing and hashRoom.pending.len == 0 and hashRoom.history.len == 0
+relay.expectError(11, RoomMessage(kind: Catchup, match: hashRoom.match + 1, tick: 0))
+relay.send(11, RoomMessage(kind: SubmitCommand, match: hashRoom.match, seat: 1,
+  sequence: 1, payload: "rematch"))
+doAssert hashRoom.pending.len == 1 and hashRoom.pending[0].payload == "rematch"
 
 # Explicit pause freezes the timeline; hash comparisons remain asynchronous.
 relay = Relay()

@@ -472,7 +472,8 @@ proc rebuildVision*(w: World) {.measure.} =
     for unit in w.units:
       if (unit.owner == player or
           w.diplomacy.sharesVision(player, unit.owner)) and
-          unit.state notin {UnitDying, UnitInMine}:
+          unit.state != UnitDying:
+        # Hidden miners retain their entrance tile and normal sight radius.
         visionSources.add VisionSource(x: unit.tile.x, z: unit.tile.y,
           radius: unitOf(unit.owner, unit.kind).sightTiles, eyeHeight: 14)
     for structure in w.buildings:

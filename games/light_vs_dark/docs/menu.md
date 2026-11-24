@@ -36,7 +36,16 @@ Menu art lives in the sibling art checkout at `polyworld_art/themes/lvd/menu/`. 
 
 Battle Setup presents compact player cards stacked in two columns, with vertical scrolling for larger rosters and no Previous/Next paging. Add/remove players, choose human or local BASIC/ZIP policies, fill empty slots, and configure the map and diplomacy. A participant controls at most one human player but can own multiple private bot seats.
 
-Multiplayer connects to the **same universal relay as GotA**. Game identity filters room listings; game commands remain opaque to the server. Create a public/private room, assign seats, ready up, then start. Policies stay on their owners' machines. Changing configuration invalidates readiness.
+Multiplayer connects to the **same universal relay as GotA**. Game identity filters room listings; game commands remain opaque to the server. Create a public/private room, assign seats, ready up, then start. Policies stay on their owners' machines.
+
+Map settings, diplomacy, teams and the game name update automatically as the
+host edits them. Controls remain usable while an update is being acknowledged;
+newer edits are sent next without being overwritten by an older reply. Start Game
+uses the acknowledged settings. Invalid values show an error, and rejected
+updates restore the server's current settings. Private rooms remain private.
+
+Display, sound, controls and networking preferences are saved as they change.
+The Settings panel's Back button only navigates; there is no apply/save step.
 
 Roster capacity is 64, subject to a combined map/roster budget. Validation uses the generator's actual seeded growth before allocating cells: at most 262,144 map cells and 8,388,608 player×map cells. Large configurations report a validation error rather than exhausting browser memory.
 

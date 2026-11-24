@@ -19,8 +19,9 @@ for marker in ["\"Add player\", rosterAt", "\"Remove last\"", "\"Fill empty slot
   doAssert frontend.guarded(marker, "if owner:")
 doAssert "Shuffle mine" notin frontend
 doAssert "The host manages all slots" in frontend
-let onlineStart = frontend[frontend.find("if roster.dirty and owner") .. frontend.find("if sk.lobbyButton(\n              if owner")]
-doAssert "elif owner:" in onlineStart
+doAssert "Apply Settings" notin frontend
+doAssert frontend.guarded("if sk.lobbyButton(\"Start Game\", layout.primary,", "if owner:")
+doAssert "not roster.dirty and not roster.pending" in frontend
 doAssert "showControls = owner" in frontend
 doAssert "if showControls:" in lobbies
 doAssert "participantMenu.openSeat(client, i, sk.mousePos)" in frontend

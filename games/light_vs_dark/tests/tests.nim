@@ -8,6 +8,7 @@ import
   test_diplomacy,
   test_fixed_teams,
   test_team_setup,
+  test_roster_state,
   test_ffa_combat,
   test_siege,
   test_siege_network,

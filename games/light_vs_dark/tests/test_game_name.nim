@@ -17,11 +17,12 @@ else:
   doAssert false, "Missing game-name helpers"
 doAssert source.count("roomName = defaultGameName(preferences.name)") == 1
 doAssert "gameName = if online: addr matchName else: nil" in source
-doAssert "client.renameGame(matchName)" in source
+doAssert "roster.publishSettings(config, client, matchName)" in source
+doAssert "roster.acceptSettings(config, matchName, client.snapshot)" in source
 doAssert "error = client.error" in source
-doAssert "if online and owner and editable and not modal and not roster.pending and" in source
-doAssert "window.buttonPressed[KeyEnter]" in source
-doAssert "kind: ConfigureRoom, name: matchName" notin source
+doAssert "if online and owner and editable and page == LobbyMenu:" in source
+doAssert "matchName != snapshot.name and window.buttonPressed[KeyEnter]" notin source
+doAssert "Apply Settings" notin source
 doAssert "if roomName == defaultGameName(preferences.name):" in source
 doAssert "roomName = defaultGameName(updated.name)" in source
 when declared(renameGame):

@@ -567,6 +567,8 @@ proc settingsPanel*(
   of ControlsSettings:
     sk.bindingsPanel(window, preferences, origin, height, controls, extension)
     inputBindings = preferences.bindings
+    if preferences != previous:
+      preferences.savePreferences(app)
   of NetworkingSettings:
     sk.drawLabel("Display name", origin + vec2(0, 64), vec2(210, 36),
       sk.theme.defaultTextColor)
@@ -576,6 +578,8 @@ proc settingsPanel*(
       sk.theme.defaultTextColor)
     sk.menuInput(window, "preferredServer", preferences.server,
       origin + vec2(210, 112), 510)
+    if preferences != previous:
+      preferences.savePreferences(app)
   of DisplaySettings:
     when defined(emscripten):
       sk.at = origin + vec2(0, 80)
@@ -672,7 +676,6 @@ proc settingsPanel*(
         )
         preferences.savePreferences(app)
   sk.at = origin + vec2(0, height - 32)
-  soundButton "Save and Back", not bindingCapture:
-    preferences.savePreferences(app)
+  soundButton "Back", not bindingCapture:
     playSound(CancelSound)
     result = true

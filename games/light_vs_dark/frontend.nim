@@ -185,18 +185,19 @@ proc runFrontend*() =
         multiplayerHuman = -1
         networkPolicies = newSeq[LocalPolicy](config.playerCount)
       if client.snapshot.room.len > 0:
-        if namedRoom != client.snapshot.room or publishedName != client.snapshot.name:
+        if namedRoom != client.snapshot.room:
           namedRoom = client.snapshot.room
           publishedName = client.snapshot.name
           matchName = publishedName
         page = LobbyMenu
         if viewedRevision != client.snapshot.revision:
           if viewedPayload != client.snapshot.payload or
-            (roster.pending and client.snapshot.payload == roster.pendingPayload):
+            publishedName != client.snapshot.name or roster.pending:
             try:
-              roster.acceptConfig(config, client.snapshot.payload)
-              networkPolicies.setLen(config.playerCount)
-              viewedPayload = client.snapshot.payload
+              if roster.acceptSettings(config, matchName, client.snapshot):
+                networkPolicies.setLen(config.playerCount)
+                viewedPayload = client.snapshot.payload
+                publishedName = client.snapshot.name
             except CatchableError as problem:
               error = problem.msg
           viewedRevision = client.snapshot.revision
@@ -220,7 +221,7 @@ proc runFrontend*() =
       if client.error.len > 0:
         error = client.error
         if roster.pending and client.snapshot.room.len > 0:
-          roster.rejectConfig(config, client.snapshot.payload)
+          roster.rejectSettings(config, matchName, client.snapshot)
           networkPolicies.setLen(config.playerCount)
     if launchNetwork:
       run = prepared.game
@@ -542,7 +543,7 @@ proc runFrontend*() =
             escape = window.buttonPressed[KeyEscape])
           if online and not roster.pending and snapshot.seats.len != config.playerCount:
             raise newException(MenusError, "Room roster does not match its settings")
-          if teamPicker.isOpen and (not owner or not editable or roster.pending):
+          if teamPicker.isOpen and (not owner or not editable):
             teamPicker.dismiss()
           var occupiedSeats: seq[int]
           for i in 0 ..< config.playerCount:
@@ -591,7 +592,7 @@ proc runFrontend*() =
             if not modal and window.buttonPressed[MouseRight] and
                 not config.diplomacySettings.enabled and
                 teamBadgeHit(layout, i, rosterScroll.scrollPos.y, sk.mousePos):
-              if owner and editable and not roster.pending:
+              if owner and editable:
                 teamPicker.openTeamPicker(i, sk.mousePos)
             elif online and not modal and window.buttonPressed[MouseRight] and
                 rosterCardHit(layout, i, rosterScroll.scrollPos.y, sk.mousePos):
@@ -604,7 +605,8 @@ proc runFrontend*() =
             if sk.lobbyButton("Add player", rosterAt, 210, "cross",
               canResize and config.playerCount < MaxSeats):
                 if online: client.error = ""
-                roster.resizeRoster(config, client, config.playerCount + 1, publicRoom)
+                roster.resizeRoster(config, client, config.playerCount + 1,
+                  if online: snapshot.flag else: publicRoom)
                 if online:
                   networkPolicies.setLen(config.playerCount)
                 else:
@@ -612,7 +614,8 @@ proc runFrontend*() =
             if sk.lobbyButton("Remove last", rosterAt + vec2(222, 0), 210, "minus",
               canResize and config.playerCount > 1):
                 if online: client.error = ""
-                roster.resizeRoster(config, client, config.playerCount - 1, publicRoom)
+                roster.resizeRoster(config, client, config.playerCount - 1,
+                  if online: snapshot.flag else: publicRoom)
                 if online:
                   networkPolicies.setLen(config.playerCount)
                   multiplayerHuman = humanAfterRemoval(multiplayerHuman, config.playerCount)
@@ -670,21 +673,17 @@ proc runFrontend*() =
                     localPolicies[destination] = oldPolicies[source]
                     if oldHuman == source:
                       humanSeat = destination
-            sk.lobbyLabel(if online and roster.pending: "Saving roster / settings..."
+            sk.lobbyLabel(if online and roster.pending: "Syncing settings..."
               elif online: "The host manages all slots. Ready is only an indicator."
               else: "Fill keeps assigned humans and bots. Clear a slot to replace it.",
               fill + vec2(0, 54), layout.leftWidth - 44, tint = LobbyMuted)
           if sk.configPanel(window, lobbyUi, config, layout.right,
             layout.rightWidth, layout.panelHeight,
-            owner and editable and not modal and not roster.pending,
+            owner and editable and not modal,
             showControls = owner,
             gameName = if online: addr matchName else: nil,
             occupied = occupiedSeats):
               roster.dirty = online
-          if online and owner and editable and not modal and not roster.pending and
-              matchName != snapshot.name and window.buttonPressed[KeyEnter]:
-            discard client.renameGame(matchName)
-            error = client.error
           if online:
             let info = layout.left + vec2(22, layout.panelHeight - 72)
             sk.lobbyLabel(snapshot.name, info, 600,
@@ -695,24 +694,15 @@ proc runFrontend*() =
                   "&room=" & encodeUrl(snapshot.room))
             if sk.lobbyButton(if selfReady: "Ready" else: "Not ready",
               layout.footer + vec2(420, 0), 190, "status",
-              editable and ownCount > 0 and not roster.dirty and not roster.pending and not modal,
+              editable and ownCount > 0 and not roster.dirty and
+                not roster.pending and matchName == snapshot.name and not modal,
               iconTint = readinessColor(selfReady)):
                 client.toggleCosmeticReady()
-            if roster.dirty and owner and editable:
-              if sk.lobbyButton("Apply Settings", layout.primary,
-                250, "settings", not modal and not roster.pending):
-                  discard parseConfig(config.toJson())
-                  client.error = ""
-                  client.send(RoomMessage(
-                    kind: ConfigureRoom, name: snapshot.name,
-                    number: uint32(config.playerCount), tickRate: uint32(TickRate),
-                    flag: publicRoom, payload: config.toJson()
-                  ))
-                  roster.pendingPayload = config.toJson()
-            elif owner:
+            if owner:
               if sk.lobbyButton("Start Game", layout.primary,
                 250, "arrow_right",
-                owner and editable and not roster.pending and not modal,
+                editable and not roster.dirty and not roster.pending and
+                  matchName == snapshot.name and not modal,
                 tint = LobbyGreen):
                   var sources = newSeq[string](networkPolicies.len)
                   for i, policy in networkPolicies: sources[i] = policy.bytes
@@ -796,6 +786,11 @@ proc runFrontend*() =
               lobbyUi.selectedSeat = -1
           if sk.drawTeamPicker(window, teamPicker, config):
             roster.dirty = online
+          if online and owner and editable and page == LobbyMenu:
+            if roster.publishSettings(config, client, matchName):
+              error = ""
+            elif client.error.len > 0:
+              error = client.error
           if participantMenu.isOpen:
             sk.pushLayer(PopupsLayer)
             let

@@ -339,7 +339,20 @@ proc communicationButtonPanel(window: Window): GameUiPanel =
   ## Shares the diplomacy button's drawing and world-input bounds.
   currentLayout(window).diplomacyButtonPanel()
 
-proc drawHumanCommunication(sk: Silky, window: Window) =
+proc diplomacyActionIcon(command: DiplomacyCommand): string =
+  ## Gives each negotiation action a matching symbol from the shared art.
+  case command
+  of DeclareWar: "battle"
+  of OfferPeace: "diplomacy"
+  of OfferAlliance: "alliance"
+  of AcceptOffer: "confirm"
+  of DeclineOffer: "cancel"
+  of WithdrawOffer, WithdrawWar: "arrow_left"
+  of EndAlliance: "hostile"
+
+proc drawHumanCommunication(sk: Silky, window: Window,
+    teamColors: openArray[ColorRGBX]) =
+  ## Draws chat and negotiations with the same player colors as the world.
   if run == nil:
     return
   commState.syncChatFeed(run)
@@ -356,12 +369,19 @@ proc drawHumanCommunication(sk: Silky, window: Window) =
         options.playerSlot - 1
     ink = rgbx(235, 231, 214, 255)
     muted = rgbx(175, 187, 201, 255)
-  proc button(label: string, panel: GameUiPanel, enabled = true): bool =
+  proc button(label: string, panel: GameUiPanel, enabled = true,
+      icon = ""): bool =
+    ## Keeps action symbols and their labels inside one clickable button.
     sk.hoverSound(panel, enabled and not statsState.visible(window.tabHeld))
     sk.drawRect(panel.origin, panel.size,
       if enabled: rgbx(48, 66, 85, 255) else: rgbx(27, 32, 42, 255))
-    sk.drawLabel(sk.fittedLabel(label, panel.size.x - 10, "Small"),
-      panel.origin + vec2(5, 0), panel.size - vec2(10, 0),
+    let labelInset = if icon.len > 0: 28'f32 else: 5'f32
+    if icon.len > 0:
+      sk.drawSprite(icon, panel.origin + vec2(6, 6), vec2(IconTiny),
+        if enabled: IconTint else: rgbx(110, 115, 125, 160))
+    sk.drawLabel(sk.fittedLabel(label, panel.size.x - labelInset - 5, "Small"),
+      panel.origin + vec2(labelInset, 0),
+      panel.size - vec2(labelInset + 5, 0),
       if enabled: ink else: muted, "Small", CenterAlign)
     # Communication owns keyboard input; typed select aliases cannot click it.
     result = enabled and not window.statsContains(sk.mousePos) and
@@ -440,7 +460,7 @@ proc drawHumanCommunication(sk: Silky, window: Window) =
   commState.diplomacyPage = clamp(commState.diplomacyPage, 0, pages - 1)
   sk.drawRect(origin - vec2(4), vec2(width + 8, height + 8), rgbx(100, 118, 140, 255))
   sk.drawRect(origin, vec2(width, height), rgbx(17, 23, 32, 255))
-  sk.drawLabel("DIPLOMACY — peace first, then alliance", origin + vec2(12, 4),
+  sk.drawLabel("DIPLOMACY - peace first, then alliance", origin + vec2(12, 4),
     vec2(width - 100, 34), ink, "Small")
   if button("Close", GameUiPanel(origin: origin + vec2(width - 80, 6), size: vec2(68, 28))):
     discard commState.cancelCommunication()
@@ -452,26 +472,34 @@ proc drawHumanCommunication(sk: Silky, window: Window) =
     if ordinal div rows != commState.diplomacyPage: continue
     let
       rowOrigin = origin + vec2(12, 44 + float32((ordinal mod rows) * 92))
+      textOrigin = rowOrigin + vec2(64, 0)
+      textWidth = width - 88
+      tint = teamColors[other]
       relation = run.world.diplomacy.relation(player, other)
       choices = run.diplomacyChoices(player, other)
       relationName = case relation.state
         of Neutral: "Peace / neutral"
-        of WarPending: "War declared — warning"
+        of WarPending: "War declared - warning"
         of AtWar: "At war"
-        of Allied: "Ally — shared vision"
-        of AllianceEnding: "Alliance ending — vision retained"
-    var label = run.config.players[other].displayName(int(other)) & " — " & relationName
+        of Allied: "Ally - shared vision"
+        of AllianceEnding: "Alliance ending - vision retained"
+    sk.drawRect(rowOrigin, vec2(56, 74), tint)
+    sk.drawRect(rowOrigin + vec2(2), vec2(52, 56), rgbx(12, 16, 23, 255))
+    sk.drawSprite(unitSymbolKey(PeonUnit), rowOrigin + vec2(4, 6),
+      vec2(48), tint)
+    var label = run.config.players[other].displayName(int(other)) & " - " & relationName
     if run.world.players[other].defeated: label.add " (defeated)"
     if relation.deadline > 0:
       label.add " (" & $max(0'i32, (relation.deadline - run.world.tick + TickRate - 1) div TickRate) & "s)"
-    sk.drawLabel(sk.fittedLabel(label, width - 24, "Small"), rowOrigin,
-      vec2(width - 24, 22), ink, "Small")
+    sk.drawLabel(sk.fittedLabel(label, textWidth, "Small"), textOrigin,
+      vec2(textWidth, 22), ink, "Small")
     var offerText = ""
     if relation.offer != NoOffer:
       offerText = (if relation.sender == player: "Outgoing " else: "Incoming ") &
         (if relation.offer == PeaceOffer: "peace offer" else: "alliance offer") &
         " (" & $max(0'i32, (relation.offerDeadline - run.world.tick + TickRate - 1) div TickRate) & "s)"
-    sk.drawLabel(offerText, rowOrigin + vec2(0, 22), vec2(width - 24, 20), muted, "Small")
+    sk.drawLabel(sk.fittedLabel(offerText, textWidth, "Small"),
+      textOrigin + vec2(0, 22), vec2(textWidth, 20), muted, "Small")
     var actions: seq[tuple[command: DiplomacyCommand, label: string]]
     if relation.offer != NoOffer:
       if relation.sender == player: actions.add (WithdrawOffer, "Withdraw offer")
@@ -488,13 +516,16 @@ proc drawHumanCommunication(sk: Silky, window: Window) =
       of AllianceEnding: discard
     if relation.state == WarPending and relation.initiator == player:
       actions.add (WithdrawWar, "Withdraw war")
-    let actionWidth = min(160'f32, (width - 36) / max(1, actions.len).float32)
+    let actionWidth = min(160'f32,
+      (textWidth - 4 * max(0, actions.len - 1).float32) /
+        max(1, actions.len).float32)
     for slot, action in actions:
       if button(action.label, GameUiPanel(
-          origin: rowOrigin + vec2(float32(slot) * (actionWidth + 4), 46),
-          size: vec2(actionWidth, 28)), action.command in choices):
+          origin: textOrigin + vec2(float32(slot) * (actionWidth + 4), 46),
+          size: vec2(actionWidth, 28)), action.command in choices,
+          action.command.diplomacyActionIcon()):
         if run.submitHumanDiplomacy(player, other, action.command, relation.offerId):
-          commState.status = if run.networked: "Submitted — awaiting authoritative tick" else: "Diplomacy updated"
+          commState.status = if run.networked: "Submitted - awaiting authoritative tick" else: "Diplomacy updated"
         else: commState.status = "Relation changed; try again."
         commState.blockedFrame = true
   let footer = origin + vec2(12, height - 40)
@@ -1282,7 +1313,7 @@ proc drawUi*(
     let at = vec2((chrome.layout.size.x - size.x) / 2, 84)
     sk.drawRect(at, size, rgbx(55, 20, 18, 245))
     sk.drawLabel(warning, at, size, rgbx(255, 213, 143, 255), "Bold", CenterAlign)
-  sk.drawHumanCommunication(window)
+  sk.drawHumanCommunication(window, teamColors)
 
 proc drawStatsOverlay*(
   sk: Silky,

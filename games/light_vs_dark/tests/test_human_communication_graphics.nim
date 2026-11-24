@@ -1,6 +1,6 @@
 ## Native production graphics callbacks, not source-string route assertions.
 ## Uses hidden native GL; focus is supplied to the callback harness explicitly.
-import std/[macros, importutils, os, strutils]
+import std/[macros, importutils, os, strutils, tables]
 import windy/internal
 import polyworld/mailboxes
 import ../presets
@@ -43,16 +43,27 @@ macro finishProductionUi(): untyped =
   result = renameDirector(search(parseStmt(staticRead("../graphics.nim"))))
   if result == nil: error("Missing production post-Silky rune restoration")
 
-window = newWindow("LvD communication callback regression", ivec2(1200, 800), visible = false)
+window = newWindow("LvD communication callback regression", ivec2(1920, 1080), visible = false)
 window.makeContextCurrent()
 loadExtensions()
 glClearColor(0, 0, 0, 1)
 let atlas = buildUiAtlas(factionOrder(DefaultSeed.int64))
+for icon in ["battle", "diplomacy", "alliance", "confirm", "cancel",
+    "arrow_left", "hostile", unitSymbolKey(PeonUnit)]:
+  doAssert atlas.atlas.entries.hasKey(icon), "Missing diplomacy icon: " & icon
 sk = newSilky(window, atlas.atlasImage, atlas.atlas)
 var
   fixtureFocused = true
-  target = initCaptureTarget(window.size)
-glBindFramebuffer(GL_FRAMEBUFFER, target.framebuffer)
+  framebuffer, texture: GLuint
+glGenFramebuffers(1, framebuffer.addr)
+glGenTextures(1, texture.addr)
+glBindTexture(GL_TEXTURE_2D, texture)
+glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8.GLint, window.size.x, window.size.y,
+  0, GL_RGBA, GL_UNSIGNED_BYTE, nil)
+glBindFramebuffer(GL_FRAMEBUFFER, framebuffer)
+glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+  GL_TEXTURE_2D, texture, 0)
+doAssert glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE
 pollEvents()
 doAssert not window.visible
 var config = defaultConfig(2)
@@ -160,9 +171,11 @@ block diplomacyPanel:
     doAssert button.origin.y + button.size.y <= size.y
   var colors = @[rgbx(230, 100, 100, 255), rgbx(100, 100, 230, 255)]
   proc drawHud(at: Vec2, pressed: set[Button] = {}) =
+    ## Draws the actual HUD into the hidden capture target with mouse input.
     sk.uiScale = gameUiScale(window)
     window.state.mousePos = ivec2((at.x * sk.uiScale).int32, (at.y * sk.uiScale).int32)
     window.state.perFrame = PerFrame(buttonPressed: pressed)
+    glClear(GL_COLOR_BUFFER_BIT)
     sk.beginUi(window, window.size)
     drawUi(sk, window, transport, cameraTarget, cameraDistance, viewMode,
       primaryId, selectedIds, followSelection, director, colors)
@@ -220,7 +233,7 @@ block diplomacyPanel:
   let rows = max(1, min(6, int((layout.size.y - 148) / 92)))
   let height = 100'f32 + float32(rows * 92)
   let origin = vec2((layout.size.x-width)/2, max(12'f32, (layout.size.y-height)/2))
-  let firstAction = origin + vec2(40, 104)
+  let firstAction = origin + vec2(104, 104)
   let secondAction = firstAction + vec2(164, 0)
   drawHud(firstAction, {MouseLeft})
   doAssert run.world.diplomacy.relation(0, 1).offer == PeaceOffer
@@ -240,6 +253,103 @@ block diplomacyPanel:
   drawHud(diplomacyCenter, {MouseLeft})
   doAssert not humanCommunicationBlocksGameplay(),
     "Fixed team icon must not open negotiation controls"
+  block playerBadges:
+    let
+      previousRun = run
+      previousSelection = selectedIds
+      previousPrimary = primaryId
+    var rosterConfig = defaultConfig(8)
+    rosterConfig.diplomacySettings.enabled = true
+    rosterConfig.diplomacySettings.neutralStart = true
+    rosterConfig.maxTicks = 100
+    rosterConfig.mapSettings = config.mapSettings
+    const Names = ["Aster", "Briar", "Cinder", "Dawn",
+      "Ember", "Flint", "Gale", "Haven"]
+    for player in 0 ..< rosterConfig.players.len:
+      rosterConfig.players[player].name = Names[player]
+    run = newLocalMatch(rosterConfig, ["", "", "", "", "", "", "", ""])
+    selectedIds = @[]
+    primaryId = NoEntity
+    colors = @[]
+    for faction in playerFactions(run.mapSeed,
+        run.world.diplomacy.settings, run.world.players.len):
+      colors.add FactionColors[faction]
+    resetHumanCommunication()
+    # Show all eight actions across six rows without advancing the simulation.
+    for other in 1'i32 .. 6:
+      let index = run.world.diplomacy.pairIndex(0, other)
+      run.world.diplomacy.pairs[index] = case other
+        of 2: Relation(state: AtWar)
+        of 3: Relation(state: Neutral, offer: AllianceOffer, sender: 3,
+          offerId: 1, offerDeadline: TickRate * 60)
+        of 4: Relation(state: Allied)
+        of 5: Relation(state: Neutral, offer: AllianceOffer, sender: 0,
+          offerId: 2, offerDeadline: TickRate * 60)
+        of 6: Relation(state: WarPending, initiator: 0,
+          deadline: TickRate * 10)
+        else: Relation(state: Neutral)
+    run.world.players[7].defeated = true
+    drawHud(diplomacyCenter, {MouseLeft})
+    drawHud(vec2(0))
+    let screenshot = newImage(window.size.x, window.size.y)
+    glReadPixels(0, 0, window.size.x, window.size.y, GL_RGBA,
+      GL_UNSIGNED_BYTE, screenshot.data[0].addr)
+    screenshot.flipVertical()
+    proc pixelAt(image: Image, at: Vec2): ColorRGBX =
+      ## Samples the rendered image in the HUD's logical coordinates.
+      image[int(at.x * sk.uiScale), int(at.y * sk.uiScale)]
+    proc brightPixels(image: Image, at, size: Vec2, threshold = 100): int =
+      ## Counts visible glyph pixels independently of the button background.
+      for y in 0 ..< int(size.y):
+        for x in 0 ..< int(size.x):
+          let pixel = image.pixelAt(at + vec2(x.float32, y.float32))
+          if pixel.r.int > threshold or pixel.g.int > threshold or
+            pixel.b.int > threshold:
+              inc result
+    doAssert rows == 6, "Fixture must show the complete first diplomacy page"
+    for row in 0 ..< rows:
+      let badge = origin + vec2(12, 44 + row.float32 * 92)
+      doAssert screenshot.pixelAt(badge + vec2(10, 66)) == colors[row + 1],
+        "Player badge must use the exact unit/minimap color"
+      doAssert screenshot.brightPixels(badge + vec2(4, 6), vec2(48), 35) > 30,
+        "Player badge must contain a visible tinted player icon"
+      let firstIcon = badge + vec2(64 + 6, 46 + 6)
+      doAssert screenshot.brightPixels(firstIcon, vec2(16)) > 4,
+        "Every visible first action must display its icon"
+      if row in [0, 2, 5]:
+        doAssert screenshot.brightPixels(firstIcon + vec2(164, 0),
+          vec2(16)) > 4, "Second actions must display their icons"
+    let panelPath = getEnv("LVD_DIPLOMACY_PANEL_FIXTURE")
+    if panelPath.len > 0:
+      let
+        left = int((origin.x - 4) * sk.uiScale)
+        top = int((origin.y - 4) * sk.uiScale)
+        panelWidth = int((width + 8) * sk.uiScale)
+        panelHeight = int((height + 8) * sk.uiScale)
+      createDir(panelPath.parentDir)
+      screenshot.subImage(left, top, panelWidth, panelHeight).writeFile(panelPath)
+    let next = origin + vec2(120, height - 26)
+    drawHud(next, {MouseLeft})
+    drawHud(vec2(0))
+    let nextPage = newImage(window.size.x, window.size.y)
+    glReadPixels(0, 0, window.size.x, window.size.y, GL_RGBA,
+      GL_UNSIGNED_BYTE, nextPage.data[0].addr)
+    nextPage.flipVertical()
+    doAssert nextPage.pixelAt(origin + vec2(22, 110)) == colors[7],
+      "Next page must show the next opponent's color"
+    let defeatedRelation = run.world.diplomacy.relation(0, 7)
+    drawHud(firstAction, {MouseLeft})
+    drawHud(secondAction, {MouseLeft})
+    doAssert run.world.diplomacy.relation(0, 7) == defeatedRelation,
+      "Defeated players must retain disabled diplomacy actions"
+    drawHud(origin + vec2(50, height - 26), {MouseLeft})
+    drawHud(firstAction, {MouseLeft})
+    doAssert run.world.diplomacy.relation(0, 1).offer == AllianceOffer,
+      "Previous page must restore the first opponent's action targets"
+    resetHumanCommunication()
+    run = previousRun
+    selectedIds = previousSelection
+    primaryId = previousPrimary
 press(KeyEnter)
 release(KeyEnter)
 press(KeyS) # Deliberately lose its release while unfocused.
@@ -252,8 +362,9 @@ doAssert not humanCommunicationBlocksGameplay(), "Focus loss clears held-key qua
 press(KeyEscape)
 doAssert matchMenu == PauseMenu, "Escape outside communication still opens pause"
 release(KeyEscape)
-target.close()
+glDeleteTextures(1, texture.addr)
+glDeleteFramebuffers(1, framebuffer.addr)
 window.close()
 window = nil
 run = nil
-echo "PASS production graphics Enter/rune/send/repeat/Escape, Silky capture restoration, focus loss, hotkeys and camera/Ctrl+A polling suppression; HUD alias/Tab isolation and both-player diplomacy Offer/Decline/Accept"
+echo "PASS production graphics Enter/rune/send/repeat/Escape, Silky capture restoration, focus loss, hotkeys and camera/Ctrl+A polling suppression; HUD alias/Tab isolation, diplomacy actions, colored player badges, action icons, paging and defeated guards"

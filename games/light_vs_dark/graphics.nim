@@ -89,6 +89,7 @@ var
   selectionAdditive = false
   lineGesture: LineGesture
   rightOrderStarted = false
+  rightOrderAppend = false
   targetFlash: TargetFeedback
   groupCameraScale = 1.0'f32
   seekCheckpoints: seq[SeekCheckpoint]
@@ -158,6 +159,7 @@ proc cancelGameplayGestures() =
   panning = false
   minimapPanning = false
   rightOrderStarted = false
+  rightOrderAppend = false
   rightOrderFromBuild = false
   attackLeftStarted = false
   lineGesture.cancelLine()
@@ -1344,6 +1346,8 @@ proc runGraphics*(network: NetworkMatch = nil,
       onMinimap = attackMinimapTile(currentLayout(window), sk.mousePos,
         run.world.map.side) != NoTile and not window.buttonDown[KeyTab]
     if window.mousePressed(MouseRight):
+      # A click keeps its queue mode even if Shift changes before release.
+      rightOrderAppend = window.actionDown(ShiftInput)
       rightOrderFromBuild = pendingBuild >= 0 and inside
       if rightOrderFromBuild:
         pendingBuild = -1
@@ -1369,6 +1373,9 @@ proc runGraphics*(network: NetworkMatch = nil,
       attackClick = pendingBuild < 0 and attackMoveArmed and
         (rightOrder or leftAttack)
       moveOnly = rightOrderFromBuild
+      appendOrder =
+        if rightOrder and not leftAttack: rightOrderAppend
+        else: window.actionDown(ShiftInput)
     if rightOrder: rightOrderFromBuild = false
     if leftAttack:
       lineGesture.cancelLine()
@@ -1394,7 +1401,7 @@ proc runGraphics*(network: NetworkMatch = nil,
           let targets = lineGesture.targets
           let outcome = lineGesture.releaseLine(run.world, selectedIds,
             inside = inside and not overUi,
-            append = window.actionDown(ShiftInput))
+            append = appendOrder)
           if outcome != LineClick:
             rightOrderStarted = false
             if outcome == LineCommitted:
@@ -1447,11 +1454,12 @@ proc runGraphics*(network: NetworkMatch = nil,
         selectionStarted = false
         minimapPanning = false
         if run.world.queueArmedAttackMove(player, selectedIds,
-            mini.x.int32, mini.y.int32, append = window.actionDown(ShiftInput)):
+            mini.x.int32, mini.y.int32, append = appendOrder):
           consumeAttackModifier()
           playSound(AttackOrderSound)
           attackClickMarks.emitClickMark(clickTilePoint(mini.x.int32, mini.y.int32))
-      elif pendingBuild < 0 and issueSelectedMove(player, mini.x.int32, mini.y.int32, append = window.actionDown(ShiftInput)):
+      elif pendingBuild < 0 and issueSelectedMove(player, mini.x.int32,
+          mini.y.int32, append = appendOrder):
         playSound(MoveOrderSound)
         clickMarks.emitClickMark(clickTilePoint(mini.x.int32, mini.y.int32))
       return
@@ -1462,7 +1470,7 @@ proc runGraphics*(network: NetworkMatch = nil,
       let picked = pickEntity(viewProjection)
       if picked != NoEntity:
         if run.world.queueFeedbackAttack(player, selectedIds, picked,
-            append = window.actionDown(ShiftInput)):
+            append = appendOrder):
           targetFlash.flashTarget(AttackEntityFlash, picked, player)
           consumeAttackModifier()
           if run.world.hasUnit(picked):
@@ -1476,7 +1484,8 @@ proc runGraphics*(network: NetworkMatch = nil,
       let ground = pickGroundPoint(window.mousePos.vec2, window.size.vec2,
         viewProjection, cameraTarget.y)
       let tile = groundTile(ground, mapHalf(), run.world.map.side)
-      if run.world.queueArmedAttackMove(player, selectedIds, tile[0], tile[1], append = window.actionDown(ShiftInput)):
+      if run.world.queueArmedAttackMove(player, selectedIds, tile[0], tile[1],
+          append = appendOrder):
         consumeAttackModifier()
         playSound(AttackOrderSound)
         attackClickMarks.emitClickMark(clickTilePoint(tile[0], tile[1]))
@@ -1509,13 +1518,13 @@ proc runGraphics*(network: NetworkMatch = nil,
             if unit.kind == PeonUnit:
               queueBuild(player, id, structure.kind.ord.int32,
                 structure.origin.x.int32, structure.origin.y.int32,
-                append = window.actionDown(ShiftInput))
+                append = appendOrder)
               playSound(MoveOrderSound)
               clickMarks.emitClickMark(buildingCentre(structure))
               return
           return
         if structure.owner == player and run.world.queueFeedbackDeposit(
-            player, selectedIds, target, append = window.actionDown(ShiftInput)):
+            player, selectedIds, target, append = appendOrder):
           targetFlash.flashTarget(HarvestEntityFlash, target, player)
           playSound(MoveOrderSound)
           clickMarks.emitClickMark(buildingCentre(structure))
@@ -1523,7 +1532,7 @@ proc runGraphics*(network: NetworkMatch = nil,
           return
         if structure.kind == GoldMineBuilding:
           if run.world.queueFeedbackHarvest(player, selectedIds, target, tree = false,
-              append = window.actionDown(ShiftInput)):
+              append = appendOrder):
             targetFlash.flashTarget(HarvestEntityFlash, target, player)
             playSound(MoveOrderSound)
             clickMarks.emitClickMark(buildingCentre(structure))
@@ -1531,7 +1540,7 @@ proc runGraphics*(network: NetworkMatch = nil,
           return
         if structure.owner != player:
           if run.world.queueFeedbackAttack(player, selectedIds, target,
-              append = window.actionDown(ShiftInput)):
+              append = appendOrder):
             targetFlash.flashTarget(AttackEntityFlash, target, player)
             playSound(AttackOrderSound)
             attackClickMarks.emitClickMark(buildingCentre(structure))
@@ -1540,7 +1549,7 @@ proc runGraphics*(network: NetworkMatch = nil,
       elif run.world.hasUnit(target) and
           run.world.unitOwner(target) != player:
         if run.world.queueFeedbackAttack(player, selectedIds, target,
-            append = window.actionDown(ShiftInput)):
+            append = appendOrder):
           targetFlash.flashTarget(AttackEntityFlash, target, player)
           playSound(AttackOrderSound)
           attackClickMarks.emitClickMark(renderPoint(run.world.units[run.world.unitIndex(target)]))
@@ -1548,7 +1557,7 @@ proc runGraphics*(network: NetworkMatch = nil,
         return
     if not moveOnly and tree >= 0:
       if run.world.queueFeedbackHarvest(player, selectedIds, tree, tree = true,
-          append = window.actionDown(ShiftInput)):
+          append = appendOrder):
         targetFlash.flashTarget(HarvestTreeFlash, tree, player)
         playSound(MoveOrderSound)
         clickMarks.emitClickMark(clickTilePoint(
@@ -1556,7 +1565,7 @@ proc runGraphics*(network: NetworkMatch = nil,
         ))
       attackMoveArmed = false
       return
-    if issueSelectedMove(player, tile[0], tile[1], append = window.actionDown(ShiftInput)):
+    if issueSelectedMove(player, tile[0], tile[1], append = appendOrder):
       playSound(MoveOrderSound)
       clickMarks.emitClickMark(clickTilePoint(tile[0], tile[1]))
     attackMoveArmed = false

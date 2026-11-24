@@ -145,6 +145,14 @@ proc main() =
     inputFrame(released = {MouseRight})
     run.flushPlayerCommands()
 
+  proc applySubmittedOrders(append: bool, count = 1) =
+    ## Applies the input's authoritative commands to inspect actual unit queues.
+    require run.submissions.len == count
+    for action in run.submissions:
+      check action.append == append
+      require run.world.applyReplayAction(action)
+    run.submissions.setLen(0)
+
   proc depotFixture(kind: BuildingKind): int32 =
     ## Places a visible owned depot and selects one peon for real right clicks.
     fixture()
@@ -160,6 +168,122 @@ proc main() =
     run.world.buildingSlot[run.world.map.mines.len] = 0
     let size = BuildingTable[kind].footprint
     pointAtTile(tile2(half+2+size.width div 2, half-1+size.depth div 2))
+
+  suite "LvD right-click queue replacement":
+    test "plain ground click replaces Shift waypoints including small mouse drift":
+      for shift in [KeyLeftShift, KeyRightShift]:
+        for drift in [vec2(0), vec2(3, 2)]:
+          fixture()
+          let unit = run.world.units[run.world.unitIndex(soldier)]
+          let half = run.world.map.side div 2
+          inputFrame({shift})
+          for y in [0'i32, 2, -2]:
+            pointAtTile(tile2(half + 4, half + y))
+            rightClick()
+            applySubmittedOrders(true)
+          require unit.orderQueue.len == 2
+          inputFrame(released = {shift})
+          pointAtTile(tile2(half + 1, half + 4))
+          inputFrame({MouseRight})
+          pointAt(window.mousePos.vec2 + drift)
+          let ground = pickGroundPoint(window.mousePos.vec2,
+            window.size.vec2, vp, cameraTarget.y)
+          let destination = groundTile(ground, mapHalf(), run.world.map.side)
+          inputFrame(released = {MouseRight})
+          run.flushPlayerCommands()
+          applySubmittedOrders(false)
+          check unit.orderQueue.len == 0
+          check unit.goal == tile2(destination[0], destination[1])
+          check unit.state == UnitMoving
+
+    test "plain minimap click replaces the unit's queued route":
+      fixture()
+      let unit = run.world.units[run.world.unitIndex(soldier)]
+      let half = run.world.map.side div 2
+      inputFrame({KeyLeftShift})
+      for y in [0'i32, 2, -2]:
+        pointAtTile(tile2(half + 4, half + y))
+        rightClick()
+        applySubmittedOrders(true)
+      require unit.orderQueue.len == 2
+      inputFrame(released = {KeyLeftShift})
+      let
+        area = attackMinimapArea(currentLayout(window))
+        relative = vec2(half.float32 + 1.5'f,
+          half.float32 + 4.5'f) / run.world.map.side.float32
+      pointAt((area.origin + area.size * relative) * sk.uiScale)
+      let destination = attackMinimapTile(currentLayout(window), sk.mousePos,
+        run.world.map.side)
+      rightClick()
+      applySubmittedOrders(false)
+      check unit.orderQueue.len == 0
+      check unit.goal == destination
+
+    test "right-click keeps the Shift state from its press through release":
+      for route in 0 .. 2:
+        for append in [false, true]:
+          fixture()
+          if route == 2:
+            selectedIds.add other
+          let half = run.world.map.side div 2
+          inputFrame({KeyLeftShift})
+          for y in [0'i32, 2, -2]:
+            pointAtTile(tile2(half + 4, half + y))
+            rightClick()
+            applySubmittedOrders(true, selectedIds.len)
+          for id in selectedIds:
+            require run.world.units[run.world.unitIndex(id)].orderQueue.len == 2
+          if not append:
+            inputFrame(released = {KeyLeftShift})
+          pointAtTile(tile2(half + 1, half + 4))
+          if route == 1:
+            let
+              area = attackMinimapArea(currentLayout(window))
+              relative = vec2(half.float32 + 1.5'f,
+                half.float32 + 4.5'f) / run.world.map.side.float32
+            pointAt((area.origin + area.size * relative) * sk.uiScale)
+          inputFrame({MouseRight})
+          if route == 2:
+            pointAtTile(tile2(half + 4, half + 4))
+            inputFrame()
+            require lineGesture.dragging
+          if append:
+            inputFrame(released = {KeyLeftShift})
+          else:
+            inputFrame({KeyLeftShift})
+          inputFrame(released = {MouseRight})
+          run.flushPlayerCommands()
+          applySubmittedOrders(append, selectedIds.len)
+          for id in selectedIds:
+            let unit = run.world.units[run.world.unitIndex(id)]
+            check unit.orderQueue.len == (if append: 3 else: 0)
+
+    test "plain formation drag replaces every selected unit's queued route":
+      fixture()
+      selectedIds.add other
+      let half = run.world.map.side div 2
+      inputFrame({KeyLeftShift})
+      for y in [0'i32, 2, -2]:
+        pointAtTile(tile2(half + 4, half + y))
+        rightClick()
+        applySubmittedOrders(true, 2)
+      for id in selectedIds:
+        require run.world.units[run.world.unitIndex(id)].orderQueue.len == 2
+      inputFrame(released = {KeyLeftShift})
+      pointAtTile(tile2(half, half + 4))
+      inputFrame({MouseRight})
+      pointAtTile(tile2(half + 4, half + 4))
+      inputFrame()
+      require lineGesture.dragging
+      let destinations = lineGesture.targets
+      require destinations.len == 2
+      inputFrame(released = {MouseRight})
+      run.flushPlayerCommands()
+      applySubmittedOrders(false, 2)
+      for destination in destinations:
+        let unit = run.world.units[run.world.unitIndex(destination.unitId)]
+        check unit.orderQueue.len == 0
+        check unit.goal == destination.tile
 
   suite "LvD right-click resource delivery":
     test "town hall accepts either cargo and mill accepts wood":

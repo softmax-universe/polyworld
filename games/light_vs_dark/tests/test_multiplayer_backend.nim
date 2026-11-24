@@ -136,8 +136,11 @@ block privateBotsAndChat:
   observer.applyPacket(packet)
   doAssert host.game.stateHash() == observer.game.stateHash()
   doAssert observer.game.inboxes[0].count == 1
-  doAssert host.game.recorder.data.actions.len == 1
+  doAssert host.game.recorder.data.actions.len == 2
   doAssert host.game.recorder.data.actions[0].kind == ActionDiplomacy
+  let chat = host.game.recorder.data.actions[1]
+  doAssert chat.kind == ActionChat and chat.playerId == 1
+  doAssert chat.target == -2 and chat.text == "hello"
 
 block controlsDoNotLeakBetweenMatches:
   queueCancel(0, own.id)

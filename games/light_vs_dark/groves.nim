@@ -6,7 +6,6 @@ import
 export groves
 
 const
-  DecorativeRocks = 80
   SceneryChunkSize = 32
 
 type GrovePlacement* = object
@@ -56,32 +55,31 @@ proc placement(kind: BrushKind, tile, seed: int): GrovePlacement =
         )
   result.position = vec3(worldX, base - 0.04'f, worldZ)
   result.rotation = rng.rand(2 * PI).float32
+  if kind == LightRock:
+    # Fit the rotated mesh inside the solid tile, including its widest corners.
+    let
+      settings = rockSettings(false, result.variant, seed)
+      cosine = abs(cos(result.rotation))
+      sine = abs(sin(result.rotation))
+      width = settings.width * cosine + settings.depth * sine
+      depth = settings.width * sine + settings.depth * cosine
+    result.scale = 0.9'f / max(width, depth)
 
 proc grovePlacements*(
   treeWood: openArray[int16],
   seed: int,
   forestRocks: openArray[int32] = []
 ): seq[GrovePlacement] =
-  ## Records harvestable trees and decorative rocks without changing tiles.
+  ## Records trees and solid boulders without decorating walkable ground.
   let ground = layers[0]
   doAssert treeWood.len == ground.tiles.len
-  var candidates: seq[int]
   for index, tile in ground.tiles:
     if not tile.exists:
       continue
     if treeWood[index] > 0:
       result.add placement(LightTree, index, seed)
-    elif tile.kind == RockTile and not tile.impassable:
-      candidates.add index
-  var rng = initRand(seed.int64 * 104_729 + 3)
-  rng.shuffle(candidates)
-  for index in 0 ..< min(DecorativeRocks, candidates.len):
-    result.add placement(LightRock, candidates[index], seed)
   for index in forestRocks:
-    var rock = placement(LightRock, index.int, seed)
-    # These rocks block one tile, so keep their mesh inside that footprint.
-    rock.scale = 0.45'f + (rock.variant mod 3).float32 * 0.05'f
-    result.add rock
+    result.add placement(LightRock, index.int, seed)
 
 proc visible*(placement: GrovePlacement, treeWood: openArray[int16]): bool =
   ## Follows authoritative wood state for harvesting and replay restoration.

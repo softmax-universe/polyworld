@@ -266,7 +266,9 @@ proc renderFacing(unit: Unit): float32 =
   previous + shortestTurn(previous, current) * frameAlpha
 
 proc renderAnimation(unit: Unit): AnimationSlot =
-  ## Uses the construction work pose while a worker is building.
+  ## Stops running at match end while preserving work and combat poses.
+  if run.world.over and unit.animation == RunAnimation:
+    return IdleAnimation
   let work = run.world.constructionPresentation(unit)
   if work.active: work.animation else: unit.animation
 

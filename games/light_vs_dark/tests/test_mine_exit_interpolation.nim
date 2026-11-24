@@ -133,3 +133,23 @@ block constructionInteriorStillOverridesInterpolation:
   echo "Production construction interior/yaw/animation override preserved"
 
 echo "Production mine-exit interpolation regression passed"
+
+block endedMatchStopsRunningPose:
+  run = Game(world: trafficFixture(0, "open").world)
+  let w = run.world
+  w.maximumTicks = 1
+  let id = w.spawnUnit(0, PeonUnit, tile2(35, 35))
+  let unit = w.units[w.unitIndex(id)]
+  doAssert w.applyMove(0, id, 45, 35)
+  w.tickWorld(nil)
+  doAssert w.over and unit.animation == RunAnimation
+  let before = run.stateHash()
+  for alpha in Alphas:
+    frameAlpha = alpha
+    doAssert renderAnimation(unit) == IdleAnimation
+  doAssert run.stateHash() == before,
+    "The ended-match display must not change replay authority"
+  for animation in [AttackAnimation, DeathAnimation, VictoryAnimation]:
+    unit.animation = animation
+    doAssert renderAnimation(unit) == animation
+  echo "Ended matches show idle instead of frozen running without changing hashes"

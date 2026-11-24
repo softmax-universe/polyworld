@@ -67,11 +67,16 @@ block denseEnemyEnvelope:
 block opposingEnemyBodies:
   let f = trafficFixture(2, "opposing")
   f.world.units[1].owner = 1
-  # Different owners retain body collision and never reserve friendly yields,
-  # even while ordinary movement suppresses attack acquisition.
+  # Different owners retain body clearance while walking around each other.
+  # Crossing the same X coordinate is legal when the circles do not overlap.
   for tick in 0 ..< 120:
     f.world.tickWorld(nil)
-    doAssert f.world.units[0].body.pos.x < f.world.units[1].body.pos.x
+    let
+      first = f.world.units[0]
+      second = f.world.units[1]
+    doAssert length(first.body.pos - second.body.pos) >=
+      first.body.radius + second.body.radius - 0.002'fx,
+      "Opposing owners must route around bodies rather than phase through them"
 
 block attackMoveCrossing:
   let f = trafficFixture(2, "crossing")

@@ -601,6 +601,7 @@ var
   trafficGrid: LocalGrid
   softPush: seq[FixedVec2]
   trafficDirections, trafficSteering: seq[FixedVec2]
+  movementStarts: seq[FixedVec2]
 
 proc rebuildTrafficGrid(w: World) =
   trafficGrid.reset(w.map.side, w.units.len)
@@ -609,31 +610,9 @@ proc rebuildTrafficGrid(w: World) =
     if w.units[i].state notin {UnitDying, UnitInMine}:
       trafficGrid.insert(int32(i), w.units[i].body.pos, w.units[i].owner)
 
-proc standingOccupant(w: World, holder, ignoreId: int32): bool =
-  ## True when another living unit is idle on this occupancy slot.
-  if holder == 0 or holder == ignoreId:
-    return false
-  let index = w.unitIndex(holder)
-  if index < 0:
-    return false
-  let unit = w.units[index]
-  let mover = w.unitIndex(ignoreId)
-  if mover >= 0 and unit.owner == w.units[mover].owner:
-    return false
-  unit.state != UnitDying and
-    unit.state != UnitInMine and
-    not unit.hasGoal
-
-proc tileHoldsOther(w: World, x, z, ignoreId: int32): bool =
-  ## True when a standing unit occupies this cell.
-  w.map.inGrid(x, z) and
-    w.standingOccupant(w.occupancy[w.map.tileIndex(x, z)], ignoreId)
-
 proc lvdPathWalkable(layer, x, z: int): bool {.nimcall.} =
-  ## Terrain plus idle occupants. Moving traffic is not a wall.
-  if layer != 0 or not pathWorld.tileOpen(int32(x), int32(z)):
-    return false
-  not pathWorld.tileHoldsOther(int32(x), int32(z), pathIgnoreId)
+  ## Routes around static obstacles; local bodies never reserve whole tiles.
+  layer == 0 and pathWorld.tileOpen(int32(x), int32(z))
 
 proc lvdPathEnterCost(layer, x, z: int): int32 {.nimcall.} =
   ## Extra cost for standing on another unit's tile.
@@ -1095,13 +1074,25 @@ proc overlapsFootprint(unit: Unit, structure: Building): bool =
     unit.body.pos.y - unit.body.radius < highY
 
 proc bodyGroundOpen(w: World, unit: Unit, point: FixedVec2,
-    allowed: openArray[int32] = []): bool =
+    allowed: openArray[int32] = [],
+    allowedTiles: openArray[Tile2] = []): bool =
   ## Allows only named initial overlaps during a corrective sweep.
   for y in whole(point.y - unit.body.radius) .. whole(point.y + unit.body.radius):
     for x in whole(point.x - unit.body.radius) .. whole(point.x + unit.body.radius):
+      if tile2(x, y) in allowedTiles: continue
       if not w.terrainOpen(x, y): return false
       let blocker = w.blocker[w.map.tileIndex(x, y)]
       if blocker != 0 and blocker notin allowed: return false
+  true
+
+proc bodyLandingFree(w: World, unit: Unit, point: FixedVec2): bool =
+  ## Prefers empty escape ground without treating another body as a wall.
+  for other in w.units:
+    if other.id == unit.id or other.hp <= 0 or
+        other.state in {UnitDying, UnitInMine}: continue
+    let clearance = int64(int32(unit.body.radius + other.body.radius))
+    if lengthSquared(point - other.body.pos) < clearance * clearance:
+      return false
   true
 
 proc overlappingBuildings(w: World, unit: Unit): seq[int32] =
@@ -1130,8 +1121,7 @@ proc workingConstructionOccupant(w: World, unit: Unit): bool =
 
 proc releaseConstructionOccupant(w: World, unit: Unit,
     siteId = NoEntity): bool =
-  ## Like exiting a mine, release only onto free legal ground. A full ring
-  ## waits rather than clipping terrain, a structure, or another body.
+  ## Leaves the shell on legal ground; soft bodies may yield after release.
   let index = w.buildingIndex(
     if siteId != NoEntity: siteId else: unit.constructionSiteId)
   if index < 0 or unit.state in {UnitDying, UnitInMine}:
@@ -1141,58 +1131,54 @@ proc releaseConstructionOccupant(w: World, unit: Unit,
   if site.state == BuildingDying or not unit.overlapsFootprint(site):
     unit.constructionSiteId = NoEntity
     return true
+  var destination = NoTile
   for y in site.origin.y.int32 - 1 .. site.origin.y.int32 + site.footprint.depth:
     for x in site.origin.x.int32 - 1 .. site.origin.x.int32 + site.footprint.width:
-      if not adjacentToFootprint(site.origin, site.footprint, x, y) or
-          not w.tileFree(x, y): continue
+      if not adjacentToFootprint(site.origin, site.footprint, x, y): continue
       let at = tile2(x, y)
       if not w.bodyGroundOpen(unit, tileCenter(at)): continue
-      var free = true
-      for other in w.units:
-        if other.id != unit.id and other.state notin {UnitDying, UnitInMine} and
-            length(other.body.pos - tileCenter(at)) <
-              other.body.radius + unit.body.radius:
-          free = false
-          break
-      if free:
+      if destination == NoTile: destination = at
+      if w.bodyLandingFree(unit, tileCenter(at)):
         w.place(unit, at)
         unit.constructionSiteId = NoEntity
         unit.clearPath()
         return true
+  if destination != NoTile:
+    w.place(unit, destination)
+    unit.constructionSiteId = NoEntity
+    unit.clearPath()
+    return true
   false
 
 proc recoverySegmentOpen(w: World, unit: Unit, finish: FixedVec2,
-    overlaps: openArray[int32]): bool =
-  ## Escapes initial structures without crossing unrelated static or enemy bodies.
+    overlaps: openArray[int32], tiles: openArray[Tile2]): bool =
+  ## Escapes initial obstacles while keeping unrelated static geometry solid.
   if not w.bodyGroundOpen(unit, finish): return false
-  for other in w.units:
-    if other.id == unit.id or other.hp <= 0 or
-        other.state in {UnitDying, UnitInMine}: continue
-    let clearance = int64(int32(unit.body.radius + other.body.radius))
-    if lengthSquared(finish - other.body.pos) < clearance * clearance:
-      return false
   let
     start = unit.body.pos
     steps = max(1, whole(length(finish - start) * 16) + 1)
   for step in 1 .. steps:
     let point = start + (finish - start) * (fixed(step) / fixed(steps))
-    if not w.bodyGroundOpen(unit, point, overlaps): return false
-    for other in w.units:
-      if other.owner == unit.owner or other.hp <= 0 or
-          other.state in {UnitDying, UnitInMine}: continue
-      let clearance = int64(int32(unit.body.radius + other.body.radius))
-      if lengthSquared(point - other.body.pos) < clearance * clearance:
-        return false
+    if not w.bodyGroundOpen(unit, point, overlaps, tiles): return false
   true
 
-proc recoverBuildingOverlaps(w: World) =
+proc recoverObstacleOverlaps(w: World) =
   ## Restores legal body clearance before a blocked start can lose its order.
   var moved = false
   for i, unit in w.units:
     if unit.hp <= 0 or unit.state in {UnitDying, UnitInMine} or
         w.workingConstructionOccupant(unit): continue
+    if w.bodyGroundOpen(unit, unit.body.pos): continue
     let overlaps = w.overlappingBuildings(unit)
-    if overlaps.len == 0: continue
+    var tiles: seq[Tile2]
+    for y in whole(unit.body.pos.y - unit.body.radius) ..
+        whole(unit.body.pos.y + unit.body.radius):
+      for x in whole(unit.body.pos.x - unit.body.radius) ..
+          whole(unit.body.pos.x + unit.body.radius):
+        if not w.terrainOpen(x, y) or
+          (w.blocker[w.map.tileIndex(x, y)] != 0 and
+            w.blocker[w.map.tileIndex(x, y)] notin overlaps):
+              tiles.add tile2(x, y)
     let before = unit.body.pos
     if unit.constructionSiteId != NoEntity:
       if not w.releaseConstructionOccupant(unit): continue
@@ -1200,26 +1186,31 @@ proc recoverBuildingOverlaps(w: World) =
       var
         best = int64.high
         destination = before
+        foundFree = false
       proc consider(point: FixedVec2) =
         ## Keeps the closest valid candidate with deterministic tie order.
         let distance = lengthSquared(point - before)
-        if distance < best and w.recoverySegmentOpen(unit, point, overlaps):
-          best = distance
-          destination = point
-      for id in overlaps:
+        if not w.recoverySegmentOpen(unit, point, overlaps, tiles): return
+        let free = w.bodyLandingFree(unit, point)
+        if (free and not foundFree) or
+          (free == foundFree and distance < best):
+            best = distance
+            destination = point
+            foundFree = free
+      proc considerFootprint(origin: Tile2, footprint: Footprint) =
+        ## Tests direct edge exits and nearby corners of one initial obstacle.
         let
-          site = w.buildings[w.buildingIndex(id)]
-          left = fixed(site.origin.x.int32) - unit.body.radius - Fixed(1)
-          top = fixed(site.origin.y.int32) - unit.body.radius - Fixed(1)
-          right = fixed(site.origin.x.int32 + site.footprint.width) +
+          left = fixed(origin.x.int32) - unit.body.radius - Fixed(1)
+          top = fixed(origin.y.int32) - unit.body.radius - Fixed(1)
+          right = fixed(origin.x.int32 + footprint.width) +
             unit.body.radius + Fixed(1)
-          bottom = fixed(site.origin.y.int32 + site.footprint.depth) +
+          bottom = fixed(origin.y.int32 + footprint.depth) +
             unit.body.radius + Fixed(1)
         consider(fixedVec2(left, before.y))
         consider(fixedVec2(right, before.y))
         consider(fixedVec2(before.x, top))
         consider(fixedVec2(before.x, bottom))
-        for tile in footprintPerimeter(site.origin, site.footprint):
+        for tile in footprintPerimeter(origin, footprint):
           if not w.tileOpen(tile): continue
           let inset = unit.body.radius + Fixed(1)
           consider(fixedVec2(
@@ -1227,6 +1218,11 @@ proc recoverBuildingOverlaps(w: World) =
               fixed(tile.x.int32 + 1) - inset),
             clamp(before.y, fixed(tile.y.int32) + inset,
               fixed(tile.y.int32 + 1) - inset)))
+      for id in overlaps:
+        let site = w.buildings[w.buildingIndex(id)]
+        considerFootprint(site.origin, site.footprint)
+      for tile in tiles:
+        considerFootprint(tile, (width: 1'i32, depth: 1'i32))
       if best == int64.high: continue
       unit.body.pos = destination
       unit.applyBody()
@@ -1579,8 +1575,42 @@ proc steerUnit(w: World, index: int32, toward: FixedVec2) =
       unit.body.pos = onlyY
     elif direct != before and w.bodySegmentOpen(unit, direct):
       unit.body.pos = direct
+    if unit.body.pos == before:
+      var
+        blocker = -1
+        nearest = int64.high
+      for otherIndex in trafficGrid.neighbors(before):
+        let peer = w.units[otherIndex]
+        if peer.owner == unit.owner or peer.id == unit.id or
+          peer.state in {UnitDying, UnitInMine}:
+            continue
+        let
+          separation = lengthSquared(before - peer.body.pos)
+          reach = int64(int32(unit.body.radius + peer.body.radius + speed))
+        if separation < reach * reach and separation < nearest:
+          blocker = otherIndex
+          nearest = separation
+      if blocker >= 0:
+        # Walk around a touching foreign circle instead of retrying the same
+        # blocked axes forever. Every candidate retains the normal swept test.
+        var outward = normalize(before - w.units[blocker].body.pos)
+        if outward == FixedVec2Zero:
+          outward = normalize(toward) * -FixedOne
+        var tangent = fixedVec2(-outward.y, outward.x)
+        if dot(tangent, toward) < FixedZero:
+          tangent *= -FixedOne
+        for turn in [tangent, tangent * -FixedOne]:
+          for margin in [0.125'fx, FixedZero]:
+            let candidate = before + normalize(turn + outward * margin) * speed
+            if candidate != before and w.bodySegmentOpen(unit, candidate):
+              unit.body.pos = candidate
+              turnToward(unit.body.facing, angle(candidate - before), BodyTurnRate)
+              break
+          if unit.body.pos != before:
+            break
   unit.applyBody()
   if unit.body.pos == before:
+    unit.animation = IdleAnimation
     inc unit.blockedTicks
     if unit.blockedTicks >= AbandonAfterTicks:
       if not w.returnFromAutoAttack(index): unit.clearOrder(true)
@@ -1616,8 +1646,9 @@ proc bodySegmentOpen(w: World, unit: Unit, finish: FixedVec2,
         let corner = cell(pos + fixedVec2(dx, dy))
         if not w.tileOpen(corner.x, corner.z): return false
     if not checkBodies or trafficGrid.onlyOwner(unit.owner): continue
-    if trafficGrid.crowdedForeign(pos, unit.body.radius * 2, unit.owner):
-      return false
+    if trafficGrid.crowdedForeign(pos, unit.body.radius * 2, unit.owner) and
+      not trafficGrid.crowdedForeign(start, unit.body.radius * 2, unit.owner):
+        return false
     for otherIndex in trafficGrid.neighbors(pos):
       let other = w.units[otherIndex]
       if other.owner != unit.owner and other.id != unit.id and
@@ -1625,7 +1656,14 @@ proc bodySegmentOpen(w: World, unit: Unit, finish: FixedVec2,
           lengthSquared(other.body.pos - pos) <
             int64(int32(other.body.radius + unit.body.radius)) *
             int64(int32(other.body.radius + unit.body.radius)):
-        return false
+        # Existing overlaps may open monotonically, regardless of ownership.
+        # A new contact still blocks forward travel through another body.
+        let
+          original = lengthSquared(other.body.pos - start)
+          clearance = int64(int32(other.body.radius + unit.body.radius))
+        if original >= clearance * clearance or
+          lengthSquared(other.body.pos - pos) <= original:
+            return false
   true
 
 proc prepareTraffic(w: World) =
@@ -1655,8 +1693,6 @@ proc prepareTraffic(w: World) =
       if j == i:
         continue
       let peer = w.units[j]
-      if peer.owner != unit.owner:
-        continue
       let
         offset = peer.body.pos - unit.body.pos
         squared = lengthSquared(offset)
@@ -1669,11 +1705,12 @@ proc prepareTraffic(w: World) =
         peerDirection = trafficDirections[j]
         agreement = dot(forward, peerDirection)
         ahead = dot(offset, forward)
-      if peerDirection != FixedVec2Zero and agreement > 0.5'fx:
-        # Alignment is a small lateral bias among compatible moving neighbors.
-        # It never attracts a unit toward somebody else's destination.
-        alignment += dot(peerDirection, lateral)
-        inc aligned
+      if peer.owner == unit.owner and peerDirection != FixedVec2Zero and
+        agreement > 0.5'fx:
+          # Alignment is a small lateral bias among compatible moving neighbors.
+          # It never attracts a unit toward somebody else's destination.
+          alignment += dot(peerDirection, lateral)
+          inc aligned
       if ahead <= FixedZero:
         continue
       let across = dot(offset, lateral)
@@ -1717,11 +1754,34 @@ proc nearestLegalEndpoint(w: World, goal, endpoint: Tile2): bool =
         return false
   true
 
+proc crowdedArrival(w: World, unit: Unit, target: FixedVec2): bool =
+  ## Lets a move settle near a claimed destination without losing free precision.
+  if unit.state != UnitMoving or length(target - unit.body.pos) > 0.6'fx or
+    not w.bodyGroundOpen(unit, unit.body.pos) or
+    not w.routeSegmentOpen(unit, target):
+      return false
+  for otherIndex in trafficGrid.neighbors(target):
+    let peer = w.units[otherIndex]
+    if peer.id == unit.id or peer.state in {UnitDying, UnitInMine}:
+      continue
+    # Friendly bodies yield, so reach the destination area before settling.
+    # Foreign bodies retain their solid core and need a wider arrival margin.
+    if peer.owner == unit.owner and length(target - unit.body.pos) > 0.3'fx:
+      continue
+    if peer.hasGoal and peer.state notin {UnitAttacking, UnitChopping,
+      UnitBuilding, UnitDepositGold, UnitDepositWood} and
+      length(peer.waypointPosition(peer.goal) - target) > 0.1'fx:
+        continue
+    let clearance = int64(int32(unit.body.radius + peer.body.radius))
+    if lengthSquared(peer.body.pos - target) < clearance * clearance:
+      return true
+
 proc advanceMovement(w: World, index: int32) =
-  ## Steers toward the next pulled waypoint. Does not cut toward the goal
-  ## when the route is still queued or has run out.
+  ## Uses paths for distant travel and continuous steering near clear goals.
   if not w.units[index].hasGoal:
     return
+  if w.units[index].animation == RunAnimation:
+    w.units[index].animation = IdleAnimation
   let retained = w.retainedBlockedEndpoint(w.units[index])
   if retained and w.units[index].arrivedAt(w.units[index].blockedEndpoint):
     w.units[index].animation = IdleAnimation
@@ -1730,9 +1790,15 @@ proc advanceMovement(w: World, index: int32) =
     ## Stay on the order. Clearing the goal here left harvest and build
     ## peons idle-not-idle after a shove off the ring.
     return
-  if w.units[index].tile == w.units[index].goal:
-    w.steerUnit(
-      index, w.units[index].waypointPosition(w.units[index].goal) - w.units[index].body.pos)
+  let
+    unit = w.units[index]
+    target = unit.waypointPosition(unit.goal)
+    toward = target - unit.body.pos
+  if w.crowdedArrival(unit, target):
+    unit.clearOrder(false)
+    return
+  if length(toward) <= 1.5'fx and w.routeSegmentOpen(unit, target):
+    w.steerUnit(index, toward)
     return
   if w.units[index].path.len == 0:
     w.requestPath(index)
@@ -1790,7 +1856,7 @@ proc servePathQueue(w: World) {.measure.} =
         not w.releaseConstructionOccupant(w.units[index]):
       w.pathQueue.add request
       break
-    if w.overlappingBuildings(w.units[index]).len > 0:
+    if not w.bodyGroundOpen(w.units[index], w.units[index].body.pos):
       w.pathQueue.add request
       continue
     let retained = w.retainedBlockedEndpoint(w.units[index])
@@ -2257,7 +2323,7 @@ proc advanceUnit(w: World, index: int32) =
         not w.releaseConstructionOccupant(unit): return
   if unit.state notin {UnitDying, UnitInMine} and
       not w.workingConstructionOccupant(unit) and
-      w.overlappingBuildings(unit).len > 0:
+      not w.bodyGroundOpen(unit, unit.body.pos):
     return
   if w.units[index].state == UnitDying:
     inc w.units[index].animationTicks
@@ -3579,14 +3645,17 @@ proc tickWorld*(w: World, decide: proc(w: World) {.closure.}) {.measure.} =
     profileBlock "decisions":
       decide(w)
 
-  profileBlock "buildingClearance":
-    w.recoverBuildingOverlaps()
+  profileBlock "obstacleClearance":
+    w.recoverObstacleOverlaps()
 
   profileBlock "searchPath":
     w.servePathQueue()
   profileBlock "units":
     w.rebuildTrafficGrid()
     w.prepareTraffic()
+    movementStarts.setLen(w.units.len)
+    for i, unit in w.units:
+      movementStarts[i] = unit.body.pos
     for index in 0 ..< w.units.len:
       w.advanceUnit(int32(index))
   profileBlock "separate":
@@ -3653,21 +3722,27 @@ proc tickWorld*(w: World, decide: proc(w: World) {.closure.}) {.measure.} =
             push = normalize(push) * ContactPushPerPass
         if push != FixedVec2Zero:
           let next = unit.body.pos+push
-          if w.bodySegmentOpen(unit, next):
+          if w.bodySegmentOpen(unit, next, checkBodies = false):
             unit.body.pos = next
           else:
             let
               onlyX = fixedVec2(next.x, unit.body.pos.y)
               onlyY = fixedVec2(unit.body.pos.x, next.y)
-            if onlyX != unit.body.pos and w.bodySegmentOpen(unit, onlyX):
-              unit.body.pos = onlyX
-            elif onlyY != unit.body.pos and w.bodySegmentOpen(unit, onlyY):
-              unit.body.pos = onlyY
+            if onlyX != unit.body.pos and
+              w.bodySegmentOpen(unit, onlyX, checkBodies = false):
+                unit.body.pos = onlyX
+            elif onlyY != unit.body.pos and
+              w.bodySegmentOpen(unit, onlyY, checkBodies = false):
+                unit.body.pos = onlyY
     for i in 0 ..< w.occupancy.len:
       w.occupancy[i] = 0
-    for unit in w.units:
+    for i, unit in w.units:
       if unit.state == UnitDying or unit.state == UnitInMine:
         continue
+      if unit.animation == RunAnimation and
+        lengthSquared(unit.body.pos - movementStarts[i]) <=
+          int64(int32(0.005'fx)) * int64(int32(0.005'fx)):
+            unit.animation = IdleAnimation
       unit.applyBody()
       if w.map.inGrid(unit.tile):
         let index = w.map.tileIndex(unit.tile)

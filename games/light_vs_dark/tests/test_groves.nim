@@ -1,6 +1,7 @@
 import
-  std/sets,
-  polyworld/pathing,
+  std/[math, sets],
+  vmath,
+  polyworld/[pathing, rockgen],
   ../[assets, groves, maps]
 
 echo "Checking generated scenery placement, harvesting, and restoration"
@@ -18,6 +19,16 @@ for seed in [2026, 42, 73]:
   var
     treeTiles, rockTiles: HashSet[int]
     wood = newSeq[int16](map.treeWood.len)
+    rockGeometry: array[BrushVariants, RockGeometry]
+  for variant in 0 ..< BrushVariants:
+    # Match the mesh seed used by polyworld/groves.generateGrove.
+    let modelSeed = int(
+      (seed.int64 * 104_729 + LightRock.ord.int64 * 7_919 +
+        variant.int64 * 997 + 42) mod 1_000_000_000
+    )
+    rockGeometry[variant] = generateGeometry(
+      rockSettings(false, variant, modelSeed)
+    )
   for index, amount in map.treeWood:
     wood[index] = amount
   for placement in placements:
@@ -39,12 +50,24 @@ for seed in [2026, 42, 73]:
       doAssert tiles[placement.tile].kind == RockTile
       doAssert tiles[placement.tile].impassable ==
         (placement.tile.int32 in map.forestRocks)
+      doAssert tiles[placement.tile].impassable,
+        "Every rendered boulder must identify blocked terrain"
       doAssert map.treeWood[placement.tile] == 0
+      let
+        cosine = cos(placement.rotation)
+        sine = sin(placement.rotation)
+      for vertex in rockGeometry[placement.variant].mesh.vertices:
+        let
+          x = (vertex.position.x * cosine + vertex.position.z * sine) *
+            placement.scale
+          z = (vertex.position.z * cosine - vertex.position.x * sine) *
+            placement.scale
+        doAssert abs(x) < 0.5'f and abs(z) < 0.5'f,
+          "Rotated boulders must not extend into adjacent walkable tiles"
   for index, amount in map.treeWood:
     doAssert (index in treeTiles) == (amount > 0)
   doAssert treeTiles.len > 0
-  doAssert rockTiles.len > map.forestRocks.len
-  doAssert rockTiles.len <= map.forestRocks.len + 80
+  doAssert rockTiles.len == map.forestRocks.len
   doAssert map.forestRocks.len ==
     (treeTiles.len + map.forestRocks.len) div 10
   doAssert wood == map.treeWood

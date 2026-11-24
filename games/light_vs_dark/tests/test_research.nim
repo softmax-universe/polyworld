@@ -189,7 +189,7 @@ block controlQueueSubmitsWithoutLocalMutation:
   try: old.validate()
   except ReplayError: rejected = true
   doAssert rejected
-  doAssert LvdNetworkProtocol == 4
+  doAssert LvdNetworkProtocol >= 4 # Research requires the packed-seat protocol.
 
 block eligibilityAndPlayerWideLocks:
   let w = laboratory()

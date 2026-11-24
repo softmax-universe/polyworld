@@ -37,16 +37,39 @@ block unreachableMoveDoesNotResumeChasing:
   let
     world = trafficFixture(0, "open").world
     id = world.spawnUnit(0, SoldierUnit, tile2(40, 30))
+    enemyId = world.spawnUnit(1, PeonUnit, tile2(43, 30))
     unit = world.units[world.unitIndex(id)]
+    enemy = world.units[world.unitIndex(enemyId)]
+    origin = unit.body.pos
+  # Keep the enemy visible beyond the sealed ring without another combatant.
+  discard world.spawnUnit(0, PeonUnit, tile2(44, 30))
   for y in 29'i32 .. 31'i32:
     for x in 39'i32 .. 41'i32:
+      # Enclose legal ground; starts inside obstacles recover separately.
+      if x == 40 and y == 30:
+        continue
       world.blocker[world.map.tileIndex(x, y)] = TreeBlocker
+  world.rebuildVision()
+  doAssert world.visible(0, enemy.tile)
+  doAssert world.applyAttack(0, id, enemyId)
   doAssert world.applyMove(0, id, 50, 30)
-  for tick in 0 ..< TickRate:
+  let hp = enemy.hp
+  for tick in 0 ..< TickRate * 4:
     world.tickWorld(nil)
-  doAssert unit.orderFailed
-  doAssert unit.state == UnitIdle and unit.holdPosition
+    # A sealed route may wait for terrain changes or fail. Neither outcome
+    # may restore the chase that the direct move replaced.
+    doAssert unit.state in {UnitIdle, UnitMoving} and unit.holdPosition
+    doAssert unit.targetId == NoEntity
+    doAssert unit.body.pos == origin and unit.animation == IdleAnimation
+    doAssert enemy.hp == hp
   doAssert world.applyAttackMove(0, id, 50, 30)
   doAssert not unit.holdPosition
+  var reacquired = false
+  for tick in 0 ..< TickRate:
+    world.tickWorld(nil)
+    if unit.targetId == enemyId:
+      reacquired = true
+      break
+  doAssert reacquired
 
-echo "Direct move priority, completed-move acquisition and failed-move hold passed"
+echo "Direct move priority, completed acquisition and blocked-move hold passed"

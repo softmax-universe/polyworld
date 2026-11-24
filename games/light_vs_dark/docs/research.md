@@ -1,4 +1,4 @@
-# Passive research (gameplay 31)
+# Passive research
 
 All players and both factions have the same four passive research categories.
 These are multiplayer technology rules, **not campaign-level unlocks**.
@@ -19,17 +19,36 @@ effective upgraded speed. Armor reduces basic damage, not piercing or splash.
 
 ## Prices and duration
 
-The same explicit, escalating ladder applies to every category:
+The same escalating price ladder applies to every category:
 
-| Target tier | Gold | Wood | Seconds | Simulation duration |
-|---|---:|---:|---:|---|
-| 1 | 600 | 200 | 20 | `20 * TickRate` |
-| 2 | 900 | 400 | 30 | `30 * TickRate` |
-| 3 | 1200 | 600 | 40 | `40 * TickRate` |
+| Target tier | Gold | Wood |
+|---|---:|---:|
+| 1 | 600 | 200 |
+| 2 | 900 | 400 |
+| 3 | 1200 | 600 |
 
-This is a deliberately chosen LvD balance ladder, not a claim about historical
-Warcraft pricing. It makes higher tiers a progressively larger investment while
-allowing a completed producer and a normal economy to unlock the first tier.
+Prices are LvD balance values. Duration follows the Warcraft I category cadence,
+normalized to the same 40 Hz reference used by LvD's unit/building tables:
+
+| Category | Reference frames | Seconds per tier | Simulation duration |
+|---|---:|---:|---|
+| Tempered Edges | 1200 | 30 | `30 * TickRate` |
+| Runed Plating | 1200 | 30 | `30 * TickRate` |
+| Keenflight Arrows | 1400 | 35 | `35 * TickRate` |
+| Windrunner Training | 1400 | 35 | `35 * TickRate` |
+
+The original has two upgrade tiers with the same category duration. LvD extends
+that rule to tier III. The former universal 20/30/40-second ladder is removed.
+
+Timing provenance: the [WC1 building reference](https://warcraft.wiki.gg/wiki/Stables_%28WC1_Human%29)
+lists 1200/1400 frame values. Section 3.3.1 of the
+[Insider's Guide](https://device.report/m/25a1bd31004095b916610f5b1168e2e6d5c741024d42d80e3a3d05b90ad7ee47.pdf#page=25)
+and [War1gus's upgrade definitions](https://github.com/Wargus/war1gus/blob/master/scripts/upgrade.lua#L30-L72)
+corroborate the category mapping in 120/140 research units. The guide's next
+table swaps weapons/projectiles, and its clock arithmetic is inconsistent.
+The chosen 40 Hz normalization is consistent with this game's existing content;
+it is not an independently measured wall-clock match to the original executable
+at every game-speed setting. War1gus is a recreation, not original engine code.
 
 ## Acceptance, lifecycle and cancellation
 
@@ -68,8 +87,8 @@ Action 10 (`ActionResearch`) uses the existing opaque action envelope:
 `entityId = producer`, `first = ResearchKind ordinal`; `second`, `third`, offset
 and append must remain zero/false. Network intent does not mutate the local world.
 Accepted commands use the same recording/authoritative replay path as training.
-Gameplay version is **31**, replay format remains **6**, network protocol remains
-**3**. Old gameplay tapes require archived clients; shared relay code is unchanged.
+Gameplay version is **52**, replay format remains **9**, network protocol remains
+**5**. Old gameplay tapes require archived clients; shared relay code is unchanged.
 
 Spells are a separate follow-up phase. Keep passive modifiers separate from
 future spell unlocks, mana/cooldowns and casting commands; no speculative fields,
@@ -96,6 +115,11 @@ Select an owned Blacksmith, Lumber Mill, or Stables/Kennels and open **Upgrades*
 Only that selected producer's categories appear (no implicit redirection). Cards
 read authoritative tiers, costs, total/remaining duration, progress and MAX LEVEL;
 busy, unfinished, prerequisite/resource and duplicate-category locks disable clicks.
+Active research also occupies the selected building's first production-queue
+slot, using the researched tier's icon. Its top-edge bar reads the authoritative
+total and remaining ticks, just like the active unit-training slot. Deselecting
+hides it; reselecting restores current progress. Completion, cancellation and
+destruction clear it. Waiting unit slots have no progress bar.
 A click uses ordinary `queueResearch`; it neither spends resources nor grants a tier
 before the authoritative command is accepted. Replay/watch, chat, results and
 existing covered-HUD input guards apply. Build/Units and placement shortcuts are

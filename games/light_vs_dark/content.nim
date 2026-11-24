@@ -115,6 +115,9 @@ const
   ResearchDamagePerTier* = 2'i32
   ResearchArmorPerTier* = 2'i32
   ResearchSpeedPercentPerTier* = 10'i32
+  ResearchFrames: array[ResearchKind, int32] = [1400'i32, 1200, 1200, 1400]
+    ## WC1 reference durations at 40 Hz; timing sources are in docs/research.md.
+    ## Its two tiers share durations; LvD's third tier follows the same rule.
 
 proc researchBuilding*(kind: ResearchKind): BuildingKind =
   case kind
@@ -130,10 +133,10 @@ proc researchName*(kind: ResearchKind): string =
   of WindrunnerTraining: "Windrunner Training"
 
 proc researchStats*(kind: ResearchKind, level: int32): ResearchStats =
-  ## Target-tier prices; no campaign level or faction gate.
+  ## Category duration and target-tier prices, without campaign or faction gates.
   if level notin 1'i32 .. MaxResearchLevel: return
   ResearchStats(gold: 300 + 300 * level, wood: 200 * level,
-    ticks: (10 + 10 * level) * TickRate)
+    ticks: ResearchFrames[kind] * TickRate div 40)
 
 type
   Footprint* = tuple[width, depth: int32]

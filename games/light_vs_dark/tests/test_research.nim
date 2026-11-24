@@ -240,11 +240,18 @@ block allCategoriesHaveThreeSequentialTiers:
       let cost = researchStats(category, level)
       doAssert cost.gold == 300 + 300 * level
       doAssert cost.wood == 200 * level
-      doAssert cost.ticks == (10 + 10 * level) * TickRate
+      let seconds =
+        if category in {TemperedEdges, RunedPlating}: 30'i32
+        else: 35'i32
+      doAssert cost.ticks == seconds * TickRate
       doAssert w.applyResearch(0, w.buildings[i].id, category.ord.int32)
       doAssert w.buildings[i].researchLevel == level
-      w.run(cost.ticks)
+      w.run(cost.ticks - 1)
+      doAssert w.buildings[i].researchTicks == 1
+      doAssert w.researchLevel(0, category) == level - 1
+      w.run(1)
       doAssert w.researchLevel(0, category) == level
+      doAssert w.buildings[i].researchTicks == 0
       doAssert w.researchLevel(1, category) == 0
     doAssert not w.canResearch(0, w.buildings[i].id, category)
     doAssert researchStats(category, 0) == ResearchStats()

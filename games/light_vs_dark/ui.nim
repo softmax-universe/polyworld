@@ -93,6 +93,19 @@ proc drawPortrait(
   ## Draws a profile sprite at a fixed size centered in a well.
   sk.drawWellImage(well, key, color, iconSize = iconSize)
 
+proc drawProductionProgress(sk: Silky, well: GameUiPanel,
+    remaining, total: int32) =
+  ## Active production fills a top-edge bar using authoritative tick counts.
+  let
+    origin = well.origin + vec2(1)
+    size = vec2(well.size.x - 2, 4)
+    progress = if total > 0:
+      clamp(1'f32 - remaining.float32 / total.float32, 0'f32, 1'f32)
+      else: 0'f32
+  sk.drawRect(origin, size, rgbx(42, 44, 49, 255))
+  sk.drawRect(origin, vec2(size.x * progress, size.y),
+    rgbx(238, 216, 120, 255))
+
 proc commandPlayer(viewMode: int32): int32 =
   ## Returns the side whose build and train locks the HUD should show.
   if options.playerSlot > 0 and not run.replayMode:
@@ -1122,11 +1135,18 @@ proc drawUi*(
         "Hud"
       )
     else:
-      for slot in 0 ..< min(QueueSlots, selection.units.len):
+      let research = run.world.researchQueueCard(structure.id)
+      if research.active:
         let
-          well = selection.units[slot]
-          filled = slot < structure.queueLength
-        if filled:
+          well = selection.units[0]
+          icon = if sk.atlas.entries.hasKey(research.icon): research.icon
+            else: TemporaryResearchIcons[structure.researchKind]
+        sk.drawPortrait(well, icon, SelectionIcon)
+        sk.drawProductionProgress(well, research.ticksRemaining, research.ticks)
+      else:
+        for slot in 0 ..< min(QueueSlots, selection.units.len):
+          let well = selection.units[slot]
+          if slot >= structure.queueLength: continue
           let kind = UnitKind(structure.queue[slot] - 1)
           sk.drawPortrait(
             well,
@@ -1134,12 +1154,9 @@ proc drawUi*(
             SelectionIcon,
             teamColors[max(structure.owner, 0)]
           )
-        if filled and slot == 0:
-          sk.drawRect(
-            well.origin,
-            vec2(well.size.x, 3),
-            rgbx(238, 216, 120, 255)
-          )
+          if slot == 0:
+            sk.drawProductionProgress(well, structure.trainTicks,
+              unitOf(structure.owner, kind).trainTicks)
 
   if tooltipShortcuts != currentShortcuts:
     resetHudTooltips()

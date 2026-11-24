@@ -97,6 +97,19 @@ proc researchCard*(w: World, player, buildingId: int32,
   elif not result.allowed and result.level < MaxResearchLevel:
     result.reason = "Need resources"
 
+proc researchQueueCard*(w: World, buildingId: int32): ResearchCard =
+  ## Shows the selected producer's active tier, including visible inspection.
+  let index = w.buildingIndex(buildingId)
+  if index < 0: return
+  let building = w.buildings[index]
+  if building.owner < 0 or building.owner >= w.players.len or
+    building.hp <= 0 or building.state != BuildingComplete or
+    building.researchTicks <= 0:
+      return
+  result = w.researchCard(building.owner, buildingId, building.researchKind)
+  result.level = clamp(building.researchLevel - 1, 0, MaxResearchLevel - 1)
+  result.icon = ResearchIconKeys[building.researchKind][result.level]
+
 proc researchDetails*(kind: ResearchKind, player: int32, card: ResearchCard,
     temporaryIcon: bool): DetailTooltip =
   result.title = card.researchTitle

@@ -38,6 +38,40 @@ suite "Authoritative research HUD data":
       check card.active
       check card.icon.endsWith("_2")
       check card.researchTitle.endsWith(" II")
+      let queued = w.researchQueueCard(producer)
+      check queued.active and queued.icon == card.icon
+      check queued.researchTitle == card.researchTitle
+      check queued.researchProgress == 0.5'f32
+
+  test "queue follows producer state through inspection, cancellation and removal":
+    let w = newWorld(generateMap(DefaultSeed), TickRate * 600)
+    var index = -1
+    for i, building in w.buildings:
+      if building.owner == 1:
+        index = i
+        break
+    require index >= 0
+    let id = w.buildings[index].id
+    w.buildings[index].kind = BlacksmithBuilding
+    w.buildings[index].researchKind = TemperedEdges
+    w.buildings[index].researchLevel = 3
+    w.buildings[index].researchTicks = 90
+    w.buildings[index].researchTotal = 120
+    let baseline = Game(world: w).stateHash()
+    let queued = w.researchQueueCard(id)
+    check queued.active and queued.icon == "tempered_edges_3"
+    check queued.researchTitle == "Tempered Edges III"
+    check queued.researchProgress == 0.25'f32
+    check Game(world: w).stateHash() == baseline
+    check w.clone().researchQueueCard(id) == queued
+    check not w.researchQueueCard(NoEntity).active
+    w.buildings[index].researchTicks = 0
+    check not w.researchQueueCard(id).active
+    w.buildings[index].researchTicks = 90
+    w.buildings[index].state = BuildingDying
+    check not w.researchQueueCard(id).active
+    w.buildings[index].state = BuildingUnderConstruction
+    check not w.researchQueueCard(id).active
 
   test "research coverage tooltips and explicit temporary icon keys":
     let w = newWorld(generateMap(DefaultSeed), TickRate * 600)

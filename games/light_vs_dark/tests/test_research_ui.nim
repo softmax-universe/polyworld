@@ -74,6 +74,8 @@ proc drawHud(at: Vec2, pressed: set[Button] = {}) =
 # beginFrame returns the same inner geometry without consuming input.
 sk.beginUi(window, window.size)
 let build = sk.beginFrame(currentLayout(window).panel(GameUiRegion.BottomRight, PanelBuild)).buildPanels()
+let selection = sk.beginFrame(currentLayout(window).panel(
+  GameUiRegion.BottomLeft, PanelSelection)).selectionPanels()
 sk.endUi()
 let click = build.contents.origin + vec2(30,30)
 let before = run.stateHash()
@@ -165,10 +167,25 @@ glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8.GLint, window.size.x, window.size.y,
 glBindFramebuffer(GL_FRAMEBUFFER, framebuffer)
 glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0)
 doAssert glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE
+proc captureHud(): Image =
+  ## Reads the actual offscreen HUD for selection and progress assertions.
+  result = newImage(window.size.x, window.size.y)
+  glReadPixels(0,0,window.size.x,window.size.y,GL_RGBA,GL_UNSIGNED_BYTE,result.data[0].addr)
+  result.flipVertical()
+
+proc queuePixel(image: Image, slot: int, offset: Vec2): ColorRGBX =
+  ## Samples logical queue coordinates after the real HUD scale is applied.
+  let point = (selection.units[slot].origin + offset) * gameUiScale(window)
+  image[point.x.int, point.y.int]
+
+proc assertHalfProgress(image: Image) =
+  ## The selected producer's first queue slot has half a gold bar on top.
+  doAssert image.queuePixel(0, vec2(8, 2)).r > 180
+  doAssert image.queuePixel(0, vec2(48, 2)).r < 100
+
 proc snapshot(name: string) =
-  let image = newImage(window.size.x, window.size.y)
-  glReadPixels(0,0,window.size.x,window.size.y,GL_RGBA,GL_UNSIGNED_BYTE,image.data[0].addr)
-  image.flipVertical()
+  ## Saves the current production HUD as a visual review artifact.
+  let image = captureHud()
   image.writeFile(getEnv("LVD_RESEARCH_UI_FIXTURE", getTempDir()) / name)
   var nonblack = 0
   for pixel in image.data:
@@ -188,6 +205,39 @@ drawHud(click)
 sleep(550)
 drawHud(click)
 snapshot("lvd-research-ui.png")
+let baseline = run.stateHash()
+captureHud().assertHalfProgress()
+let filledPixel = captureHud().queuePixel(0, vec2(8, 2))
+primaryId = NoEntity
+selectedIds = @[]
+drawHud(vec2(500,400))
+doAssert captureHud().queuePixel(0, vec2(8, 2)) != filledPixel
+primaryId = producerId
+selectedIds = @[primaryId]
+drawHud(vec2(500,400))
+captureHud().assertHalfProgress()
+doAssert run.stateHash() == baseline,
+  "Queue presentation and reselection must not mutate authoritative state"
+doAssert run.world.applyCancel(0, primaryId)
+drawHud(vec2(500,400))
+doAssert captureHud().queuePixel(0, vec2(8, 2)) != filledPixel
+doAssert not run.world.researchQueueCard(primaryId).active
+doAssert run.world.applyResearch(0, primaryId, TemperedEdges.ord.int32)
+producer.researchTicks = 1
+run.world.tickWorld(nil)
+drawHud(vec2(500,400))
+doAssert not run.world.researchQueueCard(primaryId).active
+doAssert captureHud().queuePixel(0, vec2(8, 2)) != filledPixel
+# Training uses the same real progress bar, with no fill on waiting slots.
+producer.kind = BarracksBuilding
+run.world.players[0].foodCap = 100
+doAssert run.world.applyTrain(0, primaryId, SoldierUnit.ord.int32)
+doAssert run.world.applyTrain(0, primaryId, SoldierUnit.ord.int32)
+producer.trainTicks = unitOf(0, SoldierUnit).trainTicks div 2
+drawHud(vec2(500,400))
+let trainingImage = captureHud()
+trainingImage.assertHalfProgress()
+doAssert trainingImage.queuePixel(1, vec2(8, 2)) != filledPixel
 # Selected worker retains cargo and displays armor; newly selected Knight uses
 # current player stats rather than a spawn-time cached value.
 primaryId = run.world.units[0].id

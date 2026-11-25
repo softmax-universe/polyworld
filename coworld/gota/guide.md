@@ -91,7 +91,7 @@ Do not redeclare these names. Additional policy-defined types are allowed.
 | `objectItems(i * 6 + slot)` | Visible object inventory IDs and stack counts. |
 | `spells(i)` | Visible spell warnings, positions, ability/caster IDs, impact tick, hostile and support flags. |
 | `camps(i)` | Public camp positions and difficulty tiers. |
-| `match` | Match/battle ticks, limits, seed, wave timers, observation counts and team-known building counts. |
+| `match` | Match/battle ticks, limits, seed, wave timers, observation counts and public building counts. |
 | `map` | Dimensions, layer count, world-to-map origin and enemy god position. |
 | `draft`, `players(i)`, `heroChoices(class)` | Draft state, public roster selections, roles and hero availability. |
 | `lastAction` | The latest gameplay command's `accepted` flag and `error` code. |
@@ -108,7 +108,8 @@ use `floor(position.x + .5)` to select the containing tile.
 
 The visible-object and spell collections are a snapshot of the decision frame.
 They use the existing team LOS filter. Hidden target/caster identities remain
-zero, and enemy building counts use team-known state. `objects(i).alive`
+zero, while tower and barracks survival counts stay current through fog.
+Exact enemy building HP and targets still require vision. `objects(i).alive`
 preserves `objectAlive(i)` semantics, including building vulnerability.
 Camp records contain static geometry, not hidden respawn or population data.
 Use the corresponding count: `match.objectCount`, `match.spellCount`,
@@ -272,7 +273,7 @@ resumes drafting, including the countdown. Drafting has a separate budget
 of up to 100 simulation seconds for ten players. The configured `maxTicks`
 and CLI duration flags limit battle time only, starting after the last pick.
 
-## Hero balance, October 7, 2026
+## Hero balance, November 23, 2026
 
 Frontlines have the most health. Fighters have the next health tier.
 Mages and supports have flatter health growth. Carries start fragile, with
@@ -285,12 +286,17 @@ Open Draft still allows any composition and duplicate heroes.
 
 Ranger and Crossbowman both attack from six tiles. Crossbowman's first two
 spell ranks deal roughly 10% less damage, while its final ranks stay unchanged.
-Supports start with more health but still gain only 20 HP per level.
+Supports start with more health and gain 40 HP per level.
 Druid Warden heals groups; Warlock provides stronger healing to one hero.
 A full lane wave has six melee creeps and two casters, with 480 combined HP
 and 168 sustained DPS before movement or interruptions. Every creep deals
-28 damage per basic attack. Gameplay replay version is 69; this client
+28 damage per basic attack. Gameplay replay version is 89; this client
 supports only that exact version.
+
+Health, basic-damage, and maximum-mana gains from hero levels are twice the
+previous tuning. Level-one stats, XP requirements, movement growth, attack
+cadence, and mana-regeneration rate are unchanged. Carries keep their
+accelerating health curve, while frontlines retain the highest health.
 
 ## Ability progression
 
@@ -306,10 +312,16 @@ Q, W, and E have four ranks requiring hero levels 1, 3, 5, and 7.
 R has three ranks requiring hero levels 6, 12, and 18. Each additional rank
 adds 50% of the rank-1 damage, healing, or mana restoration, rounded down.
 Carry spell damage instead follows explicit per-rank curves with later growth.
-Mana costs, range, charge capacity, and timing stay the same. An upgrade
-preserves spent charges and running cooldowns. Pending spells retain the
-rank they had when cast. Respawning preserves learned ranks and banked
-points and refills only learned abilities.
+After rank scaling, each hero level above 1 adds 5% to damage, healing, and
+mana restoration. The multiplier is `100 + 5 * (heroLevel - 1)` percent,
+with hero level clamped to 1–20 and the final integer amount rounded down.
+That means 120% at level 5, 145% at level 10, and 195% at level 20. This
+continues improving spells after they reach their maximum rank.
+
+Mana costs, range, charge capacity, control duration, and timing stay the
+same. An upgrade preserves spent charges and running cooldowns. Pending
+spells retain the rank and hero level they had when released. Respawning
+preserves learned ranks and banked points and refills only learned abilities.
 
 Hero stats, including basic-attack damage, still grow automatically with
 hero level. Ability ranks never increase automatically. The bundled base
@@ -340,7 +352,7 @@ Warlock's Mending Hex and Dread Pact heal one selected allied hero, including
 self, or damage one selected enemy. Dread Pact silences hostile targets only.
 All four spells reach six tiles. Healing is capped at maximum HP.
 
-| Support spell | Healing at ranks 1 / 2 / 3 / 4 | Targets |
+| Support spell | Base healing at ranks 1 / 2 / 3 / 4, before hero-level bonus | Targets |
 | --- | --- | --- |
 | Druid Q: Thorn Bloom | 150 / 225 / 300 / 375 | Allies within a 2-tile circle. |
 | Druid W: Kindred Renewal | 160 / 240 / 320 / 400 | Allies within a 2.5-tile circle. |
@@ -361,9 +373,9 @@ Healing requires an explicit policy command, just like every other ability.
 | `abilityMaxLevel(slot)` | Rank limit: 4 for slots 0-2, 3 for slot 3. |
 | `abilityRequiredLevel(slot)` | Hero level required for the next rank, or 0 at maximum rank. |
 | `canLevelAbility(slot)` | 1 when alive with a point and the required level, otherwise 0. |
-| `abilityDamage(slot)` | Damage per target at the learned rank, or 0 when locked. |
-| `abilityHeal(slot)` | Healing per target at the learned rank, or 0 when locked. |
-| `abilityRestore(slot)` | Mana restoration at the learned rank, or 0 when locked. |
+| `abilityDamage(slot)` | Damage per target at the learned rank and current hero level, or 0 when locked. |
+| `abilityHeal(slot)` | Healing per target at the learned rank and current hero level, or 0 when locked. |
+| `abilityRestore(slot)` | Mana restoration at the learned rank and current hero level, or 0 when locked. |
 | `abilityManaCost(slot)` | Mana cost of a cast, including while locked. |
 
 These queries update immediately after commands and return 0 for invalid
@@ -457,6 +469,37 @@ spending a dose. `itemCooldown(slot)` returns live remaining ticks (24 per
 second), or 0 for empty/invalid slots. Inventory icons show stack counts and
 remaining cooldowns.
 
+Higher-tier equipment provides passive regeneration in any inventory slot.
+Bonuses from different items add together, on top of normal mana regeneration.
+They work while moving, attacking, casting, or taking damage, up to maximum
+health and mana. They stop while dead and are removed when the item is sold.
+No item activation is needed.
+
+| ID | Equipment | Gold | Regeneration bonus |
+| --- | --- | --- | --- |
+| 15 | Ironbark Pauldrons | 140 | +1 HP per second. |
+| 16 | Knight Armor | 160 | +2 HP per second. |
+| 17 | Thornwood Staff | 170 | +1 HP and +1 mana per second. |
+| 20 | Arcane Spellbook | 190 | +2 mana per second. |
+
+### Magical damage artifacts
+
+These expensive items add flat damage to every basic attack. All hero classes
+can equip them in any inventory slot. Different artifacts add together, and
+each item can be owned once. They do not change attack range, timing, or spells.
+
+| ID | Artifact | Gold | Bonus attack damage |
+| --- | --- | --- | --- |
+| 23 | Stormcoil Maul | 500 | +150 |
+| 24 | Abyssal Pearl | 1,000 | +1,000 |
+| 25 | Worldbreaker | 3,000 | +10,000 |
+
+Worldbreaker can kill any current full-health hero, creep, neutral, tower,
+barracks, or god with one basic hit when that target is vulnerable. Normal
+tower and god protection still applies. `buyItem(id)` buys these artifacts,
+and `selfAttackDamage` includes their bonuses. Selling removes the bonus and
+returns half the purchase price.
+
 ### Portal Scrolls
 
 Buy item **21** for **100 gold**. Scrolls stack to eight per slot. Call
@@ -519,8 +562,10 @@ Other invalid spell queries return zero. Visibility of an enemy warning does not
 ## Death and buyback
 
 The first death takes 9 seconds to respawn, including the 1-second death
-animation. Each subsequent death adds 5 seconds, up to a total of 60 seconds.
-Death counts belong to each hero and persist after respawning.
+animation. Each subsequent death doubles the total delay: 9, 18, 36, 72,
+144, and 288 seconds. From the seventh death onward, the delay is capped at
+300 seconds (5 minutes). This uses each hero's own death count, not the
+team's total. Death counts persist after respawning.
 
 `selfDeaths` is the hero's death count. `selfRespawnTicks` is the remaining
 respawn delay in ticks, or zero while alive. BASIC decisions continue while
@@ -534,6 +579,7 @@ fixed during a death, even as the respawn timer counts down.
 hero's gold and immediately respawns them with full health, mana, and spell
 charges. It preserves inventory, level, XP, and death count. A living hero,
 an ended match, or insufficient gold causes rejection without spending gold.
+Buying back does not reset the next death's respawn penalty.
 The HUD shows the countdown, buyback price, and any rejection reason while
 dead. Buyback attempts are recorded for replay and seeking.
 
@@ -551,7 +597,7 @@ end if
 
 ## Crowd control
 
-| Hero | Ability | Effect | Rank-one damage |
+| Hero | Ability | Effect | Base rank-one damage, before hero-level bonus |
 | --- | --- | --- | --- |
 | Vanguard | Q: Firebrand Sword | Stun for 0.5 seconds | 37 |
 | Vanguard | R: Blazing Blade | Stun for 1 second | 204 |
@@ -562,7 +608,7 @@ end if
 | Druid | R: Golem Seed | Root for 2 seconds | 49 |
 | Lich | W: Bone Marionette | Root for 1.5 seconds | 49 |
 
-Control durations stay fixed at every rank. Effects apply on impact to enemy
+Control durations stay fixed at every rank and hero level. Effects apply on impact to enemy
 heroes and creeps; buildings and gods are immune. A stun stops movement,
 basic attacks, abilities, and items, and cancels a pending basic swing. Silence prevents
 all four abilities but allows movement, basic attacks, and items. Root
@@ -611,7 +657,7 @@ is not available to live BASIC policies.
 
 ## Terrain and execution
 
-BASIC can inspect the complete static terrain with `terrainKind(x, y)`, `terrainWalkable(x, y)`, `terrainHeight(x, y)`, and `terrainWaterDepth(x, y)`. These use global tile coordinates on `selfLayer`. Each has an explicit `At(x, y, layer)` version, such as `terrainKindAt(x, y, GroundLayer)`. Read-only constants expose `mapWidth`, `mapHeight`, `mapLayers`, the layer names, and terrain kinds. Height and water depth use eighths of a tile; invalid or absent tiles return zero. The Terrain API section of the game documentation lists all constants and edge cases. Static terrain is available through fog, while enemy objects remain visibility-filtered. Walkability also includes team-known building footprints; unseen enemy destruction does not reveal newly open tiles.
+BASIC can inspect the complete static terrain with `terrainKind(x, y)`, `terrainWalkable(x, y)`, `terrainHeight(x, y)`, and `terrainWaterDepth(x, y)`. These use global tile coordinates on `selfLayer`. Each has an explicit `At(x, y, layer)` version, such as `terrainKindAt(x, y, GroundLayer)`. Read-only constants expose `mapWidth`, `mapHeight`, `mapLayers`, the layer names, and terrain kinds. Height and water depth use eighths of a tile; invalid or absent tiles return zero. The Terrain API section of the game documentation lists all constants and edge cases. Static terrain is available through fog, while enemy objects remain visibility-filtered. Tower and barracks locations and survival are public: walkability includes living building footprints and updates for both teams as soon as a building is destroyed, even under fog.
 
 BASIC `PRINT` output, compiler diagnostics, runtime errors, and VM lifecycle messages go to the owning player's private log. Each log is limited to 10 MiB. Runtime limit errors disable that VM; other seats continue. Invalid BASIC syntax fails the episode with a player failure diagnostic. Public game logs and action replays contain no BASIC source or private print output.
 

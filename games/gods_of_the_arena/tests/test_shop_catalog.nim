@@ -17,5 +17,8 @@ doAssert SunsteelLongsword.shopGroup == ShopMelee
 doAssert RangerBow.shopGroup == ShopRanged
 doAssert SteelHelmet.shopGroup == ShopEquipment
 doAssert PortalScroll.shopGroup == ShopUtility
+for item in ArtifactItems:
+  doAssert item.shopGroup == ShopArtifacts
+  doAssert item in catalog
 doAssert catalog[0] == HealthPotion
 echo "PASS functional groups / ascending actual prices"

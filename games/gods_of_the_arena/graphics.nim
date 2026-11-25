@@ -146,7 +146,7 @@ proc drawWaterTuning(sk: Silky, window: Window) =
   slider("lakeFadeCurve", "Fade curve", water.fadeCurve, 0.1, 5)
 
 const
-  DefaultCameraDistance = 17.0'f / 1.2'f
+  DefaultCameraDistance = 17.0'f
   ProfileWarmupFrames {.intdefine.} = 0
   AtlasPath = TmpRoot & "/gota.atlas.png"
   MossyStoneSurface = SurfaceNames.len
@@ -357,6 +357,7 @@ proc runGraphics*(
   window.cursor = Cursor(kind: ArrowCursor)
   window.onFrame = nil
   window.onButtonPress = nil
+  window.onButtonRelease = nil
   clearPlayerCommands()
   clearProps()
   let previousBindings = customBindingsEnabled
@@ -478,7 +479,7 @@ proc runGraphics*(
   scene.useToonShading()
   var
     worldCharacters: seq[WorldCharacter]
-    visibleBuildings: seq[int]
+    standingBuildings: seq[int]
     worldCharacterCount: int
     directorSubjects: seq[Subject]
   if heroModels[HeroClass.low] == nil:
@@ -640,9 +641,9 @@ proc runGraphics*(
     radioButton "PBR", scene.shading, PbrCharacters
 
   const
-    SmallTowerScale = 3.5'f
-    TallTowerScale = 4.5'f
-    GateTowerScale = 6.0'f
+    SmallTowerScale = 2.8'f
+    TallTowerScale = 3.6'f
+    GateTowerScale = 4.8'f
     BarracksScale = 1.65'f
 
   proc towerPropName(tier: TowerTier): string =
@@ -980,6 +981,34 @@ proc runGraphics*(
     if unit.camp == 0:
       return visibleInView(unit.team, unit.position)
     viewMode == 0 or visible(run.world, Team(viewMode - 1), unit.position)
+
+  proc addBuildingRemains() =
+    ## Marks destroyed foundations without revealing nearby units through fog.
+    for building in run.world.buildings:
+      if building.hp > 0:
+        continue
+      let
+        origin = renderPoint(building.position) + vec3(0, 0.09'f, 0)
+        size = towerPacks[building.team].propSize(buildingPropName(building)) *
+          buildingScale(building) * 0.45'f
+        half = max(vec2(size.x, size.z), vec2(0.75'f))
+        angle = renderFacing(building.facing)
+        c = cos(angle)
+        s = sin(angle)
+        color =
+          if visibleInView(building.team, building.position):
+            rgbx(137, 134, 124, 210)
+          else:
+            rgbx(110, 114, 120, 220)
+      var corners: array[5, Vec3]
+      for i, offset in [vec2(-half.x, -half.y), vec2(half.x, -half.y),
+          vec2(half.x, half.y), vec2(-half.x, half.y)]:
+        corners[i] = origin + vec3(c * offset.x + s * offset.y, 0,
+          -s * offset.x + c * offset.y)
+      corners[4] = corners[0]
+      worldShapes.addPolyline(corners, color, 0.07'f)
+      worldShapes.addLine(corners[0], corners[2], color, 0.09'f)
+      worldShapes.addLine(corners[1], corners[3], color, 0.09'f)
 
   proc updateTerrainVision() =
     ## Uploads softened terrain vision for the selected spectator team.
@@ -1413,7 +1442,13 @@ proc runGraphics*(
     window.runeInputEnabled = false
     actionCam.takeManual()
 
+  var heldButtons: set[Button]
+  window.onButtonRelease = proc(button: Button) =
+    ## Allows a fresh shop press after release, including focus-loss releases.
+    heldButtons.excl button
   window.onButtonPress = proc(button: Button) =
+    let repeatedPress = button in heldButtons
+    heldButtons.incl button
     window.captureCursorConfinement(button)
     if matchMenu == MatchResults:
       return
@@ -1435,18 +1470,10 @@ proc runGraphics*(
       return
     if window.scaleKey(button, preferences, sk.uiScale, "Polyworld GotA"):
       return
-    if button == KeyEscape and shopOpen:
+    if shopOpen and (button == KeyEscape or MenuInput.matches(button)):
       heldRightMove = false
-      playSound(CancelSound)
       clearHudTooltip()
-      shopOpen = false
-      resetShopUi()
-      armedAbility = -1
-      armedItem = -1
-      attackMoveArmed = false
-      selectionStarted = false
-      minimapPanning = false
-      panning = false
+      discard consumeShopEscape()
       return
     if MenuInput.matches(button):
       heldRightMove = false
@@ -1464,7 +1491,6 @@ proc runGraphics*(
         if matchMenu == HiddenMatchMenu: PauseMenu
         elif matchMenu in {MatchSettings, MatchPlayers}: PauseMenu
         else: HiddenMatchMenu
-      shopOpen = false
       armedAbility = -1
       armedItem = -1
       attackMoveArmed = false
@@ -1480,10 +1506,12 @@ proc runGraphics*(
     if options.playerSlot > 0 and not run.replayMode and
       run.world.phase != Drafting:
         if ShopInput.matches(button):
+          if repeatedPress or shopOpen:
+            return
           heldRightMove = false
           clearHudTooltip()
-          shopOpen = not shopOpen
-          playSound(if shopOpen: ClickSound else: CancelSound)
+          shopOpen = true
+          playSound(ClickSound)
           armedAbility = -1
           armedItem = -1
           attackMoveArmed = false
@@ -2345,7 +2373,7 @@ proc runGraphics*(
         hero = heroById(run.world, heroId)
         slot = HeroAbilitySlot(armedAbility)
         spec = heroAbility(hero.class, slot).abilitySpec(
-          hero.abilityLevels[slot]
+          hero.abilityLevels[slot], hero.level
         )
       if hero.hp <= 0 or hero.state == Dying or hero.charges[slot] <= 0 or
         hero.cooldowns[slot] > 0 or
@@ -2435,7 +2463,7 @@ proc runGraphics*(
             let
               slot = HeroAbilitySlot(armedAbility)
               ability = heroAbility(hero.class, slot)
-              spec = ability.abilitySpec(hero.abilityLevels[slot])
+              spec = ability.abilitySpec(hero.abilityLevels[slot], hero.level)
               picked = pickActionTarget(viewProjection, spec.kind in {Heal, Restore})
               targetId =
                 if picked != 0 and
@@ -3011,10 +3039,11 @@ proc runGraphics*(
           clockHour(float32(run.world.battleTick()) + renderAlpha, TickRate))
         setEnvironmentPalette(scene.toon)
 
-        visibleBuildings.setLen(0)
+        # Structures are public landmarks; the prop shader still applies fog.
+        standingBuildings.setLen(0)
         for i, tower in run.world.buildings:
-          if tower.hp > 0 and visibleInView(tower.team, tower.position):
-            visibleBuildings.add i
+          if tower.hp > 0:
+            standingBuildings.add i
         profileBlock "prepare character poses":
           var count = 0
           for footman in run.world.footmen:
@@ -3114,7 +3143,7 @@ proc runGraphics*(
         profileBlock "Shadow pass":
           sunDepthPasses(window.size):
             drawTerrainSunDepth()
-            for index in visibleBuildings:
+            for index in standingBuildings:
               let tower {.cursor.} = run.world.buildings[index]
               towerPacks[tower.team].drawPropSunDepth(
                 buildingPropName(tower),
@@ -3140,7 +3169,7 @@ proc runGraphics*(
             terrainEdgeWorld = run.world
             terrainEdgeRevision = run.world.navigationRevision
           drawTerrain(viewProjection, showTiles)
-          for index in visibleBuildings:
+          for index in standingBuildings:
             let tower {.cursor.} = run.world.buildings[index]
             towerPacks[tower.team].drawProp(
               buildingPropName(tower),
@@ -3205,7 +3234,7 @@ proc runGraphics*(
                 scene.toon.groundColor
               )
               drawTerrain(mirroredViewProjection, false)
-              for index in visibleBuildings:
+              for index in standingBuildings:
                 let tower {.cursor.} = run.world.buildings[index]
                 towerPacks[tower.team].drawProp(
                   buildingPropName(tower),
@@ -3282,6 +3311,7 @@ proc runGraphics*(
           attackMarks.drawClickMarks(viewProjection)
           drawHeroOrderMarkers(viewProjection)
         worldShapes.clear()
+        addBuildingRemains()
         let trailTime = (run.world.tick.float32 + animationAlpha) /
           TickRate.float32
         for trails in heroTrails:
@@ -3681,6 +3711,7 @@ proc runGraphics*(
   window.cursor = Cursor(kind: ArrowCursor)
   window.onFrame = nil
   window.onButtonPress = nil
+  window.onButtonRelease = nil
   clearPlayerCommands()
   var recordingFailure: string
   when not defined(emscripten):

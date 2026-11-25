@@ -157,6 +157,7 @@ type
     heroId: int32
     previous: array[ArrayNames.len, int]
     specClass: int32
+    specLevel: int
     specRanks: array[HeroAbilitySlot, int32]
     specs: array[HeroAbilitySlot, AbilitySpec]
 
@@ -333,14 +334,17 @@ proc loadSpells(view: ArrayView, state: StructureLoader, field: int) =
 
 proc ownSpec(state: StructureLoader, hero: Hero,
     slot: HeroAbilitySlot): lent AbilitySpec =
-  ## Reuses immutable ability metadata until its class or rank changes.
-  if state.specClass != hero.class.ord:
+  ## Reuses ability metadata until its class, hero level or rank changes.
+  if state.specClass != hero.class.ord or state.specLevel != hero.level:
     state.specClass = hero.class.ord.int32
+    state.specLevel = hero.level
     for rank in state.specRanks.mitems:
       rank = -1
   if state.specRanks[slot] != hero.abilityLevels[slot]:
     state.specs[slot] =
-      heroAbility(hero.class, slot).abilitySpec(hero.abilityLevels[slot])
+      heroAbility(hero.class, slot).abilitySpec(
+        hero.abilityLevels[slot], hero.level
+      )
     state.specRanks[slot] = hero.abilityLevels[slot]
   state.specs[slot]
 
@@ -544,7 +548,7 @@ proc refreshOwnStructures*(game: Game, index: int) =
     vm.structureArrays[field].invalidate()
 
 proc refreshStructureCounts*(game: Game) =
-  ## Counts team-known buildings once for the common decision frame.
+  ## Counts public building survival once for the common decision frame.
   game.structureCounts = default(typeof(game.structureCounts))
   for building in game.world.buildings:
     for team in Team:

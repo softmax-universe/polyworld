@@ -273,7 +273,6 @@ proc drawBuyback(
     price = run.world.buybackPrice(hero.id)
     reason = run.world.buybackReason(hero.id)
     enabled = controlled and reason.len == 0 and not run.historyPlayback
-    seconds = (hero.respawnTicks() + TickRate - 1) div TickRate
     gold = rgbx(247, 221, 143, 255)
     muted = rgbx(163, 175, 192, 255)
   sk.drawRect(panel.origin, panel.size, rgbx(8, 12, 20, 255))
@@ -284,8 +283,7 @@ proc drawBuyback(
     status = rows.takeRest()
   hudScratch.setLen(0)
   hudScratch.add "Respawn in "
-  hudScratch.addHudInt(seconds.int)
-  hudScratch.add 's'
+  hudScratch.add respawnCountdown(hero.respawnTicks())
   sk.drawLabel(
     hudScratch,
     countdown.origin,
@@ -764,6 +762,39 @@ proc minimapPosition(position: Vec3, panel: GameUiPanel): Vec2 =
     )
   area.origin + vec2(x * area.size.x, y * area.size.y)
 
+proc drawMinimapTerrain(sk: Silky, panel: GameUiPanel) =
+  ## Draws the fixed arena beneath fog and minimap markers.
+  let mapArea = panel.minimapMap()
+  sk.drawFrame(
+    GameUiPanel(origin: mapArea.origin, size: mapArea.size)
+  )
+  if run.map.minimap.len == mapTiles() * mapTiles():
+    let tileSize = mapArea.size / mapTiles().float32
+    for y in 0 ..< mapTiles():
+      var x = 0
+      while x < mapTiles():
+        let color = run.map.minimap[y * mapTiles() + x]
+        var finish = x + 1
+        while finish < mapTiles() and
+          run.map.minimap[y * mapTiles() + finish] == color:
+            finish.inc
+        sk.drawRect(
+          mapArea.origin + vec2(x.float32, y.float32) * tileSize,
+          vec2((finish - x).float32, 1) * tileSize,
+          rgbx(
+            uint8((color shr 16) and 255),
+            uint8((color shr 8) and 255),
+            uint8(color and 255),
+            255
+          )
+        )
+        x = finish
+  sk.drawRect(
+    mapArea.origin + mapArea.size * 0.5'f32 - vec2(2),
+    vec2(4),
+    rgbx(91, 119, 128, 255)
+  )
+
 proc minimapFogAlpha(team, index: int): uint8 =
   ## Dims hidden terrain while keeping the map readable beneath the fog.
   if run.world.teamVisible[team][index] != 0:
@@ -817,6 +848,29 @@ proc drawMinimapIcon(
     outline
   )
   sk.drawSprite(name, point - vec2(size / 2), vec2(size), color)
+
+proc drawMinimapStructures(sk: Silky, panel: GameUiPanel, viewMode: int32,
+    selectedIds: openArray[int32]) =
+  ## Keeps fixed structures known under fog and marks their destroyed sites.
+  for building in run.world.buildings:
+    let
+      point = minimapPosition(renderPoint(building.position), panel)
+      visible = visibleInView(viewMode, building.team, building.position)
+      alive = building.hp > 0
+      tint =
+        if not alive: rgbx(77, 83, 94, 255)
+        elif visible: teamHudColor(building.team)
+        else: rgbx(132, 139, 150, 255)
+    sk.drawMinimapIcon(
+      if building.kind == BarracksBuilding: "barracks" else: "tower",
+      point,
+      16.0'f,
+      tint,
+      alive and visible and isPicked(building.id, selectedIds)
+    )
+    if not alive:
+      sk.drawMinimapIcon("cancel", point, 14.0'f,
+        rgbx(192, 177, 155, 255))
 
 proc drawMinimapHero(
     sk: Silky,
@@ -1239,47 +1293,10 @@ proc drawUi*(
   )
 
   let mapArea = minimapPanel.minimapMap()
-  sk.drawFrame(
-    GameUiPanel(origin: mapArea.origin, size: mapArea.size)
-  )
-  if run.map.minimap.len == mapTiles() * mapTiles():
-    let tileSize = mapArea.size / mapTiles().float32
-    for y in 0 ..< mapTiles():
-      var x = 0
-      while x < mapTiles():
-        let color = run.map.minimap[y * mapTiles() + x]
-        var finish = x + 1
-        while finish < mapTiles() and
-          run.map.minimap[y * mapTiles() + finish] == color:
-            finish.inc
-        sk.drawRect(
-          mapArea.origin + vec2(x.float32, y.float32) * tileSize,
-          vec2((finish - x).float32, 1) * tileSize,
-          rgbx(
-            uint8((color shr 16) and 255),
-            uint8((color shr 8) and 255),
-            uint8(color and 255),
-            255
-          )
-        )
-        x = finish
-  sk.drawRect(
-    mapArea.origin + mapArea.size * 0.5'f32 - vec2(2),
-    vec2(4),
-    rgbx(91, 119, 128, 255)
-  )
+  sk.drawMinimapTerrain(minimapPanel)
   sk.pushClipRect(rect(mapArea.origin, mapArea.size))
   sk.drawMinimapFog(mapArea, viewMode)
-  for tower in run.world.buildings:
-    if tower.hp > 0 and
-        visibleInView(viewMode, tower.team, tower.position):
-      sk.drawMinimapIcon(
-        (if tower.kind == BarracksBuilding: "barracks" else: "tower"),
-        minimapPosition(renderPoint(tower.position), minimapPanel),
-        16.0'f,
-        teamHudColor(tower.team),
-        isPicked(tower.id, selectedIds)
-      )
+  sk.drawMinimapStructures(minimapPanel, viewMode, selectedIds)
   for fort in run.world.forts:
     if not defined(gotaTestRoom) and
       visibleInView(viewMode, fort.team, fort.center):
@@ -1378,7 +1395,7 @@ proc drawUi*(
           i = slot.ord
           well = details.abilities[i]
           spec = selection.abilities[slot].abilitySpec(
-            selection.abilityLevels[slot]
+            selection.abilityLevels[slot], selection.level
           )
           empty = selection.charges[slot] == 0
           remaining =
@@ -1613,7 +1630,7 @@ proc drawUi*(
           )
         let
           rank = selection.abilityLevels[slot]
-          spec = selection.abilities[slot].abilitySpec(rank)
+          spec = selection.abilities[slot].abilitySpec(rank, selection.level)
           badge = well.origin + vec2(3, 2)
         sk.drawRect(badge, vec2(42, 20), rgbx(0, 0, 0, 190))
         hudScratch.setLen(0)
@@ -1786,7 +1803,8 @@ proc drawUi*(
         let ability = selection.abilities[slot]
         targets.add TooltipTarget(
           id: "ability:" & $selection.id & ":" & $slot.ord & ":" & $ability.ord,
-          card: abilityDetails(ability, selection.abilityLevels[slot]),
+          card: abilityDetails(
+            ability, selection.abilityLevels[slot], selection.level),
           anchor: details.abilities[slot.ord],
           key: AbilityInputs[slot.ord].actionLabel)
       for slot in 0 .. 1:

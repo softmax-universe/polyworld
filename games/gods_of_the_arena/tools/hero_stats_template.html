@@ -247,8 +247,8 @@
         <div class="section-title"><h2 id="spell-title">Spell levels</h2><span class="label">Current spell tuning</span></div>
         <div class="spell-intro">
           <p>All four spells start locked at rank 0. You receive one ability point at hero level 1 and one per level after that. Spend a point to unlock rank 1 or upgrade a learned spell. Meeting the hero-level requirement does not unlock it automatically.</p>
-          <p>Q, W, and E have four ranks at hero levels 1 / 3 / 5 / 7. R has three at 6 / 12 / 18. Each extra rank adds 50% of the rank-1 effect, rounded down. Values below are per affected target.</p>
-          <p class="small">Use Shift+Q/W/E/R, an ability's + button, or BASIC <code>levelAbility(slot)</code> with slots 0-3. Upgrading preserves charges and cooldowns. Pending casts keep their original rank, and learned ranks survive death.</p>
+          <p>Q, W, and E have four ranks at hero levels 1 / 3 / 5 / 7. R has three at 6 / 12 / 18. Most ranks add 50% of the rank-1 effect; carry spell damage uses its own later-growing curve. Values below are per affected target before the hero-level bonus.</p>
+          <p class="small">Use Shift+Q/W/E/R, an ability's + button, or BASIC <code>levelAbility(slot)</code> with slots 0-3. Upgrading preserves charges and cooldowns. Each hero level above 1 adds 5% to ranked damage, healing, and mana restoration, rounded down: 145% at level 10 and 195% at level 20. Pending casts keep their original rank and hero level, and learned ranks survive death.</p>
           <p class="small">These are the current game rules. The match-version filter changes historical performance statistics, not this spell reference.</p>
         </div>
         <div class="spell-grid">${hero.abilities.map(ability => `
@@ -258,7 +258,7 @@
               <div><span class="spell-key">${ability.key}</span><span class="label">${ability.ultimate ? 'Ultimate' : 'Ability'} · ${ability.ranks.length} ranks</span><h3>${escape(ability.name)}</h3></div>
             </header>
             <div class="scroll"><table aria-label="${escape(ability.name)} spell levels">
-              <thead><tr><th scope="col">Spell rank</th><th scope="col">Hero level</th><th scope="col">${escape(ability.effect)}</th><th scope="col">Mana cost</th></tr></thead>
+              <thead><tr><th scope="col">Spell rank</th><th scope="col">Hero level</th><th scope="col">Base ${escape(ability.effect).toLowerCase()}</th><th scope="col">Mana cost</th></tr></thead>
               <tbody>${ability.ranks.map(rank => `<tr><td>${rank.rank}${rank.rank === 1 ? ' · Unlock' : ''}</td><td>${rank.required_level}</td><td>${number(rank.amount)}</td><td>${number(rank.mana_cost)}</td></tr>`).join('')}</tbody>
             </table></div>
             <div class="spell-timing small"><span><b>${ability.charges}</b> ${ability.charges === 1 ? 'charge' : 'charges'}</span><span><b>${number(ability.cooldown_seconds,1)}s</b> cast cooldown</span><span><b>${number(ability.recharge_seconds,1)}s</b> per charge</span></div>

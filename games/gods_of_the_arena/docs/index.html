@@ -516,10 +516,16 @@
           automatically. Fully ranking all four spells costs 15 points.</p>
         <p><b>Hero stats grow automatically.</b> Basic-attack damage scales as
           base damage + (hero level − 1) × damage per level, plus equipment.
-          Spell damage, healing, and mana restoration grow only with spell rank:
-          100%, 150%, 200%, then 250% of rank 1, rounded down.
-          Mana costs, charges, cooldowns, and ranges stay the same across ranks.
-          Each spell below lists its exact values and required hero levels.</p>
+          Health, basic-damage, and mana gains from levels are doubled in the
+          current tuning; level-one values and movement growth are unchanged.</p>
+        <p><b>Spells also grow with hero level.</b> Each level above 1 adds 5%
+          to the learned rank's damage, healing, and mana restoration:
+          120% at level 5, 145% at level 10, and 195% at level 20, rounded down.
+          Casts keep the rank and hero level from when they were released.
+          Mana costs, control durations, charges, cooldowns, and ranges stay
+          unchanged. The tables below show rank values before this hero-level
+          bonus. Most ranks add 50% of the rank-one effect; carry spell damage
+          uses its own later-growing rank curves.</p>
       </div>
 
       <div class="roster">
@@ -535,16 +541,16 @@
               <h3>VANGUARD KNIGHT</h3>
               <div class="role" style="color:var(--blue)">MELEE · FRONTLINE PROTECTOR</div>
               <div class="stats">
-                <div class="stat"><img src="../../../../polyworld_art/icons/health.png" alt=""><div><b>451 → 2598</b><span class="muted">HP +113/LVL</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_art/icons/mana.png" alt=""><div><b>107 → 254</b><span class="muted">MANA · LEVEL 1 → 20</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_art/icons/attack.png" alt=""><div><b>33 → 147</b><span class="muted">BASIC DAMAGE +6/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_art/icons/health.png" alt=""><div><b>451 → 4745</b><span class="muted">HP +226/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_art/icons/mana.png" alt=""><div><b>107 → 401</b><span class="muted">MANA · LEVEL 1 → 20</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_art/icons/attack.png" alt=""><div><b>33 → 261</b><span class="muted">BASIC DAMAGE +12/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_art/icons/range.png" alt=""><div><b>1.17</b><span class="muted">RANGE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_art/icons/move.png" alt=""><div><b>2.27 → 2.57</b><span class="muted">MOVE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_art/icons/damage.png" alt=""><div><b>0.89</b><span class="muted">ATTACKS / S</span></div></div>
               </div>
               <div class="bars">
-                <div class="bar hp"><i style="width:100%"></i><div class="bar-label"><span>HEALTH</span><span>451 → 2598</span></div></div>
-                <div class="bar mp"><i style="width:49%"></i><div class="bar-label"><span>MANA</span><span>107 → 254</span></div></div>
+                <div class="bar hp"><i style="width:100%"></i><div class="bar-label"><span>HEALTH</span><span>451 → 4745</span></div></div>
+                <div class="bar mp"><i style="width:48%"></i><div class="bar-label"><span>MANA</span><span>107 → 401</span></div></div>
               </div>
             </div>
           </div>
@@ -564,7 +570,7 @@
               <p class="cast-type">Melee</p>
               <p>Stuns enemy heroes and creeps for 0.5 seconds. Duration does not scale with rank.</p>
               <table class="ability-levels" aria-label="Firebrand Sword spell levels">
-                <caption>Spell levels · 4 ranks</caption>
+                <caption>Base rank values · 4 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>1</td><td>37</td></tr>
@@ -597,7 +603,7 @@
               <h4>Inferno Aegis</h4>
               <p class="cast-type">Area cast</p>
               <table class="ability-levels" aria-label="Inferno Aegis spell levels">
-                <caption>Spell levels · 4 ranks</caption>
+                <caption>Base rank values · 4 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Healing</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>1</td><td>50 HP</td></tr>
@@ -632,7 +638,7 @@
               <h4>Lion Guard</h4>
               <p class="cast-type">Self cast</p>
               <table class="ability-levels" aria-label="Lion Guard spell levels">
-                <caption>Spell levels · 4 ranks</caption>
+                <caption>Base rank values · 4 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Healing</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>1</td><td>28 HP</td></tr>
@@ -665,7 +671,7 @@
               <p class="cast-type">Area cast</p>
               <p>Stuns enemy heroes and creeps for 1 second. Duration does not scale with rank.</p>
               <table class="ability-levels" aria-label="Blazing Blade spell levels">
-                <caption>Spell levels · 3 ranks</caption>
+                <caption>Base rank values · 3 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>6</td><td>204</td></tr>
@@ -701,16 +707,16 @@
               <h3>RANGER</h3>
               <div class="role" style="color:var(--blue)">RANGER · MOBILE RANGED CARRY</div>
               <div class="stats">
-                <div class="stat"><img src="../../../../polyworld_art/icons/health.png" alt=""><div><b>218 → 1928</b><span class="muted">HP · LATE GROWTH</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_art/icons/mana.png" alt=""><div><b>52 → 361</b><span class="muted">MANA · LEVEL 1 → 20</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_art/icons/attack.png" alt=""><div><b>21 → 249</b><span class="muted">BASIC DAMAGE +12/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_art/icons/health.png" alt=""><div><b>218 → 3638</b><span class="muted">HP · LATE GROWTH</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_art/icons/mana.png" alt=""><div><b>52 → 670</b><span class="muted">MANA · LEVEL 1 → 20</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_art/icons/attack.png" alt=""><div><b>21 → 477</b><span class="muted">BASIC DAMAGE +24/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_art/icons/range.png" alt=""><div><b>6.00</b><span class="muted">RANGE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_art/icons/move.png" alt=""><div><b>2.24 → 3.57</b><span class="muted">MOVE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_art/icons/damage.png" alt=""><div><b>0.80</b><span class="muted">ATTACKS / S</span></div></div>
               </div>
               <div class="bars">
-                <div class="bar hp"><i style="width:74%"></i><div class="bar-label"><span>HEALTH</span><span>218 → 1928</span></div></div>
-                <div class="bar mp"><i style="width:70%"></i><div class="bar-label"><span>MANA</span><span>52 → 361</span></div></div>
+                <div class="bar hp"><i style="width:77%"></i><div class="bar-label"><span>HEALTH</span><span>218 → 3638</span></div></div>
+                <div class="bar mp"><i style="width:81%"></i><div class="bar-label"><span>MANA</span><span>52 → 670</span></div></div>
               </div>
             </div>
           </div>
@@ -729,7 +735,7 @@
               <h4>Verdant Arrow</h4>
               <p class="cast-type">Projectile</p>
               <table class="ability-levels" aria-label="Verdant Arrow spell levels">
-                <caption>Spell levels · 4 ranks</caption>
+                <caption>Base rank values · 4 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>1</td><td>25</td></tr>
@@ -762,7 +768,7 @@
               <h4>Ricochet Disc</h4>
               <p class="cast-type">Area cast</p>
               <table class="ability-levels" aria-label="Ricochet Disc spell levels">
-                <caption>Spell levels · 4 ranks</caption>
+                <caption>Base rank values · 4 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>1</td><td>35</td></tr>
@@ -797,7 +803,7 @@
               <h4>Dragon Sight</h4>
               <p class="cast-type">Projectile</p>
               <table class="ability-levels" aria-label="Dragon Sight spell levels">
-                <caption>Spell levels · 4 ranks</caption>
+                <caption>Base rank values · 4 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>1</td><td>10</td></tr>
@@ -830,7 +836,7 @@
               <h4>Storm Eagle</h4>
               <p class="cast-type">Area cast</p>
               <table class="ability-levels" aria-label="Storm Eagle spell levels">
-                <caption>Spell levels · 3 ranks</caption>
+                <caption>Base rank values · 3 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>6</td><td>110</td></tr>
@@ -865,16 +871,16 @@
               <h3>ARCANIST</h3>
               <div class="role" style="color:var(--blue)">MAGE · BURST MAGE</div>
               <div class="stats">
-                <div class="stat"><img src="../../../../polyworld_art/icons/health.png" alt=""><div><b>288 → 649</b><span class="muted">HP +19/LVL</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_art/icons/mana.png" alt=""><div><b>185 → 479</b><span class="muted">MANA · LEVEL 1 → 20</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_art/icons/attack.png" alt=""><div><b>26 → 121</b><span class="muted">BASIC DAMAGE +5/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_art/icons/health.png" alt=""><div><b>288 → 1010</b><span class="muted">HP +38/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_art/icons/mana.png" alt=""><div><b>185 → 773</b><span class="muted">MANA · LEVEL 1 → 20</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_art/icons/attack.png" alt=""><div><b>26 → 216</b><span class="muted">BASIC DAMAGE +10/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_art/icons/range.png" alt=""><div><b>5.00</b><span class="muted">RANGE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_art/icons/move.png" alt=""><div><b>2.53 → 3.07</b><span class="muted">MOVE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_art/icons/damage.png" alt=""><div><b>0.80</b><span class="muted">ATTACKS / S</span></div></div>
               </div>
               <div class="bars">
-                <div class="bar hp"><i style="width:25%"></i><div class="bar-label"><span>HEALTH</span><span>288 → 649</span></div></div>
-                <div class="bar mp"><i style="width:93%"></i><div class="bar-label"><span>MANA</span><span>185 → 479</span></div></div>
+                <div class="bar hp"><i style="width:21%"></i><div class="bar-label"><span>HEALTH</span><span>288 → 1010</span></div></div>
+                <div class="bar mp"><i style="width:93%"></i><div class="bar-label"><span>MANA</span><span>185 → 773</span></div></div>
               </div>
             </div>
           </div>
@@ -893,7 +899,7 @@
               <h4>Frost Lance</h4>
               <p class="cast-type">Projectile</p>
               <table class="ability-levels" aria-label="Frost Lance spell levels">
-                <caption>Spell levels · 4 ranks</caption>
+                <caption>Base rank values · 4 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>1</td><td>41</td></tr>
@@ -926,7 +932,7 @@
               <h4>Meteor Strike</h4>
               <p class="cast-type">Area cast</p>
               <table class="ability-levels" aria-label="Meteor Strike spell levels">
-                <caption>Spell levels · 4 ranks</caption>
+                <caption>Base rank values · 4 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>1</td><td>69</td></tr>
@@ -961,7 +967,7 @@
               <h4>Mana Crystal</h4>
               <p class="cast-type">Self cast</p>
               <table class="ability-levels" aria-label="Mana Crystal spell levels">
-                <caption>Spell levels · 4 ranks</caption>
+                <caption>Base rank values · 4 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Mana</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>1</td><td>28 mana</td></tr>
@@ -993,7 +999,7 @@
               <h4>Arcane Meteor</h4>
               <p class="cast-type">Area cast</p>
               <table class="ability-levels" aria-label="Arcane Meteor spell levels">
-                <caption>Spell levels · 3 ranks</caption>
+                <caption>Base rank values · 3 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>6</td><td>255</td></tr>
@@ -1028,16 +1034,16 @@
               <h3>DRUID WARDEN</h3>
               <div class="role" style="color:var(--blue)">SUPPORT · AREA HEALER</div>
               <div class="stats">
-                <div class="stat"><img src="../../../../polyworld_art/icons/health.png" alt=""><div><b>350 → 730</b><span class="muted">HP +20/LVL</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_art/icons/mana.png" alt=""><div><b>167 → 427</b><span class="muted">MANA · LEVEL 1 → 20</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_art/icons/attack.png" alt=""><div><b>24 → 62</b><span class="muted">BASIC DAMAGE +2/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_art/icons/health.png" alt=""><div><b>350 → 1110</b><span class="muted">HP +40/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_art/icons/mana.png" alt=""><div><b>167 → 687</b><span class="muted">MANA · LEVEL 1 → 20</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_art/icons/attack.png" alt=""><div><b>24 → 100</b><span class="muted">BASIC DAMAGE +4/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_art/icons/range.png" alt=""><div><b>4.00</b><span class="muted">RANGE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_art/icons/move.png" alt=""><div><b>2.64 → 3.18</b><span class="muted">MOVE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_art/icons/damage.png" alt=""><div><b>0.80</b><span class="muted">ATTACKS / S</span></div></div>
               </div>
               <div class="bars">
-                <div class="bar hp"><i style="width:28%"></i><div class="bar-label"><span>HEALTH</span><span>350 → 730</span></div></div>
-                <div class="bar mp"><i style="width:83%"></i><div class="bar-label"><span>MANA</span><span>167 → 427</span></div></div>
+                <div class="bar hp"><i style="width:23%"></i><div class="bar-label"><span>HEALTH</span><span>350 → 1110</span></div></div>
+                <div class="bar mp"><i style="width:83%"></i><div class="bar-label"><span>MANA</span><span>167 → 687</span></div></div>
               </div>
             </div>
           </div>
@@ -1056,7 +1062,7 @@
               <h4>Thorn Bloom</h4>
               <p class="cast-type">Area cast</p>
               <table class="ability-levels" aria-label="Thorn Bloom spell levels">
-                <caption>Spell levels · 4 ranks</caption>
+                <caption>Base rank values · 4 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th><th scope="col">Healing</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>1</td><td>37</td><td>150 HP</td></tr>
@@ -1091,7 +1097,7 @@
               <h4>Kindred Renewal</h4>
               <p class="cast-type">Area cast</p>
               <table class="ability-levels" aria-label="Kindred Renewal spell levels">
-                <caption>Spell levels · 4 ranks</caption>
+                <caption>Base rank values · 4 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th><th scope="col">Healing</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>1</td><td>88</td><td>160 HP</td></tr>
@@ -1126,7 +1132,7 @@
               <h4>Nature Talisman</h4>
               <p class="cast-type">Self cast</p>
               <table class="ability-levels" aria-label="Nature Talisman spell levels">
-                <caption>Spell levels · 4 ranks</caption>
+                <caption>Base rank values · 4 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Healing</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>1</td><td>22 HP</td></tr>
@@ -1159,7 +1165,7 @@
               <p class="cast-type">Area cast</p>
               <p>Roots enemy heroes and creeps for 2 seconds. Duration does not scale with rank.</p>
               <table class="ability-levels" aria-label="Golem Seed spell levels">
-                <caption>Spell levels · 3 ranks</caption>
+                <caption>Base rank values · 3 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>6</td><td>49</td></tr>
@@ -1194,16 +1200,16 @@
               <h3>DEMON HUNTER</h3>
               <div class="role" style="color:var(--blue)">MELEE · MELEE ASSASSIN</div>
               <div class="stats">
-                <div class="stat"><img src="../../../../polyworld_art/icons/health.png" alt=""><div><b>335 → 1608</b><span class="muted">HP +67/LVL</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_art/icons/mana.png" alt=""><div><b>93 → 230</b><span class="muted">MANA · LEVEL 1 → 20</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_art/icons/attack.png" alt=""><div><b>29 → 124</b><span class="muted">BASIC DAMAGE +5/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_art/icons/health.png" alt=""><div><b>335 → 2881</b><span class="muted">HP +134/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_art/icons/mana.png" alt=""><div><b>93 → 367</b><span class="muted">MANA · LEVEL 1 → 20</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_art/icons/attack.png" alt=""><div><b>29 → 219</b><span class="muted">BASIC DAMAGE +10/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_art/icons/range.png" alt=""><div><b>1.25</b><span class="muted">RANGE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_art/icons/move.png" alt=""><div><b>2.45 → 3.73</b><span class="muted">MOVE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_art/icons/damage.png" alt=""><div><b>1.60</b><span class="muted">ATTACKS / S</span></div></div>
               </div>
               <div class="bars">
-                <div class="bar hp"><i style="width:62%"></i><div class="bar-label"><span>HEALTH</span><span>335 → 1608</span></div></div>
-                <div class="bar mp"><i style="width:44%"></i><div class="bar-label"><span>MANA</span><span>93 → 230</span></div></div>
+                <div class="bar hp"><i style="width:61%"></i><div class="bar-label"><span>HEALTH</span><span>335 → 2881</span></div></div>
+                <div class="bar mp"><i style="width:44%"></i><div class="bar-label"><span>MANA</span><span>93 → 367</span></div></div>
               </div>
             </div>
           </div>
@@ -1222,7 +1228,7 @@
               <h4>Void Blade</h4>
               <p class="cast-type">Melee</p>
               <table class="ability-levels" aria-label="Void Blade spell levels">
-                <caption>Spell levels · 4 ranks</caption>
+                <caption>Base rank values · 4 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>1</td><td>39</td></tr>
@@ -1256,7 +1262,7 @@
               <p class="cast-type">Area cast</p>
               <p>Roots enemy heroes and creeps for 0.5 seconds. Duration does not scale with rank.</p>
               <table class="ability-levels" aria-label="Gale Slash spell levels">
-                <caption>Spell levels · 4 ranks</caption>
+                <caption>Base rank values · 4 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>1</td><td>60</td></tr>
@@ -1292,7 +1298,7 @@
               <h4>Shadow Cloak</h4>
               <p class="cast-type">Self cast</p>
               <table class="ability-levels" aria-label="Shadow Cloak spell levels">
-                <caption>Spell levels · 4 ranks</caption>
+                <caption>Base rank values · 4 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Healing</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>1</td><td>18 HP</td></tr>
@@ -1324,7 +1330,7 @@
               <h4>Shadow Comet</h4>
               <p class="cast-type">Projectile</p>
               <table class="ability-levels" aria-label="Shadow Comet spell levels">
-                <caption>Spell levels · 3 ranks</caption>
+                <caption>Base rank values · 3 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>6</td><td>177</td></tr>
@@ -1357,16 +1363,16 @@
               <h3>DEATH KNIGHT</h3>
               <div class="role" style="color:var(--red)">MELEE · SUSTAINING BRUISER</div>
               <div class="stats">
-                <div class="stat"><img src="../../../../polyworld_art/icons/health.png" alt=""><div><b>425 → 2420</b><span class="muted">HP +105/LVL</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_art/icons/mana.png" alt=""><div><b>93 → 249</b><span class="muted">MANA · LEVEL 1 → 20</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_art/icons/attack.png" alt=""><div><b>36 → 150</b><span class="muted">BASIC DAMAGE +6/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_art/icons/health.png" alt=""><div><b>425 → 4415</b><span class="muted">HP +210/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_art/icons/mana.png" alt=""><div><b>93 → 405</b><span class="muted">MANA · LEVEL 1 → 20</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_art/icons/attack.png" alt=""><div><b>36 → 264</b><span class="muted">BASIC DAMAGE +12/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_art/icons/range.png" alt=""><div><b>1.27</b><span class="muted">RANGE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_art/icons/move.png" alt=""><div><b>2.13 → 2.42</b><span class="muted">MOVE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_art/icons/damage.png" alt=""><div><b>0.86</b><span class="muted">ATTACKS / S</span></div></div>
               </div>
               <div class="bars">
-                <div class="bar hp"><i style="width:93%"></i><div class="bar-label"><span>HEALTH</span><span>425 → 2420</span></div></div>
-                <div class="bar mp"><i style="width:48%"></i><div class="bar-label"><span>MANA</span><span>93 → 249</span></div></div>
+                <div class="bar hp"><i style="width:93%"></i><div class="bar-label"><span>HEALTH</span><span>425 → 4415</span></div></div>
+                <div class="bar mp"><i style="width:49%"></i><div class="bar-label"><span>MANA</span><span>93 → 405</span></div></div>
               </div>
             </div>
           </div>
@@ -1386,7 +1392,7 @@
               <p class="cast-type">Melee</p>
               <p>Roots enemy heroes and creeps for 0.5 seconds. Duration does not scale with rank.</p>
               <table class="ability-levels" aria-label="Afterlight Sickle spell levels">
-                <caption>Spell levels · 4 ranks</caption>
+                <caption>Base rank values · 4 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>1</td><td>37</td></tr>
@@ -1419,7 +1425,7 @@
               <h4>Withering Idol</h4>
               <p class="cast-type">Area cast</p>
               <table class="ability-levels" aria-label="Withering Idol spell levels">
-                <caption>Spell levels · 4 ranks</caption>
+                <caption>Base rank values · 4 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>1</td><td>59</td></tr>
@@ -1454,7 +1460,7 @@
               <h4>Sanguine Chalice</h4>
               <p class="cast-type">Self cast</p>
               <table class="ability-levels" aria-label="Sanguine Chalice spell levels">
-                <caption>Spell levels · 4 ranks</caption>
+                <caption>Base rank values · 4 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Healing</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>1</td><td>83 HP</td></tr>
@@ -1486,7 +1492,7 @@
               <h4>Dark Eclipse</h4>
               <p class="cast-type">Area cast</p>
               <table class="ability-levels" aria-label="Dark Eclipse spell levels">
-                <caption>Spell levels · 3 ranks</caption>
+                <caption>Base rank values · 3 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>6</td><td>121</td></tr>
@@ -1522,16 +1528,16 @@
               <h3>CROSSBOWMAN</h3>
               <div class="role" style="color:var(--red)">RANGER · HEAVY RANGED CARRY</div>
               <div class="stats">
-                <div class="stat"><img src="../../../../polyworld_art/icons/health.png" alt=""><div><b>225 → 2049</b><span class="muted">HP · LATE GROWTH</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_art/icons/mana.png" alt=""><div><b>49 → 340</b><span class="muted">MANA · LEVEL 1 → 20</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_art/icons/attack.png" alt=""><div><b>19 → 247</b><span class="muted">BASIC DAMAGE +12/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_art/icons/health.png" alt=""><div><b>225 → 3873</b><span class="muted">HP · LATE GROWTH</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_art/icons/mana.png" alt=""><div><b>49 → 631</b><span class="muted">MANA · LEVEL 1 → 20</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_art/icons/attack.png" alt=""><div><b>19 → 475</b><span class="muted">BASIC DAMAGE +24/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_art/icons/range.png" alt=""><div><b>6.00</b><span class="muted">RANGE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_art/icons/move.png" alt=""><div><b>2.16 → 3.43</b><span class="muted">MOVE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_art/icons/damage.png" alt=""><div><b>0.80</b><span class="muted">ATTACKS / S</span></div></div>
               </div>
               <div class="bars">
-                <div class="bar hp"><i style="width:79%"></i><div class="bar-label"><span>HEALTH</span><span>225 → 2049</span></div></div>
-                <div class="bar mp"><i style="width:66%"></i><div class="bar-label"><span>MANA</span><span>49 → 340</span></div></div>
+                <div class="bar hp"><i style="width:82%"></i><div class="bar-label"><span>HEALTH</span><span>225 → 3873</span></div></div>
+                <div class="bar mp"><i style="width:76%"></i><div class="bar-label"><span>MANA</span><span>49 → 631</span></div></div>
               </div>
             </div>
           </div>
@@ -1550,7 +1556,7 @@
               <h4>Siege Scarab</h4>
               <p class="cast-type">Projectile</p>
               <table class="ability-levels" aria-label="Siege Scarab spell levels">
-                <caption>Spell levels · 4 ranks</caption>
+                <caption>Base rank values · 4 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>1</td><td>23</td></tr>
@@ -1583,7 +1589,7 @@
               <h4>Lodestone Surge</h4>
               <p class="cast-type">Area cast</p>
               <table class="ability-levels" aria-label="Lodestone Surge spell levels">
-                <caption>Spell levels · 4 ranks</caption>
+                <caption>Base rank values · 4 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>1</td><td>31</td></tr>
@@ -1619,7 +1625,7 @@
               <h4>Final Measure</h4>
               <p class="cast-type">Projectile</p>
               <table class="ability-levels" aria-label="Final Measure spell levels">
-                <caption>Spell levels · 4 ranks</caption>
+                <caption>Base rank values · 4 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>1</td><td>9</td></tr>
@@ -1652,7 +1658,7 @@
               <h4>Clockwork Charge</h4>
               <p class="cast-type">Area cast</p>
               <table class="ability-levels" aria-label="Clockwork Charge spell levels">
-                <caption>Spell levels · 3 ranks</caption>
+                <caption>Base rank values · 3 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>6</td><td>106</td></tr>
@@ -1687,16 +1693,16 @@
               <h3>LICH</h3>
               <div class="role" style="color:var(--red)">MAGE · CONTROL MAGE</div>
               <div class="stats">
-                <div class="stat"><img src="../../../../polyworld_art/icons/health.png" alt=""><div><b>312 → 711</b><span class="muted">HP +21/LVL</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_art/icons/mana.png" alt=""><div><b>204 → 517</b><span class="muted">MANA · LEVEL 1 → 20</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_art/icons/attack.png" alt=""><div><b>24 → 119</b><span class="muted">BASIC DAMAGE +5/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_art/icons/health.png" alt=""><div><b>312 → 1110</b><span class="muted">HP +42/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_art/icons/mana.png" alt=""><div><b>204 → 830</b><span class="muted">MANA · LEVEL 1 → 20</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_art/icons/attack.png" alt=""><div><b>24 → 214</b><span class="muted">BASIC DAMAGE +10/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_art/icons/range.png" alt=""><div><b>5.50</b><span class="muted">RANGE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_art/icons/move.png" alt=""><div><b>2.35 → 2.80</b><span class="muted">MOVE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_art/icons/damage.png" alt=""><div><b>0.80</b><span class="muted">ATTACKS / S</span></div></div>
               </div>
               <div class="bars">
-                <div class="bar hp"><i style="width:27%"></i><div class="bar-label"><span>HEALTH</span><span>312 → 711</span></div></div>
-                <div class="bar mp"><i style="width:100%"></i><div class="bar-label"><span>MANA</span><span>204 → 517</span></div></div>
+                <div class="bar hp"><i style="width:23%"></i><div class="bar-label"><span>HEALTH</span><span>312 → 1110</span></div></div>
+                <div class="bar mp"><i style="width:100%"></i><div class="bar-label"><span>MANA</span><span>204 → 830</span></div></div>
               </div>
             </div>
           </div>
@@ -1715,7 +1721,7 @@
               <h4>Ice Spear</h4>
               <p class="cast-type">Projectile</p>
               <table class="ability-levels" aria-label="Ice Spear spell levels">
-                <caption>Spell levels · 4 ranks</caption>
+                <caption>Base rank values · 4 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>1</td><td>49</td></tr>
@@ -1749,7 +1755,7 @@
               <p class="cast-type">Area cast</p>
               <p>Roots enemy heroes and creeps for 1.5 seconds. Duration does not scale with rank.</p>
               <table class="ability-levels" aria-label="Bone Marionette spell levels">
-                <caption>Spell levels · 4 ranks</caption>
+                <caption>Base rank values · 4 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>1</td><td>49</td></tr>
@@ -1784,7 +1790,7 @@
               <h4>Frost Sigil</h4>
               <p class="cast-type">Projectile</p>
               <table class="ability-levels" aria-label="Frost Sigil spell levels">
-                <caption>Spell levels · 4 ranks</caption>
+                <caption>Base rank values · 4 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>1</td><td>14</td></tr>
@@ -1817,7 +1823,7 @@
               <h4>Bound Void</h4>
               <p class="cast-type">Area cast</p>
               <table class="ability-levels" aria-label="Bound Void spell levels">
-                <caption>Spell levels · 3 ranks</caption>
+                <caption>Base rank values · 3 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>6</td><td>262</td></tr>
@@ -1853,16 +1859,16 @@
               <h3>WARLOCK</h3>
               <div class="role" style="color:var(--red)">SUPPORT · DIRECT HEALER</div>
               <div class="stats">
-                <div class="stat"><img src="../../../../polyworld_art/icons/health.png" alt=""><div><b>338 → 718</b><span class="muted">HP +20/LVL</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_art/icons/mana.png" alt=""><div><b>194 → 504</b><span class="muted">MANA · LEVEL 1 → 20</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_art/icons/attack.png" alt=""><div><b>26 → 64</b><span class="muted">BASIC DAMAGE +2/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_art/icons/health.png" alt=""><div><b>338 → 1098</b><span class="muted">HP +40/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_art/icons/mana.png" alt=""><div><b>194 → 814</b><span class="muted">MANA · LEVEL 1 → 20</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_art/icons/attack.png" alt=""><div><b>26 → 102</b><span class="muted">BASIC DAMAGE +4/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_art/icons/range.png" alt=""><div><b>4.50</b><span class="muted">RANGE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_art/icons/move.png" alt=""><div><b>2.41 → 2.92</b><span class="muted">MOVE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_art/icons/damage.png" alt=""><div><b>0.80</b><span class="muted">ATTACKS / S</span></div></div>
               </div>
               <div class="bars">
-                <div class="bar hp"><i style="width:28%"></i><div class="bar-label"><span>HEALTH</span><span>338 → 718</span></div></div>
-                <div class="bar mp"><i style="width:97%"></i><div class="bar-label"><span>MANA</span><span>194 → 504</span></div></div>
+                <div class="bar hp"><i style="width:23%"></i><div class="bar-label"><span>HEALTH</span><span>338 → 1098</span></div></div>
+                <div class="bar mp"><i style="width:98%"></i><div class="bar-label"><span>MANA</span><span>194 → 814</span></div></div>
               </div>
             </div>
           </div>
@@ -1881,7 +1887,7 @@
               <h4>Mending Hex</h4>
               <p class="cast-type">Projectile</p>
               <table class="ability-levels" aria-label="Mending Hex spell levels">
-                <caption>Spell levels · 4 ranks</caption>
+                <caption>Base rank values · 4 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th><th scope="col">Healing</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>1</td><td>35</td><td>220 HP</td></tr>
@@ -1915,7 +1921,7 @@
               <p class="cast-type">Projectile</p>
               <p>Silences enemy heroes and creeps for 2 seconds. Duration does not scale with rank.</p>
               <table class="ability-levels" aria-label="Dread Pact spell levels">
-                <caption>Spell levels · 4 ranks</caption>
+                <caption>Base rank values · 4 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th><th scope="col">Healing</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>1</td><td>84</td><td>240 HP</td></tr>
@@ -1948,7 +1954,7 @@
               <h4>Aether Siphon</h4>
               <p class="cast-type">Self cast</p>
               <table class="ability-levels" aria-label="Aether Siphon spell levels">
-                <caption>Spell levels · 4 ranks</caption>
+                <caption>Base rank values · 4 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Mana</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>1</td><td>30 mana</td></tr>
@@ -1980,7 +1986,7 @@
               <h4>Void Portal</h4>
               <p class="cast-type">Area cast</p>
               <table class="ability-levels" aria-label="Void Portal spell levels">
-                <caption>Spell levels · 3 ranks</caption>
+                <caption>Base rank values · 3 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>6</td><td>47</td></tr>
@@ -2016,16 +2022,16 @@
               <h3>BERSERKER</h3>
               <div class="role" style="color:var(--red)">MELEE · AGGRESSIVE MELEE CARRY</div>
               <div class="stats">
-                <div class="stat"><img src="../../../../polyworld_art/icons/health.png" alt=""><div><b>315 → 1512</b><span class="muted">HP +63/LVL</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_art/icons/mana.png" alt=""><div><b>87 → 216</b><span class="muted">MANA · LEVEL 1 → 20</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_art/icons/attack.png" alt=""><div><b>41 → 174</b><span class="muted">BASIC DAMAGE +7/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_art/icons/health.png" alt=""><div><b>315 → 2709</b><span class="muted">HP +126/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_art/icons/mana.png" alt=""><div><b>87 → 345</b><span class="muted">MANA · LEVEL 1 → 20</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_art/icons/attack.png" alt=""><div><b>41 → 307</b><span class="muted">BASIC DAMAGE +14/LVL</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_art/icons/range.png" alt=""><div><b>1.33</b><span class="muted">RANGE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_art/icons/move.png" alt=""><div><b>2.55 → 3.87</b><span class="muted">MOVE</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_art/icons/damage.png" alt=""><div><b>1.20</b><span class="muted">ATTACKS / S</span></div></div>
               </div>
               <div class="bars">
-                <div class="bar hp"><i style="width:58%"></i><div class="bar-label"><span>HEALTH</span><span>315 → 1512</span></div></div>
-                <div class="bar mp"><i style="width:42%"></i><div class="bar-label"><span>MANA</span><span>87 → 216</span></div></div>
+                <div class="bar hp"><i style="width:57%"></i><div class="bar-label"><span>HEALTH</span><span>315 → 2709</span></div></div>
+                <div class="bar mp"><i style="width:42%"></i><div class="bar-label"><span>MANA</span><span>87 → 345</span></div></div>
               </div>
             </div>
           </div>
@@ -2044,7 +2050,7 @@
               <h4>Molten Fist</h4>
               <p class="cast-type">Melee</p>
               <table class="ability-levels" aria-label="Molten Fist spell levels">
-                <caption>Spell levels · 4 ranks</caption>
+                <caption>Base rank values · 4 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>1</td><td>44</td></tr>
@@ -2078,7 +2084,7 @@
               <p class="cast-type">Area cast</p>
               <p>Roots enemy heroes and creeps for 0.75 seconds. Duration does not scale with rank.</p>
               <table class="ability-levels" aria-label="Winged Boot spell levels">
-                <caption>Spell levels · 4 ranks</caption>
+                <caption>Base rank values · 4 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>1</td><td>35</td></tr>
@@ -2114,7 +2120,7 @@
               <h4>Rage Crucible</h4>
               <p class="cast-type">Self cast</p>
               <table class="ability-levels" aria-label="Rage Crucible spell levels">
-                <caption>Spell levels · 4 ranks</caption>
+                <caption>Base rank values · 4 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Healing</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>1</td><td>20 HP</td></tr>
@@ -2146,7 +2152,7 @@
               <h4>Volcanic Eruption</h4>
               <p class="cast-type">Area cast</p>
               <table class="ability-levels" aria-label="Volcanic Eruption spell levels">
-                <caption>Spell levels · 3 ranks</caption>
+                <caption>Base rank values · 3 ranks · before hero-level bonus</caption>
                 <thead><tr><th scope="col">Rank</th><th scope="col">Hero level</th><th scope="col">Damage</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">1</th><td>6</td><td>188</td></tr>
@@ -2243,6 +2249,7 @@
       <p>BASIC: <code>useItemAt(slot, x, y)</code> accepts fractional coordinates and returns 1 on success, 0 on rejection. <code>selfPortalCooldown</code>, <code>selfChannelTicks</code>, <code>selfStunTicks</code>, <code>selfRootTicks</code>, and <code>selfSilenceTicks</code> report remaining ticks. <code>useItem(slot)</code> rejects scrolls because they require a destination.</p>
 
       <h3 style="margin: 22px 0 12px; color: var(--gold);">Equipment</h3>
+      <p>Equipment is passive in any inventory slot. Regeneration bonuses from different items add together, on top of normal mana regeneration. They continue during combat, restore only up to maximum health and mana, and stop while dead or when sold. No activation is needed.</p>
       <div class="shop">
         <article class="item-card">
           <div class="item-top">
@@ -2352,7 +2359,7 @@
               <div class="cost"><img src="../../../../polyworld_art/icons/gold.png" alt="">140</div>
             </div>
           </div>
-          <p class="bonus">+80 maximum health.</p>
+          <p class="bonus">+80 maximum health, +1 HP per second.</p>
         </article>
         <article class="item-card">
           <div class="item-top">
@@ -2362,7 +2369,7 @@
               <div class="cost"><img src="../../../../polyworld_art/icons/gold.png" alt="">160</div>
             </div>
           </div>
-          <p class="bonus">+120 maximum health.</p>
+          <p class="bonus">+120 maximum health, +2 HP per second.</p>
         </article>
         <article class="item-card">
           <div class="item-top">
@@ -2372,7 +2379,7 @@
               <div class="cost"><img src="../../../../polyworld_art/icons/gold.png" alt="">170</div>
             </div>
           </div>
-          <p class="bonus">+40 maximum health, +6 damage.</p>
+          <p class="bonus">+40 maximum health, +6 damage, +1 HP and +1 mana per second.</p>
         </article>
         <article class="item-card">
           <div class="item-top">
@@ -2402,9 +2409,44 @@
               <div class="cost"><img src="../../../../polyworld_art/icons/gold.png" alt="">190</div>
             </div>
           </div>
-          <p class="bonus">+30 maximum mana, +12 damage.</p>
+          <p class="bonus">+30 maximum mana, +12 damage, +2 mana per second.</p>
         </article>
       </div>
+      <h3 style="margin: 22px 0 12px; color: var(--gold);">Magical artifacts</h3>
+      <p>All hero classes can equip these artifacts in any inventory slot. Their flat damage bonuses add together and apply to basic attacks. Each artifact can be owned once. Attack range, timing, and spell strength stay the same.</p>
+      <div class="shop">
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_art/items/stormcoil_maul.png" alt="Stormcoil Maul">
+            <div>
+              <h3>Stormcoil Maul</h3>
+              <div class="cost"><img src="../../../../polyworld_art/icons/gold.png" alt="">500</div>
+            </div>
+          </div>
+          <p class="bonus">+150 attack damage.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_art/items/abyssal_pearl.png" alt="Abyssal Pearl">
+            <div>
+              <h3>Abyssal Pearl</h3>
+              <div class="cost"><img src="../../../../polyworld_art/icons/gold.png" alt="">1,000</div>
+            </div>
+          </div>
+          <p class="bonus">+1,000 attack damage.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_art/items/ashbloom_scythe.png" alt="Worldbreaker">
+            <div>
+              <h3>Worldbreaker</h3>
+              <div class="cost"><img src="../../../../polyworld_art/icons/gold.png" alt="">3,000</div>
+            </div>
+          </div>
+          <p class="bonus">+10,000 attack damage. One basic hit can kill any current full-health target once vulnerable. Normal tower and god protection still applies.</p>
+        </article>
+      </div>
+      <p>BASIC: buy item 23, 24, or 25 with <code>buyItem(id)</code>. <code>selfAttackDamage</code> includes the artifact bonuses. Selling removes the bonus and returns half the purchase price.</p>
     </section>
 
     <section id="drafting" class="panel">
@@ -2451,7 +2493,7 @@
       <h2>Control your hero</h2>
       <p>Idle heroes automatically use their basic attack against the closest visible, attackable enemy nearby, including creeps, heroes, and exposed buildings. Melee heroes approach nearby enemies; ranged heroes acquire enemies within their attack range. Select an enemy or right-click it to make it take priority. Both melee and ranged heroes move toward that target until they reach their own basic-attack range, then stop and attack repeatedly. When the target dies or is lost in fog, they acquire another nearby visible enemy. A ground move order cancels the attack and takes priority over automatic acquisition. These rules also apply with zero mana or all four abilities on cooldown.</p>
       <p>Spend points with Shift+Q/W/E/R, Shift-click on an ability, or its gold + button. The HUD shows ranks, locked abilities, and available points. Unlocks and upgrades are always explicit. Points and ranks survive death.</p>
-      <p>You control your four extra abilities; they only cast when you use them. Q/W/E/R cast immediately at your current valid target. Self actions always fire on key press and affect you. Melee actions also fire immediately: they strike a nearby target, or swing toward the pointer when there is none. For other abilities with no valid target, the key selects the ability and right-click casts at an object or the ground. Escape cancels the selection. With no ability selected, right-click moves or attacks. Click SHOP in the inventory, or press B, to open the full-screen item shop; click an item to buy it. Space pauses or resumes the battle, including while shopping. The HUD shows remaining charges and the wait until an empty action can be used again. A blue bar tracks progress toward the next charge.</p>
+      <p>You control your four extra abilities; they only cast when you use them. Q/W/E/R cast immediately at your current valid target. Self actions always fire on key press and affect you. Melee actions also fire immediately: they strike a nearby target, or swing toward the pointer when there is none. For other abilities with no valid target, the key selects the ability and right-click casts at an object or the ground. Escape cancels the selection. With no ability selected, right-click moves or attacks. Click SHOP in the inventory, or press B, to open the full-screen item shop; click an item to buy it. Holding or pressing B again leaves it open. Click Close to dismiss the shop. Space pauses or resumes the battle, including while shopping. The HUD shows remaining charges and the wait until an empty action can be used again. A blue bar tracks progress toward the next charge.</p>
       <table class="spell-table"><thead><tr><th>Input</th><th>Action</th></tr></thead><tbody>
         <tr><td>Shift + right-click</td><td>Queue movement or attacks after your current order, including on the minimap. Green destination effects keep pulsing until reached. A normal order replaces the queue; Stop clears it.</td></tr>
         <tr><td>Shift + A, then click</td><td>Queue an attack-move or targeted attack. Hold Shift when clicking the destination.</td></tr>
@@ -2486,7 +2528,7 @@
         <tr><td><code>abilityMaxLevel(slot)</code></td><td>4 for Q/W/E, 3 for R.</td></tr>
         <tr><td><code>abilityRequiredLevel(slot)</code></td><td>Hero level needed for the next rank, or 0 at maximum.</td></tr>
         <tr><td><code>canLevelAbility(slot)</code></td><td>1 when alive and eligible to spend a point, otherwise 0.</td></tr>
-        <tr><td><code>abilityDamage(slot)</code>, <code>abilityHeal(slot)</code>, <code>abilityRestore(slot)</code></td><td>Effect per target at the learned rank, or 0 when locked.</td></tr>
+        <tr><td><code>abilityDamage(slot)</code>, <code>abilityHeal(slot)</code>, <code>abilityRestore(slot)</code></td><td>Effect per target at the learned rank and current hero level, or 0 when locked.</td></tr>
         <tr><td><code>abilityManaCost(slot)</code></td><td>Mana cost, including while locked.</td></tr>
         </tbody>
       </table>
@@ -2506,14 +2548,14 @@
         </tbody>
       </table>
       <h3>Death and buyback</h3>
-      <p>The first death takes 9 seconds to respawn, including the 1-second death animation. Each subsequent death adds 5 seconds, up to a total of 60 seconds. Counts belong to each hero and persist after respawning. BASIC decisions continue while dead.</p>
+      <p>The first death takes 9 seconds to respawn, including the 1-second death animation. Each subsequent death doubles the total delay: 9, 18, 36, 72, 144, and 288 seconds. From the seventh death onward, the delay is capped at 300 seconds (5 minutes). This uses each hero's own death count, not the team's total. Counts persist after respawning. BASIC decisions continue while dead.</p>
       <table class="spell-table api-table">
         <thead><tr><th>Value or function</th><th>Meaning</th></tr></thead>
         <tbody>
           <tr><td><code>selfDeaths</code></td><td>This hero's total death count.</td></tr>
           <tr><td><code>selfRespawnTicks</code></td><td>Remaining respawn delay in ticks, or zero while alive.</td></tr>
           <tr><td><code>buybackPrice()</code></td><td>100 gold times this hero's death count. Returns zero while alive or after the match ends. The price stays fixed during each death.</td></tr>
-          <tr><td><code>buyback()</code></td><td>Spends this hero's gold and immediately respawns them with full health, mana, and spell charges. Returns 1 when accepted or 0 when rejected. Inventory, level, XP, and death count are preserved.</td></tr>
+          <tr><td><code>buyback()</code></td><td>Spends this hero's gold and immediately respawns them with full health, mana, and spell charges. Returns 1 when accepted or 0 when rejected. Inventory, level, XP, and death count are preserved. Buying back does not reset the next death's respawn penalty.</td></tr>
         </tbody>
       </table>
       <p>A living hero, an ended match, or insufficient gold rejects buyback without spending gold. Use <code>lastActionError()</code> for the reason. The HUD displays the respawn countdown and buyback price while dead. Buyback attempts are recorded for replay and seeking. The bundled <code>players/base.bas</code> buys back as soon as it can afford the price, skipping normal commands while dead and resuming them on the decision after buyback.</p>
@@ -2574,7 +2616,7 @@ end if</code></pre>
       <p>Opt in by putting <code>' @gota-structures</code> on the first nonblank line of a policy. The host supplies <code>self</code>, <code>objects(i)</code>, <code>abilities(slot)</code>, <code>items(slot)</code>, <code>objectItems(i * 6 + slot)</code>, <code>spells(i)</code>, <code>camps(i)</code>, <code>match</code>, <code>map</code>, <code>draft</code>, <code>players(i)</code>, <code>heroChoices(class)</code>, <code>lastAction</code> and <code>tile</code>. For example, read <code>self.hp</code> or <code>objects(i).position.x</code>. Use <code>match.objectCount</code> to bound the visible-object loop.</p>
       <p>Coordinates are fractional tile-center map coordinates, directly usable by movement and casting commands. Own state refreshes after commands; world observations remain a visibility-filtered decision snapshot. Writing a record only changes the policy's local copy. Call <code>readTile(x, y, layer)</code> with integer tile indices to fill <code>tile</code>. Existing policies and scalar APIs still work. See the <a href="../../../coworld/gota/guide.md#structured-observations">structured API guide</a> for units, counts and limits, and <a href="../structures.bas">structures.bas</a> for every field.</p>
       <h3 id="terrain-api">Terrain API</h3>
-      <p><code>terrainKind(x, y)</code>, <code>terrainWalkable(x, y)</code>, <code>terrainHeight(x, y)</code>, and <code>terrainWaterDepth(x, y)</code> inspect terrain on <code>selfLayer</code>. Each also has an explicit layer form, such as <code>terrainKindAt(x, y, layer)</code>. Coordinates are whole global tiles. Walkability is 1 or 0; height and water depth use eighths of a tile. Invalid coordinates, invalid layers, and absent tiles return zero. Static terrain remains observable through fog. Walkability also includes building footprints: enemy destruction is reflected only after your team sees it; unseen buildings retain their last known state.</p>
+      <p><code>terrainKind(x, y)</code>, <code>terrainWalkable(x, y)</code>, <code>terrainHeight(x, y)</code>, and <code>terrainWaterDepth(x, y)</code> inspect terrain on <code>selfLayer</code>. Each also has an explicit layer form, such as <code>terrainKindAt(x, y, layer)</code>. Coordinates are whole global tiles. Walkability is 1 or 0; height and water depth use eighths of a tile. Invalid coordinates, invalid layers, and absent tiles return zero. Static terrain remains observable through fog. Tower and barracks locations and survival are public: their footprints block walkability while standing and open for both teams immediately when destroyed, even under fog. Enemy HP, targets, and mobile units still require vision.</p>
       <p>Read-only constants expose <code>mapWidth</code>, <code>mapHeight</code>, <code>mapLayers</code>, <code>GroundLayer</code>, <code>RedFortLayer</code>, <code>BlueFortLayer</code>, and <code>WaterLayer</code>. Terrain kinds are <code>TerrainNone</code>, <code>TerrainGrass</code>, <code>TerrainRoad</code>, <code>TerrainRock</code>, <code>TerrainTrees</code>, <code>TerrainMarsh</code>, <code>TerrainWall</code>, and <code>TerrainWater</code>.</p>
     </section>
 

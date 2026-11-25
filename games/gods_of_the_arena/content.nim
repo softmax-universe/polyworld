@@ -130,7 +130,10 @@ type
     RuneCrossbow,
     ArcaneSpellbook,
     PortalScroll,
-    ManaPotion
+    ManaPotion,
+    StormcoilMaul,
+    AbyssalPearl,
+    Worldbreaker
   ItemKind* = enum
     Consumable, Equipment
   RecoveryKind* = enum
@@ -142,6 +145,8 @@ type
     cost*: int32
     maxHp*: int32
     maxMana*: int32
+    healthRegen*, manaRegen*: int32
+      ## Passive points restored per second by held equipment.
     damage*: int32
     movePerTick*: int32
     heal*: int32
@@ -179,11 +184,11 @@ const
       role: "Frontline protector",
       attackStyle: MeleeAttack,
       baseHitPoints: 451,
-      hitPointsPerLevel: 113,
+      hitPointsPerLevel: 226,
       baseMana: 107,
-      maxLevelMana: 254,
+      maxLevelMana: 401,
       baseDamage: 33,
-      damagePerLevel: 6,
+      damagePerLevel: 12,
       baseMovePerTick: 7_138,
       movePerLevel: 40,
       attackRange: 70_000,
@@ -197,12 +202,12 @@ const
       role: "Mobile ranged carry",
       attackStyle: RangedAttack,
       baseHitPoints: 218,
-      hitPointsPerLevel: 90,
+      hitPointsPerLevel: 180,
       healthGrowth: DelayedGrowth,
       baseMana: 52,
-      maxLevelMana: 361,
+      maxLevelMana: 670,
       baseDamage: 21,
-      damagePerLevel: 12,
+      damagePerLevel: 24,
       baseMovePerTick: 7_069,
       movePerLevel: 174,
       attackRange: 360_000,
@@ -216,11 +221,11 @@ const
       role: "Burst mage",
       attackStyle: MagicAttack,
       baseHitPoints: 288,
-      hitPointsPerLevel: 19,
+      hitPointsPerLevel: 38,
       baseMana: 185,
-      maxLevelMana: 479,
+      maxLevelMana: 773,
       baseDamage: 26,
-      damagePerLevel: 5,
+      damagePerLevel: 10,
       baseMovePerTick: 7_968,
       movePerLevel: 71,
       attackRange: 300_000,
@@ -234,11 +239,11 @@ const
       role: "Durable support",
       attackStyle: MagicAttack,
       baseHitPoints: 350,
-      hitPointsPerLevel: 20,
+      hitPointsPerLevel: 40,
       baseMana: 167,
-      maxLevelMana: 427,
+      maxLevelMana: 687,
       baseDamage: 24,
-      damagePerLevel: 2,
+      damagePerLevel: 4,
       baseMovePerTick: 8_306,
       movePerLevel: 72,
       attackRange: 240_000,
@@ -252,11 +257,11 @@ const
       role: "Melee assassin",
       attackStyle: MeleeAttack,
       baseHitPoints: 335,
-      hitPointsPerLevel: 67,
+      hitPointsPerLevel: 134,
       baseMana: 93,
-      maxLevelMana: 230,
+      maxLevelMana: 367,
       baseDamage: 29,
-      damagePerLevel: 5,
+      damagePerLevel: 10,
       baseMovePerTick: 7_718,
       movePerLevel: 168,
       attackRange: 75_000,
@@ -270,11 +275,11 @@ const
       role: "Sustaining bruiser",
       attackStyle: MeleeAttack,
       baseHitPoints: 425,
-      hitPointsPerLevel: 105,
+      hitPointsPerLevel: 210,
       baseMana: 93,
-      maxLevelMana: 249,
+      maxLevelMana: 405,
       baseDamage: 36,
-      damagePerLevel: 6,
+      damagePerLevel: 12,
       baseMovePerTick: 6_722,
       movePerLevel: 38,
       attackRange: 76_000,
@@ -288,12 +293,12 @@ const
       role: "Heavy ranged carry",
       attackStyle: RangedAttack,
       baseHitPoints: 225,
-      hitPointsPerLevel: 96,
+      hitPointsPerLevel: 192,
       healthGrowth: DelayedGrowth,
       baseMana: 49,
-      maxLevelMana: 340,
+      maxLevelMana: 631,
       baseDamage: 19,
-      damagePerLevel: 12,
+      damagePerLevel: 24,
       baseMovePerTick: 6_791,
       movePerLevel: 168,
       attackRange: 360_000,
@@ -307,11 +312,11 @@ const
       role: "Control mage",
       attackStyle: MagicAttack,
       baseHitPoints: 312,
-      hitPointsPerLevel: 21,
+      hitPointsPerLevel: 42,
       baseMana: 204,
-      maxLevelMana: 517,
+      maxLevelMana: 830,
       baseDamage: 24,
-      damagePerLevel: 5,
+      damagePerLevel: 10,
       baseMovePerTick: 7_409,
       movePerLevel: 59,
       attackRange: 330_000,
@@ -325,11 +330,11 @@ const
       role: "Utility summoner",
       attackStyle: MagicAttack,
       baseHitPoints: 338,
-      hitPointsPerLevel: 20,
+      hitPointsPerLevel: 40,
       baseMana: 194,
-      maxLevelMana: 504,
+      maxLevelMana: 814,
       baseDamage: 26,
-      damagePerLevel: 2,
+      damagePerLevel: 4,
       baseMovePerTick: 7_578,
       movePerLevel: 68,
       attackRange: 270_000,
@@ -343,11 +348,11 @@ const
       role: "Aggressive melee carry",
       attackStyle: MeleeAttack,
       baseHitPoints: 315,
-      hitPointsPerLevel: 63,
+      hitPointsPerLevel: 126,
       baseMana: 87,
-      maxLevelMana: 216,
+      maxLevelMana: 345,
       baseDamage: 41,
-      damagePerLevel: 7,
+      damagePerLevel: 14,
       baseMovePerTick: 8_033,
       movePerLevel: 174,
       attackRange: 80_000,
@@ -668,15 +673,16 @@ const
     ),
     ItemSpec(
       name: "Ironbark Pauldrons", icon: "ironbark_pauldrons",
-      kind: Equipment, cost: 140, maxHp: 80
+      kind: Equipment, cost: 140, maxHp: 80, healthRegen: 1
     ),
     ItemSpec(
       name: "Knight Armor", icon: "knight_armor",
-      kind: Equipment, cost: 160, maxHp: 120
+      kind: Equipment, cost: 160, maxHp: 120, healthRegen: 2
     ),
     ItemSpec(
       name: "Thornwood Staff", icon: "thornwood_staff",
-      kind: Equipment, cost: 170, maxHp: 40, damage: 6
+      kind: Equipment, cost: 170, maxHp: 40, damage: 6,
+      healthRegen: 1, manaRegen: 1
     ),
     ItemSpec(
       name: "Battle Axe", icon: "battle_axe",
@@ -688,7 +694,7 @@ const
     ),
     ItemSpec(
       name: "Arcane Spellbook", icon: "arcane_spellbook",
-      kind: Equipment, cost: 190, maxMana: 30, damage: 12
+      kind: Equipment, cost: 190, maxMana: 30, damage: 12, manaRegen: 2
     ),
     ItemSpec(
       name: "Portal Scroll", icon: "waystone_scroll",
@@ -699,15 +705,29 @@ const
       name: "Mana Potion", icon: "mana_flower",
       kind: Consumable, cost: 45, restore: 90,
       recoveryTicks: PotionRecoveryTicks, cooldownTicks: PotionCooldownTicks
+    ),
+    ItemSpec(
+      name: "Stormcoil Maul", icon: "stormcoil_maul",
+      kind: Equipment, cost: 500, damage: 150
+    ),
+    ItemSpec(
+      name: "Abyssal Pearl", icon: "abyssal_pearl",
+      kind: Equipment, cost: 1_000, damage: 1_000
+    ),
+    ItemSpec(
+      name: "Worldbreaker", icon: "ashbloom_scythe",
+      kind: Equipment, cost: 3_000, damage: 10_000
     )
   ]
+
+const ArtifactItems* = [StormcoilMaul, AbyssalPearl, Worldbreaker]
 
 const ShopItems* = [
   HealthPotion, VitalityElixir, ManaPotion, ManaElixir, PoisonPotion,
   PortalScroll, SteelHelmet, SteelBuckler, LeatherGauntlets, RangerBoots,
   RubyAmulet, SapphireRing, CrimsonDagger, AmethystWand, SunsteelLongsword,
   RangerBow, IronbarkPauldrons, KnightArmor, ThornwoodStaff, BattleAxe,
-  RuneCrossbow, ArcaneSpellbook
+  RuneCrossbow, ArcaneSpellbook, StormcoilMaul, AbyssalPearl, Worldbreaker
 ]
 
 proc heroClassForTeam*(team, slot: int): HeroClass =
@@ -872,8 +892,8 @@ proc abilityRequiredLevel*(slot: HeroAbilitySlot, rank: int32): int32 =
     return 0
   if slot == UltimateAbility: rank * 6 else: rank * 2 - 1
 
-proc abilitySpec*(ability: Ability, rank: int32): AbilitySpec =
-  ## Scales effects by rank while retaining the ability's timing and geometry.
+proc abilitySpec*(ability: Ability, rank: int32, heroLevel = 1): AbilitySpec =
+  ## Scales ranked effects by hero level, preserving costs, timing and geometry.
   result = ability.abilitySpec
   let
     level = clamp(rank, 0'i32, result.slot.abilityMaxLevel)
@@ -888,6 +908,10 @@ proc abilitySpec*(ability: Ability, rank: int32): AbilitySpec =
     result.damage = result.damage * scale div 2
   result.heal = result.heal * scale div 2
   result.restore = result.restore * scale div 2
+  let potency = int64(100 + 5 * (clamp(heroLevel, 1, HeroMaxLevel) - 1))
+  result.damage = int32(int64(result.damage) * potency div 100)
+  result.heal = int32(int64(result.heal) * potency div 100)
+  result.restore = int32(int64(result.restore) * potency div 100)
   if level == 0:
     result.charges = 0
     result.controlTicks = 0

@@ -163,6 +163,8 @@ for class in HeroClass:
       doAssert actual.direction == preview.direction
       doAssert actual.impact == preview.impact
       doAssert actual.targetId == preview.targetId
+      doAssert actual.heroLevel == preview.heroLevel
+      doAssert actual.heroLevel == hero.level
 
 echo "Testing support spells heal allies and damage enemies on both teams"
 for team in Team:

@@ -258,27 +258,37 @@ block:
     doAssert game.world.worldObjectAt(hero.id, i, value)
     doAssert value.id != target.id
 
-echo "Testing unseen destruction does not leak through walkability"
-block:
-  let game = quietGame()
-  let target = game.world.buildings[0]
-  let observer = if target.team == RedTeam: BlueTeam else: RedTeam
-  game.world.buildings[0].hp = 0
-  game.world.syncBuildings()
-  var checked = false
-  for tile in target.footprint:
-    if navigationOpen(int(tile.layer), int(tile.x), int(tile.z)):
-      doAssert not game.world.knownWalkable(observer,
-        int(tile.layer), int(tile.x), int(tile.z))
-      checked = true
-  doAssert checked
-  var scout = Footman(id: 1000, hp: FootmanHp, team: observer)
-  scout.place(target.position)
-  game.world.footmen = @[scout]
-  game.tickWorld(nil)
-  for tile in target.footprint:
-    doAssert game.world.knownWalkable(observer,
-      int(tile.layer), int(tile.x), int(tile.z)) ==
-      navigationOpen(int(tile.layer), int(tile.x), int(tile.z))
+echo "Testing public tower and barracks destruction updates both teams under fog"
+for kind in BuildingKind:
+  for team in Team:
+    let game = quietGame()
+    var index = -1
+    for i, building in game.world.buildings:
+      if building.kind == kind and building.team == team:
+        index = i
+        break
+    doAssert index >= 0
+    let
+      target = game.world.buildings[index]
+      observer = if team == RedTeam: BlueTeam else: RedTeam
+    doAssert not game.world.visible(observer, target.position)
+    for building in game.world.buildings:
+      doAssert building.knownAlive == [true, true]
+    for tile in target.footprint:
+      for viewer in Team:
+        doAssert not game.world.knownWalkable(viewer,
+          int(tile.layer), int(tile.x), int(tile.z))
+    game.world.buildings[index].hp = 0
+    game.world.syncBuildings()
+    doAssert game.world.buildings[index].knownAlive == [false, false]
+    doAssert not game.world.visible(observer, target.position)
+    var checked = false
+    for tile in target.footprint:
+      let open = navigationOpen(int(tile.layer), int(tile.x), int(tile.z))
+      for viewer in Team:
+        doAssert game.world.knownWalkable(viewer,
+          int(tile.layer), int(tile.x), int(tile.z)) == open
+      checked = checked or open
+    doAssert checked
 
 echo "Lane navigation and destructible building checks passed"

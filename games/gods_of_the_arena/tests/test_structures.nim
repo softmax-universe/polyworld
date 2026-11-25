@@ -168,6 +168,32 @@ block:
     doAssert vm.runtime.getArray("objects.id", i.int32) == 0
     doAssert vm.runtime.getArray("objects.alive", i.int32) == 0
     doAssert vm.runtime.getArray("objectItems.count", int32(i * 6)) == 0
+  # Destruction is public even when exact enemy HP and targets remain hidden.
+  for kind in BuildingKind:
+    let field = if kind == TowerBuilding:
+      "match.enemyTowers" else: "match.enemyBarracks"
+    let before = vm.runtime.getGlobal(field)
+    var index = -1
+    for i, building in world.buildings:
+      if building.team != hero.team and building.kind == kind:
+        index = i
+        break
+    doAssert index >= 0
+    let target = world.buildings[index]
+    doAssert not world.visible(hero.team, target.position)
+    var observed: WorldObject
+    doAssert not world.worldObjectById(hero.id, target.id, observed)
+    world.buildings[index].hp = 0
+    world.syncBuildings()
+    inc world.tick
+    game.runBotDecisions()
+    doAssert not vm.failed, vm.lastError
+    doAssert vm.runtime.getGlobal("sameBuildings") != 0
+    doAssert vm.runtime.getGlobal(field) == before - 1
+    doAssert not world.worldObjectById(hero.id, target.id, observed)
+    for i in 0 ..< world.worldObjectCount(hero.id):
+      doAssert world.worldObjectAt(hero.id, i, observed)
+      doAssert observed.id != target.id
   world.casts.setLen(0)
   inc world.tick
   game.runBotDecisions()
@@ -241,5 +267,56 @@ block:
     doAssert vm.legacyHeroData
     doAssert not vm.failed, vm.lastError
     doAssert vm.runtime.getGlobal("sum") == game.world.heroes[i].hp
+
+echo "Testing both BASIC APIs refresh spell potency after hero levels change"
+block:
+  let
+    directory = createTempDir("gota-level-spells-", "")
+    structured = directory / "structured.bas"
+    legacy = directory / "legacy.bas"
+    game = newGame(generateMap(54), 240, 10, false,
+      ReplayData(), drafting = false)
+  defer:
+    removeDir(directory)
+  writeFile(structured, """' @gota-structures
+dim damage(3)
+dim healing(3)
+dim restoration(3)
+for slot = 0 to 3
+  damage(slot) = abilities(slot).damage
+  healing(slot) = abilities(slot).heal
+  restoration(slot) = abilities(slot).restore
+next slot
+""")
+  writeFile(legacy, """dim damage(3)
+dim healing(3)
+dim restoration(3)
+for slot = 0 to 3
+  damage(slot) = abilityDamage(slot)
+  healing(slot) = abilityHeal(slot)
+  restoration(slot) = abilityRestore(slot)
+next slot
+""")
+  game.loadBots([BotGroup(path: structured, count: 1),
+    BotGroup(path: legacy, count: 9)])
+  for class in [Arcanist, DruidWarden, Warlock]:
+    for level in [1, 10, 20, 5]:
+      for hero in game.world.heroes:
+        hero.class = class
+        hero.level = level
+        hero.abilityLevels = [1'i32, 1, 1, 0]
+      inc game.world.tick
+      game.runBotDecisions()
+      for index in 0 .. 1:
+        let vm = game.heroVms[index]
+        doAssert not vm.failed, vm.lastError
+        for slot in HeroAbilitySlot:
+          let spec = class.heroAbility(slot).abilitySpec(
+            game.world.heroes[index].abilityLevels[slot], level
+          )
+          doAssert vm.runtime.getArray("damage", slot.ord.int32) == spec.damage
+          doAssert vm.runtime.getArray("healing", slot.ord.int32) == spec.heal
+          doAssert vm.runtime.getArray("restoration", slot.ord.int32) ==
+            spec.restore
 
 echo "Structured GotA observation checks passed"

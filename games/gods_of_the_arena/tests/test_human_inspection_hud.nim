@@ -77,7 +77,7 @@ doAssert ownSelection.abilities == HeroSpecs[VanguardKnight].abilities
 # Production ability tooltip route must continue to use the same bound details selection.
 let source = readFile("games/gods_of_the_arena/ui.nim")
 doAssert "let detailId = hudDetailId(primaryId, actionCam)" in source
-doAssert "abilityDetails(ability, selection.abilityLevels[slot])" in source
+doAssert "ability, selection.abilityLevels[slot], selection.level)" in source
 let beforeNil = run
 run = nil
 doAssert selectedUnit(1, 0).id == 0

@@ -1,6 +1,7 @@
 ## Integration contract for production shop, exercised further by the FBO fixture.
 import ../shops
 import ../content
+import ../controls
 import vmath
 let panels = shopInventoryPanels(vec2(1280, 800))
 doAssert panels[0].origin.x < panels[1].origin.x
@@ -18,6 +19,11 @@ for mode in ShopSortMode:
       if catalog[i-1].shopGroup == catalog[i].shopGroup:
         doAssert catalog[i-1].itemSpec.cost <= catalog[i].itemSpec.cost
 resetShopUi()
+shopOpen = true
+for i in 0 ..< 3:
+  doAssert consumeShopEscape()
+  doAssert shopOpen, "Escape must not dismiss the shop"
 closeShop()
+doAssert not shopOpen
 doAssert not consumeShopEscape()
 echo "PASS shop geometry, catalog sorting and lifecycle API"

@@ -150,8 +150,8 @@
 ' Read the bot guide for units, LOS restrictions, and action error constants.
 ' Abilities and items are used only by our explicit policy commands.
 
-dim owned(22)
-dim inventorySlot(22)
+dim owned(25)
+dim inventorySlot(25)
 dim allyIds(9)
 dim seenMaxHp(9)
 dim castRange(3)
@@ -692,7 +692,7 @@ sub buy(id, price, quantity)
 end sub
 
 sub inventory()
-  for id = 0 to 22
+  for id = 0 to 25
     owned(id) = 0
     inventorySlot(id) = -1
   next id

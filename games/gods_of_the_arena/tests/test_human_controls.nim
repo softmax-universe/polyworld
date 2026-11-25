@@ -29,10 +29,11 @@ macro production(names: varargs[untyped]): untyped =
     doAssert found != nil, name.strVal
     result.add found
 
-macro buttonCallback(): untyped =
+macro buttonCallback(callback: static[string] = "onButtonPress"): untyped =
+  ## Executes the production callback against this fixture's native input state.
   let tree = parseStmt(readFile(currentSourcePath().parentDir.parentDir / "graphics.nim"))
   proc find(node: NimNode): NimNode =
-    if node.kind == nnkAsgn and node[0].repr == "window.onButtonPress" and
+    if node.kind == nnkAsgn and node[0].repr == "window." & callback and
         node[1].kind == nnkLambda: return node
     for child in node:
       result = find(child)
@@ -523,11 +524,13 @@ proc main() =
       scene = 0
       debugToggles = 0
       chromeCalls = 0
+      heldButtons: set[Button]
     const
       HiddenMatchMenu = 0
       PauseMenu = 1
       MatchSettings = 2
       MatchResults = 3
+      MatchPlayers = 4
     proc canHumanChat(network: TestNetwork): bool = true
     proc scaleKey(window: Window, button: Button, preferences: var int,
         scale: float32, name: string): bool = false
@@ -546,10 +549,14 @@ proc main() =
     var sk = (uiScale: 1'f32,)
     var shopResets = 0
     proc resetShopUi() = inc shopResets
+    proc consumeShopEscape(): bool =
+      ## The native shop renderer separately checks popup and drag cancellation.
+      shopOpen
     var confinementButtons: seq[Button]
     proc captureCursorConfinement(window: Window, button: Button) =
       ## Records clicks routed through the production callback before UI gates.
       confinementButtons.add button
+    buttonCallback("onButtonRelease")
     buttonCallback()
     bindingCapture = true
     window.onButtonPress(MouseLeft)
@@ -565,17 +572,67 @@ proc main() =
     window.onButtonPress(KeyF2)
     doAssert debugToggles == 1 and shopOpen,
       "F2 must open debugging while the shop remains open"
+    heldRightMove = true
+    let beforeEscape = playedSounds.len
+    for i in 0 ..< 4:
+      window.onButtonPress(KeyEscape)
+      doAssert shopOpen and matchMenu == HiddenMatchMenu,
+        "Escape must keep the shop open instead of opening the match menu"
+    doAssert not heldRightMove
+    doAssert shopResets == 0 and playedSounds.len == beforeEscape
+    inputBindings[MenuInput] = [KeyM, ButtonUnknown]
+    window.onButtonPress(KeyM)
+    doAssert shopOpen and matchMenu == HiddenMatchMenu,
+      "A remapped menu key must not dismiss the shop"
+    inputBindings = DefaultBindings
+    playedSounds.setLen(0)
+    for i in 0 ..< 8:
+      window.onButtonPress(KeyB)
+      doAssert shopOpen
+    doAssert playedSounds.len == 0,
+      "Pressing or repeating B in an open shop must be silent"
+    shopOpen = false # The rendered close button is exercised by test_shop_render.
+    for i in 0 ..< 8:
+      window.onButtonPress(KeyB)
+      doAssert not shopOpen,
+        "Holding B after clicking Close must not reopen the shop"
+    window.onButtonRelease(KeyB)
     armedAbility = 1
+    armedItem = 0
+    attackMoveArmed = true
+    heldRightMove = true
+    window.onButtonPress(KeyB)
+    doAssert shopOpen and playedSounds == @[ClickSound]
+    doAssert not heldRightMove and not attackMoveArmed
+    doAssert armedAbility == -1 and armedItem == -1
+    for i in 0 ..< 8:
+      window.onButtonPress(KeyB)
+    doAssert shopOpen and playedSounds == @[ClickSound],
+      "Key repeat must neither toggle the shop nor repeat its open sound"
+    window.onButtonRelease(KeyB)
+    window.onButtonPress(KeyB)
+    doAssert shopOpen and playedSounds == @[ClickSound],
+      "A second deliberate B press must not close the shop"
+    inputBindings[ShopInput] = [KeyN, KeyP]
+    for key in [KeyN, KeyP]:
+      shopOpen = false
+      window.onButtonPress(key)
+      doAssert shopOpen
+      shopOpen = false
+      window.onButtonPress(key)
+      doAssert not shopOpen
+      window.onButtonRelease(key)
+      window.onButtonPress(key)
+      doAssert shopOpen
+      window.onButtonRelease(key)
+    inputBindings = DefaultBindings
+    window.onButtonRelease(KeyB)
+    shopOpen = false
+    echo "PASS open-only shop bindings, repeat suppression, release and button-only dismissal"
     heldRightMove = true
     window.onButtonPress(KeyEscape)
-    doAssert not shopOpen and matchMenu == HiddenMatchMenu,
-      "Escape must close the shop before opening the match menu"
-    doAssert not heldRightMove, "Closing the shop must retire held movement"
-    doAssert shopResets == 1 and armedAbility == -1,
-      "shop close must retire shop interaction and targeting"
-    heldRightMove = true
-    window.onButtonPress(KeyEscape)
-    doAssert matchMenu == PauseMenu, "a second Escape may open the match menu"
+    doAssert matchMenu == PauseMenu,
+      "Escape may open the match menu after the shop's Close button is clicked"
     doAssert not heldRightMove, "Opening the menu must retire held movement"
     matchMenu = HiddenMatchMenu
     let callsBeforeSpace = chromeCalls

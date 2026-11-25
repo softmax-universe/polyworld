@@ -1,7 +1,7 @@
 import ../[layouts, shopcatalog]
 import vmath
 import polyworld/gameuis
-for size in [vec2(1280,800),vec2(1600,1000),vec2(3840,2160)]:
+for size in [vec2(1280,720),vec2(1280,800),vec2(1600,1000),vec2(3840,2160)]:
   let p = shopPanels(size)
   for i in 0..<p.cards.len:
     for j in i+1..<p.cards.len:
@@ -14,6 +14,11 @@ for size in [vec2(1280,800),vec2(1600,1000),vec2(3840,2160)]:
   for card in p.cards:
     doAssert card.size.x >= 72 and card.size.y >= 88
     doAssert not card.overlaps(p.tooltipGutter)
+    doAssert not card.overlaps(p.footer)
+    doAssert p.catalog.contains(card.origin)
+    doAssert p.catalog.contains(card.origin + card.size - vec2(1))
+    for group in p.groups:
+      doAssert not card.overlaps(group)
     doAssert p.panel.contains(card.origin)
     doAssert p.panel.contains(card.origin + card.size - vec2(1))
   let items = sortedShopItems()

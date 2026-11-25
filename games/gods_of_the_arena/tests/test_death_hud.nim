@@ -9,6 +9,10 @@ doAssert respawnCountdown(TickRate + 1) == "0:02"
 doAssert respawnCountdown(35 * TickRate) == "0:35"
 doAssert respawnCountdown(60 * TickRate) == "1:00"
 doAssert respawnCountdown(65 * TickRate + 1) == "1:06"
+doAssert respawnCountdown(144 * TickRate) == "2:24"
+doAssert respawnCountdown(288 * TickRate) == "4:48"
+doAssert respawnCountdown(300 * TickRate) == "5:00"
+doAssert respawnCountdown(299 * TickRate + 1) == "5:00"
 doAssert respawnCountdown(-1) == "0:00"
 echo "Death HUD countdown boundaries passed"
 
@@ -18,7 +22,7 @@ block:
     hp: 0, deaths: 12, deathTicks: 25 * TickRate)
   let other = Hero(id: 104, slot: 3, team: RedTeam, state: Marching, hp: 100)
   let world = World(phase: Playing, heroes: @[other, hero])
-  doAssert deathHudText(world, 2, false) == "DEAD 0:35"
+  doAssert deathHudText(world, 2, false) == "DEAD 4:35"
   doAssert deathHudText(world, 1, false) == ""
   doAssert deathHudText(world, 0, false) == ""
   doAssert deathHudText(world, -1, false) == ""
@@ -30,12 +34,12 @@ block:
   world.phase = Playing
   # Repeated rendered frames and unconsumed network time cannot reduce ticks.
   for frame in 0 ..< 100:
-    doAssert deathHudText(world, 2, false) == "DEAD 0:35"
+    doAssert deathHudText(world, 2, false) == "DEAD 4:35"
   inc hero.deathTicks
-  doAssert deathHudText(world, 2, false) == "DEAD 0:35"
-  hero.deathTicks = 60 * TickRate - 1
+  doAssert deathHudText(world, 2, false) == "DEAD 4:35"
+  hero.deathTicks = 300 * TickRate - 1
   doAssert deathHudText(world, 2, false) == "DEAD 0:01"
-  hero.deathTicks = 60 * TickRate
+  hero.deathTicks = 300 * TickRate
   doAssert deathHudText(world, 2, false) == "DEAD 0:00"
   hero.state = Marching
   doAssert deathHudText(world, 2, false) == "", "Revival retires banner immediately"

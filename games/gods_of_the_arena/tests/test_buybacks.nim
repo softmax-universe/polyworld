@@ -30,7 +30,7 @@ proc buybackGame(): Game =
   hero.hp = hero.maxHp
   hero.deathTicks = 0
 
-echo "Testing capped death timers and per-hero buyback prices"
+echo "Testing doubling death timers, the five-minute cap and buyback prices"
 block:
   let
     game = buybackGame()
@@ -41,7 +41,8 @@ block:
   doAssert world.buybackPrice(hero.id) == 0
   doAssert world.buybackPrice(-1) == 0
   for (death, seconds) in [
-    (1'i32, 9'i32), (2, 14), (3, 19), (11, 59), (12, 60), (20, 60)
+    (1'i32, 9'i32), (2, 18), (3, 36), (4, 72), (5, 144),
+    (6, 288), (7, 300), (71, 300)
   ]:
     hero.deaths = death - 1
     hero.hp = 0
@@ -66,9 +67,31 @@ block:
     hash = game.stateHash()
   inc hero.deaths
   doAssert game.stateHash() != hash
-  doAssert snapshot.heroes[0].deaths == 20
+  doAssert snapshot.heroes[0].deaths == 71
   world.restore(snapshot)
   doAssert game.stateHash() == hash
+
+echo "Testing high death counts saturate without changing another hero's timer"
+block:
+  let
+    game = buybackGame()
+    hero = game.world.heroes[0]
+    teammate = game.world.heroes[1]
+  hero.state = Dying
+  teammate.state = Dying
+  teammate.deaths = 2
+  teammate.deathTicks = 3 * TickRate
+  for deaths in [71'i32, 1000, int32.high]:
+    hero.deaths = deaths
+    hero.deathTicks = 0
+    doAssert hero.respawnTicks() == 300 * TickRate
+    doAssert teammate.respawnTicks() == 15 * TickRate
+    hero.deathTicks = 300 * TickRate - 1
+    doAssert hero.respawnTicks() == 1
+    inc hero.deathTicks
+    doAssert hero.respawnTicks() == 0
+    inc hero.deathTicks
+    doAssert hero.respawnTicks() == 0
 
 echo "Testing both base teams buy back immediately when affordable"
 for team in Team:
@@ -88,6 +111,7 @@ for team in Team:
   hero.deathTicks = 0
   hero.deaths = 12
   hero.gold = 1199
+  doAssert hero.respawnTicks() == 300 * TickRate
   game.runBotDecisions()
   doAssert not vm.failed, vm.lastError
   doAssert hero.state == Dying and hero.gold == 1199
@@ -162,6 +186,7 @@ block:
   hero.hp = 0
   game.tickWorld(nil)
   doAssert hero.deaths == 2
+  doAssert hero.respawnTicks() == 18 * TickRate
   doAssert world.buybackPrice(hero.id) == 200
   hero.gold = 500
   world.gameOver = true
@@ -217,7 +242,8 @@ end if
     game.heroVms[i] = nil
   let vm = game.heroVms[0]
   hero.hp = 0
-  hero.gold = 100
+  hero.deaths = 2
+  hero.gold = 300
   game.world.heroTurnTicks = 1
   game.recorder = initReplayRecorder(game.currentSetup(10), game.map.preset)
   let initial = game.world.clone()
@@ -228,16 +254,16 @@ end if
     )
   doAssert not vm.failed, vm.lastError
   doAssert vm.runtime.getGlobal("turns") == 5
-  doAssert vm.runtime.getGlobal("deaths") == 1
-  doAssert vm.runtime.getGlobal("remaining") == HeroDeathTicks + 8 * TickRate
-  doAssert vm.runtime.getGlobal("price") == 100
+  doAssert vm.runtime.getGlobal("deaths") == 3
+  doAssert vm.runtime.getGlobal("remaining") == 36 * TickRate
+  doAssert vm.runtime.getGlobal("price") == 300
   doAssert vm.runtime.getGlobal("bought") == 1
   doAssert vm.runtime.getGlobal("duplicate") == 0
   doAssert vm.runtime.getGlobal("priceAfter") == 0
   doAssert vm.runtime.getGlobal("alivePrice") == 0
   doAssert vm.runtime.getGlobal("snapshotHp") == 0
-  doAssert vm.runtime.getGlobal("snapshotGold") == 100
-  doAssert hero.state != Dying and hero.gold == 0 and hero.deaths == 1
+  doAssert vm.runtime.getGlobal("snapshotGold") == 300
+  doAssert hero.state != Dying and hero.gold == 0 and hero.deaths == 3
   let
     data = decodeReplay(encodeReplay(game.recorder.data))
     playback = newGame(game.map, 240, 0, true, data)

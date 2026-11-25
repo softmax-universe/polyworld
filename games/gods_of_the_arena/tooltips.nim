@@ -31,6 +31,7 @@ type
 var
   cachedAbility = -1
   cachedRank = -1'i32
+  cachedHeroLevel = -1
   cachedItem = NoItem
   cachedCard: DetailTooltip
 
@@ -50,9 +51,10 @@ proc tiles(distance: int32): string =
   ## Converts fixed world distances to map tiles.
   number(distance.float / WorldScale.float) & " tiles"
 
-proc abilityDetails*(ability: Ability, rank: int32): DetailTooltip =
-  ## Describes only the currently learned rank using simulation definitions.
-  let spec = ability.abilitySpec(rank)
+proc abilityDetails*(ability: Ability, rank: int32,
+    heroLevel = 1): DetailTooltip =
+  ## Describes the current rank and hero level using simulation definitions.
+  let spec = ability.abilitySpec(rank, heroLevel)
   result.title = spec.name
   result.icon = ability.abilityIconKey
   result.subtitle =
@@ -149,6 +151,12 @@ proc itemDetails*(item: Item): DetailTooltip =
       result.rows.add ("Requires", "Melee heroes only")
     elif item in [RuneCrossbow, RangerBow]:
       result.rows.add ("Requires", "Ranged heroes only")
+    if item in ArtifactItems:
+      result.subtitle = "Magical artifact"
+      result.rows.add ("Requires", "Any hero")
+      result.description.add " Damage bonuses stack with other equipment."
+      if item == Worldbreaker:
+        result.description.add " Tower and god protection still applies."
   elif item == PortalScroll:
     result.description = "Double-click or double-tap its key to return home. " &
       "Otherwise, teleport near a living allied tower. Distant aims " &
@@ -184,6 +192,13 @@ proc itemDetails*(item: Item): DetailTooltip =
     result.rows.add ("Max health", "+" & $spec.maxHp & " HP")
   if spec.maxMana > 0:
     result.rows.add ("Max mana", "+" & $spec.maxMana)
+  if spec.healthRegen > 0:
+    result.rows.add ("Health regen", "+" & $spec.healthRegen & " HP/s")
+  if spec.manaRegen > 0:
+    result.rows.add ("Mana regen", "+" & $spec.manaRegen & " mana/s")
+  if spec.healthRegen > 0 or spec.manaRegen > 0:
+    result.description.add " Regeneration stacks with other equipment " &
+      "and continues in combat."
   if spec.damage > 0:
     result.rows.add ("Attack damage", "+" & $spec.damage)
   if spec.movePerTick > 0:
@@ -298,12 +313,14 @@ proc drawTooltip*(sk: Silky, session: TooltipSession, size: Vec2) =
       session.current.key)
 
 proc drawAbilityTooltip*(sk: Silky, ability: Ability, rank: int32,
-    anchor: GameUiPanel, size: Vec2, key: string) =
-  ## Rebuilds the hovered ability card only when its identity or rank changes.
-  if cachedAbility != ability.ord or cachedRank != rank:
-    cachedCard = abilityDetails(ability, rank)
+    anchor: GameUiPanel, size: Vec2, key: string, heroLevel = 1) =
+  ## Refreshes the hovered card when its ability, rank or hero level changes.
+  if cachedAbility != ability.ord or cachedRank != rank or
+      cachedHeroLevel != heroLevel:
+    cachedCard = abilityDetails(ability, rank, heroLevel)
     cachedAbility = ability.ord
     cachedRank = rank
+    cachedHeroLevel = heroLevel
     cachedItem = NoItem
   sk.drawDetails(cachedCard, anchor, size, key)
 

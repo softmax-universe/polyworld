@@ -6,6 +6,8 @@ import
   test_audio,
   test_andre,
   test_attacks,
+  test_artifacts,
+  test_artifact_bots,
   test_base,
   test_brushes,
   test_buybacks,
@@ -18,6 +20,7 @@ import
   test_controls,
   test_shop_backend,
   test_shop_network,
+  test_equipment_regen,
   test_human_chat,
   test_human_chat_network,
   test_human_chat_graphics,
@@ -90,6 +93,7 @@ import
   test_kick_menu,
   test_kick_menu_ui,
   test_game_name,
+  test_name_prompt,
   test_player_names
 
 echo "Game tests passed"

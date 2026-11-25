@@ -263,7 +263,7 @@ proc abilityProc(heroId: int32, field: AbilityField): HostProc =
       hero = activeGame.world.heroes[index]
       slot = HeroAbilitySlot(arguments[0])
       rank = hero.abilityLevels[slot]
-      spec = heroAbility(hero.class, slot).abilitySpec(rank)
+      spec = heroAbility(hero.class, slot).abilitySpec(rank, hero.level)
     case field
     of AbilityLevel: rank
     of AbilityMaximum: slot.abilityMaxLevel
@@ -389,7 +389,7 @@ proc infoFunctions(host: var Host, heroId: int32) =
     let
       hero = activeGame.world.heroById(heroId)
       spec = heroAbility(hero.class, HeroAbilitySlot(slot)).abilitySpec(
-        hero.abilityLevels[HeroAbilitySlot(slot)]
+        hero.abilityLevels[HeroAbilitySlot(slot)], hero.level
       )
     case args[1].asInt
     of 0: toValue(worldToTiles(spec.range, WorldScale))
@@ -413,7 +413,7 @@ proc infoFunctions(host: var Host, heroId: int32) =
     of 3: toValue(spell.ability.abilitySpec.damage == 0)
     else: toValue(0)
   let matchInfo: HostProc = proc(args: openArray[int32]): int32 =
-    ## Reads match timing and team-remembered structure counts under fog.
+    ## Reads match timing and public structure counts even under fog.
     let
       world = activeGame.world
       team = world.heroById(heroId).team

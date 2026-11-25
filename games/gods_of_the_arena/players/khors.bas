@@ -6,7 +6,7 @@
 ' gold, portal home when the god is threatened, and advance from the lane
 ' waypoint to the enemy god. Written fresh on our own draft and abilities.
 
-dim owned(22)
+dim owned(25)
 
 ' The legacy whole-tile index of a tile-center coordinate: floor(p + .5), with
 ' the Blue observer taking the lower cell on an exact tile edge.

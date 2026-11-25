@@ -52,6 +52,7 @@ proc center(panel: GameUiPanel): Vec2 = panel.origin + panel.size/2
 let panels = shopInventoryPanels(viewport)
 frame(panels[2].center)
 clearPlayerCommands()
+shopOpen = true
 # Warm the production session with its explicit clock, then draw real art.
 shopTooltip.clearTooltip()
 let now = getMonoTime().ticks.float64 / 1_000_000_000.0
@@ -111,8 +112,11 @@ doAssert moved.len == 1 and moved[0].kind == ActionSwapItems and moved[0].slot =
 frame(panels[2].center,{MouseLeft},{},{MouseLeft})
 frame(panels[1].center,{}, {},{MouseLeft})
 doAssert consumeShopEscape()
+doAssert shopOpen, "Escape cancels the drag without closing the shop"
 frame(panels[1].center,{}, {MouseLeft})
 doAssert takePlayerCommands().len == 0
+doAssert consumeShopEscape() and shopOpen,
+  "Further Escape presses must leave the shop open"
 # Buying targets the shown sorted item and never fires on press/held/release twice.
 let card = shopPanels(viewport).cards[0].center
 frame(card,{MouseLeft},{},{MouseLeft})
@@ -142,7 +146,20 @@ for index, item in sortedShopItems():
     doAssert commands[0].first == item.ord.int32
   else:
     doAssert commands.len == 0
-closeShop()
+# Only the explicit Close button dismisses the shop, on a completed click.
+frame(vec2(2), {MouseLeft}, {}, {MouseLeft})
+frame(vec2(2), {}, {MouseLeft})
+doAssert shopOpen, "Outside clicks must not close the shop"
+let
+  shopHeading = shopPanels(viewport).heading
+  closePoint = shopHeading.origin +
+    vec2(shopHeading.size.x - 20, shopHeading.size.y / 2)
+frame(closePoint, {MouseLeft}, {}, {MouseLeft})
+doAssert shopOpen, "Close must wait for the click release"
+frame(closePoint, {}, {}, {MouseLeft})
+doAssert shopOpen
+frame(closePoint, {}, {MouseLeft})
 doAssert sellSlot == -1 and not shopOpen
+doAssert takePlayerCommands().len == 0
 window.close()
-echo "PASS production shop: native Sell popup, single Sell/Swap, sorted release-only buy"
+echo "PASS production shop: Sell/Swap, release-only buy, button-only close"

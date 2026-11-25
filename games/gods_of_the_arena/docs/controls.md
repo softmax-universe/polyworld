@@ -15,11 +15,11 @@ saved locally with Save and Back.
 | Stop movement and queued actions | S |
 | Abilities | Q, W, E, R |
 | Item slots beside abilities | F, G |
-| Shop | B |
+| Open shop | B |
 | Action camera (watch / replay only) | V |
 | Follow own hero while held; release for free camera | Space |
 | Pause watch / replay playback | Space |
-| Cancel targeting / close shop / game menu | Escape |
+| Cancel targeting / game menu | Escape |
 | Debug menu | F2 |
 | Fullscreen | F11 |
 | Pan camera | Arrow keys |
@@ -54,8 +54,10 @@ of the inspected unit; releasing Space immediately restores free camera.
 Space does not pause human matches or drafts. Clicking your own portrait
 recenters once rather than latching follow.
 
-Escape closes an open shop first, then a later Escape can open the game menu.
-Otherwise it cancels armed targeting before opening the menu. Cooldown
+B opens the shop; holding or pressing it again leaves the shop open. Click
+the shop's Close button to dismiss it. Escape can cancel a shop drag or sell
+popup, but keeps the shop open. Outside the shop, Escape cancels armed
+targeting before opening the menu. Cooldown
 abilities cannot enter targeting mode or queue a cast; ready aimed and self
 abilities retain their normal behavior. Chat, shop, draft and match menus
 own input before gameplay orders or camera gestures.

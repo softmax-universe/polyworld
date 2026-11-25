@@ -183,32 +183,46 @@ proc shopPanels*(size: Vec2): ShopPanels =
   let width = result.panel.size.x - 40
   result.heading = GameUiPanel(origin: at, size: vec2(width, 48))
   result.catalog = GameUiPanel(origin: at + vec2(0, 60),
-    size: vec2(width - 400, result.panel.size.y - 220))
+    size: vec2(width - 400, result.panel.size.y - 208))
   result.tooltipGutter = GameUiPanel(
     origin: vec2(result.catalog.origin.x + result.catalog.size.x + 12,
       result.catalog.origin.y),
     size: vec2(388, result.catalog.size.y))
   result.footer = GameUiPanel(origin: at + vec2(0, result.panel.size.y - 144),
     size: vec2(width, 104))
-  # Four small functional groups across the top; equipment and utility below.
-  # The equipment group wraps left-to-right before advancing to its next row.
+  # Equipment wraps below the four small groups; artifacts get their own row.
   let cell = vec2(80, 96)
-  let pitch = vec2(88, 102)
+  let pitch = vec2(88, if result.compact: 98 else: 102)
   let topWidth = result.catalog.size.x / 4
+  let equipmentTop = if result.compact: 130.0'f else: 136.0'f
   for group in ShopHealing..ShopRanged:
     result.groups[group] = GameUiPanel(
       origin: result.catalog.origin + vec2(group.ord.float32 * topWidth, 0),
       size: vec2(topWidth - 8, 24))
   result.groups[ShopEquipment] = GameUiPanel(
-    origin: result.catalog.origin + vec2(0, 136),
+    origin: result.catalog.origin + vec2(0, equipmentTop),
     size: vec2(result.catalog.size.x - 184, 24))
   result.groups[ShopUtility] = GameUiPanel(
-    origin: result.catalog.origin + vec2(result.catalog.size.x - 176, 136),
+    origin: result.catalog.origin +
+      vec2(result.catalog.size.x - 176, equipmentTop),
     size: vec2(176, 24))
+  var equipmentCount = 0
+  for item in ShopItems:
+    if item.shopGroup == ShopEquipment:
+      inc equipmentCount
+  let
+    equipmentColumns = max(1,
+      int(result.groups[ShopEquipment].size.x / pitch.x))
+    equipmentRows = (equipmentCount + equipmentColumns - 1) div equipmentColumns
+    artifactTop = equipmentTop + 26 + equipmentRows.float32 * pitch.y +
+      (if result.compact: 6.0'f else: 12.0'f)
+  result.groups[ShopArtifacts] = GameUiPanel(
+    origin: result.catalog.origin + vec2(0, artifactTop),
+    size: vec2(result.catalog.size.x, 24))
   var counts: array[ShopGroup, int]
   for i, item in sortedShopItems():
     let group = item.shopGroup
-    let columns = if group == ShopEquipment:
+    let columns = if group in [ShopEquipment, ShopArtifacts]:
         max(1, int(result.groups[group].size.x / pitch.x))
       else: 2
     let n = counts[group]

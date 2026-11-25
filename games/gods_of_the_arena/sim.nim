@@ -253,6 +253,8 @@ type
   SpellCast* = object
     ability*: Ability
     level*: int32
+    heroLevel*: int
+      ## Caster level at release; later level-ups cannot alter pending impacts.
     heroId*: int32
     targetId*: int32
     origin*: WorldPoint
@@ -573,8 +575,7 @@ const
     ## Attack-move melee chase radius, much larger than idle aggro.
   HeroLanes = [0, 0, 1, 2, 2]
   HeroRespawnTicks = 8 * TickRate
-  HeroRespawnGrowthTicks = 5 * TickRate
-  HeroMaxRespawnTicks = 60 * TickRate
+  HeroMaxRespawnTicks = 5 * 60 * TickRate
   HeroBuybackGold = 100'i32
   FootmanGoldReward = 15
   HeroXpReward = 150
@@ -1291,7 +1292,7 @@ proc recordHeroKill(world: World, team: Team, victimTeam: Team) =
   inc world.teamHeroDeaths[victimTeam.ord]
 
 proc heroItemBonus(hero: Hero): tuple[
-    maxHp, maxMana, damage, movePerTick: int32
+    maxHp, maxMana, damage, movePerTick, healthRegen, manaRegen: int32
 ] =
   ## Sums passive bonuses from every item the hero is holding.
   for slot in 0 ..< InventorySlots:
@@ -1302,6 +1303,8 @@ proc heroItemBonus(hero: Hero): tuple[
     result.maxMana += spec.maxMana
     result.damage += spec.damage
     result.movePerTick += spec.movePerTick
+    result.healthRegen += spec.healthRegen
+    result.manaRegen += spec.manaRegen
 
 proc refreshHeroStats*(
     hero: Hero,
@@ -1731,10 +1734,11 @@ proc bindNavigation*(world: World) =
   navigationWorld = world
 
 proc syncBuildings*(world: World) =
-  ## Releases destroyed footprints and invalidates paths and stale targets.
+  ## Publishes building survival and releases destroyed footprints and targets.
   navigationWorld = world
   for building in world.buildings.mitems:
     let alive = building.hp > 0
+    building.knownAlive = [alive, alive]
     if alive == building.occupied:
       continue
     for tile in building.footprint:
@@ -1763,18 +1767,10 @@ proc initOccupancy(world: World) =
     world.occupancy[i] = newSeq[int16](layer.width * layer.depth)
   for building in world.buildings.mitems:
     building.footprint = buildingFootprint(building)
-    building.knownAlive = [true, true]
   world.syncBuildings()
 
-proc updateKnownBuildings(world: World) =
-  ## Remembers enemy destruction only when the team's vision confirms it.
-  for building in world.buildings.mitems:
-    for team in Team:
-      if building.team == team or world.visible(team, building.position):
-        building.knownAlive[team] = building.hp > 0
-
 proc knownWalkable*(world: World, team: Team, layer, x, z: int): bool =
-  ## Reports static terrain and remembered occupancy without fog information leaks.
+  ## Reports static terrain and the public surviving building footprints.
   if not isWalkable(layer, x, z):
     return false
   for buildingSlot in 0 ..< world.buildings.len:
@@ -2335,7 +2331,7 @@ proc rawWorldObjectAt(world: World, index: int, value: var WorldObject): bool =
 
 proc spellObservationKey(world: World, spell: SpellCast, team: Team):
     tuple[impact: int32, allied: bool, z, x: int32, ability: int,
-      caster, target, started, ends, level: int32] =
+      caster, target, started, ends, level: int32, heroLevel: int] =
   ## Orders warnings by urgency and team-relative geometry, independent of scans.
   let
     caster = world.heroIndex(spell.heroId)
@@ -2343,7 +2339,7 @@ proc spellObservationKey(world: World, spell: SpellCast, team: Team):
     direction = if team == RedTeam: 1'i32 else: -1'i32
   (spell.impact, allied, direction * spell.position.z,
     direction * spell.position.x, spell.ability.ord, spell.heroId,
-    spell.targetId, spell.started, spell.ends, spell.level)
+    spell.targetId, spell.started, spell.ends, spell.level, spell.heroLevel)
 
 proc freezeObservations*(world: World): bool =
   ## Captures one common observation frame and reports ownership to the caller.
@@ -3308,17 +3304,17 @@ proc purchaseReason*(world: World, heroId, itemId: int32): string =
   world.purchaseError(heroId, itemId).actionErrorMessage()
 
 proc respawnTicks*(hero: Hero): int32 =
-  ## Returns the remaining respawn ticks, including the death animation.
+  ## Doubles each hero's death delay up to five minutes, including animation.
   if hero.state != Dying:
     return 0
-  max(
-    0'i32,
-    min(
-      HeroMaxRespawnTicks,
-      HeroDeathTicks + HeroRespawnTicks +
-        max(0'i32, hero.deaths - 1) * HeroRespawnGrowthTicks
-    ) - hero.deathTicks
-  )
+  var
+    duration = HeroDeathTicks + HeroRespawnTicks
+    deaths = max(1'i32, hero.deaths)
+  # Stop at the cap before doubling can overflow, even for huge death counts.
+  while deaths > 1 and duration < HeroMaxRespawnTicks:
+    duration = min(HeroMaxRespawnTicks, duration * 2)
+    dec deaths
+  int32(clamp(int64(duration) - int64(hero.deathTicks), 0'i64, int32.high.int64))
 
 proc buybackPrice*(world: World, heroId: int32): int32 =
   ## Returns this dead hero's gold price, or zero when buyback is unavailable.
@@ -4414,7 +4410,18 @@ proc recoverPotion(world: World, hero: Hero, kind: RecoveryKind) =
       )
 
 proc recoverHero(world: World, hero: Hero) =
-  ## Applies potion regeneration and fast recovery on the own spawn floor.
+  ## Applies equipment, potion, and own-spawn recovery to a living hero.
+  let
+    bonus = hero.heroItemBonus()
+    phase = world.tick mod TickRate
+    health = bonus.healthRegen * (phase + 1) div TickRate -
+      bonus.healthRegen * phase div TickRate
+    mana = bonus.manaRegen * (phase + 1) div TickRate -
+      bonus.manaRegen * phase div TickRate
+  if health > 0:
+    world.healHero(hero, health, hero.id, Regeneration, 0)
+  if mana > 0:
+    world.restoreMana(hero, mana, hero.id, Regeneration, 0)
   for kind in RecoveryKind:
     world.recoverPotion(hero, kind)
   if hero.inOwnSpawn:
@@ -5004,7 +5011,7 @@ proc hitSpellTarget(world: World, spell: SpellCast, id: int32) =
   ## Applies one effect, checking living targets and structure protection again.
   let
     caster = heroIndex(world, spell.heroId)
-    spec = spell.ability.abilitySpec(spell.level)
+    spec = spell.ability.abilitySpec(spell.level, spell.heroLevel)
   var target: WorldObject
   if caster < 0 or not world.spellTarget(id, target) or not target.alive:
     return
@@ -5042,7 +5049,7 @@ proc spellContains*(spell: SpellCast, area: FxArea, point: WorldPoint): bool =
 proc resolveSpell(world: World, spell: var SpellCast) =
   ## Resolves one area or single-target impact exactly once.
   spell.resolved = true
-  let spec = spell.ability.abilitySpec(spell.level)
+  let spec = spell.ability.abilitySpec(spell.level, spell.heroLevel)
   if spec.casting == SelfCast:
     world.hitSpellTarget(spell, spell.heroId)
     return
@@ -5095,7 +5102,7 @@ proc resolveSpell(world: World, spell: var SpellCast) =
 proc advanceGroundShot(world: World, spell: var SpellCast) =
   ## Sweeps one tick of projectile travel and stops at the first enemy.
   let
-    spec = spell.ability.abilitySpec(spell.level)
+    spec = spell.ability.abilitySpec(spell.level, spell.heroLevel)
     start = spell.started + spec.castTicks
     duration = max(1'i32, spell.impact - start)
     elapsed = clamp(world.tick - start, 0'i32, duration)
@@ -5193,7 +5200,7 @@ proc aimAbility*(
   ## Resolves the same targeting geometry for the cursor preview and casting.
   let
     ability = heroAbility(hero.class, slot)
-    spec = ability.abilitySpec(hero.abilityLevels[slot])
+    spec = ability.abilitySpec(hero.abilityLevels[slot], hero.level)
   var
     point = aim
     selected = targetId
@@ -5225,7 +5232,7 @@ proc aimAbility*(
   if direction.x == 0 and direction.z == 0:
     direction.z = WorldScale
   spell = SpellCast(
-    ability: ability, level: hero.abilityLevels[slot],
+    ability: ability, level: hero.abilityLevels[slot], heroLevel: hero.level,
     heroId: hero.id, targetId: selected,
     origin: hero.position, position: point,
     direction: heading(direction.x, direction.z),
@@ -5267,7 +5274,7 @@ proc castAbility(
     hero.initHeroCharges()
   let
     ability = heroAbility(hero.class, slot)
-    spec = ability.abilitySpec(hero.abilityLevels[slot])
+    spec = ability.abilitySpec(hero.abilityLevels[slot], hero.level)
   if hero.cooldowns[slot] > 0:
     return ActionCooldown
   if hero.charges[slot] <= 0:
@@ -6262,6 +6269,7 @@ proc stateHash*(game: Game): uint64 =
   for spell in world.casts:
     hash.addHashy(spell.ability.ord)
     hash.addHashy(spell.level)
+    hash.addHashy(spell.heroLevel)
     hash.addHashy(spell.heroId)
     hash.addHashy(spell.targetId)
     hash.addHashy(spell.origin)
@@ -6383,7 +6391,6 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
       world.tickHeroCooldowns(hero)
   profileBlock "vision":
     rebuildVision(world)
-    world.updateKnownBuildings()
   block:
     discard world.freezeObservations()
     defer:
@@ -6743,7 +6750,6 @@ proc newGame*(
     world.stats.teams[slot] = hero.team.ord
   doAssert world.heroes.len == heroSetup.len, "every configured hero must spawn"
   rebuildVision(world)
-  world.updateKnownBuildings()
   world.heroTurnStart = seededHeroTurnStart(world)
   if (if replayMode: replayData.header.setup.drafting else: drafting):
     world.initDraft()

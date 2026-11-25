@@ -4,6 +4,7 @@ import polyworld/[rooms, roomclients, relays, tapes]
 import ../[content, controls, maps, multiplayer, replays, sim]
 
 block authoritativeShop:
+  const StartingGold = 10_000'i32
   let relay = Relay()
   let clients = [RoomClient(identity: gotaIdentity(), name: "Shop host"),
     RoomClient(identity: gotaIdentity(), name: "Shop guest")]
@@ -52,7 +53,7 @@ block authoritativeShop:
       hero.state = Dying
       hero.hp = 0
       hero.mana = 0
-      hero.gold = 1000
+      hero.gold = StartingGold
       hero.deathTicks = 40
       hero.potionCooldownEnds[ManaRecovery] = 110
       hero.portalCooldownEnds = 220
@@ -80,8 +81,8 @@ block authoritativeShop:
   sessions[0].flushSubmissions()
   queueBuyItem(guest.id, KnightArmor.ord.int32)
   sessions[1].flushSubmissions()
-  doAssert hero.inventory[0] == NoItem and hero.gold == 1000
-  doAssert guest.inventory[0] == NoItem and guest.gold == 1000
+  doAssert hero.inventory[0] == NoItem and hero.gold == StartingGold
+  doAssert guest.inventory[0] == NoItem and guest.gold == StartingGold
   exchange()
   for i in 0 ..< 3: step()
   doAssert hero.inventory[0] == ManaPotion and hero.itemCounts[0] == 3
@@ -113,12 +114,56 @@ block authoritativeShop:
   for i in 0 ..< 3: step()
   doAssert hero.inventory[5] == NoItem and hero.itemCounts[5] == 0
   doAssert hero.gold == gold + ManaPotion.itemSpec.cost * 3 div 2 - KnightArmor.itemSpec.cost
-  doAssert hero.gold >= 0 and guest.gold == 1000 - KnightArmor.itemSpec.cost div 2
+  doAssert hero.gold >= 0 and
+    guest.gold == StartingGold - KnightArmor.itemSpec.cost div 2
   doAssert hero.hp == 0 and hero.mana == 0 and hero.state == Dying
+  let
+    beforeDamage = hero.heroAttackDamage
+    beforeArtifacts = hero.gold
+    guestBefore = guest.gold
+  var artifactCost, artifactDamage: int32
+  for item in [StormcoilMaul, AbyssalPearl, Worldbreaker]:
+    queueBuyItem(hero.id, item.ord.int32)
+    artifactCost += item.itemSpec.cost
+    artifactDamage += item.itemSpec.damage
+  sessions[0].flushSubmissions()
+  queueBuyItem(guest.id, Worldbreaker.ord.int32)
+  sessions[1].flushSubmissions()
+  doAssert hero.heroAttackDamage == beforeDamage
+  exchange()
+  for i in 0 ..< 3: step()
+  doAssert hero.inventory[2] == StormcoilMaul
+  doAssert hero.inventory[3] == AbyssalPearl
+  doAssert hero.inventory[4] == Worldbreaker
+  doAssert hero.gold == beforeArtifacts - artifactCost
+  doAssert hero.heroAttackDamage == beforeDamage + artifactDamage
+  doAssert guest.inventory[0] == Worldbreaker
+  doAssert guest.gold == guestBefore - Worldbreaker.itemSpec.cost
+  for session in sessions:
+    doAssert session.game.world.heroes[0].heroAttackDamage ==
+      beforeDamage + artifactDamage
+  queueSwapItems(hero.id, 4, 5)
+  queueSellItem(hero.id, 2)
+  queueBuyItem(hero.id, Worldbreaker.ord.int32)
+  sessions[0].flushSubmissions()
+  queueSellItem(guest.id, 0)
+  sessions[1].flushSubmissions()
+  exchange()
+  for i in 0 ..< 3: step()
+  doAssert hero.inventory[4] == NoItem
+  doAssert hero.inventory[5] == Worldbreaker
+  doAssert hero.inventory[2] == NoItem
+  doAssert hero.heroAttackDamage == beforeDamage + artifactDamage -
+    StormcoilMaul.itemSpec.damage
+  doAssert hero.gold == beforeArtifacts - artifactCost +
+    StormcoilMaul.itemSpec.cost div 2
+  doAssert hero.lastActionError == ActionAlreadyEquipped
+  doAssert guest.inventory[0] == NoItem
+  doAssert guest.gold == guestBefore - Worldbreaker.itemSpec.cost div 2
   let data = decodeReplay(encodeReplay(sessions[0].game.recorder.data))
   doAssert data.actions == sessions[1].game.recorder.data.actions
   doAssert data.hashes == sessions[1].game.recorder.data.hashes
-  doAssert data.actions.len == 14
+  doAssert data.actions.len == 22
   let playback = newGame(generateMap(data.config.seed, data.config.mapPreset),
     data.config.spawnIntervalTicks, 0, true, data)
   playback.historyPlayback = true
@@ -140,4 +185,4 @@ block authoritativeShop:
     discard decodeSubmission(GameSubmission(action: ReplayAction(kind: 255)).encodeSubmission())
   except RoomsError: rejected = true
   doAssert rejected
-  echo "Shop relay/replay parity passed: 2 clients, 14 actions, signed bounds, repeated seek"
+  echo "Shop relay/replay parity passed: 2 clients, 22 actions, artifacts, repeated seek"

@@ -23,7 +23,7 @@ glBindFramebuffer(GL_FRAMEBUFFER, framebuffer)
 glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0)
 doAssert glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE
 let hero = Hero(id: 109, team: BlueTeam, slot: 4, state: Dying,
-  deaths: 12, deathTicks: 25 * TickRate)
+  deaths: 71, deathTicks: 0)
 run = Game(world: World(phase: Playing, heroes: @[
   Hero(id: 104, team: RedTeam, slot: 3, state: Marching), hero]))
 options.playerSlot = 2

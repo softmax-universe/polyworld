@@ -4,23 +4,28 @@ import content
 
 type
   ShopGroup* = enum
-    ShopHealing, ShopMana, ShopMelee, ShopRanged, ShopEquipment, ShopUtility
+    ShopHealing, ShopMana, ShopMelee, ShopRanged, ShopEquipment, ShopUtility,
+    ShopArtifacts
   ShopSortMode* = enum
     ShopSortName, ShopSortPrice, ShopSortType, ShopSortGrouped
 
 const ShopGroupNames*: array[ShopGroup, string] =
-  ["HEALING", "MANA", "MELEE", "RANGED", "OTHER EQUIPMENT", "UTILITY"]
+  ["HEALING", "MANA", "MELEE", "RANGED", "OTHER EQUIPMENT", "UTILITY",
+    "ARTIFACTS"]
 
 proc shopGroup*(item: Item): ShopGroup =
+  ## Groups equipment by its purchase purpose without changing eligibility.
   let spec = item.itemSpec
   if spec.heal > 0: ShopHealing
   elif spec.restore > 0: ShopMana
   elif item in [BattleAxe, SunsteelLongsword]: ShopMelee
   elif item in [RuneCrossbow, RangerBow]: ShopRanged
+  elif item in ArtifactItems: ShopArtifacts
   elif spec.kind == Equipment: ShopEquipment
   else: ShopUtility
 
 proc sortedShopItems*(mode: ShopSortMode = ShopSortGrouped): seq[Item] =
+  ## Orders the full catalog consistently for layout and input hit targets.
   result = @ShopItems
   result.sort(proc(a, b: Item): int =
     case mode

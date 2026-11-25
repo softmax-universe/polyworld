@@ -120,11 +120,13 @@ for team in Team:
     for slot in HeroAbilitySlot:
       let
         ability = class.heroAbility(slot)
-        spec = ability.abilitySpec(hero.abilityLevels[slot])
+        spec = ability.abilitySpec(hero.abilityLevels[slot], hero.level)
       hero.hp = hero.maxHp
       hero.mana = hero.maxMana
       if spec.kind == Heal:
-        hero.hp = hero.maxHp div 2
+        # Make the heal worthwhile under the policy's half-effect threshold.
+        hero.hp = max(1'i32,
+          hero.maxHp - max(hero.maxHp div 2, spec.heal div 2))
       elif spec.kind == Restore:
         hero.mana -= spec.restore
       hero.cooldowns = [0'i32, 0, 0, 0]

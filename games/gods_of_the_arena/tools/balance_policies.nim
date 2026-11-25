@@ -72,7 +72,7 @@ proc supportPolicy*(source, tuning: string): string =
   ## Repairs khors support decisions using the experiment's public stats.
   require(SupportMarker notin source, "Support fixes are already applied")
   let
-    declarations = "dim owned(22)\n"
+    declarations = "dim owned(" & $Item.high.ord & ")\n"
     think = "learnAbilities()\nobserve()\neconomy()\n"
     heal = "if selfMaxHp - selfHp >= abilityHeal(slot) \\ 2 then"
   for marker in [declarations, think, heal]:

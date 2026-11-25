@@ -108,9 +108,9 @@ echo "Testing carries stay fragile early and retain late health"
 block:
   for class in [Ranger, Crossbowman]:
     doAssert class.heroMaxHp(3) < Arcanist.heroMaxHp(3)
-    doAssert class.heroMaxHp(5) < 400
-    doAssert class.heroMaxHp(10) < 800
-    doAssert class.heroMaxHp(20) in 1900 .. 2100
+    doAssert class.heroMaxHp(5) < 550
+    doAssert class.heroMaxHp(10) < 1400
+    doAssert class.heroMaxHp(20) in 3600 .. 3900
     doAssert class.heroMaxHp(0) == class.heroMaxHp(1)
     doAssert class.heroMaxHp(21) == class.heroMaxHp(20)
     var previousGain = 0'i32
@@ -120,7 +120,7 @@ block:
       previousGain = gain
   for class in [VanguardKnight, DeathKnight]:
     doAssert class.heroMaxHp(1) >= 425
-    doAssert class.heroMaxHp(20) >= 2400
+    doAssert class.heroMaxHp(20) >= 4400
     for level in 1 .. HeroMaxLevel:
       doAssert class.heroMaxHp(level) > Ranger.heroMaxHp(level)
       doAssert class.heroMaxHp(level) > Crossbowman.heroMaxHp(level)
@@ -167,11 +167,14 @@ block:
     of Consumable:
       doAssert spec.heal > 0 or spec.restore > 0 or spec.strike > 0 or
         spec.channelTicks > 0
+      doAssert spec.healthRegen == 0 and spec.manaRegen == 0
     of Equipment:
       doAssert spec.maxHp > 0 or spec.maxMana > 0 or
-        spec.damage > 0 or spec.movePerTick > 0
+        spec.damage > 0 or spec.movePerTick > 0 or
+        spec.healthRegen > 0 or spec.manaRegen > 0
+    doAssert spec.healthRegen >= 0 and spec.manaRegen >= 0
     doAssert itemIconKey(item).len > 5
-  doAssert names.len == 22
+  doAssert names.len == Item.high.ord
   doAssert ShopItems.len == Item.high.ord
   for item in Item:
     if item != NoItem:

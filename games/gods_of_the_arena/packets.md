@@ -1,6 +1,6 @@
 # GotA packets
 
-Payload protocol **5**, gameplay **84**, outer protocol **5**.
+Payload protocol **5**, gameplay **89**, outer protocol **5**.
 [Outer packets](../../docs/gameserver-packets.md) carry these blobs unchanged.
 
 ## Identity
@@ -10,7 +10,7 @@ Sent inside Hello; GotA requires ten seats at 24 ticks/second.
 | Field | Nim type | Value |
 | --- | --- | --- |
 | game | `string` | `gods_of_the_arena` |
-| gameplay | `uint32` | 84 |
+| gameplay | `uint32` | 89 |
 | protocol | `uint32` | 5 |
 
 ## Setup payload

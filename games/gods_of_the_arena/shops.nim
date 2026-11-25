@@ -57,14 +57,13 @@ proc closeShop*() =
   resetShopUi()
 
 proc consumeShopEscape*(): bool =
-  ## First Esc dismisses context/drag; next Esc closes the shop.
+  ## Cancels a context/drag, while reserving shop dismissal for its close button.
   if sellSlot >= 0 or gestures.draggingShopSlot() >= 0:
     playSound(CancelSound)
     sellSlot = -1
     gestures.resetShopGesture()
     return true
   if shopOpen:
-    closeShop()
     return true
 
 proc shopInventoryPanels*(size: Vec2): array[InventorySlots, GameUiPanel] =
@@ -172,7 +171,7 @@ proc drawShop*(sk: Silky, window: Window, world: World, hero: Hero,
     wallet = heading.takeColumn(180, 16)
     title = heading.takeRest()
   sk.drawTab(close, hovered = not pointerBlocked and sk.hovered(close))
-  sk.drawLabel("CLOSE  Esc", close.origin, close.size, White, "Bold",
+  sk.drawLabel("CLOSE", close.origin, close.size, White, "Bold",
     CenterAlign)
   let
     slots = shopInventoryPanels(size)
@@ -268,7 +267,8 @@ proc drawShop*(sk: Silky, window: Window, world: World, hero: Hero,
     vec2(title.size.x - 52, 40), White, "H1")
   for group in ShopGroup:
     let panel = layout.groups[group]
-    sk.drawLabel(ShopGroupNames[group], panel.origin, panel.size, Muted, "Small")
+    sk.drawLabel(ShopGroupNames[group], panel.origin, panel.size,
+      if group == ShopArtifacts: Gold else: Muted, "Small")
   for index, item in catalog:
     let
       spec = item.itemSpec

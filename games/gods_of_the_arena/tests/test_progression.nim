@@ -163,8 +163,7 @@ for class in HeroClass:
         world = game.world
         hero = world.heroes[0]
         target = world.heroes[5]
-        spec = ability.abilitySpec(rank)
-        base = ability.abilitySpec
+        spec = ability.abilitySpec(rank, 18)
       hero.level = 18
       for i in 1'i32 .. rank:
         doAssert world.applyLevelAbility(hero.id, slot.ord.int32)
@@ -188,24 +187,40 @@ for class in HeroClass:
       doAssert world.applyCastTarget(hero.id, slot.ord.int32, targetId),
         $ability & " rank " & $rank
       doAssert world.casts[^1].level == rank
+      doAssert world.casts[^1].heroLevel == hero.level
       game.step(100)
       case spec.kind
       of Strike:
         doAssert target.hp == targetHp - spec.damage, $ability
-        if base.damageRanks[0] == 0:
-          doAssert spec.damage == base.damage * (rank + 1) div 2
-        doAssert spec.damage > ability.abilitySpec(rank - 1).damage
+        doAssert spec.damage > ability.abilitySpec(rank - 1, 18).damage
       of Heal:
         if spec.casting == SelfCast:
           doAssert hero.hp == min(hero.maxHp, hp + spec.heal), $ability
         else:
           doAssert target.hp == targetHp + spec.heal, $ability
-        doAssert spec.heal == base.heal * (rank + 1) div 2
       of Restore:
         doAssert hero.mana >= mana + spec.restore, $ability
-        doAssert spec.restore == base.restore * (rank + 1) div 2
 
-echo "Testing pending casts keep their rank and upgrades preserve cooldowns"
+echo "Testing every level strengthens ranked effects without changing cast costs"
+for ability in Ability:
+  for rank in 0'i32 .. ability.abilitySpec.slot.abilityMaxLevel:
+    let base = ability.abilitySpec(rank)
+    doAssert ability.abilitySpec(rank, 1) == base
+    doAssert ability.abilitySpec(rank, int.low) == base
+    doAssert ability.abilitySpec(rank, int.high) ==
+      ability.abilitySpec(rank, HeroMaxLevel)
+    for level in 2 .. HeroMaxLevel:
+      var scaled = ability.abilitySpec(rank, level)
+      let potency = 100 + 5 * (level - 1)
+      doAssert scaled.damage == base.damage * potency div 100
+      doAssert scaled.heal == base.heal * potency div 100
+      doAssert scaled.restore == base.restore * potency div 100
+      scaled.damage = base.damage
+      scaled.heal = base.heal
+      scaled.restore = base.restore
+      doAssert scaled == base
+
+echo "Testing pending casts keep rank and caster level across upgrades and restore"
 block:
   let
     game = quietGame(Arcanist)
@@ -228,12 +243,21 @@ block:
   doAssert hero.charges == charges and hero.cooldowns == cooldowns
   doAssert hero.recharges == recharges
   doAssert world.casts[0].level == 1
+  doAssert world.casts[0].heroLevel == 3
+  hero.level = HeroMaxLevel
+  let snapshot = world.clone()
   let hash = game.stateHash()
   world.casts[0].level = 2
   doAssert game.stateHash() != hash
   world.casts[0].level = 1
+  world.casts[0].heroLevel = HeroMaxLevel
+  doAssert game.stateHash() != hash
+  world.restore(snapshot)
+  doAssert world.casts[0].heroLevel == 3
+  doAssert game.stateHash() == hash
   game.step(int(MeteorStrike.abilitySpec.castTicks))
-  doAssert enemy.hp == 10_000 - MeteorStrike.abilitySpec.damage
+  doAssert world.heroes[5].hp ==
+    10_000 - MeteorStrike.abilitySpec(1, 3).damage
 
 echo "Testing ranks survive respawn, clone and restore and affect hashes"
 block:

@@ -1,0 +1,12 @@
+--- a/examples/light_vs_dark/graphics.nim
++++ b/examples/light_vs_dark/graphics.nim
+@@ -153,6 +153,9 @@
+   previousUnitPositions.clear()
+   previousUnitFacings.clear()
+   for unit in run.world.units:
++    # Hidden miners have no visible pose to interpolate from on emergence.
++    if unit.state == UnitInMine:
++      continue
+     previousUnitPositions[unit.id] = unitWorldPoint(unit)
+     previousUnitFacings[unit.id] = unitYaw(unit)
+ 

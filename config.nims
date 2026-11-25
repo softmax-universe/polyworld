@@ -5,7 +5,11 @@ switch("hint", "[CC]:off")
 --path:"src"
 let
   projectRoot = currentSourcePath().parentDir
-  dependencyRoot = getEnv("POLYWORLD_DEPS", projectRoot.parentDir)
+  localDependencies = projectRoot / ".deps"
+  defaultDependencies =
+    if dirExists(localDependencies): localDependencies
+    else: projectRoot.parentDir
+  dependencyRoot = getEnv("POLYWORLD_DEPS", defaultDependencies)
 for line in readFile(projectRoot / "nimby.lock").splitLines():
   let fields = line.splitWhitespace()
   if fields.len == 0:

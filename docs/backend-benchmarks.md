@@ -84,3 +84,10 @@ The seeded scenes cover ten simulation seconds after warmup. They do not
 represent every map, late-game battle, resolution or graphics setting. Results
 from a working desktop can include background application and thermal effects;
 retain the trial range and repeat the matrix when comparing optimizations.
+
+## Recorded results
+
+[Apple M4 Pro, November 25, 2026](benchmarks/2026-11-25-m4-pro/report.md)
+contains the seven-game comparison, trial variation, browser cadence and all
+37,800 measured frames. It records the exact measured commit, `e65a5dee`,
+which predates the concurrent DirectX/Vulkan backend update.

@@ -163,6 +163,7 @@ else:
     let started = epochTime()
     window.installInput(chat.addr)
     window.onFrame = proc() =
+      when defined(frameBench): beginBenchFrame(window)
       ## Consumes input before Windy clears the browser's per-frame events.
       when not defined(emscripten):
         voice.poll(window.focused)

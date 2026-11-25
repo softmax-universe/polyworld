@@ -2728,6 +2728,11 @@ proc runGraphics*(
       startReplayRecording(uint32(options.maximumTicks))
     replayCheckpoints = @[captureCheckpoint()]
 
+  when defined(frameBench):
+    # Start the measured match after drafting and preparation on every backend.
+    for i in 0 ..< 135 * TickRate.int:
+      advanceGame()
+
   let cleanScreenshot = captureActive() and existsEnv("CLEAN_SCREENSHOT")
   if captureActive():
     applyScreenshotCamera(cameraDistance)
@@ -2809,6 +2814,7 @@ proc runGraphics*(
     # Exclude loading and the requested simulation seek from frame captures.
     startTrace()
   window.onFrame = proc() =
+    when defined(frameBench): beginBenchFrame(window)
     updateSounds()
     updateMatchResults()
     let previousCapture = bindingCapture

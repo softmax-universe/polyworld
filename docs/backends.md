@@ -94,3 +94,31 @@ The tests cover depth and stencil, cutout textures, skinning, independent model
 instances, texture lifetime, visibility masks, screen coordinates, resizing,
 MSAA, reflections, and UI composition. Browser smoke tests compile and link
 generated shaders on WebGL 2, then check gameplay frames and resized canvases.
+
+## Frame benchmarks
+
+Build and run the seven games from the repository root. Put the locked
+dependencies, Emscripten, the native shader compilers, and the game's audio
+runtime on the build or run PATH as appropriate. The browser runner uses
+Chrome on Windows. Set `BENCH_CHROMIUM` to use a different Chromium executable.
+
+```sh
+nim c -o:tmp/bench_backends tools/bench_backends.nim
+tmp/bench_backends build
+tmp/bench_backends run all all 3 local
+nim r tools/bench_report.nim local
+```
+
+The runner also accepts comma-separated games and backends, for example
+`tmp/bench_backends run gota,lvd OpenGL,WebGL,DirectX,Vulkan 3`. Each
+repetition launches a fresh process at seed 42 and 800×560, with one sample
+per pixel and a fixed simulation step of 1/60 second. GotA advances beyond its
+draft and Crewrift advances beyond its role reveal before warmup. Monster uses
+a fresh offline world. After 180 warmup frames the runner records 180 samples
+from the start of the gameplay frame through GPU completion. Each finished
+frame includes simulation, scene, and HUD work. The timer stops before the swap
+or browser refresh wait. Loading, warmup, and display pacing are outside the
+measurement. The separate `interval_ms` series records start-to-start cadence
+with those waits included and the same per-frame GPU synchronization. The report
+pools samples across launches and includes each launch’s mean for comparison. WebGL uses the game's normal browser asset pack. Per-run JSON in
+`tmp/livetest/benchmarks` retains each sample and the browser GPU identity.

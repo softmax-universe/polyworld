@@ -7,6 +7,10 @@ import
 
 export screenshots, renderer
 
+when defined(frameBench):
+  import framebench
+  export framebench
+
 when defined(emscripten):
   {.emit: "#include <emscripten.h>".}
 
@@ -81,7 +85,7 @@ proc viewingDelta*(clock: var ViewingClock, window: Window): float32 =
     result = max(now - clock.last, 0).float32
   clock.last = now
   clock.hidden = hidden
-  if captureActive():
+  if captureActive() or defined(frameBench):
     result = 1.0'f / 60
 
 proc damping*(rate, dt: float32): float32 =
@@ -167,13 +171,13 @@ proc initGameWindow*(
   ## Creates the viewer and renderer, keeping screenshot captures hidden.
   let window = newWindow(
     title,
-    size,
+    (when defined(frameBench): ivec2(BenchWidth, BenchHeight) else: size),
     visible = visible and not captureActive(),
-    vsync = vsync and not captureActive(),
-    msaa = msaa
+    vsync = vsync and not captureActive() and not defined(frameBench),
+    msaa = (when defined(frameBench): msaaDisabled else: msaa)
   )
   window.prepareDesktopFullscreen()
-  initRenderer(window, max(1, ord(msaa)))
+  initRenderer(window, (when defined(frameBench): 1 else: max(1, ord(msaa))))
   let sk = newGameUi(window, atlasPath)
   sk.applyThemePatches()
   (window, sk)
@@ -239,8 +243,9 @@ var
 proc presentFrame*(window: Window, paceHz = 60) =
   ## Swaps the back buffer, then waits so presents stay on one cadence.
   ## ProMotion vsync alone flips between 8.33 ms and 16.67 ms.
+  when defined(frameBench): endBenchFrame(window)
   window.presentRenderer()
-  if paceHz <= 0 or captureActive():
+  if paceHz <= 0 or captureActive() or defined(frameBench):
     presentDeadline = 0
     presentPaceHz = 0
     return
@@ -266,8 +271,9 @@ proc frameDelta*(
   let now = epochTime()
   result = clamp(now - lastFrameTime, 0.0, 0.1).float32
   lastFrameTime = now
-  if captureActive():
-    result = captureStep
+  when defined(frameBench): result = BenchStep
+  else:
+    if captureActive(): result = captureStep
 
 proc simulationActive*(transport: Player): bool =
   ## Returns whether presentation should advance on this frame.

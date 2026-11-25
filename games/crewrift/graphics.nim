@@ -825,6 +825,7 @@ proc runGraphics*(initial: Options) =
   while not window.closeRequested:
     when not defined(emscripten):
       pollEvents()
+    when defined(frameBench): beginBenchFrame(window)
     let
       dt = min(clock.viewingDelta(window), 0.1'f)
       slot = if game.playback: -1 else: options.player
@@ -917,6 +918,11 @@ proc runGraphics*(initial: Options) =
       state.typing = false
       state.text.setLen(0)
       syncTransport()
+    when defined(frameBench):
+      if renderedFrames == 0:
+        for i in 0 ..< game.world.config.roleRevealTicks:
+          game.advance(slot, record = true)
+        syncTransport()
     if captureActive() and renderedFrames == 0:
       for i in 0 ..< options.captureTicks:
         game.advance(slot, record = true)

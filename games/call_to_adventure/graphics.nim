@@ -1954,6 +1954,7 @@ proc runGraphics*() =
 
   holdSplash(sk, window, splash)
   window.onFrame = proc() =
+    when defined(frameBench): beginBenchFrame(window)
     profileBlock "frame":
       let dt = frameDelta(lastFrameTime, SimulationStep)
       viewingDt = viewingClock.viewingDelta(window)

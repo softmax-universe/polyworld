@@ -2062,6 +2062,7 @@ proc runGraphics*(network: NetworkMatch = nil,
   if hooks.ready != nil:
     hooks.ready(actionCam)
   window.onFrame = proc() =
+    when defined(frameBench): beginBenchFrame(window)
     profileBlock "frame":
       discard beginScreenshotFrame(captureTarget, window, captureHidden)
       updateSounds()

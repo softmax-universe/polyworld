@@ -566,6 +566,7 @@ proc runGraphics*() =
         advanceGame()
   holdSplash(sk, window, splash)
   window.onFrame = proc() =
+    when defined(frameBench): beginBenchFrame(window)
     profileBlock "frame":
       discard beginScreenshotFrame(screenshotTarget, window)
       let dt = frameDelta(lastFrameTime, Step)

@@ -612,6 +612,7 @@ proc runDuel*(app: App) =
     ## Keep the shared UI size shortcuts available during a battle.
     discard window.scaleKey(button, app.preferences, sk.uiScale, AppName)
   window.onFrame = proc() =
+    when defined(frameBench): beginBenchFrame(window)
     app.beginCaptureFrame()
     when not defined(emscripten):
       window.updateWindowSettings()

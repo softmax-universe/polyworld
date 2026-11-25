@@ -48,7 +48,7 @@ proc setupEmscripten*(
       let
         variant = if defined(webPng): "png" else: "ktx2"
         cache = repoDir / "tmp" / "webassets" / (game & "-" & variant)
-        packer = cache / ("pack_assets" & ExeExt)
+        packer = cache / "pack_assets".addFileExt(ExeExt)
         options = if defined(webPng): " -d:webPng" else: ""
       if not dirExists(cache):
         mkDir(cache)
@@ -98,16 +98,13 @@ proc setupEmscripten*(
     --os:linux
     --cpu:wasm32
     --cc:clang
-    when defined(windows):
-      --clang.exe:emcc.bat
-      --clang.linkerexe:emcc.bat
-      --clang.cpp.exe:emcc.bat
-      --clang.cpp.linkerexe:emcc.bat
-    else:
-      --clang.exe:emcc
-      --clang.linkerexe:emcc
-      --clang.cpp.exe:emcc
-      --clang.cpp.linkerexe:emcc
+    let emcc =
+      when defined(windows):
+        if findExe("emcc.exe").len > 0: "emcc.exe" else: "emcc.bat"
+      else:
+        "emcc"
+    for option in ["clang.exe", "clang.linkerexe", "clang.cpp.exe", "clang.cpp.linkerexe"]:
+      switch(option, emcc)
     --gc:arc
     --exceptions:goto
     --define:noSignalHandler

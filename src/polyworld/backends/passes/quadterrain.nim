@@ -6,6 +6,7 @@ import
   ../../[assets, common, pathing, profiles, shadows, terrainblends,
     terrainmaps, terrainreliefs, terrainsurfaces, textures, toon]
 import ./common as driver
+when defined(useDirectX) or defined(useVulkan): import ../../frustums
 
 type
   TerrainVertexArray = VertexBuffer
@@ -21,6 +22,32 @@ var
 
 include ../../shared/terrainhooks
 include ../../shared/terrainmeshes
+
+when defined(useDirectX) or defined(useVulkan):
+  var visibilityByGroup: Table[int32, seq[bool]]
+  var visibilityRevision: uint64
+
+  proc setPropVisibility*(group: int32, visible: seq[bool]) =
+    visibilityByGroup.withValue(group, old):
+      if old[] == visible: return
+    visibilityByGroup[group] = visible
+    inc visibilityRevision
+
+  type SceneProp* = tuple[pack: PropPack, name: string, position: Vec3, facing, scale: float32]
+
+  proc replaceTexturedGroup*(group: int32, props: openArray[SceneProp]) =
+    ## Rebuild just the changed textured batches when a landmark is added or lost.
+    var kept = 0
+    for i in 0 ..< propPlacements.len:
+      if propPlacements[i].group == group: continue
+      if kept != i: swap(propPlacements[kept], propPlacements[i])
+      inc kept
+    propPlacements.setLen(kept)
+    for slot, prop in props:
+      # Baked placement yaw uses the opposite sign to vmath's rotateY.
+      prop.pack.placeProp(prop.name, prop.position, -prop.facing, prop.scale, group = group)
+      propPlacements[^1].slot = slot
+    rebuildTexturedBatches()
 
 proc terrainLayout(): VertexLayout =
   ## Describes the packed terrain vertex fields shared with mesh generation.
@@ -77,7 +104,7 @@ proc depthLayout(stride: int, cutout = false): VertexLayout =
       name: "vertUv", format: Float3, offset: 12
     )
 
-proc replaceBuffer(buffer: var VertexBuffer, values: seq[float32]) =
+proc replaceBuffer[T](buffer: var VertexBuffer, values: seq[T]) =
   ## Uploads a packed mesh, retaining its allocation across ordinary rebakes.
   if values.len == 0:
     return
@@ -118,8 +145,22 @@ proc initTerrainPrograms() =
     nativeStage(texturedInstantFrag, shaderFragment), texturedLayout()
   )
 
+when defined(useDirectX) or defined(useVulkan):
+  var
+    casterRevision: uint64
+    terrainShadowCache: array[2, tuple[target: RenderTarget, transform: Mat4,
+      geometry, textures, visibility: uint64]]
+template invalidateTerrainShadows() =
+  when defined(useDirectX) or defined(useVulkan): inc casterRevision
+
 proc initTerrainBuffers() =
   ## Defers GPU allocations until the shared geometry is first uploaded.
+  invalidateTerrainShadows()
+  when defined(useDirectX) or defined(useVulkan):
+    visibilityByGroup.clear()
+    for cached in terrainShadowCache.mitems:
+      destroy(cached.target)
+      cached.target = nil
   destroy(vertexBuffer)
   destroy(waterVertexBuffer)
   destroy(treeVertexBuffer)
@@ -138,6 +179,7 @@ proc initTerrainVisibility() =
 
 proc uploadTerrainMesh() =
   ## Uploads terrain vertices after the shared geometry bake.
+  invalidateTerrainShadows()
   replaceBuffer(vertexBuffer, mesh)
 
 proc uploadWaterMesh() =
@@ -146,22 +188,58 @@ proc uploadWaterMesh() =
 
 proc uploadTreeMesh() =
   ## Uploads the packed foliage geometry.
+  invalidateTerrainShadows()
   replaceBuffer(treeVertexBuffer, treeMesh)
 
 proc uploadPropMesh() =
   ## Uploads the packed colored scenery geometry.
+  invalidateTerrainShadows()
   replaceBuffer(propVertexBuffer, propMesh)
 
 proc updateTerrainMeshRange(offset, count: int) =
   ## Refreshes changed edge overlays from the current complete vertex data.
+  invalidateTerrainShadows()
   replaceBuffer(vertexBuffer, mesh)
 
 proc uploadTexturedBatch(batch: var TexturedBatch) =
   ## Uploads only a changed batch while preserving clean scene batches.
-  replaceBuffer(batch.vertexBuffer, batch.mesh)
+  invalidateTerrainShadows()
+  when defined(useDirectX) or defined(useVulkan):
+    # Keep the original triangle order and every material seam. Local sharing
+    # bounds bake-time memory even for forests with millions of vertices.
+    type Vertex = array[12, uint32]
+    var unique: seq[Vertex]
+    let count = batch.mesh.len div 12
+    var indices = newSeq[uint32](count)
+    var cache = initTable[Vertex, uint32]()
+    for i in 0 ..< count:
+      if i mod 3072 == 0: cache.clear()
+      var v: Vertex
+      copyMem(v.addr, batch.mesh[12 * i].addr, sizeof(Vertex))
+      let next = unique.len.uint32
+      let index = cache.mgetOrPut(v, next)
+      if index == next: unique.add v
+      indices[i] = index
+    batch.bounds.setLen(0)
+    var first = 0
+    for placement in batch.placements:
+      let size = placement.model.vertices.len div 9
+      if size == 0: continue
+      var box = emptyBounds()
+      for i in first ..< first + size:
+        box.extend(vec3(batch.mesh[12*i], batch.mesh[12*i+1], batch.mesh[12*i+2]))
+      batch.bounds.add (first, size, placement.slot, box)
+      first += size
+    doAssert first == count
+    replaceBuffer(batch.vertexBuffer, unique)
+    replaceBuffer(batch.indices, indices)
+  else:
+    replaceBuffer(batch.vertexBuffer, batch.mesh)
 
 proc releaseTexturedBatch(batch: var TexturedBatch) =
   ## Releases a batch's geometry while leaving its shared texture alive.
+  invalidateTerrainShadows()
+  when defined(useDirectX) or defined(useVulkan): destroy(batch.indices)
   destroy(batch.vertexBuffer)
   batch = TexturedBatch()
 
@@ -355,6 +433,37 @@ proc drawProp*(
       state.depthWrite = false
     draw(program, model.vertexBuffer, model.vertexCount, state)
 
+when defined(useDirectX) or defined(useVulkan):
+  proc drawVisible(batch: TexturedBatch, transform: Mat4, program: ShaderProgram, layout = VertexLayout()) =
+    # Consecutive visible placements share one indexed range. All positions are
+    # world-space and each pass supplies the exact matrix used by its shader.
+    var planes: array[6, Vec4]
+    for axis in 0 .. 2:
+      for col in 0 .. 3:
+        planes[2*axis][col] = transform[col, 3] + transform[col, axis]
+        planes[2*axis+1][col] = transform[col, 3] - transform[col, axis]
+    var ranges: seq[IndexRange]
+    var active: ptr seq[bool]
+    visibilityByGroup.withValue(batch.group, slots): active = slots
+    for instance in batch.bounds:
+      if active != nil and not active[][instance.slot]: continue
+      var visible = true
+      for plane in planes:
+        let x = if plane.x < 0: instance.box.min.x else: instance.box.max.x
+        let y = if plane.y < 0: instance.box.min.y else: instance.box.max.y
+        let z = if plane.z < 0: instance.box.min.z else: instance.box.max.z
+        if plane.x*x + plane.y*y + plane.z*z + plane.w < -0.001'f32:
+          visible = false
+          break
+      if not visible: continue
+      if ranges.len > 0 and ranges[^1].first + ranges[^1].count == instance.first:
+        ranges[^1].count += instance.count
+      else:
+        ranges.add (instance.first, instance.count)
+    if ranges.len > 0:
+      draw(program, batch.vertexBuffer, batch.mesh.len div 12, DrawState(depthTest: true, depthWrite: true),
+        indices = batch.indices, layout = layout, ranges = ranges)
+
 proc drawTexturedBatch(batch: TexturedBatch, viewProjection: Mat4) =
   ## Draws a textured scenery batch using its per-vertex material tint.
   texturedPropProgram.setEnvUniforms()
@@ -364,8 +473,10 @@ proc drawTexturedBatch(batch: TexturedBatch, viewProjection: Mat4) =
   texturedPropProgram.setUniform("propModel", mat4())
   texturedPropProgram.setUniform("treeAlphaCutoff", TreeAlphaCutoff)
   texturedPropProgram.bindTexture("treeTextures", batch.textureArray)
-  draw(texturedPropProgram, batch.vertexBuffer, batch.mesh.len div 12,
-    DrawState(depthTest: true, depthWrite: true))
+  when defined(useDirectX) or defined(useVulkan):
+    batch.drawVisible(viewProjection, texturedPropProgram)
+  else:
+    draw(texturedPropProgram, batch.vertexBuffer, batch.mesh.len div 12, DrawState(depthTest: true, depthWrite: true))
 
 proc drawTerrain*(
     viewProjection: Mat4, showEdges = false,
@@ -466,8 +577,33 @@ proc drawTerrainSunDepth*(firstVertex = 0, vertexCount = -1) {.measure.} =
   drawDepthMesh(treeVertexBuffer, treeMesh.len div TreeVertexSize,
     TreeVertexSize, transform, treeTextureArray)
   for batch in texturedBatches:
-    drawDepthMesh(batch.vertexBuffer, batch.mesh.len div 12,
-      12, transform, batch.textureArray)
+    when defined(useDirectX) or defined(useVulkan):
+      bindSunCutoutDepth(transform, TreeAlphaCutoff)
+      sunBindCutoutTexture(batch.textureArray)
+      batch.drawVisible(transform, sunCutoutProgramId(), depthLayout(12, true))
+    else:
+      drawDepthMesh(batch.vertexBuffer, batch.mesh.len div 12, 12, transform, batch.textureArray)
+
+when defined(useDirectX) or defined(useVulkan):
+  proc drawCachedTerrainSunDepth*(step: int) =
+    ## Seed a freshly cleared shadow pass with its stationary terrain casters.
+    ## Buildings and animated characters are drawn into the live map afterward.
+    let target = gpuRenderer.target
+    let cached = addr terrainShadowCache[step]
+    if cached.target == nil or cached.target.width != target.width or cached.target.height != target.height:
+      destroy(cached.target)
+      cached.target = newRenderTarget(target.width, target.height, color = false)
+      cached.geometry = uint64.high
+    let transform = sunDepthPassMvp()
+    if cached.geometry == casterRevision and cached.textures == textureArrayRevision and cached.visibility == visibilityRevision and cached.transform == transform:
+      copyTarget(cached.target, target, color = false)
+    else:
+      drawTerrainSunDepth()
+      copyTarget(target, cached.target, color = false)
+      cached.transform = transform
+      cached.geometry = casterRevision
+      cached.textures = textureArrayRevision
+      cached.visibility = visibilityRevision
 
 proc drawPropSunDepth*(
     pack: PropPack, name: string, position: Vec3,

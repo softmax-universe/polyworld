@@ -243,8 +243,9 @@ var
 proc presentFrame*(window: Window, paceHz = 60) =
   ## Swaps the back buffer, then waits so presents stay on one cadence.
   ## ProMotion vsync alone flips between 8.33 ms and 16.67 ms.
-  when defined(frameBench): endBenchFrame(window)
+  when defined(frameBench) and not defined(pipelinedBench): endBenchFrame(window)
   window.presentRenderer()
+  when defined(frameBench) and defined(pipelinedBench): endPresentedBenchFrame(window)
   if paceHz <= 0 or captureActive() or defined(frameBench):
     presentDeadline = 0
     presentPaceHz = 0

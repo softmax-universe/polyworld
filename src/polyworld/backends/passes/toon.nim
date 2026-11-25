@@ -23,6 +23,7 @@ type
 
   ToonContext* = ref object of ToonSettings
     shader, depthShader, backgroundShader: ShaderProgram
+    when defined(useDirectX) or defined(useVulkan): solidDepth: ShaderProgram
     backgroundVertices: VertexBuffer
     rampTexture: GpuImage
     jointMatrices: seq[Mat4]
@@ -50,6 +51,8 @@ proc newToonContext*(): ToonContext =
       vec3(-1, -1, 0), vec3(3, -1, 0), vec3(-1, 3, 0)
     ])
   )
+  when defined(useDirectX) or defined(useVulkan):
+    result.solidDepth = newProgram(ToonDepthVertSrc, "", ModelLayout)
   result.setPalette(ToonPalettes[0])
   result.setRamp(rampImage())
 
@@ -68,10 +71,12 @@ proc uploadPose(program: ShaderProgram, joints: openArray[Mat4]) =
   if joints.len > 128:
     raise newException(GltfError, "Toon supports at most 128 skin joints.")
   if joints.len > 0:
-    var palette: array[128, Mat4]
-    for i, joint in joints:
-      palette[i] = joint
-    program.setUniform("toonJointMatrices", palette)
+    when defined(useDirectX) or defined(useVulkan):
+      program.setUniform("toonJointMatrices", joints)
+    else:
+      var palette: array[128, Mat4]
+      for i, joint in joints: palette[i] = joint
+      program.setUniform("toonJointMatrices", palette)
 
 proc modelUniforms(ctx: ToonContext, program: ShaderProgram,
     root, owner: Node, pose: ptr ToonMeshPose) =
@@ -178,15 +183,23 @@ proc drawSunDepthPrimitive(ctx: ToonContext, root, owner: Node,
     primitive: gltf.Primitive, pose: ptr ToonMeshPose = nil) =
   ## Draws the same skinned geometry and alpha cutout into the sun target.
   let
-    shader = ctx.depthShader
+    geometry = modelMeshCache.geometry(primitive)
     material = primitive.material
+  when defined(useDirectX) or defined(useVulkan):
+    let packed = pose != nil and pose.packedParts
+    if (if packed: not geometry.packedCutout else: material.alphaMode != MaskAlphaMode):
+      ctx.modelUniforms(ctx.solidDepth, root, owner, pose)
+      ctx.solidDepth.drawGeometry(geometry, DrawState(depthTest: true, depthWrite: true))
+      return
+  let
+    shader = ctx.depthShader
     textures = modelMeshCache.textures(material)
   ctx.modelUniforms(shader, root, owner, pose)
   shader.setUniform("toonBaseColorFactor", material.baseColorFactor.colorVector)
   shader.setUniform("toonAlphaCutoff",
     if material.alphaMode == MaskAlphaMode: material.alphaCutoff else: -1.0'f)
   shader.bindTexture("toonBaseColorTexture", textures.baseColor)
-  shader.drawGeometry(modelMeshCache.geometry(primitive),
+  shader.drawGeometry(geometry,
     DrawState(depthTest: true, depthWrite: true))
 
 proc prepareShadowGeometry(ctx: ToonContext, mesh: Mesh) =
@@ -249,6 +262,8 @@ proc drawSunDepth*(ctx: ToonContext, root: Node,
   if pose == nil:
     root.updateTransforms(ctx.transform)
   ctx.depthShader.setUniform("toonDepthLightMvp", sunDepthPassMvp())
+  when defined(useDirectX) or defined(useVulkan):
+    ctx.solidDepth.setUniform("toonDepthLightMvp", sunDepthPassMvp())
   if pose == nil:
     ctx.drawDepthNodes(root, root)
   else:

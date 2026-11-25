@@ -162,6 +162,32 @@ window.size = ivec2(80, 48)
 beginFrame(80, 48, color(1, 0, 0, 1))
 doAssert captureTargetImage().width == 80
 endFrame(true)
+# Each queued list owns its upload bytes and descriptors until its fence signals.
+# Update in place between two draws, then retire that geometry before presenting.
+setFrameSamples(1)
+let leftQuad = [-1'f32, -1, 0, -1, 0, 1, -1, -1, 0, 1, -1, 1]
+let rightQuad = [0'f32, -1, 1, -1, 1, 1, 0, -1, 1, 1, 0, 1]
+for frame in 0 .. 6:
+  beginFrame(80, 48, color(0, 0, 0, 1))
+  let geometry = newBuffer(leftQuad)
+  program.setUniform("tint", vec4(1, 0, 0, 1))
+  draw(program, geometry, 6)
+  geometry.updateBuffer(rightQuad)
+  program.setUniform("tint", vec4(0, 1, 0, 1))
+  draw(program, geometry, 6)
+  destroy(geometry)
+  if frame == 6:
+    let pixels = captureTargetImage()
+    doAssert pixels[10, 24].r == 255 and pixels[70, 24].g == 255
+  endFrame(true)
+beginFrame(80, 48, color(0, 0, 0, 1))
+program.setUniform("tint", vec4(1, 0, 0, 1))
+drawStream(program, leftQuad, 6, DrawState())
+program.setUniform("tint", vec4(0, 0, 1, 1))
+drawStream(program, rightQuad, 6, DrawState())
+let streams = captureTargetImage()
+doAssert streams[10, 24].r == 255 and streams[70, 24].b == 255
+endFrame(false)
 destroy(resolvedCopy)
 destroy(copy)
 destroy(target)

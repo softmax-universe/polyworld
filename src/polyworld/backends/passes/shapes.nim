@@ -20,7 +20,7 @@ proc initShapeRenderer*(): ShapeRenderer =
         ]
       )
     )
-    result.gpu.vertexBuffer = newBuffer([0.0'f])
+    when defined(useMetal4): result.gpu.vertexBuffer = newBuffer([0.0'f])
     let white = newImage(1, 1)
     white.fill(rgba(255, 255, 255, 255))
     result.gpu.whiteTexture = newTexture(white, linear = false)
@@ -37,20 +37,19 @@ proc draw*(
   ## Draws the world-space batch and optionally writes opaque surface depth.
   if renderer.vertices.len == 0:
     return
-  updateBuffer(renderer.gpu.vertexBuffer, renderer.vertices)
   setUniform(renderer.gpu.program, "shapeViewProjection", viewProjection)
   bindTexture(
     renderer.gpu.program,
     "shapeSampler",
     if renderer.texture == nil: renderer.gpu.whiteTexture else: renderer.texture
   )
-  draw(
-    renderer.gpu.program,
-    renderer.gpu.vertexBuffer,
-    renderer.vertices.len div VertexFloats,
-    DrawState(
+  let state = DrawState(
       depthTest: true,
       depthWrite: opaque,
       blend: if opaque: Opaque else: StraightAlpha
     )
-  )
+  when defined(useMetal4):
+    updateBuffer(renderer.gpu.vertexBuffer, renderer.vertices)
+    draw(renderer.gpu.program, renderer.gpu.vertexBuffer, renderer.vertices.len div VertexFloats, state)
+  else:
+    drawStream(renderer.gpu.program, renderer.vertices, renderer.vertices.len div VertexFloats, state)

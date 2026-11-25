@@ -24,6 +24,7 @@ type
     vertices*, indices*: VertexBuffer
     count*: int
     index32*: bool
+    when defined(useDirectX) or defined(useVulkan): packedCutout*: bool
     topology*: common.Primitive
     source: gltf.Primitive
     version: uint64
@@ -78,6 +79,8 @@ proc geometry*(cache: var MeshCache, primitive: gltf.Primitive): MeshBuffers =
     cache.meshes[key].version == primitive.geometryVersion:
       return cache.meshes[key]
   cache.release(primitive)
+  when defined(useDirectX) or defined(useVulkan):
+    var packedCutout = false
   var vertices = newSeq[ModelVertex](primitive.points.len)
   for i, point in primitive.points:
     vertices[i] = ModelVertex(
@@ -97,6 +100,8 @@ proc geometry*(cache: var MeshCache, primitive: gltf.Primitive): MeshBuffers =
       vertices[i].uv = primitive.uvs[i]
     if i < primitive.uvs1.len:
       vertices[i].uv1 = primitive.uvs1[i]
+      when defined(useDirectX) or defined(useVulkan):
+        if primitive.uvs1[i].y > 0: packedCutout = true
     if i < primitive.tangents.len:
       vertices[i].tangent = primitive.tangents[i]
     if i < primitive.jointIds.len:
@@ -112,6 +117,7 @@ proc geometry*(cache: var MeshCache, primitive: gltf.Primitive): MeshBuffers =
     count: vertices.len,
     topology: Triangles
   )
+  when defined(useDirectX) or defined(useVulkan): result.packedCutout = packedCutout
   case primitive.mode
   of PointsMode: result.topology = Points
   of LinesMode, LineLoopMode, LineStripMode: result.topology = Lines

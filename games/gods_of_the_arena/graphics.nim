@@ -482,6 +482,9 @@ proc runGraphics*(
     standingBuildings: seq[int]
     worldCharacterCount: int
     directorSubjects: seq[Subject]
+  when defined(useDirectX) or defined(useVulkan):
+    var previousStructures, structures: seq[SceneProp]
+    var structureVisibility: seq[bool]
   if heroModels[HeroClass.low] == nil:
     profileBlock "models":
       let
@@ -3050,6 +3053,17 @@ proc runGraphics*(
         for i, tower in run.world.buildings:
           if tower.hp > 0:
             standingBuildings.add i
+        when defined(useDirectX) or defined(useVulkan):
+          structures.setLen(0)
+          structureVisibility.setLen(0)
+          for tower in run.world.buildings:
+            structureVisibility.add tower.hp > 0
+            structures.add (towerPacks[tower.team], buildingPropName(tower), renderPoint(tower.position),
+              renderFacing(tower.facing), buildingScale(tower))
+          if structures != previousStructures:
+            replaceTexturedGroup(int32.low, structures)
+            swap(previousStructures, structures)
+          setPropVisibility(int32.low, structureVisibility)
         profileBlock "prepare character poses":
           var count = 0
           for footman in run.world.footmen:
@@ -3148,15 +3162,19 @@ proc runGraphics*(
 
         profileBlock "Shadow pass":
           sunDepthPasses(window.size):
-            drawTerrainSunDepth()
-            for index in standingBuildings:
-              let tower {.cursor.} = run.world.buildings[index]
-              towerPacks[tower.team].drawPropSunDepth(
-                buildingPropName(tower),
-                renderPoint(tower.position),
-                renderFacing(tower.facing),
-                buildingScale(tower)
-              )
+            when defined(useDirectX) or defined(useVulkan):
+              drawCachedTerrainSunDepth(sunPassIndex)
+            else:
+              drawTerrainSunDepth()
+            when not (defined(useDirectX) or defined(useVulkan)):
+              for index in standingBuildings:
+                let tower {.cursor.} = run.world.buildings[index]
+                towerPacks[tower.team].drawPropSunDepth(
+                  buildingPropName(tower),
+                  renderPoint(tower.position),
+                  renderFacing(tower.facing),
+                  buildingScale(tower)
+                )
             scene.sunDepthPass = true
             profileBlock "Shadow characters":
               drawWorldCharacters(scene, worldCharacters, worldCharacterCount)
@@ -3174,15 +3192,16 @@ proc runGraphics*(
             terrainEdgeWorld = run.world
             terrainEdgeRevision = run.world.navigationRevision
           drawTerrain(viewProjection, showTiles)
-          for index in standingBuildings:
-            let tower {.cursor.} = run.world.buildings[index]
-            towerPacks[tower.team].drawProp(
-              buildingPropName(tower),
-              renderPoint(tower.position),
-              renderFacing(tower.facing),
-              buildingScale(tower),
-              viewProjection
-            )
+          when not (defined(useDirectX) or defined(useVulkan)):
+            for index in standingBuildings:
+              let tower {.cursor.} = run.world.buildings[index]
+              towerPacks[tower.team].drawProp(
+                buildingPropName(tower),
+                renderPoint(tower.position),
+                renderFacing(tower.facing),
+                buildingScale(tower),
+                viewProjection
+              )
 
           occlusion.settings.enabled = preferences.ambientOcclusion
           occlusion.captureGround(window.size)
@@ -3239,15 +3258,16 @@ proc runGraphics*(
                 scene.toon.groundColor
               )
               drawTerrain(mirroredViewProjection, false)
-              for index in standingBuildings:
-                let tower {.cursor.} = run.world.buildings[index]
-                towerPacks[tower.team].drawProp(
-                  buildingPropName(tower),
-                  renderPoint(tower.position),
-                  renderFacing(tower.facing),
-                  buildingScale(tower),
-                  mirroredViewProjection
-                )
+              when not (defined(useDirectX) or defined(useVulkan)):
+                for index in standingBuildings:
+                  let tower {.cursor.} = run.world.buildings[index]
+                  towerPacks[tower.team].drawProp(
+                    buildingPropName(tower),
+                    renderPoint(tower.position),
+                    renderFacing(tower.facing),
+                    buildingScale(tower),
+                    mirroredViewProjection
+                  )
               profileBlock "Water mirror characters":
                 beginCharacters(
                   scene,

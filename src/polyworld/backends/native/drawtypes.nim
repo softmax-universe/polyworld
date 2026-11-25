@@ -1,4 +1,5 @@
 type
+  IndexRange* = tuple[first, count: int]
   VertexFormat* = enum
     Float1, Float2, Float3, Float4, UInt1, UInt2, UInt3, UInt4, Unorm8x4
   VertexAttribute* = object

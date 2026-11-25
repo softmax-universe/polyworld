@@ -51,6 +51,7 @@ proc executable(game, backend: string): string =
 
 proc build(game, backend: string, i: int) =
   var args = @["c", "--hints:off", "-d:frameBench"]
+  if getEnv("BENCH_PIPELINED") == "1": args.add "-d:pipelinedBench"
   if backend == "WebGL":
     args.add "-d:emscripten"
   else:

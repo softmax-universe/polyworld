@@ -22,7 +22,7 @@ proc initWorldBarRenderer*(): WorldBarRenderer =
         ]
       )
     )
-    result.gpu.vertexBuffer = newBuffer([0.0'f])
+    when defined(useMetal4): result.gpu.vertexBuffer = newBuffer([0.0'f])
     let white = newImage(1, 1)
     white.fill(rgba(255, 255, 255, 255))
     result.gpu.whiteTexture = newTexture(white)
@@ -41,7 +41,6 @@ proc draw*(
   ## Draws camera-facing resource bars and atlas glyphs against scene depth.
   if renderer.vertices.len == 0:
     return
-  updateBuffer(renderer.gpu.vertexBuffer, renderer.vertices)
   setUniform(renderer.gpu.program, "barViewProjection", viewProjection)
   setUniform(renderer.gpu.program, "barCameraRight", cameraRight)
   setUniform(renderer.gpu.program, "barCameraUp", cameraUp)
@@ -50,9 +49,9 @@ proc draw*(
     "barTexture",
     if textureId == nil: renderer.gpu.whiteTexture else: textureId
   )
-  draw(
-    renderer.gpu.program,
-    renderer.gpu.vertexBuffer,
-    renderer.vertices.len div VertexFloats,
-    DrawState(depthTest: true, blend: StraightAlpha)
-  )
+  let state = DrawState(depthTest: true, blend: StraightAlpha)
+  when defined(useMetal4):
+    updateBuffer(renderer.gpu.vertexBuffer, renderer.vertices)
+    draw(renderer.gpu.program, renderer.gpu.vertexBuffer, renderer.vertices.len div VertexFloats, state)
+  else:
+    drawStream(renderer.gpu.program, renderer.vertices, renderer.vertices.len div VertexFloats, state)

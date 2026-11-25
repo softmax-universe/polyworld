@@ -18,7 +18,10 @@ proc allocateTexture(width, height, layers, mipCount: int, format: TextureFormat
     linear, repeat, arrayTexture: bool): Texture =
   allocateImage(width, height, format, linear, repeat, layers, mipCount, arrayTexture)
 
+var textureArrayRevision*: uint64
+
 proc uploadArrayLevel(texture: Texture, layer, level, width, height: int, data: pointer) =
+  inc textureArrayRevision
   texture.handle.uploadLevel(layer, level, width, height, 4, data)
 
 proc loadTerrainTextures*(
@@ -86,6 +89,10 @@ proc updateDataTexture(
   data: pointer, format: TextureFormat, linear: bool
 ) =
   ## Replaces data storage while preserving resources used by queued draws.
+  if texture != nil and texture.width == width and texture.height == height and texture.pixelFormat == format:
+    texture.handle.uploadLevel(0, 0, width, height, bytesPerPixel, data)
+    texture.setTextureSampling(linear)
+    return
   var replacement = allocateTexture(
     width, height, 1, 1, format, linear = linear, repeat = false,
     arrayTexture = false

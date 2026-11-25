@@ -43,7 +43,9 @@ proc findField(layout: ShaderLayout, name: string): int =
       return i
   -1
 
-proc put*(data: var GpuConstants, name: string,
+func findField(layout: ShaderLayout, index: int): int {.inline.} = index
+
+proc put*(data: var GpuConstants, name: string or int,
   value: openArray[float32], index = 0) =
   ## Stores vector or matrix components with the native column and array stride.
   let fieldIndex = data.layout.findField(name)
@@ -52,18 +54,21 @@ proc put*(data: var GpuConstants, name: string,
   let field = data.layout.fields[fieldIndex].unsafeAddr
   doAssert index >= 0 and index < field.count and
     value.len == field.components * field.columns,
-    "Incorrect uniform shape: " & name
+    "Incorrect uniform shape: " & field.name
+  if field.columns == 1 or field.components == 4:
+    copyMem(data.words[field.offset + index * field.stride].addr, value[0].unsafeAddr, value.len * sizeof(float32))
+    return
   for col in 0 ..< field.columns:
     for row in 0 ..< field.components:
       let offset = field.offset + index * field.stride +
         col * (if field.columns > 1: 4 else: 0) + row
       data.words[offset] = cast[uint32](value[col * field.components + row])
 
-proc put*(data: var GpuConstants, name: string, value: float32, index = 0) =
+proc put*(data: var GpuConstants, name: string or int, value: float32, index = 0) =
   ## Stores one floating-point parameter when declared by the program.
   data.put(name, [value], index)
 
-proc put*(data: var GpuConstants, name: string, value: int, index = 0) =
+proc put*(data: var GpuConstants, name: string or int, value: int, index = 0) =
   ## Stores integer bits without converting their representation to float.
   let fieldIndex = data.layout.findField(name)
   if fieldIndex < 0:
@@ -72,35 +77,32 @@ proc put*(data: var GpuConstants, name: string, value: int, index = 0) =
   doAssert index in 0 ..< field.count and field.components == 1 and field.columns == 1
   data.words[field.offset + index * field.stride] = cast[uint32](value.int32)
 
-proc put*(data: var GpuConstants, name: string, value: bool, index = 0) =
+proc put*(data: var GpuConstants, name: string or int, value: bool, index = 0) =
   ## Stores a native shader boolean as a four-byte integer.
   data.put(name, value.ord, index)
 
-proc put*(data: var GpuConstants, name: string, value: Vec2, index = 0) =
+proc put*(data: var GpuConstants, name: string or int, value: Vec2, index = 0) =
   ## Stores the two ordered components of a vector.
   data.put(name, [value.x, value.y], index)
 
-proc put*(data: var GpuConstants, name: string, value: Vec3, index = 0) =
+proc put*(data: var GpuConstants, name: string or int, value: Vec3, index = 0) =
   ## Stores three vector components at an optional array index.
   data.put(name, [value.x, value.y, value.z], index)
 
-proc put*(data: var GpuConstants, name: string, value: Vec4, index = 0) =
+proc put*(data: var GpuConstants, name: string or int, value: Vec4, index = 0) =
   ## Stores four vector components at an optional array index.
   data.put(name, [value.x, value.y, value.z, value.w], index)
 
-proc put*(data: var GpuConstants, name: string, value: Color, index = 0) =
+proc put*(data: var GpuConstants, name: string or int, value: Color, index = 0) =
   ## Stores authored RGBA components without changing their color space.
   data.put(name, [value.r, value.g, value.b, value.a], index)
 
-proc put*(data: var GpuConstants, name: string, value: Mat4, index = 0) =
+proc put*(data: var GpuConstants, name: string or int, value: Mat4, index = 0) =
   ## Stores a four-column transform with the native matrix column stride.
-  var values: array[16, float32]
-  for col in 0 ..< 4:
-    for row in 0 ..< 4:
-      values[col * 4 + row] = value[col, row]
-  data.put(name, values, index)
+  static: doAssert sizeof(Mat4) == 16 * sizeof(float32)
+  data.put(name, cast[ptr array[16, float32]](value.unsafeAddr)[], index)
 
-proc put*(data: var GpuConstants, name: string, value: Mat3, index = 0) =
+proc put*(data: var GpuConstants, name: string or int, value: Mat3, index = 0) =
   ## Stores a three-column transform with native matrix padding.
   var values: array[9, float32]
   for col in 0 ..< 3:
@@ -108,6 +110,15 @@ proc put*(data: var GpuConstants, name: string, value: Mat3, index = 0) =
       values[col * 3 + row] = value[col, row]
   data.put(name, values, index)
 
-proc put*(data: var GpuConstants, name: string, value: int32, index = 0) =
+proc put*(data: var GpuConstants, name: string or int, value: int32, index = 0) =
   ## Packs a signed integer uniform without changing its representation.
   data.put(name, value.int, index)
+
+proc putMatrices*(data: GpuConstants, name: string or int, values: openArray[Mat4]) =
+  ## mat4 arrays are contiguous in the reflected std140 and HLSL layouts.
+  let index = data.layout.findField(name)
+  if index < 0 or values.len == 0: return
+  let field = data.layout.fields[index]
+  static: doAssert sizeof(Mat4) == 16 * sizeof(float32)
+  doAssert field.components == 4 and field.columns == 4 and field.stride == 16 and values.len <= field.count
+  copyMem(data.words[field.offset].addr, values[0].unsafeAddr, values.len * sizeof(Mat4))

@@ -1,6 +1,6 @@
 ## Shared scene commands for the D3D12 and Vulkan implementations.
 import std/[json, strutils, tables], pixie, vmath, windy, shady
-import device, stages
+import device, stages, framecounts
 export device, stages
 
 type
@@ -14,16 +14,25 @@ type
     color*, depth*: GpuImage
     multisampleColor, multisampleDepth: GpuImage
     stencil*, borrowsDepth, resolved: bool
-  PipelineKey = tuple[state: DrawState, layout: VertexLayout, color, depth: TextureFormat, hasColor, hasDepth: bool, samples: int]
+  PipelineKey = tuple[state: DrawState, layout: int, color, depth: TextureFormat, hasColor, hasDepth: bool, samples: int]
   ShaderProgram* = ref object
     label: string
     code: ProgramCode
-    layout: VertexLayout
+    layouts: seq[VertexLayout]
+    defaultLayout: int
     vertex, fragment: GpuConstants
-    textures: Table[string, GpuImage]
-    shadowInputs: seq[string]
+    uniformFields: Table[string, array[2, int]]
+    bindings: seq[tuple[slot: int, comparison: bool, image: GpuImage]]
+    bindingIndices: Table[string, seq[int]]
     pipelines: Table[PipelineKey, GpuProgram]
+  RetiredResources = object
+    serial: uint64
+    buffers: seq[GpuBuffer]
+    textures: seq[GpuTexture]
+    pipelines: seq[GpuProgram]
   RendererState* = ref object
+    pending: RetiredResources
+    retired: seq[RetiredResources]
     ctx*: GpuContext
     window: Window
     frameSamples: int
@@ -32,11 +41,8 @@ type
     stack: seq[tuple[target: RenderTarget, viewport: IVec2]]
     stencil: DrawState
     samplers: Table[SamplerState, GpuSampler]
-    retiredBuffers: seq[GpuBuffer]
-    retiredTextures: seq[GpuTexture]
-    retiredPipelines: seq[GpuProgram]
     blit: ShaderProgram
-    quad: VertexBuffer
+    quad, stream: VertexBuffer
     programs: seq[ShaderProgram]
     buffers: seq[VertexBuffer]
     images: seq[GpuImage]
@@ -48,28 +54,32 @@ proc initNative*(window: Window) =
     gpuRenderer = RendererState(window: window, frameSamples: 1, ctx: newGpuContext(window))
 
 proc collect() =
-  for item in gpuRenderer.retiredBuffers.mitems: item.freeGpu()
-  for item in gpuRenderer.retiredTextures.mitems: item.freeGpu()
-  for item in gpuRenderer.retiredPipelines.mitems: item.freeGpu()
-  gpuRenderer.retiredBuffers.setLen(0)
-  gpuRenderer.retiredTextures.setLen(0)
-  gpuRenderer.retiredPipelines.setLen(0)
+  # Called between lists. The latest submission covers every pending last use.
+  let r = gpuRenderer
+  if r.pending.buffers.len + r.pending.textures.len + r.pending.pipelines.len > 0:
+    r.pending.serial = r.ctx.submitted
+    r.retired.add move(r.pending)
+  while r.retired.len > 0 and r.retired[0].serial <= r.ctx.completed:
+    for item in r.retired[0].buffers.mitems: item.freeGpu()
+    for item in r.retired[0].textures.mitems: item.freeGpu()
+    for item in r.retired[0].pipelines.mitems: item.freeGpu()
+    r.retired.delete(0)
 
 proc destroy*(b: VertexBuffer) =
   if b == nil or b notin gpuRenderer.buffers: return
-  if b.handle != nil: gpuRenderer.retiredBuffers.add b.handle
+  if b.handle != nil: gpuRenderer.pending.buffers.add b.handle
   b.handle = nil
   gpuRenderer.buffers.del(gpuRenderer.buffers.find(b))
 
 proc destroy*(t: GpuImage) =
   if t == nil or t.handle == nil: return
-  gpuRenderer.retiredTextures.add t.handle
+  gpuRenderer.pending.textures.add t.handle
   t.handle = nil
   gpuRenderer.images.del(gpuRenderer.images.find(t))
 
 proc destroy*(p: ShaderProgram) =
   if p == nil or p notin gpuRenderer.programs: return
-  for pipeline in p.pipelines.values: gpuRenderer.retiredPipelines.add pipeline
+  for pipeline in p.pipelines.values: gpuRenderer.pending.pipelines.add pipeline
   p.pipelines.clear()
   gpuRenderer.programs.del(gpuRenderer.programs.find(p))
 
@@ -86,8 +96,14 @@ proc newBuffer*[T](values: openArray[T]): VertexBuffer =
   gpuRenderer.buffers.add result
 
 proc updateBuffer*[T](b: VertexBuffer, values: openArray[T]) =
-  if b.handle != nil: gpuRenderer.retiredBuffers.add b.handle
-  b.handle = gpuRenderer.ctx.uploadBuffer(values)
+  counted: uploadedBytes += values.len * sizeof(T)
+  let bytes = values.len * sizeof(T)
+  if b.handle != nil and bytes <= b.handle.capacity:
+    b.handle.writeBuffer(values)
+  elif bytes > 0:
+    let capacity = if b.handle == nil: bytes else: max(bytes, b.handle.capacity * 2)
+    if b.handle != nil: gpuRenderer.pending.buffers.add b.handle
+    b.handle = gpuRenderer.ctx.uploadBuffer(values, capacity)
 
 proc width*(image: GpuImage): int = image.handle.width
 proc height*(image: GpuImage): int = image.handle.height
@@ -189,7 +205,9 @@ proc ensureFrame*(width, height: int) =
   r.viewport = ivec2(width.int32, height.int32)
 
 proc ensureFrame*() =
-  ensureFrame(gpuRenderer.window.size.x, gpuRenderer.window.size.y)
+  if not frameActive():
+    let size = gpuRenderer.window.size
+    ensureFrame(size.x, size.y)
 
 proc setTarget*(target: RenderTarget = nil) =
   ensureFrame()
@@ -253,40 +271,70 @@ proc newProgram*(vertexSource, fragmentSource: string, layout = VertexLayout()):
   let fragment = f.source.split('\n', 1)
   let vs = parseJson(vertex[1])
   let ps = if f.source.len > 0: parseJson(fragment[1]) else: newJObject()
-  result = ShaderProgram(label: vertex[0] & " / " & fragment[0], layout: layout, code: ProgramCode(vertex: v.binary, fragment: f.binary),
+  result = ShaderProgram(label: vertex[0] & " / " & fragment[0], layouts: @[layout], code: ProgramCode(vertex: v.binary, fragment: f.binary),
     vertex: uniformLayout(vs).constants, fragment: uniformLayout(ps).constants)
   for input in vs{"inputs"}.getElems():
     result.code.inputs.add ShaderInput(name: input["name"].getStr(),
       semantic: "TEXCOORD", location: input["location"].getInt())
-  for stage in [vs, ps]:
-    for sampler in stage{"textures"}.getElems():
-      if sampler["type"].getStr().endsWith("Shadow"):
-        result.shadowInputs.add sampler["name"].getStr()
+  for stage, data in [result.vertex, result.fragment]:
+    for i, field in data.layout.fields:
+      result.uniformFields.mgetOrPut(field.name, [0, 0])[stage] = i + 1
+  for stage, reflection in [vs, ps]:
+    for sampler in reflection{"textures"}.getElems():
+      let name = sampler["name"].getStr()
+      let binding = sampler["binding"].getInt()
+      doAssert binding in 0 ..< MaxTextures
+      let slot = binding + (if stage == 0: MaxTextures else: 0)
+      result.bindingIndices.mgetOrPut(name, @[]).add result.bindings.len
+      result.bindings.add (slot, sampler["type"].getStr().endsWith("Shadow"), GpuImage(nil))
   gpuRenderer.programs.add result
 
-proc setVertexLayout*(p: ShaderProgram, layout: VertexLayout) = p.layout = layout
+proc layoutIndex(p: ShaderProgram, layout: VertexLayout): int =
+  for i, known in p.layouts:
+    if known == layout: return i
+  result = p.layouts.len
+  p.layouts.add layout
+
+proc setVertexLayout*(p: ShaderProgram, layout: VertexLayout) =
+  p.defaultLayout = p.layoutIndex(layout)
 
 proc setUniform*[T](p: ShaderProgram, name: string, value: T) =
-  template write(buffer: untyped) =
+  let fields = p.uniformFields.getOrDefault(name)
+  template write(buffer, index: untyped) =
     when T is Mat4 or T is Mat3 or T is Vec2 or T is Vec3 or T is Vec4:
-      buffer.put(name, value)
+      buffer.put(index, value)
     elif T is array or T is seq:
-      for i, item in value: buffer.put(name, item, i)
+      when typeof(value[0]) is Mat4:
+        buffer.putMatrices(index, value)
+      else:
+        for i, item in value: buffer.put(index, item, i)
     else:
-      buffer.put(name, value)
-  write(p.vertex)
-  write(p.fragment)
+      buffer.put(index, value)
+  if fields[0] > 0: write(p.vertex, fields[0] - 1)
+  if fields[1] > 0: write(p.fragment, fields[1] - 1)
 
-proc bindTexture*(p: ShaderProgram, name: string, image: GpuImage) = p.textures[name] = image
+proc setUniform*(p: ShaderProgram, name: string, values: openArray[Mat4]) =
+  let fields = p.uniformFields.getOrDefault(name)
+  if fields[0] > 0: p.vertex.putMatrices(fields[0] - 1, values)
+  if fields[1] > 0: p.fragment.putMatrices(fields[1] - 1, values)
+
+proc bindTexture*(p: ShaderProgram, name: string, image: GpuImage) =
+  p.bindingIndices.withValue(name, indices):
+    for i in indices[]:
+      if p.bindings[i].image != image: p.bindings[i].image = image
 
 proc waitForGpu*()
 
 proc draw*(p: ShaderProgram, vertices: VertexBuffer, count: int, state = DrawState(),
-    indices: VertexBuffer = nil, first = 0, index32 = true, instanceCount = 1, layout = VertexLayout()) =
+    indices: VertexBuffer = nil, first = 0, index32 = true, instanceCount = 1, layout = VertexLayout(), ranges: openArray[IndexRange] = []) =
   if count <= 0: return
+  counted:
+    draws += max(1, ranges.len)
+    if ranges.len == 0: drawVertices += count * instanceCount
+    else:
+      for span in ranges: drawVertices += span.count * instanceCount
   ensureFrame()
   let r = gpuRenderer
-  if r.ctx.needsSubmission(): waitForGpu()
   let target = r.target
   var actual = state
   if r.stencil.stencilTest:
@@ -294,43 +342,57 @@ proc draw*(p: ShaderProgram, vertices: VertexBuffer, count: int, state = DrawSta
     actual.stencilWrite = r.stencil.stencilWrite
     actual.stencilCompare = r.stencil.stencilCompare
     actual.stencilReference = r.stencil.stencilReference
-  let key: PipelineKey = (actual, (if layout.stride > 0: layout else: p.layout),
+  let key: PipelineKey = (actual, (if layout.stride > 0: p.layoutIndex(layout) else: p.defaultLayout),
     (if target.color != nil: target.color.pixelFormat else: Rgba8),
     (if target.depth != nil: target.depth.pixelFormat else: Depth32f),
     target.color != nil, target.depth != nil, target.renderSamples())
-  if key notin p.pipelines:
+  var pipeline = p.pipelines.getOrDefault(key)
+  if pipeline == nil:
     try:
-      p.pipelines[key] = r.ctx.newPipeline(p.code, key.layout, actual, key.color, key.depth, key.hasColor, key.hasDepth, key.samples)
+      pipeline = r.ctx.newPipeline(p.code, p.layouts[key.layout], actual, key.color, key.depth, key.hasColor, key.hasDepth, key.samples)
+      p.pipelines[key] = pipeline
     except Exception as error:
       raise newException(GpuError, p.label & ": " & error.msg)
   when defined(useVulkan):
-    for uniforms in [p.vertex, p.fragment]:
-      for name in uniforms.layout.textures:
-        let image = p.textures.getOrDefault(name)
-        if image != nil: image.handle.prepareSample()
+    for binding in p.bindings:
+      if binding.image != nil: binding.image.handle.prepareSample()
   var encoder = r.ctx.beginPass(target.driverTarget())
   encoder.applyViewport(r.viewport)
-  encoder.setProgram(p.pipelines[key])
-  for stage, uniforms in [p.vertex, p.fragment]:
-    for i, name in uniforms.layout.textures:
-      let image = p.textures.getOrDefault(name)
-      if image == nil: continue
-      var sampling = image.sampling
-      sampling.comparison = name in p.shadowInputs
-      if sampling notin r.samplers:
-        r.samplers[sampling] = r.ctx.createSampler(sampling)
-      encoder.setTexture(image.handle, (i + (if stage == 0: MaxTextures else: 0)).uint)
-      encoder.setSampler(r.samplers[sampling], (i + (if stage == 0: MaxTextures else: 0)).uint)
+  encoder.setProgram(pipeline)
+  for binding in p.bindings:
+    let image = binding.image
+    if image == nil: continue
+    var sampling = image.sampling
+    sampling.comparison = binding.comparison
+    var sampler = r.samplers.getOrDefault(sampling)
+    if sampler == nil:
+      sampler = r.ctx.createSampler(sampling)
+      r.samplers[sampling] = sampler
+    encoder.setTexture(image.handle, binding.slot.uint)
+    encoder.setSampler(sampler, binding.slot.uint)
   if vertices != nil: encoder.setVertices(vertices.handle, 0, 0)
   r.ctx.bindConstants(encoder, p.vertex, p.fragment)
-  encoder.drawNative(first, count, instanceCount, if indices != nil: indices.handle else: nil, index32, actual)
+  encoder.drawNative(first, count, instanceCount, if indices != nil: indices.handle else: nil, index32, actual, ranges)
   encoder.endPass()
+
+proc drawStream*[T](p: ShaderProgram, values: openArray[T], count: int, state: DrawState) =
+  ## The vertex range belongs to this command list's mapped arena.
+  if count <= 0: return
+  ensureFrame()
+  let r = gpuRenderer
+  if r.stream == nil: r.stream = VertexBuffer()
+  r.ctx.streamVertices(r.stream.handle, values)
+  counted: uploadedBytes += values.len * sizeof(T)
+  draw(p, r.stream, count, state)
 
 proc waitForGpu*() =
   if frameActive():
     gpuRenderer.ctx.finishFrame()
     collect()
     gpuRenderer.ctx.beginFrame()
+  else:
+    gpuRenderer.ctx.finishFrame()
+    collect()
 
 proc captureTargetImage*(target: RenderTarget = nil): Image =
   ensureFrame()
@@ -405,6 +467,7 @@ proc endFrame*(present = true) =
         r.viewport = ivec2(surface.width.int32, surface.height.int32)
         blit(r.frameTarget.color)
         r.ctx.presentSurface(surface, index)
-  r.ctx.finishFrame()
+  if frameActive(): r.ctx.submitFrame()
+  counted: reportGpuCounts()
   collect()
   r.target = r.frameTarget

@@ -33,12 +33,16 @@ type
     placements, pending: seq[PropPlacement]
     dirty: bool
     mesh: seq[float32]      # x y z u v layer nx ny nz r g b
+    when defined(useDirectX) or defined(useVulkan):
+      indices: TerrainBuffer
+      bounds: seq[tuple[first, count, slot: int, box: AABounds]]
     vertexArray, depthVertexArray: TerrainVertexArray
     vertexBuffer: TerrainBuffer
 
   PropPlacement = object
     model: PropModel
     group: int32
+    when defined(useDirectX) or defined(useVulkan): slot: int
     position: Vec3
     rotation: float32
     scale: float32

@@ -3,8 +3,8 @@ when not defined(windows):
   {.error: "Polyworld's DirectX 12 backend requires Windows.".}
 
 import
-  dx12, dx12/context, pixie, vmath,
-  windy, ../native/[allocations, drawtypes, formats, uniforms]
+  std/tables, dx12, dx12/context, pixie, vmath,
+  windy, ../native/[framecounts, allocations, drawtypes, formats, uniforms]
 
 export drawtypes, formats, uniforms
 
@@ -13,20 +13,38 @@ const
   DescriptorCount = 2048
 
 type
+  DescriptorKey = array[2 * MaxTextures, tuple[texture: uint64, sampler: pointer]]
+  DescriptorPage = ref object
+    textures, samplers: ID3D12DescriptorHeap
+    offsets: Table[DescriptorKey, int]
+    recording: uint64
+  FrameStorage = object
+    allocator: ID3D12CommandAllocator
+    constantsList: ID3D12GraphicsCommandList
+    fence: uint64
+    uploadPages, uniformPages: seq[UniformPage]
+    descriptorPages: seq[DescriptorPage]
   GpuContext* = ref object
+    frames: array[2, FrameStorage]
+    slot: int
+    submitted*, completed*: uint64
+    nextImageId: uint64
     when defined(polyworldGpuValidation): infoQueue: pointer
     native: D3D12Context
     resolveList: ID3D12GraphicsCommandList1
     command*: ID3D12GraphicsCommandList
     root: ID3D12RootSignature
-    textures, samplers: ID3D12DescriptorHeap
+    descriptorPage: int
     descriptorSize, samplerSize: uint32
-    cursor: int
-    transient: seq[ID3D12Resource]
-    uniformPages: seq[UniformPage]
+    activeTarget: GpuTarget
+    activePage: DescriptorPage
+    activeProgram: GpuProgram
+    recording: uint64
+    uploadPage, uploadOffset: int
     uniformPage, uniformOffset: int
 
   GpuTexture* = ref object
+    id: uint64
     ctx: GpuContext
     resource: ID3D12Resource
     desc: D3D12_RESOURCE_DESC
@@ -40,7 +58,10 @@ type
   GpuBuffer* = ref object
     ctx: GpuContext
     resource: ID3D12Resource
-    size: int
+    size*, capacity*: int
+    offset: int
+    state: uint32
+    lastCommand: uint64
 
   GpuSampler* = ref object
     desc: D3D12_SAMPLER_DESC
@@ -57,8 +78,9 @@ type
     format*: TextureFormat
 
   UniformPage = object
-    resource: ID3D12Resource
+    resource, local: ID3D12Resource
     mapped: pointer
+    capacity: int
 
   GpuEncoder* = object
     ctx: GpuContext
@@ -68,6 +90,7 @@ type
     samplers: array[2 * MaxTextures, GpuSampler]
     vertex, fragment: GpuConstants
 
+proc closePass(ctx: GpuContext)
 proc finishFrame*(ctx: GpuContext)
 proc beginFrame*(ctx: GpuContext)
 
@@ -131,11 +154,6 @@ proc freeGpu*[T](value: var T) =
   ## Releases a native resource once and clears its owning reference.
   if value == nil:
     return
-  var resume = false
-  when T is GpuTexture or T is GpuBuffer or T is GpuProgram:
-    resume = value.ctx.command != nil
-    value.ctx.finishFrame()
-    let context = value.ctx
   when T is GpuTexture:
     if value.heap != nil:
       value.heap.release()
@@ -151,9 +169,6 @@ proc freeGpu*[T](value: var T) =
     if value.pipeline != nil:
       value.pipeline.release()
       value.pipeline = nil
-  when T is GpuTexture or T is GpuBuffer or T is GpuProgram:
-    if resume:
-      context.beginFrame()
   value = nil
 
 proc heap(ctx: GpuContext, kind, count: uint32,
@@ -168,16 +183,17 @@ proc newGpuContext*(window: windy.Window): GpuContext =
   result = GpuContext()
   when defined(polyworldGpuValidation): enableValidation()
   result.native.initDevice(window.getHwnd(), window.size.x, window.size.y)
+  result.frames[0].allocator = result.native.commandAllocator
+  result.frames[1].allocator = result.native.device.createCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT)
+  for frame in result.frames.mitems:
+    frame.constantsList = result.native.device.createCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, frame.allocator, nil)
+    frame.constantsList.close()
   when defined(polyworldGpuValidation):
     const QueueId = newGuid(0x0742a90b'u32, 0xc387, 0x483f,
       0xb9, 0x46, 0x30, 0xa7, 0xe4, 0xe6, 0x14, 0x58)
     result.infoQueue = queryInterface[pointer](result.native.device, QueueId.addr)
   const List1 = newGuid(0x553103fb'u32, 0x1fe7, 0x4557, 0xbb, 0x38, 0x94, 0x6d, 0x7d, 0x0e, 0x7c, 0xa7)
   result.resolveList = queryInterface[ID3D12GraphicsCommandList1](result.native.commandList, List1.addr)
-  result.textures = result.heap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-    DescriptorCount, true)
-  result.samplers = result.heap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER,
-    DescriptorCount, true)
   result.descriptorSize = result.native.device.getDescriptorHandleIncrementSize(
     D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
   result.samplerSize = result.native.device.getDescriptorHandleIncrementSize(
@@ -214,51 +230,103 @@ proc newGpuContext*(window: windy.Window): GpuContext =
   result.root = result.native.device.createRootSignature(0,
     blob.getBufferPointer(), blob.getBufferSize())
 
+proc awaitFence(ctx: GpuContext, value: uint64) =
+  ctx.completed = ctx.native.fence.getCompletedValue()
+  if ctx.completed < value:
+    ctx.native.fence.setEventOnCompletion(value, cast[pointer](ctx.native.fenceEvent))
+    timedWait: discard WaitForSingleObject(ctx.native.fenceEvent, WAIT_INFINITE)
+    ctx.completed = ctx.native.fence.getCompletedValue()
+
 proc beginFrame*(ctx: GpuContext) =
   ## Starts one command list after the preceding frame completed.
   if ctx == nil or ctx.native.device == nil:
     raise newException(GpuError, "DirectX context has been destroyed")
   if ctx.command != nil:
     raise newException(GpuError, "A DirectX frame is already active")
-  ctx.native.commandAllocator.reset()
-  ctx.native.commandList.reset(ctx.native.commandAllocator, nil)
+  ctx.awaitFence(ctx.frames[ctx.slot].fence)
+  let allocator = ctx.frames[ctx.slot].allocator
+  allocator.reset()
+  ctx.native.commandList.reset(allocator, nil)
   ctx.command = ctx.native.commandList
-  ctx.cursor = 0
+  ctx.activePage = nil
+  ctx.activeProgram = nil
+  ctx.command.setGraphicsRootSignature(ctx.root)
+  inc ctx.recording
+  ctx.uploadPage = 0
+  ctx.uploadOffset = 0
+  ctx.descriptorPage = 0
   ctx.uniformPage = 0
   ctx.uniformOffset = 0
 
-proc finishFrame*(ctx: GpuContext) =
-  ## Submits the list and retains transient uploads until fence completion.
+proc submitFrame*(ctx: GpuContext) =
+  ## Queue one completed list and retire its storage behind a fence.
   if ctx == nil or ctx.command == nil:
     return
+  ctx.closePass()
+  counted: inc submits
   ctx.command.close()
-  var command = cast[ID3D12CommandList](ctx.command)
-  ctx.native.commandQueue.executeCommandLists(1, command.addr)
+  let frame = addr ctx.frames[ctx.slot]
+  var lists = [cast[ID3D12CommandList](ctx.command), cast[ID3D12CommandList](ctx.command)]
+  var listCount = 1'u32
+  if ctx.uniformOffset > 0:
+    # All constants are now final. Copy the occupied pages before executing
+    # the draw list, in the same ExecuteCommandLists call and fence epoch.
+    let uploads = frame.constantsList
+    uploads.reset(frame.allocator, nil)
+    for i in 0 .. ctx.uniformPage:
+      let page = addr frame.uniformPages[i]
+      let bytes = if i == ctx.uniformPage: ctx.uniformOffset else: UniformPageBytes
+      # New buffers start in COPY_DEST. Reused buffers decay to COMMON
+      # between submissions and promote for the copy.
+      uploads.copyBufferRegion(page.local, 0, page.resource, 0, bytes.uint64)
+      var barrier = D3D12_RESOURCE_BARRIER(typ: D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+        data: D3D12_RESOURCE_BARRIER_union(Transition: D3D12_RESOURCE_TRANSITION_BARRIER(
+          pResource: page.local, Subresource: D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+          StateBefore: D3D12_RESOURCE_STATE_COPY_DEST, StateAfter: D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER)))
+      uploads.resourceBarrier(1, barrier.addr)
+    uploads.close()
+    lists[0] = cast[ID3D12CommandList](uploads)
+    listCount = 2
+  ctx.native.commandQueue.executeCommandLists(listCount, lists[0].addr)
   ctx.command = nil
-  ctx.native.waitForGpu()
+  ctx.submitted = ctx.native.fenceValue
+  inc ctx.native.fenceValue
+  ctx.native.commandQueue.signal(ctx.native.fence, ctx.submitted)
+  ctx.frames[ctx.slot].fence = ctx.submitted
+  ctx.slot = (ctx.slot + 1) mod ctx.frames.len
   ctx.native.device.getDeviceRemovedReason()
-  for resource in ctx.transient:
-    resource.release()
-  ctx.transient.setLen(0)
   ctx.checkValidation()
+
+proc finishFrame*(ctx: GpuContext) =
+  if ctx == nil: return
+  ctx.submitFrame()
+  ctx.awaitFence(ctx.submitted)
 
 proc destroy*(ctx: GpuContext) =
   ## Finishes submitted work before releasing its native context.
   if ctx == nil or ctx.native.device == nil:
     return
   ctx.finishFrame()
-  for page in ctx.uniformPages.mitems:
-    page.resource.unmap(0, nil)
-    page.resource.release()
-  ctx.uniformPages.setLen(0)
+  for frame in ctx.frames.mitems:
+    for page in frame.uploadPages:
+      page.resource.unmap(0, nil)
+      page.resource.release()
+    frame.constantsList.release()
+    for page in frame.uniformPages:
+      page.local.release()
+      page.resource.unmap(0, nil)
+      page.resource.release()
+    for page in frame.descriptorPages:
+      page.textures.release()
+      page.samplers.release()
+  ctx.frames[1].allocator.release()
   when defined(polyworldGpuValidation): ctx.infoQueue.release()
   ctx.resolveList.release()
   ctx.root.release()
-  ctx.textures.release()
-  ctx.samplers.release()
   ctx.native.cleanup()
 
 proc buffer(ctx: GpuContext, size: int, kind: uint32): ID3D12Resource =
+  counted: inc bufferCreates
   ## Allocates host-visible upload or readback storage.
   var
     heap = D3D12_HEAP_PROPERTIES(typ: kind,
@@ -268,7 +336,7 @@ proc buffer(ctx: GpuContext, size: int, kind: uint32): ID3D12Resource =
       MipLevels: 1, SampleDesc: DXGI_SAMPLE_DESC(Count: 1),
       Layout: D3D12_TEXTURE_LAYOUT_ROW_MAJOR)
   result = ctx.native.device.createCommittedResource(heap.addr, 0, desc.addr,
-    (if kind == D3D12_HEAP_TYPE_READBACK: D3D12_RESOURCE_STATE_COPY_DEST
+    (if kind != D3D12_HEAP_TYPE_UPLOAD: D3D12_RESOURCE_STATE_COPY_DEST
       else: D3D12_RESOURCE_STATE_GENERIC_READ), nil)
 
 proc uploadUniform(ctx: GpuContext, data: GpuConstants): uint64 =
@@ -276,41 +344,84 @@ proc uploadUniform(ctx: GpuContext, data: GpuConstants): uint64 =
   let
     bytes = data.words.len * sizeof(uint32)
     reserved = alignedBytes(max(1, bytes), 256)
-  if reserved > UniformPageBytes:
+  if reserved > 64 * 1024:
     raise newException(GpuError, "DirectX uniform block exceeds 64 KiB")
   if ctx.uniformOffset + reserved > UniformPageBytes:
     inc ctx.uniformPage
     ctx.uniformOffset = 0
-  if ctx.uniformPage >= MaxUniformPages:
-    raise newException(GpuError, "DirectX uniform arena capacity exceeded")
-  if ctx.uniformPage == ctx.uniformPages.len:
-    var page = UniformPage(resource:
-      ctx.buffer(UniformPageBytes, D3D12_HEAP_TYPE_UPLOAD))
+  if ctx.uniformPage == ctx.frames[ctx.slot].uniformPages.len:
+    var page = UniformPage(resource: ctx.buffer(UniformPageBytes, D3D12_HEAP_TYPE_UPLOAD))
     try:
       page.resource.map(0, nil, page.mapped.addr)
+      page.local = ctx.buffer(UniformPageBytes, D3D12_HEAP_TYPE_DEFAULT)
     except Exception:
       page.resource.release()
       raise
-    ctx.uniformPages.add(page)
+    ctx.frames[ctx.slot].uniformPages.add(page)
   let
-    page = ctx.uniformPages[ctx.uniformPage]
+    page = ctx.frames[ctx.slot].uniformPages[ctx.uniformPage]
     destination = cast[pointer](cast[uint](page.mapped) + ctx.uniformOffset.uint)
-  zeroMem(destination, reserved)
   if bytes > 0:
     copyMem(destination, data.words[0].unsafeAddr, bytes)
-  result = page.resource.getGPUVirtualAddress() + ctx.uniformOffset.uint64
+  result = page.local.getGPUVirtualAddress() + ctx.uniformOffset.uint64
   ctx.uniformOffset += reserved
 
-proc uploadBuffer*[T](ctx: GpuContext, values: openArray[T]): GpuBuffer =
-  ## Copies reusable vertex values into an immutable upload allocation.
-  if values.len == 0:
-    return nil
-  result = GpuBuffer(ctx: ctx, size: values.len * sizeof(T),
-    resource: ctx.buffer(values.len * sizeof(T), D3D12_HEAP_TYPE_UPLOAD))
-  var mapped: pointer
-  result.resource.map(0, nil, mapped.addr)
-  copyMem(mapped, values[0].unsafeAddr, values.len * sizeof(T))
-  result.resource.unmap(0, nil)
+proc uploadSlice(ctx: GpuContext, bytes, alignment: int): tuple[resource: ID3D12Resource, mapped: pointer, offset: int] =
+  var offset = alignedBytes(ctx.uploadOffset, alignment)
+  while ctx.uploadPage < ctx.frames[ctx.slot].uploadPages.len and offset + bytes > ctx.frames[ctx.slot].uploadPages[ctx.uploadPage].capacity:
+    inc ctx.uploadPage
+    offset = 0
+  if ctx.uploadPage == ctx.frames[ctx.slot].uploadPages.len:
+    let capacity = max(4 * 1024 * 1024, alignedBytes(bytes, 65536))
+    var page = UniformPage(resource: ctx.buffer(capacity, D3D12_HEAP_TYPE_UPLOAD), capacity: capacity)
+    page.resource.map(0, nil, page.mapped.addr)
+    ctx.frames[ctx.slot].uploadPages.add page
+  let page = ctx.frames[ctx.slot].uploadPages[ctx.uploadPage]
+  ctx.uploadOffset = offset + bytes
+  (page.resource, cast[pointer](cast[uint](page.mapped) + offset.uint), offset)
+
+proc streamVertices*[T](ctx: GpuContext, view: var GpuBuffer, values: openArray[T]) =
+  let bytes = values.len * sizeof(T)
+  let slice = ctx.uploadSlice(bytes, 16)
+  copyMem(slice.mapped, values[0].unsafeAddr, bytes)
+  if view == nil: view = GpuBuffer(ctx: ctx)
+  view.resource = slice.resource
+  view.offset = slice.offset
+  view.size = bytes
+
+proc writeBuffer*[T](buffer: GpuBuffer, values: openArray[T]) =
+  let ctx = buffer.ctx
+  let bytes = values.len * sizeof(T)
+  buffer.size = bytes
+  if bytes == 0: return
+  let ownFrame = ctx.command == nil
+  if ownFrame: ctx.beginFrame()
+  let upload = ctx.uploadSlice(bytes, 16)
+  copyMem(upload.mapped, values[0].unsafeAddr, bytes)
+  # Buffers decay to COMMON at the end of each submitted command list.
+  let before = if buffer.lastCommand == ctx.recording: buffer.state else: D3D12_RESOURCE_STATE_COMMON
+  template transition(a, b: uint32) =
+    var barrier = D3D12_RESOURCE_BARRIER(typ: D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+      data: D3D12_RESOURCE_BARRIER_union(Transition: D3D12_RESOURCE_TRANSITION_BARRIER(
+        pResource: buffer.resource, Subresource: D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+        StateBefore: a, StateAfter: b)))
+    ctx.command.resourceBarrier(1, barrier.addr)
+  if before != D3D12_RESOURCE_STATE_COPY_DEST: transition(before, D3D12_RESOURCE_STATE_COPY_DEST)
+  ctx.command.copyBufferRegion(buffer.resource, 0, upload.resource, upload.offset.uint64, bytes.uint64)
+  buffer.state = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER or D3D12_RESOURCE_STATE_INDEX_BUFFER
+  buffer.lastCommand = ctx.recording
+  transition(D3D12_RESOURCE_STATE_COPY_DEST, buffer.state)
+  if ownFrame: ctx.finishFrame()
+
+proc uploadBuffer*[T](ctx: GpuContext, values: openArray[T], capacity = 0): GpuBuffer =
+  if values.len == 0: return nil
+  let bytes = max(capacity, values.len * sizeof(T))
+  let ownFrame = ctx.command == nil
+  if ownFrame: ctx.beginFrame()
+  result = GpuBuffer(ctx: ctx, capacity: bytes, lastCommand: ctx.recording,
+    state: D3D12_RESOURCE_STATE_COPY_DEST, resource: ctx.buffer(bytes, D3D12_HEAP_TYPE_DEFAULT))
+  result.writeBuffer(values)
+  if ownFrame: ctx.finishFrame()
 
 proc transition(texture: GpuTexture, state: uint32) =
   if texture.state == state: return
@@ -318,6 +429,7 @@ proc transition(texture: GpuTexture, state: uint32) =
     data: D3D12_RESOURCE_BARRIER_union(Transition: D3D12_RESOURCE_TRANSITION_BARRIER(
       pResource: texture.resource, Subresource: D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
       StateBefore: texture.state, StateAfter: state)))
+  counted: inc barriers
   texture.ctx.command.resourceBarrier(1, barrier.addr)
   texture.state = state
 
@@ -340,23 +452,21 @@ proc uploadLevel*(texture: GpuTexture, layer, level, width, height, bytesPerPixe
     rowSize, total: uint64
   ctx.native.device.getCopyableFootprints(desc.addr, subresource.uint32, 1, 0,
     footprint.addr, rows.addr, rowSize.addr, total.addr)
-  let upload = ctx.buffer(total.int, D3D12_HEAP_TYPE_UPLOAD)
-  ctx.transient.add(upload)
-  var mapped: pointer
-  upload.map(0, nil, mapped.addr)
-  zeroMem(mapped, total.int)
+  ctx.closePass()
+  let upload = ctx.uploadSlice(total.int, 512)
+  let mapped = upload.mapped
   for y in 0 ..< height:
     copyMem(cast[pointer](cast[uint](mapped) +
       footprint.Offset.uint + y.uint * footprint.Footprint.RowPitch.uint),
       cast[pointer](cast[uint](data) + (y * width * bytesPerPixel).uint),
       width * bytesPerPixel)
-  upload.unmap(0, nil)
+  footprint.Offset += upload.offset.uint64
   texture.transition(D3D12_RESOURCE_STATE_COPY_DEST)
   var
     destination = D3D12_TEXTURE_COPY_LOCATION(pResource: texture.resource,
       typ: D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
       data: D3D12_TEXTURE_COPY_LOCATION_UNION(SubresourceIndex: subresource.uint32))
-    source = D3D12_TEXTURE_COPY_LOCATION(pResource: upload,
+    source = D3D12_TEXTURE_COPY_LOCATION(pResource: upload.resource,
       typ: D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT,
       data: D3D12_TEXTURE_COPY_LOCATION_UNION(PlacedFootprint: footprint))
   ctx.command.copyTextureRegion(destination.addr, 0, 0, 0, source.addr, nil)
@@ -371,7 +481,9 @@ proc newTexture*(ctx: GpuContext, width, height: int,
   if width < 1 or height < 1 or width > 16384 or height > 16384 or
     width.int64 * height.int64 * format.pixelBytes > 512 * 1024 * 1024:
       raise newException(GpuError, "DirectX texture dimensions exceed limits")
-  result = GpuTexture(ctx: ctx, width: width, height: height, layers: layers, arrayTexture: arrayTexture, cube: cube,
+  counted: inc textureCreates
+  inc ctx.nextImageId
+  result = GpuTexture(ctx: ctx, id: ctx.nextImageId, width: width, height: height, layers: layers, arrayTexture: arrayTexture, cube: cube,
     mipLevels: mipLevels, format: format)
   var
     heap = D3D12_HEAP_PROPERTIES(typ: D3D12_HEAP_TYPE_DEFAULT,
@@ -411,6 +523,10 @@ proc beginPass*(ctx: GpuContext, target: GpuTarget,
   if not ctx.owns(target) or ctx.command == nil:
     raise newException(GpuError, "A DirectX frame and target are required")
   result = GpuEncoder(ctx: ctx, target: target)
+  if ctx.activeTarget == target and not (clearColor or clearDepth or clearStencil): return
+  ctx.closePass()
+  ctx.activeTarget = target
+  counted: inc passCount
   var
     rtv: D3D12_CPU_DESCRIPTOR_HANDLE
     dsv: D3D12_CPU_DESCRIPTOR_HANDLE
@@ -436,21 +552,24 @@ proc beginPass*(ctx: GpuContext, target: GpuTarget,
     let flags = uint32(clearDepth) or (uint32(clearStencil and target.depth.format == DepthStencil) shl 1)
     ctx.command.clearDepthStencilView(dsv, flags, 1, 0, 0, nil)
 
-proc endPass*(encoder: GpuEncoder) =
-  ## Ends the logical pass before a subsequent target transition.
-  let t = encoder.target
+proc closePass(ctx: GpuContext) =
+  let t = ctx.activeTarget
+  ctx.activeTarget = GpuTarget()
   if t.resolveColor != nil:
     t.texture.transition(D3D12_RESOURCE_STATE_RESOLVE_SOURCE)
     t.resolveColor.transition(D3D12_RESOURCE_STATE_RESOLVE_DEST)
-    encoder.ctx.command.resolveSubresource(t.resolveColor.resource, 0, t.texture.resource, 0, t.format.nativeFormat)
+    ctx.command.resolveSubresource(t.resolveColor.resource, 0, t.texture.resource, 0, t.format.nativeFormat)
   if t.resolveDepth != nil:
     t.depth.transition(D3D12_RESOURCE_STATE_RESOLVE_SOURCE)
     t.resolveDepth.transition(D3D12_RESOURCE_STATE_RESOLVE_DEST)
-    encoder.ctx.resolveList.resolveSubresourceRegion(t.resolveDepth.resource, 0, 0, 0,
+    ctx.resolveList.resolveSubresourceRegion(t.resolveDepth.resource, 0, 0, 0,
       t.depth.resource, 0, nil, (if t.depth.format == DepthStencil: DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS else: DXGI_FORMAT_R32_FLOAT), D3D12_RESOLVE_MODE_MIN)
     if t.depth.format == DepthStencil:
-      encoder.ctx.resolveList.resolveSubresourceRegion(t.resolveDepth.resource, 1, 0, 0,
+      ctx.resolveList.resolveSubresourceRegion(t.resolveDepth.resource, 1, 0, 0,
         t.depth.resource, 1, nil, DXGI_FORMAT_X32_TYPELESS_G8X24_UINT, D3D12_RESOLVE_MODE_MAX)
+
+proc endPass*(encoder: GpuEncoder) =
+  discard # Resolve once when the target is consumed or replaced.
 
 proc createSampler*(ctx: GpuContext, state: SamplerState): GpuSampler =
   const address = [D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_WRAP,
@@ -532,8 +651,9 @@ proc newPipeline*(ctx: GpuContext, code: ProgramCode, layout: VertexLayout,
 proc setProgram*(encoder: var GpuEncoder, program: GpuProgram) =
   ## Selects one immutable native pipeline for subsequent draws.
   encoder.program = program
+  if program == encoder.ctx.activeProgram: return
+  encoder.ctx.activeProgram = program
   encoder.ctx.command.setPipelineState(program.pipeline)
-  encoder.ctx.command.setGraphicsRootSignature(encoder.ctx.root)
   encoder.ctx.command.iaSetPrimitiveTopology(program.topology)
 
 proc setTexture*(encoder: var GpuEncoder, texture: GpuTexture, index: uint) =
@@ -544,11 +664,20 @@ proc setSampler*(encoder: var GpuEncoder, sampler: GpuSampler, index: uint) =
   ## Records the sampler for the next draw's descriptor table.
   encoder.samplers[index] = sampler
 
+proc markRead(buffer: GpuBuffer, state: uint32) =
+  # A buffer promotes from COMMON on its first read of a new command list.
+  if buffer.lastCommand != buffer.ctx.recording:
+    buffer.lastCommand = buffer.ctx.recording
+    buffer.state = state
+  else:
+    buffer.state = buffer.state or state
+
 proc setVertices*(encoder: GpuEncoder, buffer: GpuBuffer, offset, index: int) =
+  buffer.markRead(D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER)
   ## Binds the pipeline's tightly packed reusable vertex stream.
   let stride = encoder.program.stride
   var view = D3D12_VERTEX_BUFFER_VIEW(
-    BufferLocation: buffer.resource.getGPUVirtualAddress() + offset.uint64,
+    BufferLocation: buffer.resource.getGPUVirtualAddress() + (buffer.offset + offset).uint64,
     SizeInBytes: (buffer.size - offset).uint32,
     StrideInBytes: stride.uint32)
   encoder.ctx.command.iaSetVertexBuffers(0, 1, view.addr)
@@ -559,66 +688,92 @@ proc bindConstants*(ctx: GpuContext, encoder: var GpuEncoder,
   encoder.vertex = vertex
   encoder.fragment = fragment
 
-proc drawNative*(encoder: GpuEncoder, first, count, instances: int, indices: GpuBuffer, index32: bool, state: DrawState) =
+proc drawNative*(encoder: GpuEncoder, first, count, instances: int, indices: GpuBuffer, index32: bool, state: DrawState, ranges: openArray[IndexRange]) =
   ## Binds bounded descriptors and immutable uniforms before a native draw.
   let ctx = encoder.ctx
-  if ctx.cursor + 2 * MaxTextures > DescriptorCount:
-    raise newException(GpuError, "DirectX frame descriptor capacity exceeded")
-  var heaps = [ctx.textures, ctx.samplers]
-  ctx.command.setDescriptorHeaps(2, heaps[0].addr)
+  var key: DescriptorKey
+  for i in 0 ..< key.len:
+    let texture = encoder.textures[i]
+    if texture != nil:
+      texture.transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE or D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)
+      key[i] = (texture.id, cast[pointer](encoder.samplers[i]))
+  while ctx.descriptorPage < ctx.frames[ctx.slot].descriptorPages.len:
+    let page = ctx.frames[ctx.slot].descriptorPages[ctx.descriptorPage]
+    if page.offsets.len < DescriptorCount div key.len or key in page.offsets: break
+    if page.recording != ctx.recording:
+      page.offsets.clear() # This slot's fence retired the previous contents.
+      break
+    inc ctx.descriptorPage
+  if ctx.descriptorPage == ctx.frames[ctx.slot].descriptorPages.len:
+    ctx.frames[ctx.slot].descriptorPages.add DescriptorPage(
+      textures: ctx.heap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, DescriptorCount, true),
+      samplers: ctx.heap(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, DescriptorCount, true))
+  let page = ctx.frames[ctx.slot].descriptorPages[ctx.descriptorPage]
+  page.recording = ctx.recording
+  if page != ctx.activePage:
+    var heaps = [page.textures, page.samplers]
+    ctx.command.setDescriptorHeaps(2, heaps[0].addr)
+    ctx.activePage = page
   for i, data in [encoder.vertex, encoder.fragment]:
     ctx.command.setGraphicsRootConstantBufferView(i.uint32,
       ctx.uploadUniform(data))
-  for i in 0 ..< 2 * MaxTextures:
-    let texture = encoder.textures[i]
-    if texture == nil:
-      continue
-    texture.transition(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
-    var desc = D3D12_SHADER_RESOURCE_VIEW_DESC(
-      Format: texture.format.nativeFormat,
-      ViewDimension: D3D12_SRV_DIMENSION_TEXTURE2D,
-      Shader4ComponentMapping: D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
-      data: D3D12_SHADER_RESOURCE_VIEW_DESC_UNION(Texture2D:
-        D3D12_TEX2D_SRV(MostDetailedMip: texture.baseMip.uint32,
-          MipLevels: texture.mipLevels.uint32)))
-    case texture.format
-    of DepthStencil: desc.Format = DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS
-    of Depth32f: desc.Format = DXGI_FORMAT_R32_FLOAT
-    else: discard
-    if texture.cube:
-      desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE
-      desc.data.TextureCube = D3D12_TEXCUBE_SRV(MipLevels: texture.mipLevels.uint32)
-    elif texture.arrayTexture:
-      desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY
-      desc.data.Texture2DArray = D3D12_TEX2D_ARRAY_SRV(MipLevels: texture.mipLevels.uint32, ArraySize: texture.layers.uint32)
-    let handle = offsetHandle(ctx.textures.getCPUDescriptorHandleForHeapStart(),
-      ctx.descriptorSize, ctx.cursor + i)
-    ctx.native.device.createShaderResourceView(texture.resource, desc.addr, handle)
-    if encoder.samplers[i] != nil:
-      var sampler = encoder.samplers[i].desc
-      ctx.native.device.createSampler(sampler.addr,
-        offsetHandle(ctx.samplers.getCPUDescriptorHandleForHeapStart(),
-          ctx.samplerSize, ctx.cursor + i))
+  var offset = page.offsets.getOrDefault(key, -1)
+  if offset < 0:
+    offset = page.offsets.len * key.len
+    page.offsets[key] = offset
+    for i in 0 ..< 2 * MaxTextures:
+      let texture = encoder.textures[i]
+      if texture == nil:
+        continue
+      var desc = D3D12_SHADER_RESOURCE_VIEW_DESC(
+        Format: texture.format.nativeFormat,
+        ViewDimension: D3D12_SRV_DIMENSION_TEXTURE2D,
+        Shader4ComponentMapping: D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+        data: D3D12_SHADER_RESOURCE_VIEW_DESC_UNION(Texture2D:
+          D3D12_TEX2D_SRV(MostDetailedMip: texture.baseMip.uint32,
+            MipLevels: texture.mipLevels.uint32)))
+      case texture.format
+      of DepthStencil: desc.Format = DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS
+      of Depth32f: desc.Format = DXGI_FORMAT_R32_FLOAT
+      else: discard
+      if texture.cube:
+        desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE
+        desc.data.TextureCube = D3D12_TEXCUBE_SRV(MipLevels: texture.mipLevels.uint32)
+      elif texture.arrayTexture:
+        desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY
+        desc.data.Texture2DArray = D3D12_TEX2D_ARRAY_SRV(MipLevels: texture.mipLevels.uint32, ArraySize: texture.layers.uint32)
+      let handle = offsetHandle(page.textures.getCPUDescriptorHandleForHeapStart(),
+        ctx.descriptorSize, offset + i)
+      ctx.native.device.createShaderResourceView(texture.resource, desc.addr, handle)
+      if encoder.samplers[i] != nil:
+        var sampler = encoder.samplers[i].desc
+        ctx.native.device.createSampler(sampler.addr,
+          offsetHandle(page.samplers.getCPUDescriptorHandleForHeapStart(),
+            ctx.samplerSize, offset + i))
   var
-    textures = ctx.textures.getGPUDescriptorHandleForHeapStart()
-    samplers = ctx.samplers.getGPUDescriptorHandleForHeapStart()
-  textures.ptrValue += ctx.cursor.uint64 * ctx.descriptorSize.uint64
-  samplers.ptrValue += ctx.cursor.uint64 * ctx.samplerSize.uint64
+    textures = page.textures.getGPUDescriptorHandleForHeapStart()
+    samplers = page.samplers.getGPUDescriptorHandleForHeapStart()
+  textures.ptrValue += offset.uint64 * ctx.descriptorSize.uint64
+  samplers.ptrValue += offset.uint64 * ctx.samplerSize.uint64
   ctx.command.setGraphicsRootDescriptorTable(2, textures)
   ctx.command.setGraphicsRootDescriptorTable(3, samplers)
   textures.ptrValue += MaxTextures.uint64 * ctx.descriptorSize.uint64
   samplers.ptrValue += MaxTextures.uint64 * ctx.samplerSize.uint64
   ctx.command.setGraphicsRootDescriptorTable(4, textures)
   ctx.command.setGraphicsRootDescriptorTable(5, samplers)
-  ctx.cursor += 2 * MaxTextures
   ctx.command.omSetStencilRef(state.stencilReference.uint32)
   if indices == nil:
     ctx.command.drawInstanced(count.uint32, instances.uint32, first.uint32, 0)
   else:
+    indices.markRead(D3D12_RESOURCE_STATE_INDEX_BUFFER)
     var view = D3D12_INDEX_BUFFER_VIEW(BufferLocation: indices.resource.getGPUVirtualAddress(),
       SizeInBytes: indices.size.uint32, Format: (if index32: DXGI_FORMAT_R32_UINT else: DXGI_FORMAT_R16_UINT))
     ctx.command.iaSetIndexBuffer(view.addr)
-    ctx.command.drawIndexedInstanced(count.uint32, instances.uint32, first.uint32, 0, 0)
+    if ranges.len == 0:
+      ctx.command.drawIndexedInstanced(count.uint32, instances.uint32, first.uint32, 0, 0)
+    else:
+      for span in ranges:
+        ctx.command.drawIndexedInstanced(span.count.uint32, instances.uint32, span.first.uint32, 0, 0)
 
 proc readImage*(ctx: GpuContext, target: GpuTarget): Image =
   ## Reads completed premultiplied RGBA8 rows without a presentation surface.
@@ -659,6 +814,7 @@ proc readImage*(ctx: GpuContext, target: GpuTarget): Image =
         y.uint * footprint.Footprint.RowPitch.uint), target.width * 4)
 
 proc copyPixels*(source, destination: GpuTexture) =
+  source.ctx.closePass()
   source.transition(D3D12_RESOURCE_STATE_COPY_SOURCE)
   destination.transition(D3D12_RESOURCE_STATE_COPY_DEST)
   source.ctx.command.copyResource(destination.resource, source.resource)
@@ -672,9 +828,9 @@ proc present*(ctx: GpuContext, frame: GpuTexture, window: windy.Window) =
     state: D3D12_RESOURCE_STATE_PRESENT, mipLevels: 1)
   frame.copyPixels(buffer)
   buffer.transition(D3D12_RESOURCE_STATE_PRESENT)
-  ctx.finishFrame()
+  ctx.submitFrame()
   ctx.native.swapChain.present(if window.vsync: 1 else: 0, 0)
-  ctx.native.moveToNextFrame()
+  ctx.native.currentFrame = ctx.native.swapChain.getCurrentBackBufferIndex().int
 
 proc applyViewport*(encoder: GpuEncoder, size: IVec2) =
   var viewport = D3D12_VIEWPORT(Width: size.x.float32, Height: size.y.float32, MaxDepth: 1)
@@ -687,9 +843,6 @@ proc copyMip*(source, dest: GpuTexture, level: int) =
   var b = D3D12_TEXTURE_COPY_LOCATION(pResource: dest.resource, typ: D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
     data: D3D12_TEXTURE_COPY_LOCATION_UNION(SubresourceIndex: level.uint32))
   source.ctx.command.copyTextureRegion(b.addr, 0, 0, 0, a.addr, nil)
-
-proc needsSubmission*(ctx: GpuContext): bool =
-  ctx.cursor + 2 * MaxTextures > DescriptorCount
 
 proc sampleCount*(ctx: GpuContext, requested: int, color, depth: TextureFormat, hasColor = true, hasDepth = true): int =
   if requested <= 1: return 1

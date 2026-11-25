@@ -122,3 +122,13 @@ measurement. The separate `interval_ms` series records start-to-start cadence
 with those waits included and the same per-frame GPU synchronization. The report
 pools samples across launches and includes each launch’s mean for comparison. WebGL uses the game's normal browser asset pack. Per-run JSON in
 `tmp/livetest/benchmarks` retains each sample and the browser GPU identity.
+
+For Gods of the Arena alone, use `build gota all`, `run gota all 3 arena`,
+and `nim r tools/bench_report.nim arena 3 gota`. The report includes mean,
+median, and 95th-percentile frame times in milliseconds.
+
+Set `BENCH_PIPELINED=1` before the build to measure normal presentation.
+Use a new run ID. This mode drains outstanding GPU work at the end of warmup
+and at the end of measurement. The mean frame interval includes every measured
+presentation and the final drain. The fourth argument to the report selects
+backends, for example `nim r tools/bench_report.nim arena-present 3 gota OpenGL,DirectX,Vulkan`.

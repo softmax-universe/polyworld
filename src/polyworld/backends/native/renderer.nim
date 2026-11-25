@@ -18,7 +18,6 @@ type
 var
   atlasViews: Table[pointer, tuple[image: Image, entries: int, texture: GpuImage]]
   uiProgram: ShaderProgram
-  uiBuffer: VertexBuffer
 
 proc initRenderer*(window: Window, samples = 1) =
   initNative(window)
@@ -29,7 +28,6 @@ proc shutdownRenderer*() =
   shutdownNative()
   atlasViews.clear()
   uiProgram = nil
-  uiBuffer = nil
 
 proc newGameUi*(window: Window, atlasPath: string): Silky =
   newSilky(window, atlasPath, uiDrawer.Drawer())
@@ -57,12 +55,10 @@ proc drawUiLayer*(sk: Silky, vertices: openArray[DrawerVertex], size: Vec2, scal
         VertexAttribute(name: "clipPos", format: Float2, offset: offsetOf(DrawerVertex, clipPos)),
         VertexAttribute(name: "clipSize", format: Float2, offset: offsetOf(DrawerVertex, clipSize)),
         VertexAttribute(name: "maskUv", format: Float2, offset: offsetOf(DrawerVertex, maskUv))]))
-  if uiBuffer == nil: uiBuffer = newBuffer(vertices)
-  else: uiBuffer.updateBuffer(vertices)
   uiProgram.setUniform("viewportSize", size / scale)
   uiProgram.setUniform("atlasSize", sk.atlasImageSize().vec2)
   uiProgram.bindTexture("atlasSampler", sk.atlasTexture())
-  draw(uiProgram, uiBuffer, vertices.len, DrawState(blend: PremultipliedAlpha))
+  drawStream(uiProgram, vertices, vertices.len, DrawState(blend: PremultipliedAlpha))
 
 proc setRenderViewport*(size: IVec2) =
   ## Sets the viewport for the current and subsequent render encoders.

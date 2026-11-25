@@ -1,6 +1,6 @@
 import
   vk14, vk14/context, pixie, vmath,
-  windy, ../native/[allocations, drawtypes, formats, uniforms]
+  windy, ../native/[framecounts, allocations, drawtypes, formats, uniforms]
 
 export drawtypes, formats, uniforms
 
@@ -9,7 +9,22 @@ const
   MaxDraws = 2048
 
 type
+  DrawDescriptors = object
+    sets: array[3, VkDescriptorSet]
+    images: array[2 * MaxTextures, tuple[id: uint64, sampler: int64]]
+    constants: array[2, VkDescriptorBufferInfo]
+  FrameStorage = object
+    serial: uint64
+    uploadPages, uniformPages, transient: seq[GpuBuffer]
+    drawSets: seq[DrawDescriptors]
+    descriptorPools: seq[VkDescriptorPool]
   GpuContext* = ref object
+    frames: array[2, FrameStorage]
+    slot: int
+    submitted*, completed*: uint64
+    nextImageId: uint64
+    surfaces: seq[GpuTexture]
+    presentReady: seq[VkSemaphore]
     presentation: VulkanContext
     instance: VkInstance
     physical: VkPhysicalDevice
@@ -18,14 +33,13 @@ type
     pool: VkCommandPool
     buffer: VkCommandBuffer
     command*: pointer
-    descriptorPool: VkDescriptorPool
+    inPass: bool
+    activeTarget: GpuTarget
     textureLayout, uniformLayout: VkDescriptorSetLayout
     layout: VkPipelineLayout
     memory: VkPhysicalDeviceMemoryProperties
-    transient: seq[GpuBuffer]
-    uniformPages: seq[GpuBuffer]
+    uploadPage, uploadOffset: int
     uniformPage, uniformOffset, uniformAlignment, uniformRange: int
-    drawSets: seq[array[3, VkDescriptorSet]]
     drawCursor: int
 
   GpuBuffer* = ref object
@@ -33,9 +47,12 @@ type
     buffer: VkBuffer
     memory: VkDeviceMemory
     mapped: pointer
-    size: int
+    size*, capacity*: int
+    offset: int
+    indexBytes: seq[byte]
 
   GpuTexture* = ref object
+    id: uint64
     ctx: GpuContext
     image: VkImage
     memory: VkDeviceMemory
@@ -45,6 +62,7 @@ type
     format*: TextureFormat
     layers*: int
     arrayTexture*, cube*: bool
+    surface: bool
 
   GpuSampler* = ref object
     ctx: GpuContext
@@ -66,6 +84,12 @@ type
     textures: array[2 * MaxTextures, GpuTexture]
     samplers: array[2 * MaxTextures, GpuSampler]
     vertex, fragment: GpuConstants
+
+proc closePass(ctx: GpuContext) =
+  if ctx.inPass:
+    vkCmdEndRendering(ctx.buffer)
+    ctx.inPass = false
+    ctx.activeTarget = GpuTarget()
 
 proc finishFrame*(ctx: GpuContext)
 proc beginFrame*(ctx: GpuContext)
@@ -93,10 +117,6 @@ proc freeGpu*[T](value: var T) =
   ## Releases a completed native allocation and clears its owning reference.
   if value == nil:
     return
-  let
-    context = value.ctx
-    resume = context.command != nil
-  value.ctx.finishFrame()
   let device = value.ctx.device
   when T is GpuTexture:
     if int64(value.view) != 0:
@@ -120,8 +140,6 @@ proc freeGpu*[T](value: var T) =
     vkDestroyPipeline(device, value.pipeline, nil)
   elif T is GpuSampler:
     vkDestroySampler(device, value.sampler, nil)
-  if resume:
-    context.beginFrame()
   value = nil
 
 proc newGpuContext*(window: windy.Window): GpuContext =
@@ -131,7 +149,6 @@ proc newGpuContext*(window: windy.Window): GpuContext =
   result.physical = result.presentation.physicalDevice
   result.device = result.presentation.device
   result.queue = result.presentation.graphicsQueue
-  result.buffer = result.presentation.commandBuffers[0]
   var properties: VkPhysicalDeviceProperties
   vkGetPhysicalDeviceProperties(result.physical, properties.addr)
   result.uniformAlignment = max(1, properties.limits.minUniformBufferOffsetAlignment.int)
@@ -165,6 +182,11 @@ proc newGpuContext*(window: windy.Window): GpuContext =
     pipeline = VkPipelineLayoutCreateInfo(
       sType: VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
       setLayoutCount: 3, pSetLayouts: layouts[0].addr)
+  vkCreatePipelineLayout(result.device, pipeline.addr, nil,
+    result.layout.addr).checked("Create pipeline layout")
+
+proc descriptorPool(ctx: GpuContext): VkDescriptorPool =
+  var
     sizes = [VkDescriptorPoolSize(`type`:
       VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, descriptorCount: MaxDraws * MaxTextures * 2),
       VkDescriptorPoolSize(`type`: VK_DESCRIPTOR_TYPE_SAMPLER, descriptorCount: MaxDraws * MaxTextures * 2),
@@ -173,10 +195,17 @@ proc newGpuContext*(window: windy.Window): GpuContext =
     descriptors = VkDescriptorPoolCreateInfo(
       sType: VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
       maxSets: MaxDraws * 3, poolSizeCount: 3, pPoolSizes: sizes[0].addr)
-  vkCreatePipelineLayout(result.device, pipeline.addr, nil,
-    result.layout.addr).checked("Create pipeline layout")
-  vkCreateDescriptorPool(result.device, descriptors.addr, nil,
-    result.descriptorPool.addr).checked("Create descriptor pool")
+  vkCreateDescriptorPool(ctx.device, descriptors.addr, nil, result.addr).checked("Create descriptor pool")
+
+proc awaitSlot(ctx: GpuContext, slot: int) =
+  let serial = ctx.frames[slot].serial
+  if serial > ctx.completed:
+    let fence = ctx.presentation.inFlightFences[slot]
+    let status = vkGetFenceStatus(ctx.device, fence)
+    if status == VK_NOT_READY:
+      timedWait: vkWaitForFences(ctx.device, 1, fence.unsafeAddr, VK_TRUE, uint64.high).checked("Wait for frame storage")
+    else: status.checked("Read frame fence")
+    ctx.completed = serial
 
 proc beginFrame*(ctx: GpuContext) =
   ## Resets reusable command and descriptor storage after GPU completion.
@@ -184,29 +213,56 @@ proc beginFrame*(ctx: GpuContext) =
     raise newException(GpuError, "Vulkan context has been destroyed")
   if ctx.command != nil:
     raise newException(GpuError, "A Vulkan frame is already active")
+  ctx.awaitSlot(ctx.slot)
+  for buffer in ctx.frames[ctx.slot].transient.mitems: buffer.freeGpu()
+  ctx.frames[ctx.slot].transient.setLen(0)
+  ctx.buffer = ctx.presentation.commandBuffers[ctx.slot]
   vkResetCommandBuffer(ctx.buffer, VkCommandBufferResetFlags(0)).checked("Reset command buffer")
   ctx.uniformPage = 0
   ctx.uniformOffset = 0
   ctx.drawCursor = 0
+  ctx.uploadPage = 0
+  ctx.uploadOffset = 0
   var info = VkCommandBufferBeginInfo(
     sType: VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
     flags: VkCommandBufferUsageFlags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT))
   vkBeginCommandBuffer(ctx.buffer, info.addr).checked("Begin command buffer")
   ctx.command = cast[pointer](ctx.buffer)
 
-proc finishFrame*(ctx: GpuContext) =
-  ## Submits the recorded frame and checks completion before freeing uploads.
+proc submitFrame*(ctx: GpuContext, acquired = VkSemaphore(0), ready = VkSemaphore(0)) =
   if ctx == nil or ctx.command == nil:
     return
+  ctx.closePass()
   vkEndCommandBuffer(ctx.buffer).checked("End command buffer")
   var submit = VkSubmitInfo(sType: VK_STRUCTURE_TYPE_SUBMIT_INFO,
     commandBufferCount: 1, pCommandBuffers: ctx.buffer.addr)
-  vkQueueSubmit(ctx.queue, 1, submit.addr, VkFence(0)).checked("Submit frame")
+  var waitStage = VkPipelineStageFlags(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT)
+  if int64(acquired) != 0:
+    submit.waitSemaphoreCount = 1
+    submit.pWaitSemaphores = acquired.unsafeAddr
+    submit.pWaitDstStageMask = waitStage.addr
+    submit.signalSemaphoreCount = 1
+    submit.pSignalSemaphores = ready.unsafeAddr
+  let fence = ctx.presentation.inFlightFences[ctx.slot]
+  vkResetFences(ctx.device, 1, fence.unsafeAddr).checked("Reset frame fence")
+  counted: inc submits
+  vkQueueSubmit(ctx.queue, 1, submit.addr, fence).checked("Submit frame")
   ctx.command = nil
-  vkQueueWaitIdle(ctx.queue).checked("Complete frame")
-  for buffer in ctx.transient.mitems:
-    buffer.freeGpu()
-  ctx.transient.setLen(0)
+  inc ctx.submitted
+  ctx.frames[ctx.slot].serial = ctx.submitted
+  ctx.slot = (ctx.slot + 1) mod ctx.frames.len
+
+proc finishFrame*(ctx: GpuContext) =
+  if ctx == nil: return
+  ctx.submitFrame()
+  ctx.awaitSlot((ctx.slot + ctx.frames.len - 1) mod ctx.frames.len)
+
+proc releaseSurface(ctx: GpuContext) =
+  for surface in ctx.surfaces:
+    if surface != nil: vkDestroyImageView(ctx.device, surface.attachment, nil)
+  for semaphore in ctx.presentReady: vkDestroySemaphore(ctx.device, semaphore, nil)
+  ctx.surfaces.setLen(0)
+  ctx.presentReady.setLen(0)
 
 proc destroy*(ctx: GpuContext) =
   ## Completes work before releasing the native queue and device resources.
@@ -214,11 +270,14 @@ proc destroy*(ctx: GpuContext) =
     return
   ctx.finishFrame()
   if int64(ctx.device) != 0:
-    for page in ctx.uniformPages.mitems:
-      page.freeGpu()
-    ctx.uniformPages.setLen(0)
-    ctx.drawSets.setLen(0)
-    vkDestroyDescriptorPool(ctx.device, ctx.descriptorPool, nil)
+    vkDeviceWaitIdle(ctx.device).checked("Drain presentation")
+    ctx.releaseSurface()
+    for frame in ctx.frames.mitems:
+      for page in frame.uploadPages.mitems: page.freeGpu()
+      for page in frame.uniformPages.mitems: page.freeGpu()
+      for buffer in frame.transient.mitems: buffer.freeGpu()
+      for pool in frame.descriptorPools: vkDestroyDescriptorPool(ctx.device, pool, nil)
+      frame = FrameStorage()
     vkDestroyPipelineLayout(ctx.device, ctx.layout, nil)
     vkDestroyDescriptorSetLayout(ctx.device, ctx.textureLayout, nil)
     vkDestroyDescriptorSetLayout(ctx.device, ctx.uniformLayout, nil)
@@ -233,9 +292,10 @@ proc memoryType(ctx: GpuContext, bits, flags: uint32): uint32 =
         return i
   raise newException(GpuError, "No suitable Vulkan memory type")
 
-proc newBuffer(ctx: GpuContext, size: int, usage: uint32): GpuBuffer =
+proc newBuffer(ctx: GpuContext, size: int, usage: uint32, deviceLocal = false, preferMappedLocal = false): GpuBuffer =
+  counted: inc bufferCreates
   ## Allocates coherent mapped storage for vertices, uniforms, or transfers.
-  result = GpuBuffer(ctx: ctx, size: max(16, size))
+  result = GpuBuffer(ctx: ctx, size: max(16, size), capacity: max(16, size))
   var
     info = VkBufferCreateInfo(sType: VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
       size: result.size.uint64, usage: VkBufferUsageFlags(usage))
@@ -245,14 +305,26 @@ proc newBuffer(ctx: GpuContext, size: int, usage: uint32): GpuBuffer =
   vkGetBufferMemoryRequirements(ctx.device, result.buffer, requirements.addr)
   var memory = VkMemoryAllocateInfo(sType: VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
     allocationSize: requirements.size, memoryTypeIndex: ctx.memoryType(
-      requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT or
-      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT))
-  vkAllocateMemory(ctx.device, memory.addr, nil, result.memory.addr).checked(
-    "Allocate buffer memory")
+      requirements.memoryTypeBits, (if deviceLocal: VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+      else: VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT or VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)))
+  if preferMappedLocal:
+    let fallback = memory.memoryTypeIndex
+    let flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT or VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT or VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    for i in 0'u32 ..< ctx.memory.memoryTypeCount:
+      if (requirements.memoryTypeBits and (1'u32 shl i)) != 0 and
+          (ctx.memory.memoryTypes[i].propertyFlags.uint32 and flags) == flags:
+        memory.memoryTypeIndex = i
+        break
+    if vkAllocateMemory(ctx.device, memory.addr, nil, result.memory.addr) != VK_SUCCESS:
+      memory.memoryTypeIndex = fallback
+      vkAllocateMemory(ctx.device, memory.addr, nil, result.memory.addr).checked("Allocate mapped uniform memory")
+  else:
+    vkAllocateMemory(ctx.device, memory.addr, nil, result.memory.addr).checked("Allocate buffer memory")
   vkBindBufferMemory(ctx.device, result.buffer, result.memory, 0).checked(
     "Bind buffer memory")
-  vkMapMemory(ctx.device, result.memory, 0, result.size.uint64, VkMemoryMapFlags(0),
-    result.mapped.addr).checked("Map buffer")
+  if not deviceLocal:
+    vkMapMemory(ctx.device, result.memory, 0, result.size.uint64, VkMemoryMapFlags(0),
+      result.mapped.addr).checked("Map buffer")
 
 proc uploadUniform(ctx: GpuContext, data: GpuConstants): VkDescriptorBufferInfo =
   ## Copies each draw's uniform bytes into a retained device-aligned slice.
@@ -263,45 +335,109 @@ proc uploadUniform(ctx: GpuContext, data: GpuConstants): VkDescriptorBufferInfo 
   if offset + bytes > UniformPageBytes:
     inc ctx.uniformPage
     offset = 0
-  if ctx.uniformPage >= MaxUniformPages:
-    raise newException(GpuError, "Vulkan uniform arena capacity exceeded")
-  if ctx.uniformPage == ctx.uniformPages.len:
-    ctx.uniformPages.add(ctx.newBuffer(UniformPageBytes,
-      VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT))
+  if ctx.uniformPage == ctx.frames[ctx.slot].uniformPages.len:
+    ctx.frames[ctx.slot].uniformPages.add(ctx.newBuffer(UniformPageBytes,
+      VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, preferMappedLocal = true))
   let
-    page = ctx.uniformPages[ctx.uniformPage]
+    page = ctx.frames[ctx.slot].uniformPages[ctx.uniformPage]
     destination = cast[pointer](cast[uint](page.mapped) + offset.uint)
-  zeroMem(destination, bytes)
   if data.words.len > 0:
     copyMem(destination, data.words[0].unsafeAddr, data.words.len * 4)
   result = VkDescriptorBufferInfo(buffer: page.buffer,
     offset: offset.uint64, range: bytes.uint64)
   ctx.uniformOffset = offset + bytes
 
-proc drawDescriptors(ctx: GpuContext): array[3, VkDescriptorSet] =
+proc drawDescriptors(ctx: GpuContext): ptr DrawDescriptors =
   ## Reuses a unique descriptor pair per draw after the preceding frame ends.
-  if ctx.drawCursor >= MaxDraws:
-    raise newException(GpuError, "Vulkan frame descriptor capacity exceeded")
-  if ctx.drawCursor == ctx.drawSets.len:
+  let poolIndex = ctx.drawCursor div MaxDraws
+  if poolIndex == ctx.frames[ctx.slot].descriptorPools.len:
+    ctx.frames[ctx.slot].descriptorPools.add ctx.descriptorPool()
+  if ctx.drawCursor == ctx.frames[ctx.slot].drawSets.len:
     var
       layouts = [ctx.textureLayout, ctx.uniformLayout, ctx.textureLayout]
       sets: array[3, VkDescriptorSet]
       allocate = VkDescriptorSetAllocateInfo(
         sType: VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-        descriptorPool: ctx.descriptorPool, descriptorSetCount: 3,
+        descriptorPool: ctx.frames[ctx.slot].descriptorPools[poolIndex], descriptorSetCount: 3,
         pSetLayouts: layouts[0].addr)
     vkAllocateDescriptorSets(ctx.device, allocate.addr, sets[0].addr).checked(
       "Allocate draw descriptors")
-    ctx.drawSets.add(sets)
-  result = ctx.drawSets[ctx.drawCursor]
+    ctx.frames[ctx.slot].drawSets.add DrawDescriptors(sets: sets)
+  result = addr ctx.frames[ctx.slot].drawSets[ctx.drawCursor]
   inc ctx.drawCursor
 
-proc uploadBuffer*[T](ctx: GpuContext, values: openArray[T]): GpuBuffer =
-  ## Uploads immutable tightly packed geometry without CPU rasterization.
-  if values.len == 0:
-    return nil
-  result = ctx.newBuffer(values.len * sizeof(T), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT or VK_BUFFER_USAGE_INDEX_BUFFER_BIT)
-  copyMem(result.mapped, values[0].unsafeAddr, values.len * sizeof(T))
+proc uploadSlice(ctx: GpuContext, bytes, alignment: int): tuple[buffer: VkBuffer, mapped: pointer, offset: int] =
+  var offset = alignedBytes(ctx.uploadOffset, alignment)
+  while ctx.uploadPage < ctx.frames[ctx.slot].uploadPages.len and offset + bytes > ctx.frames[ctx.slot].uploadPages[ctx.uploadPage].capacity:
+    inc ctx.uploadPage
+    offset = 0
+  if ctx.uploadPage == ctx.frames[ctx.slot].uploadPages.len:
+    ctx.frames[ctx.slot].uploadPages.add ctx.newBuffer(max(4 * 1024 * 1024, alignedBytes(bytes, 65536)), VK_BUFFER_USAGE_TRANSFER_SRC_BIT or VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
+  let page = ctx.frames[ctx.slot].uploadPages[ctx.uploadPage]
+  ctx.uploadOffset = offset + bytes
+  (page.buffer, cast[pointer](cast[uint](page.mapped) + offset.uint), offset)
+
+proc streamVertices*[T](ctx: GpuContext, view: var GpuBuffer, values: openArray[T]) =
+  let bytes = values.len * sizeof(T)
+  let slice = ctx.uploadSlice(bytes, 16)
+  copyMem(slice.mapped, values[0].unsafeAddr, bytes)
+  if view == nil: view = GpuBuffer(ctx: ctx)
+  view.buffer = slice.buffer
+  view.offset = slice.offset
+  view.size = bytes
+
+proc writeBuffer*[T](buffer: GpuBuffer, values: openArray[T]) =
+  let ctx = buffer.ctx
+  let bytes = values.len * sizeof(T)
+  let previousSize = buffer.size
+  buffer.size = bytes
+  if bytes == 0: return
+  when T is SomeInteger:
+    buffer.indexBytes.setLen(bytes)
+    copyMem(buffer.indexBytes[0].addr, values[0].unsafeAddr, bytes)
+  let ownFrame = ctx.command == nil
+  if ownFrame: ctx.beginFrame()
+  ctx.closePass()
+  let upload = ctx.uploadSlice(bytes, 4)
+  copyMem(upload.mapped, values[0].unsafeAddr, bytes)
+  const reads = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT or VK_ACCESS_INDEX_READ_BIT
+  template barrier(srcStage, dstStage, srcAccess, dstAccess: uint32) =
+    var dep = VkBufferMemoryBarrier(sType: VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+      srcAccessMask: VkAccessFlags(srcAccess), dstAccessMask: VkAccessFlags(dstAccess),
+      srcQueueFamilyIndex: VK_QUEUE_FAMILY_IGNORED, dstQueueFamilyIndex: VK_QUEUE_FAMILY_IGNORED,
+      buffer: buffer.buffer, size: VK_WHOLE_SIZE)
+    vkCmdPipelineBarrier(ctx.buffer, VkPipelineStageFlags(srcStage), VkPipelineStageFlags(dstStage),
+      VkDependencyFlags(0), 0, nil, 1, dep.addr, 0, nil)
+  if previousSize > 0:
+    barrier(VK_PIPELINE_STAGE_VERTEX_INPUT_BIT or VK_PIPELINE_STAGE_TRANSFER_BIT,
+      VK_PIPELINE_STAGE_TRANSFER_BIT, reads or VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT)
+  var region = VkBufferCopy(srcOffset: upload.offset.uint64, size: bytes.uint64)
+  vkCmdCopyBuffer(ctx.buffer, upload.buffer, buffer.buffer, 1, region.addr)
+  barrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, reads)
+  if ownFrame: ctx.finishFrame()
+
+proc uploadBuffer*[T](ctx: GpuContext, values: openArray[T], capacity = 0): GpuBuffer =
+  if values.len == 0: return nil
+  result = ctx.newBuffer(max(capacity, values.len * sizeof(T)), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT or
+    VK_BUFFER_USAGE_INDEX_BUFFER_BIT or VK_BUFFER_USAGE_TRANSFER_DST_BIT, deviceLocal = true)
+  result.size = 0
+  result.writeBuffer(values)
+
+proc scope(layout: VkImageLayout): tuple[stage, access: uint32] =
+  case layout
+  of VK_IMAGE_LAYOUT_UNDEFINED: (VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0'u32)
+  of VK_IMAGE_LAYOUT_PRESENT_SRC_KHR: (VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0'u32)
+  of VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+    (VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_COLOR_ATTACHMENT_READ_BIT or VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT)
+  of VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
+    # Depth/stencil resolves run at the color attachment output stage.
+    (VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT or VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT or VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+      VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT or VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT or VK_ACCESS_COLOR_ATTACHMENT_READ_BIT or VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT)
+  of VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+    (VK_PIPELINE_STAGE_VERTEX_SHADER_BIT or VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT)
+  of VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL: (VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT)
+  of VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL: (VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT)
+  else: (VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_MEMORY_READ_BIT or VK_ACCESS_MEMORY_WRITE_BIT)
 
 proc transition(texture: GpuTexture, layout: VkImageLayout,
   first = 0, count = 0) =
@@ -309,13 +445,17 @@ proc transition(texture: GpuTexture, layout: VkImageLayout,
   let levels = if count == 0: texture.mipLevels else: count
   for level in first ..< first + levels:
     let old = texture.layouts[level]
+    if old == layout and layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL: continue
+    texture.ctx.closePass()
+    let src = if texture.surface and layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+      (stage: VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, access: 0'u32)
+    else: scope(old)
+    let dst = scope(layout)
     # Equal attachment layouts still need write-after-write ordering.
     var barrier = VkImageMemoryBarrier(
       sType: VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
       oldLayout: old, newLayout: layout,
-      srcAccessMask: VkAccessFlags(if old == VK_IMAGE_LAYOUT_UNDEFINED: 0'u32
-        else: VK_ACCESS_MEMORY_READ_BIT or VK_ACCESS_MEMORY_WRITE_BIT),
-      dstAccessMask: VkAccessFlags(VK_ACCESS_MEMORY_READ_BIT or VK_ACCESS_MEMORY_WRITE_BIT),
+      srcAccessMask: VkAccessFlags(src.access), dstAccessMask: VkAccessFlags(dst.access),
       srcQueueFamilyIndex: VK_QUEUE_FAMILY_IGNORED,
       dstQueueFamilyIndex: VK_QUEUE_FAMILY_IGNORED,
       image: texture.image,
@@ -324,8 +464,9 @@ proc transition(texture: GpuTexture, layout: VkImageLayout,
           elif texture.format in {Depth32f, DepthStencil}: VK_IMAGE_ASPECT_DEPTH_BIT
           else: VK_IMAGE_ASPECT_COLOR_BIT),
         baseMipLevel: level.uint32, levelCount: 1, layerCount: texture.layers.uint32))
-    vkCmdPipelineBarrier(texture.ctx.buffer, VkPipelineStageFlags(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT),
-      VkPipelineStageFlags(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT), VkDependencyFlags(0), 0, nil, 0, nil, 1, barrier.addr)
+    counted: inc barriers
+    vkCmdPipelineBarrier(texture.ctx.buffer, VkPipelineStageFlags(src.stage),
+      VkPipelineStageFlags(dst.stage), VkDependencyFlags(0), 0, nil, 0, nil, 1, barrier.addr)
     texture.layouts[level] = layout
 
 proc uploadLevel*(texture: GpuTexture, layer, level, width, height, bytesPerPixel: int, data: pointer) =
@@ -339,12 +480,10 @@ proc uploadLevel*(texture: GpuTexture, layer, level, width, height, bytesPerPixe
   let ownFrame = ctx.command == nil
   if ownFrame:
     ctx.beginFrame()
-  let upload = ctx.newBuffer(width * height * bytesPerPixel,
-    VK_BUFFER_USAGE_TRANSFER_SRC_BIT)
-  ctx.transient.add(upload)
+  let upload = ctx.uploadSlice(width * height * bytesPerPixel, max(4, bytesPerPixel))
   copyMem(upload.mapped, data, width * height * bytesPerPixel)
   texture.transition(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
-  var region = VkBufferImageCopy(imageSubresource: VkImageSubresourceLayers(
+  var region = VkBufferImageCopy(bufferOffset: upload.offset.uint64, imageSubresource: VkImageSubresourceLayers(
     aspectMask: VkImageAspectFlags(VK_IMAGE_ASPECT_COLOR_BIT), mipLevel: level.uint32, baseArrayLayer: layer.uint32, layerCount: 1), imageExtent: VkExtent3D(width: width.uint32, height: height.uint32, depth: 1))
   vkCmdCopyBufferToImage(ctx.buffer, upload.buffer, texture.image,
     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, region.addr)
@@ -366,7 +505,9 @@ proc newTexture*(ctx: GpuContext, width, height: int,
   if width < 1 or height < 1 or width > 16384 or height > 16384 or
     width.int64 * height.int64 * format.pixelBytes > 512 * 1024 * 1024:
       raise newException(GpuError, "Vulkan texture dimensions exceed limits")
-  result = GpuTexture(ctx: ctx, width: width, height: height, layers: layers, arrayTexture: arrayTexture, cube: cube, format: format,
+  counted: inc textureCreates
+  inc ctx.nextImageId
+  result = GpuTexture(ctx: ctx, id: ctx.nextImageId, width: width, height: height, layers: layers, arrayTexture: arrayTexture, cube: cube, format: format,
     mipLevels: mipLevels, layouts: newSeq[VkImageLayout](mipLevels))
   var
     info = VkImageCreateInfo(sType: VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -413,6 +554,10 @@ proc beginPass*(ctx: GpuContext, target: GpuTarget,
   ## Begins dynamic rendering with explicit attachment layouts and load actions.
   if not ctx.owns(target) or ctx.command == nil:
     raise newException(GpuError, "A Vulkan frame and target are required")
+  if ctx.inPass and ctx.activeTarget == target and not (clearColor or clearDepth or clearStencil):
+    return GpuEncoder(ctx: ctx, target: target)
+  ctx.closePass()
+  counted: inc passCount
   if target.texture != nil:
     target.texture.transition(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
   if target.depth != nil:
@@ -455,6 +600,8 @@ proc beginPass*(ctx: GpuContext, target: GpuTarget,
       render.pStencilAttachment = stencilAttachment.addr
     render.pDepthAttachment = depthAttachment.addr
   vkCmdBeginRendering(ctx.buffer, render.addr)
+  ctx.inPass = true
+  ctx.activeTarget = target
   var
     viewport = VkViewport(width: target.width.float32,
       height: target.height.float32, maxDepth: 1)
@@ -465,7 +612,7 @@ proc beginPass*(ctx: GpuContext, target: GpuTarget,
 
 proc endPass*(encoder: GpuEncoder) =
   ## Each subsequent use transitions the attachment to its required layout.
-  vkCmdEndRendering(encoder.ctx.buffer)
+  discard
 
 proc createSampler*(ctx: GpuContext, state: SamplerState): GpuSampler =
   const address = [VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VK_SAMPLER_ADDRESS_MODE_REPEAT,
@@ -501,8 +648,8 @@ proc wireIndices(ctx: GpuContext, source: GpuBuffer, first, count: int,
   proc index(i: int): uint32 =
     let offset = first + i
     if source == nil: return offset.uint32
-    if index32: return cast[ptr UncheckedArray[uint32]](source.mapped)[offset]
-    cast[ptr UncheckedArray[uint16]](source.mapped)[offset].uint32
+    if index32: return cast[ptr UncheckedArray[uint32]](source.indexBytes[0].unsafeAddr)[offset]
+    cast[ptr UncheckedArray[uint16]](source.indexBytes[0].unsafeAddr)[offset].uint32
   var edges = newSeqOfCap[uint32](triangles * 6)
   for triangle in 0 ..< triangles:
     let start = if primitive == Triangles: triangle * 3 else: triangle
@@ -510,8 +657,9 @@ proc wireIndices(ctx: GpuContext, source: GpuBuffer, first, count: int,
     let b = index(start + 1)
     let c = index(start + 2)
     edges.add [a, b, b, c, c, a]
-  result = ctx.uploadBuffer(edges)
-  ctx.transient.add result
+  result = ctx.newBuffer(edges.len * sizeof(uint32), VK_BUFFER_USAGE_INDEX_BUFFER_BIT)
+  copyMem(result.mapped, edges[0].addr, edges.len * sizeof(uint32))
+  ctx.frames[ctx.slot].transient.add result
 
 proc newPipeline*(ctx: GpuContext, code: ProgramCode, layout: VertexLayout,
     state: DrawState, format, depth: TextureFormat, hasColor, hasDepth: bool, samples: int): GpuProgram =
@@ -632,7 +780,7 @@ proc setVertices*(encoder: GpuEncoder, buffer: GpuBuffer, offset, index: int) =
   ## Binds the immutable tightly packed vertex stream at binding zero.
   var
     native = buffer.buffer
-    start = offset.uint64
+    start = (buffer.offset + offset).uint64
   vkCmdBindVertexBuffers(encoder.ctx.buffer, 0, 1, native.addr, start.addr)
 
 proc bindConstants*(ctx: GpuContext, encoder: var GpuEncoder,
@@ -641,11 +789,12 @@ proc bindConstants*(ctx: GpuContext, encoder: var GpuEncoder,
   encoder.vertex = vertex
   encoder.fragment = fragment
 
-proc drawNative*(encoder: GpuEncoder, first, count, instances: int, indices: GpuBuffer, index32: bool, state: DrawState) =
+proc drawNative*(encoder: GpuEncoder, first, count, instances: int, indices: GpuBuffer, index32: bool, state: DrawState, ranges: openArray[IndexRange]) =
   ## Binds per-draw textures, samplers, and uniform storage.
   let
     ctx = encoder.ctx
-    sets = ctx.drawDescriptors()
+    descriptors = ctx.drawDescriptors()
+  template sets: untyped = descriptors.sets
   var
     imageInfo: array[2 * MaxTextures, VkDescriptorImageInfo]
     bufferInfo: array[2, VkDescriptorBufferInfo]
@@ -656,6 +805,9 @@ proc drawNative*(encoder: GpuEncoder, first, count, instances: int, indices: Gpu
       continue
     if texture == encoder.target.texture:
       raise newException(GpuError, "A Vulkan pass cannot sample its output")
+    let binding = (id: texture.id, sampler: int64(encoder.samplers[i].sampler))
+    if binding == descriptors.images[i]: continue
+    descriptors.images[i] = binding
     imageInfo[i] = VkDescriptorImageInfo(sampler: encoder.samplers[i].sampler,
       imageView: texture.view, imageLayout: VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
     writes[writeCount] = VkWriteDescriptorSet(
@@ -669,13 +821,16 @@ proc drawNative*(encoder: GpuEncoder, first, count, instances: int, indices: Gpu
     writeCount += 2
   for i, data in [encoder.vertex, encoder.fragment]:
     bufferInfo[i] = ctx.uploadUniform(data)
+    let previous = descriptors.constants[i]
+    if int64(previous.buffer) == int64(bufferInfo[i].buffer) and previous.offset == bufferInfo[i].offset and previous.range == bufferInfo[i].range: continue
+    descriptors.constants[i] = bufferInfo[i]
     writes[writeCount] = VkWriteDescriptorSet(
       sType: VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
       dstSet: sets[1], dstBinding: i.uint32, descriptorCount: 1,
       descriptorType: VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
       pBufferInfo: bufferInfo[i].addr)
     inc writeCount
-  vkUpdateDescriptorSets(ctx.device, writeCount.uint32, writes[0].addr, 0, nil)
+  if writeCount > 0: vkUpdateDescriptorSets(ctx.device, writeCount.uint32, writes[0].addr, 0, nil)
   vkCmdBindDescriptorSets(ctx.buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
     ctx.layout, 0, 3, sets[0].unsafeAddr, 0, nil)
   if state.wireTriangles:
@@ -687,7 +842,11 @@ proc drawNative*(encoder: GpuEncoder, first, count, instances: int, indices: Gpu
     vkCmdDraw(ctx.buffer, count.uint32, instances.uint32, first.uint32, 0)
   else:
     vkCmdBindIndexBuffer(ctx.buffer, indices.buffer, 0, if index32: VK_INDEX_TYPE_UINT32 else: VK_INDEX_TYPE_UINT16)
-    vkCmdDrawIndexed(ctx.buffer, count.uint32, instances.uint32, first.uint32, 0, 0)
+    if ranges.len == 0:
+      vkCmdDrawIndexed(ctx.buffer, count.uint32, instances.uint32, first.uint32, 0, 0)
+    else:
+      for span in ranges:
+        vkCmdDrawIndexed(ctx.buffer, span.count.uint32, instances.uint32, span.first.uint32, 0, 0)
 
 proc generateMipmaps*(ctx: GpuContext, texture: GpuTexture) =
   ## Builds each lower mip on the GPU using explicit subresource transitions.
@@ -766,41 +925,47 @@ proc acquireSurface*(ctx: GpuContext, window: windy.Window, index: var uint32): 
   if size.x <= 0 or size.y <= 0: return
   template resizeSurface() =
     ctx.finishFrame()
+    vkDeviceWaitIdle(ctx.device).checked("Drain swap chain")
+    ctx.releaseSurface()
     ctx.presentation.recreateSwapChain(size.x, size.y)
     ctx.beginFrame()
   if ctx.presentation.swapChainExtent.width.int != size.x or
       ctx.presentation.swapChainExtent.height.int != size.y or ctx.presentation.vsync != window.vsync:
     ctx.presentation.vsync = window.vsync
     resizeSurface()
-  let fence = ctx.presentation.inFlightFences[0]
-  vkResetFences(ctx.device, 1, fence.unsafeAddr).checked("Reset acquire fence")
-  var status = vkAcquireNextImageKHR(ctx.device, ctx.presentation.swapChain, uint64.high, VkSemaphore(0), fence, index.addr)
+  var acquired = ctx.presentation.imageAvailableSemaphores[ctx.slot]
+  var status = vkAcquireNextImageKHR(ctx.device, ctx.presentation.swapChain, uint64.high, acquired, VkFence(0), index.addr)
   if status == VK_ERROR_OUT_OF_DATE_KHR:
     resizeSurface()
-    status = vkAcquireNextImageKHR(ctx.device, ctx.presentation.swapChain, uint64.high, VkSemaphore(0), fence, index.addr)
+    acquired = ctx.presentation.imageAvailableSemaphores[ctx.slot]
+    status = vkAcquireNextImageKHR(ctx.device, ctx.presentation.swapChain, uint64.high, acquired, VkFence(0), index.addr)
   if status != VK_SUBOPTIMAL_KHR: status.checked("Acquire back buffer")
-  vkWaitForFences(ctx.device, 1, fence.unsafeAddr, VK_TRUE, uint64.high).checked("Wait for back buffer")
+  if ctx.surfaces.len == 0:
+    ctx.surfaces.setLen(ctx.presentation.swapChainImages.len)
+    ctx.presentReady.setLen(ctx.surfaces.len)
+  if ctx.surfaces[index] != nil: return ctx.surfaces[index]
   let fmt = ctx.presentation.swapChainImageFormat
   if fmt != VK_FORMAT_B8G8R8A8_UNORM:
     raise newException(GpuError, "Unsupported swap chain format: " & $fmt)
-  result = GpuTexture(ctx: ctx, format: Bgra8, image: ctx.presentation.swapChainImages[index],
+  result = GpuTexture(ctx: ctx, surface: true, format: Bgra8, image: ctx.presentation.swapChainImages[index],
     width: size.x, height: size.y, layers: 1, mipLevels: 1, layouts: @[VK_IMAGE_LAYOUT_UNDEFINED])
   var desc = VkImageViewCreateInfo(sType: VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
     image: result.image, viewType: VK_IMAGE_VIEW_TYPE_2D, format: fmt,
     subresourceRange: VkImageSubresourceRange(aspectMask: VkImageAspectFlags(VK_IMAGE_ASPECT_COLOR_BIT), levelCount: 1, layerCount: 1))
   vkCreateImageView(ctx.device, desc.addr, nil, result.attachment.addr).checked("Create surface attachment")
 
+  ctx.surfaces[index] = result
+  var semaphore = VkSemaphoreCreateInfo(sType: VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO)
+  vkCreateSemaphore(ctx.device, semaphore.addr, nil, ctx.presentReady[index].addr).checked("Create present semaphore")
+
 proc presentSurface*(ctx: GpuContext, texture: GpuTexture, index: uint32) =
   texture.transition(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)
-  ctx.finishFrame()
-  vkDestroyImageView(ctx.device, texture.attachment, nil)
+  ctx.submitFrame(ctx.presentation.imageAvailableSemaphores[ctx.slot], ctx.presentReady[index])
   var info = VkPresentInfoKHR(sType: VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+    waitSemaphoreCount: 1, pWaitSemaphores: ctx.presentReady[index].addr,
     swapchainCount: 1, pSwapchains: ctx.presentation.swapChain.addr, pImageIndices: index.unsafeAddr)
   let status = vkQueuePresentKHR(ctx.presentation.presentQueue, info.addr)
   if status notin [VK_SUBOPTIMAL_KHR, VK_ERROR_OUT_OF_DATE_KHR]: status.checked("Present frame")
-
-proc needsSubmission*(ctx: GpuContext): bool =
-  ctx.drawCursor >= MaxDraws
 
 proc sampleCount*(ctx: GpuContext, requested: int, color, depth: TextureFormat, hasColor = true, hasDepth = true): int =
   if requested <= 1: return 1

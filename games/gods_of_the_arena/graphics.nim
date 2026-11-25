@@ -3190,7 +3190,7 @@ proc runGraphics*(
             )
 
           occlusion.settings.enabled = preferences.ambientOcclusion
-          occlusion.captureGround(window.size)
+          occlusion.captureGround(window.size, screenshotTarget.framebuffer)
 
           if showOccludedCharacters:
             profileBlock "Character outline pass":
@@ -3212,7 +3212,9 @@ proc runGraphics*(
             finishCharacters(scene)
 
         profileBlock "Ambient occlusion":
-          occlusion.applyScreenOcclusion(window.size, projection)
+          occlusion.applyScreenOcclusion(
+            window.size, projection, screenshotTarget.framebuffer
+          )
 
         # The arena's lakes, each with its own reflection. The water mirrors the sky,
         # terrain, towers and characters; particles, spells and markers stay out of it.

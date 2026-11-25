@@ -141,6 +141,7 @@ proc captureScene*(size: IVec2) {.measure.} =
     destroy(sceneCopy)
     sceneCopy = newRenderTarget(size.x, size.y,
       colorFormat = source.color.pixelFormat, stencil = source.stencil)
+    sceneCopy.depth.setTextureSampling(linear = false)
   copyTarget(source, sceneCopy, color = true, depth = true)
 
 proc drawWaterBody*(body: WaterBody, viewProjection: Mat4, eye: Vec3, windowSize: IVec2,

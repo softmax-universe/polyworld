@@ -57,8 +57,9 @@ proc presentRenderer*(window: Window) =
 proc atlasTexture*(sk: Silky): TextureHandle =
   ## Borrows the current UI atlas for world-space text and labels.
   ensureFrame()
-  flushEncoder()
-  sk.drawer.prepareAtlas(metalRenderer.commandBuffer)
+  if sk.drawer.needsAtlasPreparation():
+    flushEncoder()
+    sk.drawer.prepareAtlas(metalRenderer.commandBuffer)
   let handle = sk.drawer.atlasTexture()
   let key = uint(handle)
   if key notin atlasViews or atlasViews[key].handle.isNil:

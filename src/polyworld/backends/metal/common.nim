@@ -1,7 +1,7 @@
 import
   std/[strutils, tables],
   metal4, pixie, shady, vmath, windy,
-  uniforms
+  uniforms, uploads
 
 when defined(metalProfile):
   import profiles
@@ -91,7 +91,7 @@ type
     buffers: seq[MetalBuffer]
     textures: seq[MetalTexture]
     programs: seq[MetalProgram]
-    depthStates: Table[system.string, MTLDepthStencilState]
+    depthStates: Table[uint32, MTLDepthStencilState]
     stencilOverride: DrawState
     hasStencilOverride: bool
     presentProgram: MetalProgram
@@ -99,6 +99,7 @@ type
     viewport: IVec2
     frameSamples: int
     commandSerial: uint64
+    uniformUploads: UploadArena
   MTLStencilDescriptor = distinct NSObject
 
 objc:
@@ -335,6 +336,8 @@ proc shareDepth*(target, source: RenderTarget) =
   if target.width != source.width or target.height != source.height or
     target.samples != source.samples:
       raise newException(PolyworldMetalError, "Shared depth target mismatch")
+  if target == metalRenderer.target:
+    flushEncoder()
   if not target.borrowsDepth:
     destroy(target.depth)
     destroy(target.multisampleDepth)
@@ -373,6 +376,8 @@ proc updateTexture*(texture: MetalTexture, image: Image) =
 
 proc generateMipmaps*(texture: MetalTexture) =
   ## Generates mip levels after an upload or render-to-texture pass.
+  if texture.handle.mipmapLevelCount() <= 1:
+    return
   nativePool()
   flushEncoder()
   let ownsCommands = metalRenderer.commandBuffer.isNil
@@ -573,6 +578,14 @@ proc makePass(clearColor: bool, color: Color, clearDepth: bool,
       )
       stencil.setClearStencil(0)
 
+proc applyViewport() =
+  ## Applies the selected viewport without starting a new render pass.
+  if not metalRenderer.encoder.isNil:
+    metalRenderer.encoder.setViewport(MTLViewport(
+      width: metalRenderer.viewport.x.float64,
+      height: metalRenderer.viewport.y.float64, znear: 0, zfar: 1
+    ))
+
 proc ensureEncoder() =
   ## Opens a preserving render pass when a feature first draws.
   if metalRenderer.commandBuffer.isNil or metalRenderer.target == nil:
@@ -585,10 +598,7 @@ proc ensureEncoder() =
     checkNil(metalRenderer.encoder, "Could not open a Metal render pass")
     when defined(metalProfile):
       profileRenderPass()
-    metalRenderer.encoder.setViewport(MTLViewport(
-      width: metalRenderer.viewport.x.float64,
-      height: metalRenderer.viewport.y.float64, znear: 0, zfar: 1
-    ))
+    applyViewport()
 
 proc clear*(color: Color, depth = true, stencil = false) =
   ## Clears color and optionally depth and stencil in the current target.
@@ -599,9 +609,10 @@ proc clear*(color: Color, depth = true, stencil = false) =
     metalRenderer.commandBuffer.renderCommandEncoderWithDescriptor(
       makePass(true, color, depth, stencil)
     )
+  checkNil(metalRenderer.encoder, "Could not open a Metal clear pass")
   when defined(metalProfile):
     profileRenderPass()
-  flushEncoder()
+  applyViewport()
 
 proc clearDepth*() =
   ## Clears the current target's depth while preserving color and stencil.
@@ -610,18 +621,19 @@ proc clearDepth*() =
     metalRenderer.commandBuffer.renderCommandEncoderWithDescriptor(
       makePass(false, color(0, 0, 0, 0), true)
     )
+  checkNil(metalRenderer.encoder, "Could not open a Metal depth clear pass")
   when defined(metalProfile):
     profileRenderPass()
-  flushEncoder()
+  applyViewport()
 
 proc setTarget*(target: RenderTarget = nil) =
-  ## Selects a target without submitting the shared command buffer.
-  flushEncoder()
-  metalRenderer.target = if target == nil:
-    metalRenderer.frameTarget else: target
-  metalRenderer.viewport = ivec2(
-    metalRenderer.target.width.int32, metalRenderer.target.height.int32
-  )
+  ## Selects a target and resets its viewport without breaking an active pass.
+  let selected = if target == nil: metalRenderer.frameTarget else: target
+  if selected != metalRenderer.target:
+    flushEncoder()
+    metalRenderer.target = selected
+  metalRenderer.viewport = ivec2(selected.width.int32, selected.height.int32)
+  applyViewport()
 
 proc ensureFrame*(width, height: int)
 
@@ -640,6 +652,7 @@ proc popTarget*() =
     raise newException(PolyworldMetalError, "Metal target stack is empty")
   setTarget(metalRenderer.targets.pop())
   metalRenderer.viewport = metalRenderer.viewports.pop()
+  applyViewport()
 
 proc resolveForUi*(): RenderTarget =
   ## Continues on resolved attachments until the next full target clear.
@@ -794,8 +807,12 @@ proc pipeline(program: MetalProgram, state: DrawState,
 
 proc depthState(state: DrawState): MTLDepthStencilState =
   ## Caches depth and stencil functions independently of render pipelines.
-  let key = $state.depthTest & $state.depthWrite & $state.depthCompare &
-    $state.stencilTest & $state.stencilWrite & $state.stencilCompare
+  let key = state.depthTest.ord.uint32 or
+    (state.depthWrite.ord.uint32 shl 1) or
+    (state.stencilTest.ord.uint32 shl 2) or
+    (state.stencilWrite.ord.uint32 shl 3) or
+    (state.depthCompare.ord.uint32 shl 8) or
+    (state.stencilCompare.ord.uint32 shl 16)
   if key in metalRenderer.depthStates:
     return metalRenderer.depthStates[key]
   let descriptor = MTLDepthStencilDescriptor.alloc().init()
@@ -837,17 +854,13 @@ proc bindUniforms(buffer: var UniformBuffer, vertex: bool) =
         buffer.data[0].addr, buffer.data.len.uint, index
       )
   else:
-    let nativeBuffer = metalRenderer.ctx.device.newBufferWithBytes(
-      buffer.data[0].addr, buffer.data.len.uint, 0
+    let slice = metalRenderer.uniformUploads.upload(
+      metalRenderer.ctx.device, buffer.data[0].addr, buffer.data.len
     )
-    checkNil(nativeBuffer, "Could not upload Metal shader constants")
-    when defined(metalProfile):
-      profileBuffer(buffer.data.len)
-    defer: nativeBuffer.release()
     if vertex:
-      metalRenderer.encoder.setVertexBuffer(nativeBuffer, 0, index)
+      metalRenderer.encoder.setVertexBuffer(slice.buffer, slice.offset, index)
     else:
-      metalRenderer.encoder.setFragmentBuffer(nativeBuffer, 0, index)
+      metalRenderer.encoder.setFragmentBuffer(slice.buffer, slice.offset, index)
 
 proc bindTextures(program: MetalProgram, bindings: seq[TextureBinding],
     vertex: bool) =
@@ -980,12 +993,11 @@ proc beginFrame*(width, height: int, clearColor: Color) =
   clear(clearColor, stencil = true)
 
 proc setRenderViewport*(size: IVec2) =
-  ## Applies a viewport to the active render pass.
+  ## Updates the current or next render pass without opening an empty one.
+  if metalRenderer.commandBuffer.isNil or metalRenderer.target == nil:
+    raise newException(PolyworldMetalError, "No active Metal frame")
   metalRenderer.viewport = size
-  ensureEncoder()
-  metalRenderer.encoder.setViewport(MTLViewport(
-    width: size.x.float64, height: size.y.float64, znear: 0, zfar: 1
-  ))
+  applyViewport()
 
 proc endFrame*(present = true) =
   ## Resolves the frame, presents it, and waits before CPU readback or reuse.
@@ -1020,6 +1032,7 @@ proc endFrame*(present = true) =
     messageNSError(error, "Polyworld Metal frame failed")
   metalRenderer.commandBuffer.release()
   metalRenderer.commandBuffer = 0.MTLCommandBuffer
+  metalRenderer.uniformUploads.resetUploads()
   metalRenderer.target = metalRenderer.frameTarget
   metalRenderer.framePool.release()
   metalRenderer.framePool = 0.ID
@@ -1080,5 +1093,6 @@ proc shutdownMetal*() =
     destroy(metalRenderer.textures[^1])
   for state in metalRenderer.depthStates.values:
     state.release()
+  metalRenderer.uniformUploads.destroy()
   metalRenderer.ctx.destroy()
   metalRenderer = nil

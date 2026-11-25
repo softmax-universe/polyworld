@@ -42,7 +42,7 @@ when defined(metalProfile):
     inc frameProfile.blitPasses
 
   proc profileBuffer*(bytes: int) {.inline.} =
-    ## Counts new engine buffers and uploaded bytes, including large uniforms.
+    ## Counts new engine buffers and their allocated storage capacity.
     inc frameProfile.bufferAllocations
     frameProfile.bufferBytes += bytes
 

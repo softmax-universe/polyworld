@@ -88,7 +88,7 @@ else:
     let
       capturing = captureActive()
       worldPath = settings.saveDir / "world.json"
-      savePath = if capturing: "" else: worldPath
+      savePath = if capturing or defined(backendBench): "" else: worldPath
       atlasPath =
         when defined(emscripten): "/tmp/monster.atlas.png"
         else: RepositoryRoot / "tmp" / "monster.atlas.png"
@@ -96,7 +96,7 @@ else:
         settings.saveDir / "conversation.json", settings.model,
         not settings.offline and (not capturing or settings.prompt.len > 0)
       )
-    if capturing:
+    if capturing or defined(backendBench):
       brain.disableSaving()
     defer:
       brain.close()
@@ -116,8 +116,9 @@ else:
     sk.builder = builder
     defer:
       window.onFrame = nil
-      if not capturing:
-        world.saveWorld(savePath)
+      when not defined(backendBench):
+        if not capturing:
+          world.saveWorld(savePath)
       window.close()
     var captureTarget: ScreenshotTarget
     defer:
@@ -161,6 +162,7 @@ else:
       discard chat.select(world, selected)
       following = selected.kind == MossSelection
     let started = epochTime()
+    var benchmarkFinished = false
     window.installInput(chat.addr)
     window.onFrame = proc() =
       ## Consumes input before Windy clears the browser's per-frame events.
@@ -169,6 +171,7 @@ else:
       if window.size.x <= 0 or window.size.y <= 0:
         sleep(20)
         return
+      beginBenchmarkFrame("monster", window.size)
       let dt =
         if capturing: 1'f / 60
         else: min(clock.viewingDelta(window), 0.1'f)
@@ -272,9 +275,15 @@ else:
       when not defined(emscripten):
         voice.observe(brain.messages)
         voice.poll(window.focused)
-      if not capturing and epochTime() - lastSave > 10:
-        world.saveWorld(savePath)
-        lastSave = epochTime()
+      when not defined(backendBench):
+        if not capturing and epochTime() - lastSave > 10:
+          world.saveWorld(savePath)
+          lastSave = epochTime()
+      if endBenchmarkFrame(world.tick.int):
+        benchmarkFinished = true
+        when not defined(emscripten):
+          window.closeRequested = true
+        return
       if capturing:
         let ready = settings.prompt.len == 0 or
           (not brain.pending and not brain.explanationPending and
@@ -293,7 +302,7 @@ else:
       if not capturing:
         window.presentFrame()
         reportReplayFrame(world.tick, 0)
-    while not window.closeRequested:
+    while not window.closeRequested and not benchmarkFinished:
       pollEvents()
       waitForDisplay()
 

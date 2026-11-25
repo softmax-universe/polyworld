@@ -6,6 +6,8 @@ import
   silky/drawers/metal4 as silkyMetal,
   common, meshes, ../../screenshots
 
+const RendererBackend* = "metal"
+
 type
   TextureHandle* = MetalTexture
   FramebufferHandle* = RenderTarget
@@ -47,7 +49,7 @@ proc newGameUi*(window: Window, atlasPath: string): Silky =
 proc presentRenderer*(window: Window) =
   ## Presents and completes the shared scene and UI command buffer.
   if not metalRenderer.commandBuffer.isNil:
-    endFrame(not captureActive())
+    endFrame(not captureActive() and not defined(backendBench))
 
 proc atlasTexture*(sk: Silky): TextureHandle =
   ## Borrows the current UI atlas for world-space text and labels.
@@ -149,3 +151,17 @@ proc readFrameImage*(width, height: int): Image =
 proc finishGpu*() =
   ## Completes submitted rendering while preserving the active target.
   waitForGpu()
+
+proc readFramePixel*(): array[4, uint8] =
+  ## Completes rendering and reads one pixel from the active RGBA8 target.
+  ensureFrame()
+  let target = metalRenderer.target
+  if target.color.pixelFormat != MTLPixelFormatRGBA8Unorm:
+    raise newException(PolyworldMetalError, "Pixel readback requires RGBA8")
+  waitForGpu()
+  target.color.handle.getBytes(
+    result[0].addr,
+    4,
+    MTLRegion(origin: MTLOrigin(), size: MTLSize(width: 1, height: 1, depth: 1)),
+    0
+  )

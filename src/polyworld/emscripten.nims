@@ -25,6 +25,8 @@ proc setupEmscripten*(
       dataDir = getEnv("POLYWORLD_ART", repoDir / ".." / "polyworld_art")
       outputDir =
         if output.len > 0: absolutePath(output)
+        elif getEnv("POLYWORLD_WEB_DIR").len > 0:
+          absolutePath(getEnv("POLYWORLD_WEB_DIR"))
         else: gameDir / "emscripten"
       shellTemplate =
         if defined(replayViewer):

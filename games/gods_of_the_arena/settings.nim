@@ -32,6 +32,7 @@ proc readGotaPreferences*(): Preferences =
   const AppName = "Polyworld GotA"
   result = readPreferences(AppName)
   result.bindings.migrateGotaBindings()
-  let bytes = getConfig(AppName, "settings.json")
-  if bytes.len > 0:
-    result.name = bytes.fromJson(Preferences).name
+  when not defined(backendBench):
+    let bytes = getConfig(AppName, "settings.json")
+    if bytes.len > 0:
+      result.name = bytes.fromJson(Preferences).name

@@ -565,7 +565,9 @@ proc runGraphics*() =
           run.world.tick < run.maximumTicks and not run.world.over:
         advanceGame()
   holdSplash(sk, window, splash)
+  var benchmarkFinished = false
   window.onFrame = proc() =
+    beginBenchmarkFrame("heartleaf", window.size)
     profileBlock "frame":
       discard beginScreenshotFrame(screenshotTarget, window)
       let dt = frameDelta(lastFrameTime, Step)
@@ -754,6 +756,11 @@ proc runGraphics*() =
           if speedClicked:
             snapFollowCamera()
           sk.finishUi()
+      if endBenchmarkFrame(run.world.tick.int):
+        benchmarkFinished = true
+        when not defined(emscripten):
+          window.closeRequested = true
+        return
       if captureFrame(window, screenshotFrame, 30, "heartleaf.png"):
         when not defined(emscripten):
           window.closeRequested = true
@@ -792,7 +799,7 @@ proc runGraphics*() =
         window.closeRequested = true
     else: discard
 
-  while not window.closeRequested:
+  while not window.closeRequested and not benchmarkFinished:
     pollEvents()
     waitForDisplay()
   saveRecording()

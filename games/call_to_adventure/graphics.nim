@@ -1953,7 +1953,9 @@ proc runGraphics*() =
     cameraSeekSerial = -1
 
   holdSplash(sk, window, splash)
+  var benchmarkFinished = false
   window.onFrame = proc() =
+    beginBenchmarkFrame("cta", window.size)
     profileBlock "frame":
       let dt = frameDelta(lastFrameTime, SimulationStep)
       viewingDt = viewingClock.viewingDelta(window)
@@ -2447,6 +2449,11 @@ proc runGraphics*() =
         )
         sk.finishUi()
         drawStatsOverlay(sk, window)
+      if endBenchmarkFrame(run.world.tick.int):
+        benchmarkFinished = true
+        when not defined(emscripten):
+          window.closeRequested = true
+        return
       if captureFrame(window, screenshotFrame):
         when not defined(emscripten):
           window.closeRequested = true
@@ -2461,7 +2468,7 @@ proc runGraphics*() =
       when not defined(emscripten):
         window.closeRequested = true
 
-  while not window.closeRequested:
+  while not window.closeRequested and not benchmarkFinished:
     pollEvents()
     waitForDisplay()
 

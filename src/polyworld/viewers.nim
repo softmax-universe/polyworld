@@ -3,9 +3,9 @@
 import
   std/[math, os, strutils, times],
   chroma, pixie, silky, vmath, windy,
-  actioncam, assets, fullscreens, player, screenshots, renderer
+  actioncam, assets, fullscreens, player, screenshots, renderer, benchmarks
 
-export screenshots, renderer
+export screenshots, renderer, benchmarks
 
 when defined(emscripten):
   {.emit: "#include <emscripten.h>".}
@@ -81,7 +81,7 @@ proc viewingDelta*(clock: var ViewingClock, window: Window): float32 =
     result = max(now - clock.last, 0).float32
   clock.last = now
   clock.hidden = hidden
-  if captureActive():
+  if captureActive() or defined(backendBench):
     result = 1.0'f / 60
 
 proc damping*(rate, dt: float32): float32 =
@@ -165,15 +165,19 @@ proc initGameWindow*(
     visible = true
 ): (Window, Silky) =
   ## Creates the viewer and renderer, keeping screenshot captures hidden.
+  let
+    selectedSize = when defined(backendBench): ivec2(1280, 800) else: size
+    selectedMsaa = when defined(backendBench): msaaDisabled else: msaa
   let window = newWindow(
     title,
-    size,
-    visible = visible and not captureActive(),
-    vsync = vsync and not captureActive(),
-    msaa = msaa
+    selectedSize,
+    visible = visible and not captureActive() and
+      (not defined(backendBench) or defined(emscripten)),
+    vsync = vsync and not captureActive() and not defined(backendBench),
+    msaa = selectedMsaa
   )
   window.prepareDesktopFullscreen()
-  initRenderer(window, max(1, ord(msaa)))
+  initRenderer(window, max(1, ord(selectedMsaa)))
   let sk = newGameUi(window, atlasPath)
   sk.applyThemePatches()
   (window, sk)
@@ -223,7 +227,7 @@ proc holdSplash*(
     seconds = SplashSeconds
 ) =
   ## Keeps the splash up until the hold time elapses.
-  if captureActive() or defined(emscripten):
+  if captureActive() or defined(emscripten) or defined(backendBench):
     drawSplash(sk, window, splash.name)
   else:
     while epochTime() - splash.startedAt < seconds:
@@ -240,7 +244,7 @@ proc presentFrame*(window: Window, paceHz = 60) =
   ## Swaps the back buffer, then waits so presents stay on one cadence.
   ## ProMotion vsync alone flips between 8.33 ms and 16.67 ms.
   window.presentRenderer()
-  if paceHz <= 0 or captureActive():
+  if paceHz <= 0 or captureActive() or defined(backendBench):
     presentDeadline = 0
     presentPaceHz = 0
     return
@@ -266,7 +270,9 @@ proc frameDelta*(
   let now = epochTime()
   result = clamp(now - lastFrameTime, 0.0, 0.1).float32
   lastFrameTime = now
-  if captureActive():
+  if defined(backendBench):
+    result = 1.0'f / 60
+  elif captureActive():
     result = captureStep
 
 proc simulationActive*(transport: Player): bool =

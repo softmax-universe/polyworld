@@ -4,6 +4,8 @@ import
   chroma, opengl, pixie, silky, vmath, windy,
   ../../screenshots
 
+const RendererBackend* = when defined(emscripten): "webgl" else: "opengl"
+
 type
   TextureHandle* = GLuint
   FramebufferHandle* = GLuint
@@ -32,7 +34,8 @@ proc newGameUi*(window: Window, atlasPath: string): Silky =
 
 proc presentRenderer*(window: Window) =
   ## Presents the completed OpenGL back buffer.
-  window.swapBuffers()
+  when not defined(backendBench):
+    window.swapBuffers()
 
 proc atlasTexture*(sk: Silky): TextureHandle =
   ## Borrows the current atlas texture for world-space text.
@@ -161,7 +164,9 @@ proc releaseScreenshotTarget*(target: var ScreenshotTarget) =
 proc beginScreenshotFrame*(target: var ScreenshotTarget, window: Window,
     enabled = captureActive()): FramebufferHandle =
   ## Binds an offscreen surface when a hidden window is being captured.
-  if not enabled:
+  let offscreen = enabled or
+    (defined(backendBench) and not defined(emscripten))
+  if not offscreen:
     bindFrameTarget()
     setRenderViewport(window.size)
     return 0
@@ -194,3 +199,28 @@ proc readFrameImage*(width, height: int): Image =
 proc finishGpu*() =
   ## Waits for submitted rendering before recording benchmark timings.
   glFinish()
+
+proc readFramePixel*(): array[4, uint8] =
+  ## Reads one output pixel, synchronizing rendering even in WebGL browsers.
+  var previousRead, drawing, readBuffer, packBuffer: GLint
+  var packing: array[4, GLint]
+  const PackSettings = [GL_PACK_ALIGNMENT, GL_PACK_ROW_LENGTH,
+    GL_PACK_SKIP_ROWS, GL_PACK_SKIP_PIXELS]
+  glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, previousRead.addr)
+  glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, drawing.addr)
+  glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, packBuffer.addr)
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, drawing.GLuint)
+  glGetIntegerv(GL_READ_BUFFER, readBuffer.addr)
+  for i, setting in PackSettings:
+    glGetIntegerv(setting, packing[i].addr)
+  defer:
+    for i, setting in PackSettings:
+      glPixelStorei(setting, packing[i])
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, packBuffer.GLuint)
+    glReadBuffer(readBuffer.GLenum)
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, previousRead.GLuint)
+  glBindBuffer(GL_PIXEL_PACK_BUFFER, 0)
+  glReadBuffer(if drawing == 0: GL_BACK else: GL_COLOR_ATTACHMENT0)
+  for i, setting in PackSettings:
+    glPixelStorei(setting, if i == 0: 1 else: 0)
+  glReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, result[0].addr)

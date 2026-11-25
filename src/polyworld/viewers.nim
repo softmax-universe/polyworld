@@ -167,7 +167,20 @@ proc initGameWindow*(
   ## Creates the viewer and renderer, keeping screenshot captures hidden.
   let
     selectedSize = when defined(backendBench): ivec2(1280, 800) else: size
-    selectedMsaa = when defined(backendBench): msaaDisabled else: msaa
+    selectedMsaa =
+      when defined(backendBench):
+        when BackendBenchSamples == 1:
+          msaaDisabled
+        elif BackendBenchSamples == 2:
+          msaa2x
+        elif BackendBenchSamples == 4:
+          msaa4x
+        elif BackendBenchSamples == 8:
+          msaa8x
+        else:
+          {.error: "backendBenchSamples must be 1, 2, 4, or 8".}
+      else:
+        msaa
   let window = newWindow(
     title,
     selectedSize,

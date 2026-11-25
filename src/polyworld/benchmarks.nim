@@ -1,4 +1,4 @@
-## Opt-in synchronized gameplay timing, separate from loading and display pace.
+## Opt-in latency or completed-work throughput, separate from display pace.
 
 when defined(backendBench):
   import
@@ -6,24 +6,33 @@ when defined(backendBench):
     jsony, vmath,
     renderer
 
+  when defined(backendThroughput) and defined(emscripten):
+    {.error: "Throughput measurement currently requires a native backend".}
+
   type
     FrameSample = object
       frame, tick: int
-      cpuMs, gpuWaitMs, workMs, intervalMs: float64
-      when defined(metalProfile) and defined(useMetal4):
+      cpuMs, submitMs, gpuWaitMs, workMs, intervalMs: float64
+      when defined(metalProfile) and defined(useMetal4) and
+          not defined(backendThroughput):
         metal*: MetalFrameProfile
     Distribution = object
       meanMs, medianMs, p95Ms, minMs, maxMs: float64
     BenchmarkSummary = object
-      cpu, gpuWait, work, interval: Distribution
+      cpu, submit, gpuWait, work, interval: Distribution
       fpsEquivalent: float64
     BenchmarkReport = object
       ready, done: bool
-      game, backend, metric: string
+      game, backend, mode, metric: string
       width, height, samples, warmup, frames, startTick, endTick: int
       fixedStepSeconds, startupMs, readyMs: float64
+      submittedFrames, completedFrames, maxOutstanding, capacity: int
+      elapsedMs, drainMs, throughputFps: float64
       framesData: seq[FrameSample]
       summary: BenchmarkSummary
+      when defined(metalProfile) and defined(useMetal4) and
+          defined(backendThroughput):
+        metal*: MetalFrameProfile
 
   when defined(emscripten):
     proc emscriptenGetNow(): float64 {.importc: "emscripten_get_now",
@@ -42,6 +51,7 @@ when defined(backendBench):
     initialized, active: bool
     frameCount: int
     started, previousStarted, currentInterval: float64
+    windowStarted: float64
 
   proc benchmarkSetting(name: string, fallback: int): int =
     ## Reads bounded run settings from the environment or browser query.
@@ -97,24 +107,39 @@ when defined(backendBench):
 
   proc beginBenchmarkFrame*(game: string, size: IVec2) =
     ## Starts timing one complete gameplay update and render submission.
-    let now = benchmarkNow()
+    var now = benchmarkNow()
     if not initialized:
       initialized = true
       report = BenchmarkReport(
         ready: true, game: game,
-        backend: RendererBackend,
+        backend: RendererBackend, mode: "latency",
         metric: "Simulation and rendering through one-pixel readback; no presentation",
-        width: size.x.int, height: size.y.int, samples: 1,
+        width: size.x.int, height: size.y.int, samples: BackendBenchSamples,
         fixedStepSeconds: 1.0 / 60,
         warmup: benchmarkSetting("WARMUP", 120),
         frames: benchmarkSetting("FRAMES", 600),
         startupMs: now - processStart
       )
+      when defined(backendThroughput):
+        report.mode = "throughput"
+        report.metric = "Completed offscreen frames / total wall time including final drain"
+        report.warmup = benchmarkSetting("WARMUP", 240)
+        report.frames = benchmarkSetting("FRAMES", 1800)
       when defined(emscripten):
         report.readyMs = now
       publish(report.toJson())
-    when defined(metalProfile) and defined(useMetal4):
-      resetMetalProfile()
+    when defined(backendThroughput):
+      if frameCount == report.warmup:
+        discard drainBenchmarkGpuFrames()
+        resetBenchmarkGpuStats()
+        when defined(metalProfile) and defined(useMetal4):
+          resetMetalProfile()
+        now = benchmarkNow()
+        windowStarted = now
+        previousStarted = 0
+    else:
+      when defined(metalProfile) and defined(useMetal4):
+        resetMetalProfile()
     doAssert not active, "Benchmark frame begun before previous frame ended"
     doAssert size.x.int == report.width and size.y.int == report.height,
       "Rendering dimensions changed during benchmark"
@@ -122,13 +147,18 @@ when defined(backendBench):
     previousStarted = now
     started = now
     active = true
+    when defined(backendThroughput):
+      beginBenchmarkGpuFrame()
 
   proc endBenchmarkFrame*(tick: int): bool =
-    ## Waits for GPU completion, then records work excluding display pacing.
+    ## Records readback latency or submits work for bounded native throughput.
     if not active:
       return report.done
     let submitted = benchmarkNow()
-    discard readFramePixel()
+    when defined(backendThroughput):
+      submitBenchmarkGpuFrame()
+    else:
+      discard readFramePixel()
     let completed = benchmarkNow()
     active = false
     inc frameCount
@@ -142,24 +172,57 @@ when defined(backendBench):
         workMs: completed - started,
         intervalMs: currentInterval
       )
-      when defined(metalProfile) and defined(useMetal4):
+      when defined(backendThroughput):
+        sample.submitMs = completed - submitted
+        sample.gpuWaitMs = 0
+      when defined(metalProfile) and defined(useMetal4) and
+          not defined(backendThroughput):
         sample.metal = readMetalProfile()
       report.framesData.add(sample)
     if report.framesData.len < report.frames:
       return false
-    var cpu, gpuWait, work, interval: seq[float64]
+    when defined(backendThroughput):
+      let
+        drainStarted = benchmarkNow()
+        gpu = drainBenchmarkGpuFrames()
+        drained = benchmarkNow()
+      report.elapsedMs = drained - windowStarted
+      report.drainMs = drained - drainStarted
+      report.submittedFrames = gpu.submittedFrames
+      report.completedFrames = gpu.completedFrames
+      report.maxOutstanding = gpu.maxOutstanding
+      report.capacity = gpu.capacity
+      if gpu.submittedFrames != report.frames or
+          gpu.completedFrames != report.frames or
+          gpu.maxOutstanding > gpu.capacity:
+        raise newException(ValueError,
+          "Throughput window did not complete the requested bounded work")
+      report.throughputFps = gpu.completedFrames.float64 * 1000 / report.elapsedMs
+      when defined(metalProfile) and defined(useMetal4):
+        report.metal = readMetalProfile()
+    var cpu, submit, gpuWait, work, interval: seq[float64]
     for sample in report.framesData:
       cpu.add(sample.cpuMs)
+      submit.add(sample.submitMs)
       gpuWait.add(sample.gpuWaitMs)
       work.add(sample.workMs)
-      interval.add(sample.intervalMs)
+      when defined(backendThroughput):
+        if sample.intervalMs > 0:
+          interval.add(sample.intervalMs)
+      else:
+        interval.add(sample.intervalMs)
+    if interval.len == 0:
+      interval.add(0)
     report.endTick = tick
     report.done = true
     report.summary = BenchmarkSummary(
-      cpu: distribution(cpu), gpuWait: distribution(gpuWait),
+      cpu: distribution(cpu), submit: distribution(submit),
+      gpuWait: distribution(gpuWait),
       work: distribution(work), interval: distribution(interval),
       fpsEquivalent: 1000 / distribution(work).meanMs
     )
+    when defined(backendThroughput):
+      report.summary.fpsEquivalent = report.throughputFps
     publish(report.toJson())
     true
 else:

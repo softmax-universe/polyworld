@@ -134,6 +134,9 @@ def build_case(game: str, backend: str, args: argparse.Namespace) -> dict:
     case = f"{game}-{backend}"
     flags = ["--hints:off", "-d:release", "-d:backendBench"]
     flags.extend(f"-d:{name}" for name in args.define)
+    if getattr(args, "mode", "latency") == "throughput":
+        flags.append("-d:backendThroughput")
+    flags.append(f"-d:backendBenchSamples={getattr(args, 'samples', 1)}")
     if backend == "metal":
         flags.append("-d:useMetal4")
     elif backend == "webgl":
@@ -179,6 +182,7 @@ def build(args: argparse.Namespace) -> None:
     manifest = {
         "commit": repository_commit(), "sourceHash": fingerprint,
         "generated": datetime.now(timezone.utc).isoformat(), "cases": [],
+        "mode": args.mode, "samples": args.samples,
     }
     args.out.mkdir(parents=True, exist_ok=True)
     with ThreadPoolExecutor(max_workers=args.jobs) as executor:
@@ -237,8 +241,11 @@ def validate_payload(data: dict, args: argparse.Namespace,
         raise BenchmarkError("Benchmark warmup differs from the requested value")
     if (payload.get("width"), payload.get("height")) != (1280, 800):
         raise BenchmarkError("Benchmark target must be 1280x800 physical pixels")
-    if payload.get("samples") != 1:
-        raise BenchmarkError("Benchmark must use single-sample rendering")
+    if payload.get("samples") != getattr(args, "samples", 1):
+        raise BenchmarkError("Benchmark sample count differs from the request")
+    mode = getattr(args, "mode", "latency")
+    if payload.get("mode", "latency") != mode:
+        raise BenchmarkError("Benchmark measurement mode differs from the request")
     if not math.isclose(payload.get("fixedStepSeconds", 0), 1 / 60):
         raise BenchmarkError("Benchmark simulation step must be 1/60 second")
     previous_tick = -1
@@ -249,12 +256,39 @@ def validate_payload(data: dict, args: argparse.Namespace,
         if not isinstance(tick, int) or tick < previous_tick:
             raise BenchmarkError("Benchmark simulation ticks moved backwards")
         previous_tick = tick
-        for key in ("cpuMs", "gpuWaitMs", "workMs"):
+        keys = ["cpuMs", "gpuWaitMs", "workMs", "intervalMs"]
+        if mode == "throughput":
+            keys.append("submitMs")
+        for key in keys:
             value = frame.get(key)
             if not isinstance(value, (int, float)) or not math.isfinite(value):
                 raise BenchmarkError(f"Invalid {key} in frame sample")
             if value < 0 or (key == "workMs" and value == 0):
                 raise BenchmarkError(f"Invalid {key} in frame sample")
+        submit_ms = frame.get("submitMs", 0) if mode == "throughput" else 0
+        if not math.isclose(frame["workMs"], frame["cpuMs"] +
+                            frame["gpuWaitMs"] + submit_ms, abs_tol=1e-5):
+            raise BenchmarkError("Frame timing components do not sum to workMs")
+    if mode == "throughput":
+        if backend == "webgl":
+            raise BenchmarkError("Throughput measurement requires a native backend")
+        if (payload.get("submittedFrames"), payload.get("completedFrames")) != (
+                args.frames, args.frames):
+            raise BenchmarkError("Throughput did not complete every submitted frame")
+        capacity = payload.get("capacity")
+        outstanding = payload.get("maxOutstanding")
+        if capacity not in (1, 3) or not isinstance(outstanding, int) or not (
+                1 <= outstanding <= capacity):
+            raise BenchmarkError("Throughput exceeded the bounded frame queue")
+        for key in ("elapsedMs", "drainMs", "throughputFps"):
+            value = payload.get(key)
+            if not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+                raise BenchmarkError(f"Invalid throughput {key}")
+        if payload["elapsedMs"] <= 0 or payload["drainMs"] > payload["elapsedMs"]:
+            raise BenchmarkError("Invalid throughput measured window")
+        if not math.isclose(payload["throughputFps"],
+                            args.frames * 1000 / payload["elapsedMs"], rel_tol=1e-6):
+            raise BenchmarkError("Throughput rate excludes completed work or final drain")
     return payload
 
 
@@ -336,6 +370,10 @@ def summarize(run_dir: Path) -> dict:
             "startTick": payload.get("startTick"), "endTick": payload.get("endTick"),
             "raw": case["raw"],
         }
+        if payload.get("mode") == "throughput":
+            trial.update({"throughputFps": payload["throughputFps"],
+                          "elapsedMs": payload["elapsedMs"],
+                          "drainMs": payload["drainMs"]})
         groups.setdefault((case["game"], case["backend"]), []).append(trial)
     rows = []
     for (game, backend), trials in groups.items():
@@ -349,6 +387,13 @@ def summarize(run_dir: Path) -> dict:
             "trialMedianRangeMs": [min(medians), max(medians)],
             "workFpsEquivalent": 1000 / median_ms,
         })
+        if "throughputFps" in trials[0]:
+            # CPU iteration durations are diagnostics, not completed frame latency.
+            rows[-1]["cpuIterationMedianMs"] = rows[-1].pop("medianFrameMs")
+            rows[-1].pop("workFpsEquivalent")
+            rates = [trial["throughputFps"] for trial in trials]
+            rows[-1]["medianThroughputFps"] = statistics.median(rates)
+            rows[-1]["throughputFpsRange"] = [min(rates), max(rates)]
     summary = {
         "commit": manifest["commit"], "sourceHash": manifest["sourceHash"],
         "method": manifest["method"], "passed": manifest.get("passed", False),
@@ -374,6 +419,9 @@ def run(args: argparse.Namespace) -> None:
     available = {(case["game"], case["backend"]) for case in built["cases"]}
     if not built.get("passed") or built["sourceHash"] != fingerprint:
         raise BenchmarkError("Build manifest is incomplete or sources changed")
+    if (built.get("mode", "latency"), built.get("samples", 1)) != (
+            args.mode, args.samples):
+        raise BenchmarkError("Build mode or sample count differs from this run")
     if any((game, backend) not in available for game, backend, _ in cases):
         raise BenchmarkError("Build manifest does not cover the requested cases")
     if run_dir.exists():
@@ -382,7 +430,8 @@ def run(args: argparse.Namespace) -> None:
     manifest = {
         "commit": repository_commit(), "sourceHash": fingerprint,
         "generated": datetime.now(timezone.utc).isoformat(),
-        "method": {"width": 1280, "height": 800, "samples": 1,
+        "method": {"width": 1280, "height": 800, "samples": args.samples,
+                   "mode": args.mode,
                    "seed": 42, "fixedStepSeconds": 1 / 60,
                    "warmupFrames": args.warmup, "measuredFrames": args.frames,
                    "trials": args.trials, "timedConcurrency": 1,
@@ -391,6 +440,9 @@ def run(args: argparse.Namespace) -> None:
                    "order": "Game shuffle and rotating backend order per trial"},
         "cases": [],
     }
+    if args.mode == "throughput":
+        manifest["method"]["metric"] = (
+            "Completed offscreen frames / total wall time including final drain")
     write_json(run_dir / "run.json", manifest)
     server = None
     try:
@@ -431,8 +483,10 @@ def main() -> None:
     parser.add_argument("--run-dir", type=Path)
     parser.add_argument("--jobs", type=int, default=3)
     parser.add_argument("--trials", type=int, default=3)
-    parser.add_argument("--warmup", type=int, default=120)
-    parser.add_argument("--frames", type=int, default=600)
+    parser.add_argument("--mode", choices=("latency", "throughput"), default="latency")
+    parser.add_argument("--samples", type=int, choices=(1, 2, 4, 8), default=1)
+    parser.add_argument("--warmup", type=int)
+    parser.add_argument("--frames", type=int)
     parser.add_argument("--cooldown", type=float, default=10)
     parser.add_argument("--timeout", type=float, default=240)
     parser.add_argument("--build-timeout", type=float, default=1800)
@@ -442,6 +496,12 @@ def main() -> None:
     parser.add_argument("--node", default="node")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+    if args.warmup is None:
+        args.warmup = 240 if args.mode == "throughput" else 120
+    if args.frames is None:
+        args.frames = 1800 if args.mode == "throughput" else 600
+    if "webgl" in args.backends and (args.mode == "throughput" or args.samples != 1):
+        parser.error("Throughput and multisample benchmarks require native backends")
     args.out = args.out.resolve()
     if args.run_dir:
         args.run_dir = args.run_dir.resolve()

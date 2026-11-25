@@ -29,6 +29,7 @@ type
 
 var
   selectionTexture: Uniform[Sampler2d]
+  selectionDepth: Uniform[Sampler2d]
   selectionResolution: Uniform[Vec2]
   selectionColor: Uniform[Vec3]
 
@@ -36,40 +37,34 @@ const
   SelectionOutlineColor* = vec3(1.0, 0.78, 0.12)
   AttackOutlineColor* = vec3(0.92, 0.16, 0.14)
   OccludedOutlineColor* = vec3(0.55, 0.85, 1.0)
-  OcclusionFragment = """
-uniform sampler2D selectionTexture;
-uniform highp sampler2D selectionDepth;
-uniform vec2 selectionResolution;
-uniform vec3 selectionColor;
-in vec2 texturePosition;
-out vec4 fragColor;
 
-void main() {
-  vec2 pixel = vec2(2.0) / selectionResolution;
-  float center = texture(selectionTexture, texturePosition).a;
-  float nearby = 0.0;
-  float nearestDepth = 1.0;
-  for (int y = -1; y <= 1; ++y) {
-    for (int x = -1; x <= 1; ++x) {
-      vec2 uv = texturePosition + vec2(float(x), float(y)) * pixel;
-      float alpha = texture(selectionTexture, uv).a;
-      float depth = texture(selectionDepth, uv).r;
-      if (alpha > 0.5 && depth < 1.0) {
-        nearby = max(nearby, alpha);
-        nearestDepth = min(nearestDepth, depth);
-      }
-    }
-  }
-  float edge = clamp(nearby - center, 0.0, 1.0);
-  if (edge <= 0.0) {
-    discard;
-  }
-  // Test the silhouette's depth against scenery without changing scene depth.
-  // The small bias avoids outlining surfaces at the same depth.
-  gl_FragDepth = max(nearestDepth - 0.0000001, 0.0);
-  fragColor = vec4(selectionColor, edge);
-}
-"""
+proc occlusionFragment(
+    fragColor: var Vec4,
+    gl_FragDepth: var float32,
+    texturePosition: Vec2
+) =
+  ## Keeps silhouette edges only where scenery hides the selected body.
+  let
+    pixel = vec2(2.0'f) / selectionResolution
+    center = texture(selectionTexture, texturePosition).a
+  var
+    nearby = 0.0'f
+    nearestDepth = 1.0'f
+  for y in -1 .. 1:
+    for x in -1 .. 1:
+      let
+        uv = texturePosition + vec2(float32(x), float32(y)) * pixel
+        alpha = texture(selectionTexture, uv).a
+        depth = texture(selectionDepth, uv).r
+      if alpha > 0.5'f and depth < 1.0'f:
+        nearby = max(nearby, alpha)
+        nearestDepth = min(nearestDepth, depth)
+  let edge = clamp(nearby - center, 0.0'f, 1.0'f)
+  if edge <= 0.0'f:
+    discardFragment()
+  # Bias the silhouette's depth without writing the scene depth.
+  gl_FragDepth = max(nearestDepth - 0.0000001'f, 0.0'f)
+  fragColor = vec4(selectionColor, edge)
 
 proc selectionVertex(
     gl_Position: var Vec4,
@@ -174,11 +169,7 @@ proc compileProgram(visibility: OutlineVisibility): GLuint =
   let
     fragmentSource =
       if visibility == OccludedOutline:
-        # Shady does not yet expose the fragment-depth output builtin.
-        when defined(emscripten):
-          "#version 300 es\nprecision highp float;\n" & OcclusionFragment
-        else:
-          "#version 410 core\n" & OcclusionFragment
+        toShader(occlusionFragment, ShaderTarget, shaderFragment)
       else:
         toShader(selectionFragment, ShaderTarget, shaderFragment)
     vertexShader = compileShaderStage(

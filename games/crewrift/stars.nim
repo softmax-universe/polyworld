@@ -2,16 +2,8 @@
 
 import
   opengl, vmath,
+  polyworld/nightskies,
   sim
-
-const
-  VertexSource = staticRead("shaders/night-sky.vert")
-  FragmentSource = staticRead("shaders/night-sky.frag")
-  ShaderHeader =
-    when defined(emscripten):
-      "#version 300 es\nprecision highp float;\nprecision highp int;\n"
-    else:
-      "#version 330 core\n"
 
 type
   StarField* = object
@@ -19,9 +11,9 @@ type
     viewLocation, eyeLocation, timeLocation, brightnessLocation: GLint
 
 proc compileStage(kind: GLenum, source: string): GLuint =
-  ## Compiles one copied sky shader and releases failed GPU resources.
+  ## Compiles one generated sky shader and releases failed GPU resources.
   result = glCreateShader(kind)
-  let sources = allocCStringArray([ShaderHeader & source])
+  let sources = allocCStringArray([source])
   defer:
     deallocCStringArray(sources)
   glShaderSource(result, 1, sources, nil)
@@ -38,10 +30,10 @@ proc compileStage(kind: GLenum, source: string): GLuint =
 
 proc initStarField*(): StarField =
   ## Creates the CaC sky program and its fullscreen triangle vertex array.
-  let vertex = compileStage(GL_VERTEX_SHADER, VertexSource)
+  let vertex = compileStage(GL_VERTEX_SHADER, NightSkyVertexSource)
   defer:
     glDeleteShader(vertex)
-  let fragment = compileStage(GL_FRAGMENT_SHADER, FragmentSource)
+  let fragment = compileStage(GL_FRAGMENT_SHADER, NightSkyFragmentSource)
   defer:
     glDeleteShader(fragment)
   result.program = glCreateProgram()

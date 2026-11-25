@@ -18,7 +18,7 @@
 
 import
   std/strutils,
-  opengl, vmath
+  opengl, shady, vmath
 
 type
   DistortionKind* = enum
@@ -51,72 +51,84 @@ type
 
 const
   VertexFloats = 9 ## Position 3, corner 2, kind, progress, shift pixels, seed.
+  ShaderTarget =
+    when defined(emscripten):
+      glsl3WebGL
+    else:
+      glsl4Desktop
 
-  VertexSource = """
-uniform mat4 viewMatrix;
-in vec3 position;
-in vec2 corner;
-in vec4 params;
-out vec2 local;
-out vec4 shape;
-void main() {
-  local = corner;
-  shape = params;
-  gl_Position = viewMatrix * vec4(position, 1.0);
-}
-"""
+var
+  viewMatrix: Uniform[Mat4]
+  scene: Uniform[Sampler2d]
+  viewportSize: Uniform[Vec2]
+  clock: Uniform[float32]
 
-  FragmentSource = """
-uniform sampler2D scene;
-uniform vec2 viewportSize;
-uniform float clock;
-in vec2 local;
-in vec4 shape;
-out vec4 color;
-void main() {
-  float d = length(local);
-  if (d >= 1.0) discard;
-  vec2 outward = d > 0.0001 ? local / d : vec2(0.0);
-  int kind = int(shape.x + 0.5);
-  float progress = clamp(shape.y, 0.0, 1.0);
-  float pixels = shape.z;
-  float seed = shape.w;
-  vec2 shift = vec2(0.0);
-  float mask = 0.0;
-  if (kind == 0) {
-    // A ring racing outward, pushing the picture away from the center.
-    float ring = exp(-pow((d - progress) / 0.13, 2.0));
-    float fade = 1.0 - progress;
-    shift = outward * ring * fade;
-    mask = clamp(ring * fade * 2.0, 0.0, 1.0);
-  } else if (kind == 1) {
-    // Rising ripples, strongest in the middle, swelling in then fading out.
-    float fade = (1.0 - d) * (1.0 - progress) * min(1.0, progress * 6.0);
-    vec2 p = local * 3.5 + vec2(seed, seed * 1.7);
-    float rise = clock * 3.0;
-    shift = vec2(sin(p.y * 4.0 - rise + sin(p.x * 3.1 + seed)),
-      cos(p.x * 4.7 + rise * 0.8 + p.y * 1.3)) * fade * 0.5;
-    mask = clamp(fade * 3.0, 0.0, 1.0);
-  } else {
-    // A bubble: magnifies its middle and bends hard at its rim.
-    float rim = pow(d, 8.0);
-    shift = -outward * (d * (1.0 - d) * 0.6 + rim * 0.8);
-    mask = 1.0 - smoothstep(0.92, 1.0, d);
-  }
-  vec2 uv = gl_FragCoord.xy / viewportSize + shift * pixels / viewportSize;
-  color = vec4(texture(scene, uv).rgb, mask);
-}
-"""
+proc distortionVertex(
+    position: Vec3,
+    corner: Vec2,
+    params: Vec4,
+    local: var Vec2,
+    shape: var Vec4,
+    gl_Position: var Vec4
+) =
+  ## Projects the distortion quad while preserving its local coordinates.
+  local = corner
+  shape = params
+  gl_Position = viewMatrix * vec4(position, 1.0'f)
 
-proc shaderHeader(): string =
-  when defined(emscripten):
-    "#version 300 es\nprecision highp float;\n"
+proc distortionFragment(
+    gl_FragCoord: Vec4,
+    local: Vec2,
+    shape: Vec4,
+    color: var Vec4
+) =
+  ## Samples the finished scene through a shockwave, haze, or shield.
+  let d = length(local)
+  if d >= 1.0'f:
+    discardFragment()
+  let
+    outward =
+      if d > 0.0001'f:
+        local / d
+      else:
+        vec2(0.0'f)
+    kind = int(shape.x + 0.5'f)
+    progress = clamp(shape.y, 0.0'f, 1.0'f)
+    pixels = shape.z
+    seed = shape.w
+  var
+    shift = vec2(0.0'f)
+    mask = 0.0'f
+  if kind == 0:
+    # A ring races outward and pushes the picture away from its center.
+    let
+      ring = exp(-pow((d - progress) / 0.13'f, 2.0'f))
+      fade = 1.0'f - progress
+    shift = outward * ring * fade
+    mask = clamp(ring * fade * 2.0'f, 0.0'f, 1.0'f)
+  elif kind == 1:
+    # Rising ripples swell in and then fade, strongest in the middle.
+    let
+      fade = (1.0'f - d) * (1.0'f - progress) *
+        min(1.0'f, progress * 6.0'f)
+      p = local * 3.5'f + vec2(seed, seed * 1.7'f)
+      rise = clock * 3.0'f
+    shift = vec2(
+      sin(p.y * 4.0'f - rise + sin(p.x * 3.1'f + seed)),
+      cos(p.x * 4.7'f + rise * 0.8'f + p.y * 1.3'f)
+    ) * fade * 0.5'f
+    mask = clamp(fade * 3.0'f, 0.0'f, 1.0'f)
   else:
-    "#version 410 core\n"
+    # A bubble magnifies its middle and bends harder at its rim.
+    let rim = pow(d, 8.0'f)
+    shift = -outward * (d * (1.0'f - d) * 0.6'f + rim * 0.8'f)
+    mask = 1.0'f - smoothstep(0.92'f, 1.0'f, d)
+  let uv = gl_FragCoord.xy / viewportSize + shift * pixels / viewportSize
+  color = vec4(texture(scene, uv).rgb, mask)
 
 proc compileStage(kind: GLenum, source: string): GLuint =
   result = glCreateShader(kind)
-  let text = allocCStringArray([shaderHeader() & source])
+  let text = allocCStringArray([source])
   defer: deallocCStringArray(text)
   glShaderSource(result, 1, text, nil)
   glCompileShader(result)
@@ -132,8 +144,14 @@ proc compileStage(kind: GLenum, source: string): GLuint =
 proc setup(renderer: var DistortionRenderer) =
   ## Builds the program and buffers on first use, with a GL context current.
   let
-    vertex = compileStage(GL_VERTEX_SHADER, VertexSource)
-    fragment = compileStage(GL_FRAGMENT_SHADER, FragmentSource)
+    vertex = compileStage(
+      GL_VERTEX_SHADER,
+      toShader(distortionVertex, ShaderTarget, shaderVertex)
+    )
+    fragment = compileStage(
+      GL_FRAGMENT_SHADER,
+      toShader(distortionFragment, ShaderTarget, shaderFragment)
+    )
   renderer.program = glCreateProgram()
   glAttachShader(renderer.program, vertex)
   glAttachShader(renderer.program, fragment)

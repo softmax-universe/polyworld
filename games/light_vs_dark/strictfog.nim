@@ -1,7 +1,13 @@
 ## LvD-only final current-sight clip. Preserve the explored ground image,
 ## then restore it over every hidden ground pixel after props/effects/shadows.
 ## Shared shaders/defaults and authoritative state are untouched.
-import opengl, vmath
+import opengl, shady, vmath
+
+const ShaderTarget =
+  when defined(emscripten):
+    glsl3WebGL
+  else:
+    glsl4Desktop
 
 type StrictFog* = object
   program, vao, framebuffer, color, depth, sight: GLuint
@@ -11,7 +17,37 @@ type StrictFog* = object
   inverse: Mat4
   side: int
 
+proc strictFogVertex(gl_Position: var Vec4, uv: var Vec2) =
+  ## Covers the viewport with one triangle and matching texture coordinates.
+  let point = vec2(
+    float32((gl_VertexID mod 2) * 2),
+    float32((gl_VertexID div 2) * 2)
+  )
+  uv = point
+  gl_Position = vec4(point * 2.0'f - 1.0'f, vec2(0.0'f, 1.0'f))
+
+proc strictFogFragment(
+    uv: Vec2,
+    color: var Vec4,
+    groundColor, groundDepth, currentSight: Uniform[Sampler2D],
+    inverseView: Uniform[Mat4],
+    mapSide: Uniform[float32]
+) =
+  ## Restores ground outside current sight after later scene passes.
+  let
+    depth = texture(groundDepth, uv).r
+    point = inverseView * vec4(uv * 2.0'f - 1.0'f,
+      vec2(depth * 2.0'f - 1.0'f, 1.0'f))
+    cell = floor(point.xz / point.w + mapSide * 0.5'f)
+    inside = cell.x >= 0.0'f and cell.y >= 0.0'f and
+      cell.x < mapSide and cell.y < mapSide
+  if depth < 1.0'f and inside and
+    texelFetch(currentSight, ivec2(cell), 0).r > 0.5'f:
+      discardFragment()
+  color = texture(groundColor, uv)
+
 proc compile(kind: GLenum, text: string): GLuint =
+  ## Compiles one Shady-generated stage for the current graphics target.
   result = glCreateShader(kind)
   var sources = allocCStringArray([text])
   glShaderSource(result, 1, sources, nil)
@@ -19,28 +55,20 @@ proc compile(kind: GLenum, text: string): GLuint =
   glCompileShader(result)
   var ok: GLint
   glGetShaderiv(result, GL_COMPILE_STATUS, ok.addr)
-  doAssert ok != 0, "Strict fog shader compilation failed"
+  if ok == 0:
+    var length: GLint
+    glGetShaderiv(result, GL_INFO_LOG_LENGTH, length.addr)
+    var log = newString(length)
+    glGetShaderInfoLog(result, length, nil, log.cstring)
+    doAssert false, "Strict fog shader compilation failed:\n" & log & text
 
 proc initStrictFog*(): StrictFog =
-  let header = when defined(emscripten): "#version 300 es\nprecision highp float;\nprecision highp int;\n"
-    else: "#version 410\n"
-  let vertex = compile(GL_VERTEX_SHADER, header & """
-out vec2 uv;
-void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);uv=p;gl_Position=vec4(p*2.0-1.0,0,1);}
-""")
-  let fragment = compile(GL_FRAGMENT_SHADER, header & """
-in vec2 uv; out vec4 color;
-uniform sampler2D groundColor; uniform sampler2D groundDepth;
-uniform sampler2D currentSight; uniform mat4 inverseView; uniform float mapSide;
-void main(){
- float d=texture(groundDepth,uv).r;
- vec4 p=inverseView*vec4(uv*2.0-1.0,d*2.0-1.0,1.0);
- vec2 cell=floor(p.xz/p.w+mapSide*0.5);
- bool inside=all(greaterThanEqual(cell,vec2(0)))&&all(lessThan(cell,vec2(mapSide)));
- if(d<1.0 && inside && texelFetch(currentSight,ivec2(cell),0).r>0.5) discard;
- color=texture(groundColor,uv);
-}
-""")
+  ## Creates the Shady program and framebuffer resources for strict fog.
+  let
+    vertex = compile(GL_VERTEX_SHADER,
+      toShader(strictFogVertex, ShaderTarget, shaderVertex))
+    fragment = compile(GL_FRAGMENT_SHADER,
+      toShader(strictFogFragment, ShaderTarget, shaderFragment))
   result.program = glCreateProgram()
   glAttachShader(result.program, vertex)
   glAttachShader(result.program, fragment)

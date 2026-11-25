@@ -24,7 +24,7 @@
 
 import
   std/[os, strutils],
-  opengl, vmath
+  opengl, shady, vmath
 
 type
   XrayBodyError* = object of CatchableError
@@ -55,53 +55,64 @@ type
     locations: array[6, GLint]
 
 const
-  FullscreenVertex = """
-void main() {
-  vec2 corner = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
-  gl_Position = vec4(corner * 2.0 - 1.0, 0.0, 1.0);
-}
-"""
+  ShaderTarget =
+    when defined(emscripten):
+      glsl3WebGL
+    else:
+      glsl4Desktop
 
-  CompositeFragment = """
-uniform sampler2D bodyColor;
-uniform highp sampler2D bodyDepth;
-uniform float coverage;
-uniform float cell;
-uniform vec4 depthTerms;   // projection [2,2], [3,2], [2,3], [3,3]
-uniform float clearance;
-out vec4 fragColor;
+var
+  bodyColor: Uniform[Sampler2d]
+  bodyDepth: Uniform[Sampler2d]
+  coverage: Uniform[float32]
+  cell: Uniform[float32]
+  depthTerms: Uniform[Vec4]
+  clearance: Uniform[float32]
 
-const float Bayer[16] = float[16](
-  0.0, 8.0, 2.0, 10.0,
-  12.0, 4.0, 14.0, 6.0,
-  3.0, 11.0, 1.0, 9.0,
-  15.0, 7.0, 13.0, 5.0
-);
+proc fullscreenVertex(gl_Position: var Vec4) =
+  ## Covers the target with one triangle generated from the vertex index.
+  let corner = vec2(
+    float32((gl_VertexID mod 2) * 2),
+    float32((gl_VertexID div 2) * 2)
+  )
+  gl_Position = vec4(
+    corner.x * 2.0'f - 1.0'f,
+    corner.y * 2.0'f - 1.0'f,
+    0.0'f,
+    1.0'f
+  )
 
-void main() {
-  ivec2 pattern = ivec2(mod(floor(gl_FragCoord.xy / cell), 4.0));
-  if ((Bayer[pattern.y * 4 + pattern.x] + 0.5) / 16.0 >= coverage) {
-    discard;
-  }
-  ivec2 texel = ivec2(gl_FragCoord.xy);
-  vec4 body = texelFetch(bodyColor, texel, 0);
-  if (body.a <= 0.0) {
-    discard;
-  }
-  // Pull the body's depth `clearance` toward the eye, in view space so it
-  // means the same distance near and far, for orthographic and perspective
-  // cameras alike. The inverted depth test then keeps only texels that are
-  // still behind the window's surface.
-  float ndc = texelFetch(bodyDepth, texel, 0).r * 2.0 - 1.0;
-  float z = (depthTerms.y - ndc * depthTerms.w) /
-    (ndc * depthTerms.z - depthTerms.x);
-  z += clearance;
-  float nearer = (depthTerms.x * z + depthTerms.y) /
-    (depthTerms.z * z + depthTerms.w);
-  gl_FragDepth = clamp(nearer * 0.5 + 0.5, 0.0, 1.0);
-  fragColor = vec4(body.rgb, 1.0);
-}
-"""
+proc compositeFragment(
+    gl_FragCoord: Vec4,
+    gl_FragDepth: var float32,
+    fragColor: var Vec4
+) =
+  ## Draws hidden body texels through the fixed screen-door pattern.
+  let
+    pattern = ivec2(floor(gl_FragCoord.xy / cell) mod 4.0'f)
+    lowX = pattern.x mod 2
+    lowY = pattern.y mod 2
+    highX = pattern.x div 2
+    highY = pattern.y div 2
+    # Expand the two recursive Bayer levels without a shader array.
+    bayer = abs(lowX - lowY) * 8 + lowY * 4 +
+      abs(highX - highY) * 2 + highY
+  if (float32(bayer) + 0.5'f) / 16.0'f >= coverage:
+    discardFragment()
+  let
+    texel = ivec2(gl_FragCoord.xy)
+    body = texelFetch(bodyColor, texel, 0)
+  if body.a <= 0.0'f:
+    discardFragment()
+  # Pull toward the eye in view space for either projection type.
+  let ndc = texelFetch(bodyDepth, texel, 0).r * 2.0'f - 1.0'f
+  var z = (depthTerms.y - ndc * depthTerms.w) /
+    (ndc * depthTerms.z - depthTerms.x)
+  z += clearance
+  let nearer = (depthTerms.x * z + depthTerms.y) /
+    (depthTerms.z * z + depthTerms.w)
+  gl_FragDepth = clamp(nearer * 0.5'f + 0.5'f, 0.0'f, 1.0'f)
+  fragColor = vec4(body.rgb, 1.0'f)
 
 proc defaultXrayBodySettings*(): XrayBodySettings =
   ## A checkerboard in three-point cells.
@@ -127,18 +138,10 @@ proc xrayBodySettings*(
     envFloat(prefix & "_COVERAGE", defaults.coverage), 0, 1)
   result.cell = max(1'f32, envFloat(prefix & "_CELL", defaults.cell))
 
-proc shaderHeader(): string =
-  when defined(emscripten):
-    "#version 300 es\nprecision highp float;\n"
-  else:
-    "#version 410 core\n"
-
 proc compileStage(kind: GLenum, source, label: string): GLuint =
   ## Compiles one stage, raising with the driver's log on failure.
   result = glCreateShader(kind)
-  let
-    text = shaderHeader() & source
-    sources = allocCStringArray([text])
+  let sources = allocCStringArray([source])
   defer:
     deallocCStringArray(sources)
   glShaderSource(result, 1, sources, nil)
@@ -155,9 +158,16 @@ proc compileStage(kind: GLenum, source, label: string): GLuint =
 
 proc compileProgram(): GLuint =
   let
-    vertexShader = compileStage(GL_VERTEX_SHADER, FullscreenVertex, "vertex")
-    fragmentShader =
-      compileStage(GL_FRAGMENT_SHADER, CompositeFragment, "fragment")
+    vertexShader = compileStage(
+      GL_VERTEX_SHADER,
+      toShader(fullscreenVertex, ShaderTarget, shaderVertex),
+      "vertex"
+    )
+    fragmentShader = compileStage(
+      GL_FRAGMENT_SHADER,
+      toShader(compositeFragment, ShaderTarget, shaderFragment),
+      "fragment"
+    )
   result = glCreateProgram()
   glAttachShader(result, vertexShader)
   glAttachShader(result, fragmentShader)

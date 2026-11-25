@@ -5,6 +5,41 @@ import windy
 import ../[maps, sim]
 import polyworld/visions
 
+proc terrainProbeVertex(
+    gl_Position: var Vec4,
+    worldPos: var Vec3,
+    vertEdgeMask: var float32,
+    vertNormal: var Vec3,
+    vertColor: var Vec3,
+    vertMaterials: var Vec4,
+    vertWeights: var Vec4,
+    vertSplatRange: var Vec3,
+    shadowPos: var Vec3,
+    fragmentColor: var Vec3,
+    fragmentNormal: var Vec3,
+    fragmentPosition: var Vec3,
+    probePosition: Uniform[Vec2]
+) =
+  ## Supplies constant terrain and prop inputs at the requested world cell.
+  let
+    corner = vec2(
+      float32(gl_VertexID mod 2) * 2.0'f,
+      float32((gl_VertexID div 2) mod 2) * 2.0'f
+    )
+    point = corner * 2.0'f - 1.0'f
+  gl_Position = vec4(point.x, point.y, 0.0'f, 1.0'f)
+  worldPos = vec3(probePosition.x, 0.0'f, probePosition.y)
+  vertEdgeMask = 0.0'f
+  vertNormal = vec3(0, 1, 0)
+  vertColor = vec3(1)
+  vertMaterials = vec4(0)
+  vertWeights = vec4(1, 0, 0, 0)
+  vertSplatRange = vec3(-1)
+  shadowPos = worldPos
+  fragmentColor = vec3(45, 180, 65) / 255.0'f
+  fragmentNormal = vertNormal
+  fragmentPosition = worldPos
+
 proc worldVisibility(world: World, mode: int32): seq[uint8] =
   ## Match updateTerrainVision's encoding, including its presentation blur.
   result = newSeq[uint8](world.map.side * world.map.side)
@@ -82,31 +117,9 @@ block visibilityUpload:
 
   # Render the actual terrain shader and its world-space UVs, without art.
   # Constant varyings keep lighting/materials identical between fog states.
-  let vertexSource = """#version 410
-out vec3 worldPos;
-out float vertEdgeMask;
-out vec3 vertNormal;
-out vec3 vertColor;
-out vec4 vertMaterials;
-out vec4 vertWeights;
-out vec3 vertSplatRange;
-out vec3 shadowPos;
-out vec3 fragmentColor;
-out vec3 fragmentNormal;
-out vec3 fragmentPosition;
-uniform vec2 probePosition;
-void main() {
-  vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
-  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
-  worldPos = vec3(probePosition.x, 0.0, probePosition.y);
-  vertEdgeMask = 0.0; vertNormal = vec3(0,1,0);
-  vertColor = vec3(1); vertMaterials = vec4(0);
-  vertWeights = vec4(1,0,0,0); vertSplatRange = vec3(-1);
-  shadowPos = worldPos;
-  fragmentColor = vec3(45,180,65) / 255.0;
-  fragmentNormal = vertNormal; fragmentPosition = worldPos;
-}
-"""
+  let vertexSource = toShader(
+    terrainProbeVertex, OpenGlShaderTarget, shaderVertex
+  )
   var program = compileProgram(vertexSource,
     toShader(terrainFrag, OpenGlShaderTarget, shaderFragment))
   glUseProgram(program)

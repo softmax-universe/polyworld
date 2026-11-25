@@ -33,7 +33,7 @@ const
   Brass = vec3(0.43, 0.31, 0.13)
 
 const
-  # The courtyard's own night lighting. courtyard.frag uses the same values;
+  # The courtyard's Shady stages use these same night lighting values;
   # cac.nim lights the heroes with them so they belong to the scene.
   CourtyardKeyColor* = vec3(0.67, 0.53, 0.36)
   CourtyardAmbientGround* = vec3(0.33, 0.35, 0.39)
@@ -648,7 +648,8 @@ proc buildMultiplayerCourtyardMesh*(playerCount: int): CourtyardMesh =
 when not defined(headless):
   import std/os
   import opengl, pixie
-  import ../paths
+  import polyworld/nightskies
+  import ../paths, courtyardshaders
 
   type
     CourtyardMaterial* = object
@@ -680,17 +681,10 @@ when not defined(headless):
 
   const
     ShadowSize = 2048
-    VertexSource = staticRead("shaders/courtyard.vert")
-    FragmentSource = staticRead("shaders/courtyard.frag")
-    SkyVertexSource = staticRead("shaders/night-sky.vert")
-    SkyFragmentSource = staticRead("shaders/night-sky.frag")
-    ShaderHeader = when defined(emscripten):
-      "#version 300 es\nprecision highp float;\nprecision highp int;\n"
-    else: "#version 330 core\n"
 
   proc compile(kind: GLenum, source: string): GLuint =
     result = glCreateShader(kind)
-    let sources = allocCStringArray([ShaderHeader & source])
+    let sources = allocCStringArray([source])
     defer: deallocCStringArray(sources)
     glShaderSource(result, 1, sources, nil)
     glCompileShader(result)
@@ -712,6 +706,11 @@ when not defined(headless):
     result = glCreateProgram()
     glAttachShader(result, v)
     glAttachShader(result, f)
+    # The scene and depth programs share one fixed vertex-array layout.
+    for (location, name) in [
+        (0, "position"), (1, "normal"), (2, "color"),
+        (3, "material"), (4, "uv")]:
+      glBindAttribLocation(result, location.GLuint, name.cstring)
     glLinkProgram(result)
     var ok: GLint
     glGetProgramiv(result, GL_LINK_STATUS, ok.addr)
@@ -763,11 +762,11 @@ when not defined(headless):
     result.commonCount = mesh.commonCount
     result.backdropCount = mesh.backdropCount
     result.centerCount = mesh.centerCount
-    result.program = program(VertexSource, FragmentSource)
+    result.program = program(CourtyardVertexSource, CourtyardFragmentSource)
     let textureRoot = artworkRoot() / "battlefield/textures"
     result.normalMap = loadNormalTexture(textureRoot / "stone-slab-normal.png")
     result.material = defaultCourtyardMaterial()
-    result.skyProgram = program(SkyVertexSource, SkyFragmentSource)
+    result.skyProgram = program(NightSkyVertexSource, NightSkyFragmentSource)
     result.skyViewLocation = glGetUniformLocation(result.skyProgram, "inverseViewProjection")
     result.skyEyeLocation = glGetUniformLocation(result.skyProgram, "cameraEye")
     result.skyTimeLocation = glGetUniformLocation(result.skyProgram, "time")
@@ -813,13 +812,9 @@ when not defined(headless):
 
     # Bake the static sun shadows for both camera directions once. No scene
     # geometry is rebuilt or uploaded on a normal frame, including cloth.
-    let depthProgram = program("""
-layout(location=0) in vec3 position;
-uniform mat4 lightMatrix;
-void main() { gl_Position = lightMatrix * vec4(position, 1.0); }
-""", """
-void main() {}
-""")
+    let depthProgram = program(
+      CourtyardDepthVertexSource, CourtyardDepthFragmentSource
+    )
     let lightLocation = glGetUniformLocation(depthProgram, "lightMatrix")
     var viewport: array[4, GLint]
     var oldFramebuffer: GLint

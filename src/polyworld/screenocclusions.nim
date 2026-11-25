@@ -25,7 +25,15 @@
 
 import
   std/[os, strutils, tables],
-  opengl, vmath
+  opengl, shady, vmath
+
+const
+  OcclusionTaps = 16
+  ShaderTarget =
+    when defined(emscripten):
+      glsl3WebGL
+    else:
+      glsl4Desktop
 
 type
   ScreenOcclusionError* = object of CatchableError
@@ -77,151 +85,128 @@ type
     textures: array[3, GLint]
     readFramebuffer, drawFramebuffer: GLint
 
+
+var
+  depthTexture, groundTexture, occlusionTexture: Uniform[Sampler2D]
+  inverseProjection: Uniform[Mat4]
+  texel, projectionScale, clipW: Uniform[Vec2]
+  radius, intensity, bias: Uniform[float32]
+  direction, halfSize, depthTexel: Uniform[Vec2]
+  depthTerms: Uniform[Vec4]
+  edgeScale, bodyOcclusion: Uniform[float32]
+  tint: Uniform[Vec3]
+
+proc fullscreenVertex(gl_Position: var Vec4, uv: var Vec2) =
+  ## Covers the framebuffer with a single triangle and normalized coordinates.
+  var corner = vec2(0.0'f)
+  if gl_VertexID == 1:
+    corner.x = 2.0'f
+  elif gl_VertexID == 2:
+    corner.y = 2.0'f
+  uv = corner
+  gl_Position = vec4(corner * 2.0'f - 1.0'f, vec2(0.0'f, 1.0'f))
+
+proc viewPosition(p: Vec2): Vec3 =
+  ## Reconstructs positions at nearest depth texel centers to avoid row tilts.
+  let
+    center = (floor(p / texel) + 0.5'f) * texel
+    depth = texture(depthTexture, center).x
+    position = inverseProjection *
+      vec4(center * 2.0'f - 1.0'f, vec2(depth * 2.0'f - 1.0'f, 1.0'f))
+  result = position.xyz / position.w
+
+proc viewNormal(p: Vec2, center: Vec3): Vec3 =
+  ## Chooses depth-nearest neighbors to keep silhouette normals clean.
+  let
+    right = viewPosition(p + vec2(texel.x, 0.0'f)) - center
+    left = center - viewPosition(p - vec2(texel.x, 0.0'f))
+    up = viewPosition(p + vec2(0.0'f, texel.y)) - center
+    down = center - viewPosition(p - vec2(0.0'f, texel.y))
+    dx =
+      if abs(right.z) < abs(left.z): right
+      else: left
+    dy =
+      if abs(up.z) < abs(down.z): up
+      else: down
+  result = normalize(cross(dx, dy))
+
+proc occlusionHash(p: Vec2): float32 =
+  ## Rotates the sample spiral independently for each framebuffer pixel.
+  result = fract(52.9829189'f * fract(dot(p, vec2(0.06711056'f, 0.00583715'f))))
+
+proc occlusionFragment(gl_FragCoord: Vec4, fragColor: var Vec4) =
+  ## Samples a world-sized spiral around a depth-reconstructed surface normal.
+  # Pick one full-resolution texel so each half-resolution row rounds alike.
+  let
+    base = (floor(gl_FragCoord.xy) * 2.0'f + 0.5'f) * texel
+    depth = texture(depthTexture, base).x
+  if depth >= 1.0'f:
+    fragColor = vec4(1.0'f)
+    return
+  let
+    center = viewPosition(base)
+    normal = viewNormal(base, center)
+    # Clip w is -z for perspective cameras and 1 for orthographic cameras.
+    w = max(clipW.x * center.z + clipW.y, 0.1'f)
+    uvRadius = 0.5'f * projectionScale * radius / w
+    spin = occlusionHash(gl_FragCoord.xy) * 6.2831853'f
+  var occlusion = 0.0'f
+  for i in 0 ..< OcclusionTaps:
+    let
+      t = (float32(i) + 0.5'f) / float32(OcclusionTaps)
+      angle = float32(i) * 2.3999632'f + spin
+      offset = vec2(cos(angle), sin(angle)) * t * uvRadius
+      delta = viewPosition(base + offset) - center
+      distance2 = dot(delta, delta)
+      falloff = max(0.0'f, 1.0'f - distance2 / (radius * radius))
+      cosine = dot(delta, normal) * inversesqrt(distance2 + 0.0001'f)
+    occlusion += falloff * max(0.0'f, cosine - bias)
+  let ao = clamp(1.0'f - intensity * occlusion / float32(OcclusionTaps), 0.0'f, 1.0'f)
+  fragColor = vec4(ao, ao, ao, 1.0'f)
+
+proc viewDepth(p: Vec2): float32 =
+  ## Reads positive view depth at the full-resolution texel used for occlusion.
+  let
+    texelCenter = (floor(p * halfSize) * 2.0'f + 0.5'f) * depthTexel
+    ndc = texture(depthTexture, texelCenter).x * 2.0'f - 1.0'f
+  result = -(depthTerms.x * ndc + depthTerms.y) /
+    (depthTerms.z * ndc + depthTerms.w)
+
+proc blurFragment(uv: Vec2, fragColor: var Vec4) =
+  ## Smooths occlusion while preserving depth edges for either camera kind.
+  let
+    centerDepth = viewDepth(uv)
+    scale = edgeScale / max(clipW.y - clipW.x * centerDepth, 0.0001'f)
+  var
+    total = 0.0'f
+    weights = 0.0'f
+  for i in -4 .. 4:
+    let
+      p = uv + direction * float32(i)
+      difference = abs(viewDepth(p) - centerDepth) * scale
+      weight = exp(-float32(i * i) / 12.0'f) * max(0.0'f, 1.0'f - difference)
+    total += texture(occlusionTexture, p).x * weight
+    weights += weight
+  let ao = total / max(weights, 0.0001'f)
+  fragColor = vec4(ao, ao, ao, 1.0'f)
+
+proc multiplyFragment(uv: Vec2, gl_FragCoord: Vec4, fragColor: var Vec4) =
+  ## Tints occluded surfaces while retaining configurable body brightness.
+  var ao = texture(occlusionTexture, uv).x
+  if ao > 0.996'f:
+    discardFragment()
+  # Without a ground copy both samplers read the same scene depth texture.
+  let pixel = ivec2(gl_FragCoord.x.int32, gl_FragCoord.y.int32)
+  if texelFetch(depthTexture, pixel, 0).x <
+    texelFetch(groundTexture, pixel, 0).x:
+      ao = mix(1.0'f, ao, bodyOcclusion)
+  fragColor = vec4(mix(tint, vec3(1.0'f), ao), 1.0'f)
+
 const
-  FullscreenVertex = """
-out vec2 uv;
-void main() {
-  vec2 corner = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
-  uv = corner;
-  gl_Position = vec4(corner * 2.0 - 1.0, 0.0, 1.0);
-}
-"""
-
-  OcclusionFragment = """
-uniform highp sampler2D depthTexture;
-uniform mat4 inverseProjection;
-uniform vec2 texel;
-uniform vec2 projectionScale;
-uniform vec2 clipW;
-uniform float radius;
-uniform float intensity;
-uniform float bias;
-in vec2 uv;
-out vec4 fragColor;
-
-// Snaps to the depth texel's center: the depth read is NEAREST, so the
-// position must be rebuilt where that depth was written, or flat surfaces
-// tilt between rows at half resolution.
-vec3 viewPosition(vec2 p) {
-  p = (floor(p / texel) + 0.5) * texel;
-  float depth = texture(depthTexture, p).r;
-  vec4 v = inverseProjection * vec4(p * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
-  return v.xyz / v.w;
-}
-
-// Picks the neighbor on each axis closest in depth so silhouettes keep
-// clean normals instead of smearing across the gap.
-vec3 viewNormal(vec2 p, vec3 center) {
-  vec3 right = viewPosition(p + vec2(texel.x, 0.0)) - center;
-  vec3 left = center - viewPosition(p - vec2(texel.x, 0.0));
-  vec3 up = viewPosition(p + vec2(0.0, texel.y)) - center;
-  vec3 down = center - viewPosition(p - vec2(0.0, texel.y));
-  vec3 dx = abs(right.z) < abs(left.z) ? right : left;
-  vec3 dy = abs(up.z) < abs(down.z) ? up : down;
-  return normalize(cross(dx, dy));
-}
-
-float hash(vec2 p) {
-  return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
-}
-
-void main() {
-  // A half-res pixel's center sits on a full-res texel corner; pick one
-  // texel explicitly so every row rounds the same way.
-  vec2 base = (floor(gl_FragCoord.xy) * 2.0 + 0.5) * texel;
-  float depth = texture(depthTexture, base).r;
-  if (depth >= 1.0) {
-    fragColor = vec4(1.0);
-    return;
-  }
-  vec3 center = viewPosition(base);
-  vec3 normal = viewNormal(base, center);
-  // Clip w is -z for a perspective camera and 1 for an orthographic one.
-  float w = max(clipW.x * center.z + clipW.y, 0.1);
-  vec2 uvRadius = 0.5 * projectionScale * radius / w;
-  float spin = hash(gl_FragCoord.xy) * 6.2831853;
-  const int Taps = 16;
-  float occlusion = 0.0;
-  for (int i = 0; i < Taps; ++i) {
-    float t = (float(i) + 0.5) / float(Taps);
-    float angle = float(i) * 2.3999632 + spin;
-    vec2 offset = vec2(cos(angle), sin(angle)) * t * uvRadius;
-    vec3 v = viewPosition(base + offset) - center;
-    float distance2 = dot(v, v);
-    float falloff = max(0.0, 1.0 - distance2 / (radius * radius));
-    float cosine = dot(v, normal) * inversesqrt(distance2 + 0.0001);
-    occlusion += falloff * max(0.0, cosine - bias);
-  }
-  float ao = clamp(1.0 - intensity * occlusion / float(Taps), 0.0, 1.0);
-  fragColor = vec4(ao, ao, ao, 1.0);
-}
-"""
-
-  BlurFragment = """
-uniform sampler2D occlusionTexture;
-uniform highp sampler2D depthTexture;
-uniform vec2 direction;
-uniform vec2 halfSize;
-uniform vec2 depthTexel;
-uniform vec4 depthTerms;
-uniform vec2 clipW;
-uniform float edgeScale;
-in vec2 uv;
-out vec4 fragColor;
-
-// Reads the same full-res texel the occlusion pass used for this pixel and
-// turns it into a positive view distance, for either kind of projection.
-float viewDepth(vec2 p) {
-  vec2 texelCenter = (floor(p * halfSize) * 2.0 + 0.5) * depthTexel;
-  float ndc = texture(depthTexture, texelCenter).r * 2.0 - 1.0;
-  return -(depthTerms.x * ndc + depthTerms.y) /
-    (depthTerms.z * ndc + depthTerms.w);
-}
-
-void main() {
-  float centerDepth = viewDepth(uv);
-  // Gaps count against the view's half height at this depth, so a
-  // perspective and an orthographic camera stop at the same edges.
-  float scale = edgeScale / max(clipW.y - clipW.x * centerDepth, 0.0001);
-  float total = 0.0;
-  float weights = 0.0;
-  for (int i = -4; i <= 4; ++i) {
-    vec2 p = uv + direction * float(i);
-    float difference = abs(viewDepth(p) - centerDepth) * scale;
-    float weight = exp(-float(i * i) / 12.0) * max(0.0, 1.0 - difference);
-    total += texture(occlusionTexture, p).r * weight;
-    weights += weight;
-  }
-  float ao = total / max(weights, 0.0001);
-  fragColor = vec4(ao, ao, ao, 1.0);
-}
-"""
-
-  MultiplyFragment = """
-uniform sampler2D occlusionTexture;
-uniform highp sampler2D depthTexture;
-uniform highp sampler2D groundTexture;
-uniform vec3 tint;
-uniform float bodyOcclusion;
-in vec2 uv;
-out vec4 fragColor;
-
-void main() {
-  float ao = texture(occlusionTexture, uv).r;
-  // Most of the screen is open: skip blending where nothing would change.
-  if (ao > 0.996) {
-    discard;
-  }
-  // A body drawn after the ground copy moved this pixel's depth nearer.
-  // Without a copy both samplers read the same texture and nothing moves.
-  ivec2 pixel = ivec2(gl_FragCoord.xy);
-  if (texelFetch(depthTexture, pixel, 0).r <
-      texelFetch(groundTexture, pixel, 0).r) {
-    ao = mix(1.0, ao, bodyOcclusion);
-  }
-  fragColor = vec4(mix(tint, vec3(1.0), ao), 1.0);
-}
-"""
+  FullscreenVertex = toShader(fullscreenVertex, ShaderTarget, shaderVertex)
+  OcclusionFragment = toShader(occlusionFragment, ShaderTarget, shaderFragment)
+  BlurFragment = toShader(blurFragment, ShaderTarget, shaderFragment)
+  MultiplyFragment = toShader(multiplyFragment, ShaderTarget, shaderFragment)
 
 proc defaultScreenOcclusionSettings*(): ScreenOcclusionSettings =
   ## CaC's tuned values. Its blur sharpness of 40 per unit of relative depth
@@ -256,18 +241,10 @@ proc screenOcclusionSettings*(
   result.intensity = envFloat(prefix & "_INTENSITY", defaults.intensity)
   result.bias = envFloat(prefix & "_BIAS", defaults.bias)
 
-proc shaderHeader(): string =
-  when defined(emscripten):
-    "#version 300 es\nprecision highp float;\n"
-  else:
-    "#version 410 core\n"
-
 proc compileStage(kind: GLenum, source, label: string): GLuint =
   ## Compiles one stage, raising with the driver's log on failure.
   result = glCreateShader(kind)
-  let
-    text = shaderHeader() & source
-    sources = allocCStringArray([text])
+  let sources = allocCStringArray([source])
   defer:
     deallocCStringArray(sources)
   glShaderSource(result, 1, sources, nil)
@@ -358,7 +335,7 @@ proc bindTarget(target: OcclusionTarget) =
   glBindFramebuffer(GL_FRAMEBUFFER, target.framebuffer)
   glViewport(0, 0, target.size.x.GLsizei, target.size.y.GLsizei)
 
-proc texel(target: OcclusionTarget): Vec2 =
+proc texelSize(target: OcclusionTarget): Vec2 =
   vec2(1.0'f32 / target.size.x.float32, 1.0'f32 / target.size.y.float32)
 
 proc release(copy: var DepthCopy) =
@@ -572,7 +549,7 @@ proc applyScreenOcclusion*(
     occlusion.blurPass.setTexture("occlusionTexture", 0,
       occlusion.occlusion[input].texture)
     occlusion.blurPass.setVec2("direction",
-      axis * occlusion.occlusion[input].texel)
+      axis * occlusion.occlusion[input].texelSize)
     occlusion.drawFullscreen()
 
   glBindFramebuffer(GL_FRAMEBUFFER, source)

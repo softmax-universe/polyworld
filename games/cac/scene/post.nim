@@ -23,7 +23,8 @@
 
 import
   std/[os, strutils, tables],
-  opengl, vmath
+  opengl, shady, vmath,
+  postshaders
 
 const
   BloomLevels = 4
@@ -95,293 +96,22 @@ type
       inverseProjection: Mat4
 
 const
-  FullscreenVertex = """
-out vec2 uv;
-void main() {
-  vec2 corner = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
-  uv = corner;
-  gl_Position = vec4(corner * 2.0 - 1.0, 0.0, 1.0);
-}
-"""
-
-  ViewFromDepth = """
-uniform highp sampler2D depthTexture;
-uniform sampler2D normalTexture;
-uniform mat4 inverseProjection;
-uniform vec2 texel;
-
-// Snaps to the depth texel's center: the depth read is NEAREST, so the
-// position must be rebuilt where that depth was written, or flat surfaces
-// tilt between rows at half resolution.
-vec3 viewPosition(vec2 p) {
-  p = (floor(p / texel) + 0.5) * texel;
-  float depth = texture(depthTexture, p).r;
-  vec4 v = inverseProjection * vec4(p * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
-  return v.xyz / v.w;
-}
-
-// Picks the neighbor on each axis closest in depth so silhouettes keep
-// clean normals instead of smearing across the gap.
-vec3 viewNormal(vec2 p, vec3 center) {
-  vec3 right = viewPosition(p + vec2(texel.x, 0.0)) - center;
-  vec3 left = center - viewPosition(p - vec2(texel.x, 0.0));
-  vec3 up = viewPosition(p + vec2(0.0, texel.y)) - center;
-  vec3 down = center - viewPosition(p - vec2(0.0, texel.y));
-  vec3 dx = abs(right.z) < abs(left.z) ? right : left;
-  vec3 dy = abs(up.z) < abs(down.z) ? up : down;
-  return normalize(cross(dx, dy));
-}
-
-vec3 surfaceNormal(vec2 p, vec3 center, float detail) {
-  vec3 geometric = viewNormal(p, center);
-  vec4 surface = texture(normalTexture, p);
-  if (surface.a < 0.5) return geometric;
-  return normalize(mix(geometric, normalize(surface.rgb * 2.0 - 1.0), detail));
-}
-"""
-
-  OcclusionFragment = ViewFromDepth & """
-uniform vec2 projectionScale;
-uniform float radius;
-uniform float intensity;
-uniform float bias;
-uniform float normalDetail;
-in vec2 uv;
-out vec4 fragColor;
-
-float hash(vec2 p) {
-  return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
-}
-
-void main() {
-  // A half-res pixel's center sits on a full-res texel corner; pick one
-  // texel explicitly so every row rounds the same way.
-  vec2 base = (floor(gl_FragCoord.xy) * 2.0 + 0.5) * texel;
-  float depth = texture(depthTexture, base).r;
-  if (depth >= 1.0) {
-    fragColor = vec4(1.0);
-    return;
-  }
-  vec3 center = viewPosition(base);
-  // Small surface relief affects the AO hemisphere without making a flat
-  // slab self-occlude as heavily as a real geometric crease.
-  vec3 normal = surfaceNormal(base, center, normalDetail);
-  vec2 uvRadius = 0.5 * projectionScale * radius / max(-center.z, 0.1);
-  float spin = hash(gl_FragCoord.xy) * 6.2831853;
-  const int Taps = 16;
-  float occlusion = 0.0;
-  for (int i = 0; i < Taps; ++i) {
-    float t = (float(i) + 0.5) / float(Taps);
-    float angle = float(i) * 2.3999632 + spin;
-    vec2 offset = vec2(cos(angle), sin(angle)) * t * uvRadius;
-    vec3 v = viewPosition(base + offset) - center;
-    float distance2 = dot(v, v);
-    float falloff = max(0.0, 1.0 - distance2 / (radius * radius));
-    float cosine = dot(v, normal) * inversesqrt(distance2 + 0.0001);
-    occlusion += falloff * max(0.0, cosine - bias);
-  }
-  float ao = clamp(1.0 - intensity * occlusion / float(Taps), 0.0, 1.0);
-  fragColor = vec4(ao, ao, ao, 1.0);
-}
-"""
-
-  BlurFragment = """
-uniform sampler2D occlusionTexture;
-uniform highp sampler2D depthTexture;
-uniform vec2 direction;
-uniform float sharpness;
-uniform float near;
-uniform float far;
-in vec2 uv;
-out vec4 fragColor;
-
-float linearDepth(vec2 p) {
-  float ndc = texture(depthTexture, p).r * 2.0 - 1.0;
-  return 2.0 * near * far / (far + near - ndc * (far - near));
-}
-
-void main() {
-  float centerDepth = linearDepth(uv);
-  float total = 0.0;
-  float weights = 0.0;
-  for (int i = -4; i <= 4; ++i) {
-    vec2 p = uv + direction * float(i);
-    float difference = abs(linearDepth(p) - centerDepth) / centerDepth;
-    float weight = exp(-float(i * i) / 12.0) * max(0.0, 1.0 - difference * sharpness);
-    total += texture(occlusionTexture, p).r * weight;
-    weights += weight;
-  }
-  float ao = total / max(weights, 0.0001);
-  fragColor = vec4(ao, ao, ao, 1.0);
-}
-"""
-
-  MultiplyFragment = """
-uniform sampler2D occlusionTexture;
-uniform vec3 tint;
-in vec2 uv;
-out vec4 fragColor;
-
-void main() {
-  float ao = texture(occlusionTexture, uv).r;
-  fragColor = vec4(mix(tint, vec3(1.0), ao), 1.0);
-}
-"""
-
-  PrefilterFragment = """
-uniform sampler2D sceneTexture;
-uniform sampler2D beforeTexture;
-uniform vec2 texel;
-uniform float threshold;
-uniform float vfxWeight;
-uniform float useVfx;
-in vec2 uv;
-out vec4 fragColor;
-
-vec3 bright(vec2 p) {
-  vec3 scene = texture(sceneTexture, p).rgb;
-  vec3 vfx = max(scene - texture(beforeTexture, p).rgb, 0.0) * useVfx;
-  float peak = max(scene.r, max(scene.g, scene.b));
-  float knee = clamp((peak - threshold) / max(1.0 - threshold, 0.0001), 0.0, 1.0);
-  return vfx * vfxWeight + scene * knee * knee;
-}
-
-void main() {
-  vec3 color = bright(uv) * 0.5;
-  color += bright(uv + texel * vec2(-1.0, -1.0)) * 0.125;
-  color += bright(uv + texel * vec2(1.0, -1.0)) * 0.125;
-  color += bright(uv + texel * vec2(-1.0, 1.0)) * 0.125;
-  color += bright(uv + texel * vec2(1.0, 1.0)) * 0.125;
-  fragColor = vec4(color, 1.0);
-}
-"""
-
-  DownFragment = """
-uniform sampler2D sourceTexture;
-uniform vec2 texel;
-in vec2 uv;
-out vec4 fragColor;
-
-void main() {
-  vec3 color = texture(sourceTexture, uv).rgb * 4.0;
-  color += texture(sourceTexture, uv + texel * vec2(-1.0, -1.0)).rgb;
-  color += texture(sourceTexture, uv + texel * vec2(1.0, -1.0)).rgb;
-  color += texture(sourceTexture, uv + texel * vec2(-1.0, 1.0)).rgb;
-  color += texture(sourceTexture, uv + texel * vec2(1.0, 1.0)).rgb;
-  fragColor = vec4(color / 8.0, 1.0);
-}
-"""
-
-  UpFragment = """
-uniform sampler2D sourceTexture;
-uniform vec2 texel;
-in vec2 uv;
-out vec4 fragColor;
-
-void main() {
-  vec3 color = texture(sourceTexture, uv + texel * vec2(-2.0, 0.0)).rgb;
-  color += texture(sourceTexture, uv + texel * vec2(2.0, 0.0)).rgb;
-  color += texture(sourceTexture, uv + texel * vec2(0.0, -2.0)).rgb;
-  color += texture(sourceTexture, uv + texel * vec2(0.0, 2.0)).rgb;
-  color += texture(sourceTexture, uv + texel * vec2(-1.0, -1.0)).rgb * 2.0;
-  color += texture(sourceTexture, uv + texel * vec2(1.0, -1.0)).rgb * 2.0;
-  color += texture(sourceTexture, uv + texel * vec2(-1.0, 1.0)).rgb * 2.0;
-  color += texture(sourceTexture, uv + texel * vec2(1.0, 1.0)).rgb * 2.0;
-  fragColor = vec4(color / 12.0, 1.0);
-}
-"""
-
-  FinalFragment = """
-uniform sampler2D sceneTexture;
-uniform sampler2D bloomTexture;
-uniform vec2 texel;
-uniform float useFxaa;
-uniform float bloomStrength;
-uniform float vignette;
-uniform float vignetteStart;
-uniform float vignetteEnd;
-uniform float saturation;
-uniform float contrast;
-in vec2 uv;
-out vec4 fragColor;
-
-const vec3 Luma = vec3(0.299, 0.587, 0.114);
-
-vec3 sampleScene(vec2 p) {
-  return texture(sceneTexture, p).rgb;
-}
-
-// FXAA 3.11 "console" variant: one directional blur along the local edge.
-vec3 fxaa(vec2 p) {
-  vec3 m = sampleScene(p);
-  if (useFxaa < 0.5) {
-    return m;
-  }
-  float nw = dot(sampleScene(p + vec2(-1.0, -1.0) * texel), Luma);
-  float ne = dot(sampleScene(p + vec2(1.0, -1.0) * texel), Luma);
-  float sw = dot(sampleScene(p + vec2(-1.0, 1.0) * texel), Luma);
-  float se = dot(sampleScene(p + vec2(1.0, 1.0) * texel), Luma);
-  float lm = dot(m, Luma);
-  float lumaMin = min(lm, min(min(nw, ne), min(sw, se)));
-  float lumaMax = max(lm, max(max(nw, ne), max(sw, se)));
-  if (lumaMax - lumaMin < max(0.0312, lumaMax * 0.125)) {
-    return m;
-  }
-  vec2 dir = vec2(-((nw + ne) - (sw + se)), (nw + sw) - (ne + se));
-  float reduce = max((nw + ne + sw + se) * 0.03125, 1.0 / 128.0);
-  float scale = 1.0 / (min(abs(dir.x), abs(dir.y)) + reduce);
-  dir = clamp(dir * scale, vec2(-8.0), vec2(8.0)) * texel;
-  vec3 a = 0.5 * (sampleScene(p + dir * (1.0 / 3.0 - 0.5)) +
-    sampleScene(p + dir * (2.0 / 3.0 - 0.5)));
-  vec3 b = a * 0.5 + 0.25 * (sampleScene(p - dir * 0.5) +
-    sampleScene(p + dir * 0.5));
-  float lb = dot(b, Luma);
-  return (lb < lumaMin || lb > lumaMax) ? a : b;
-}
-
-void main() {
-  vec3 color = fxaa(uv);
-  color += texture(bloomTexture, uv).rgb * bloomStrength;
-  float luma = dot(color, Luma);
-  color = mix(vec3(luma), color, saturation);
-  color = mix(color, color * color * (3.0 - 2.0 * color), contrast);
-  vec2 centered = (uv - 0.5) * vec2(texel.y / texel.x, 1.0);
-  float edge = smoothstep(vignetteStart, vignetteEnd, length(centered) * 1.3);
-  color *= 1.0 - vignette * edge;
-  float noise = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
-  color += (noise - 0.5) / 255.0;
-  fragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
-}
-"""
+  PostShaderTarget =
+    when defined(emscripten):
+      glsl3WebGL
+    else:
+      glsl4Desktop
+  FullscreenVertex = toShader(postVertex, PostShaderTarget, shaderVertex)
+  OcclusionFragment = toShader(postOcclusion, PostShaderTarget, shaderFragment)
+  BlurFragment = toShader(postBlur, PostShaderTarget, shaderFragment)
+  MultiplyFragment = toShader(postMultiply, PostShaderTarget, shaderFragment)
+  PrefilterFragment = toShader(postPrefilter, PostShaderTarget, shaderFragment)
+  DownFragment = toShader(postDown, PostShaderTarget, shaderFragment)
+  UpFragment = toShader(postUp, PostShaderTarget, shaderFragment)
+  FinalFragment = toShader(postFinal, PostShaderTarget, shaderFragment)
 
 when PostLayerControls:
-  const LayerFragment = ViewFromDepth & """
-uniform sampler2D colorTexture;
-uniform sampler2D otherTexture;
-uniform int mode;
-uniform float scale;
-uniform float near;
-uniform float far;
-in vec2 uv;
-out vec4 fragColor;
-
-void main() {
-  vec3 color = texture(colorTexture, uv).rgb * scale;
-  float depth = texture(depthTexture, uv).r;
-  if (mode == 1) {
-    // Near is white; the far side of the table fades to dark gray.
-    float ndc = depth * 2.0 - 1.0;
-    float z = 2.0 * near * far / (far + near - ndc * (far - near));
-    color = depth >= 1.0 ? vec3(0.0) : vec3(1.0 - 0.85 * clamp((z - 5.0) / 30.0, 0.0, 1.0));
-  } else if (mode == 2) {
-    vec3 center = viewPosition(uv);
-    color = depth >= 1.0 ? vec3(0.0) : surfaceNormal(uv, center, 1.0) * 0.5 + 0.5;
-  } else if (mode == 3) {
-    color = max(color - texture(otherTexture, uv).rgb, 0.0) * 2.0;
-  }
-  fragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
-}
-"""
+  const LayerFragment = toShader(postLayer, PostShaderTarget, shaderFragment)
 
 proc envFlag(name: string, default = true): bool =
   let value = getEnv(name)
@@ -413,17 +143,9 @@ proc defaultPostSettings*(): PostSettings =
     contrast: 0.12
   )
 
-proc shaderHeader(): string =
-  when defined(emscripten):
-    "#version 300 es\nprecision highp float;\n"
-  else:
-    "#version 410 core\n"
-
 proc compileStage(kind: GLenum, source, label: string): GLuint =
   result = glCreateShader(kind)
-  let
-    text = shaderHeader() & source
-    sources = allocCStringArray([text])
+  let sources = allocCStringArray([source])
   defer:
     deallocCStringArray(sources)
   glShaderSource(result, 1, sources, nil)

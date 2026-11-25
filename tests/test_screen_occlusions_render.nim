@@ -1,17 +1,35 @@
 ## GPU coverage for shared screen AO on the native multisampled window.
 import
-  opengl, pixie, vmath, windy,
+  opengl, pixie, shady, vmath, windy,
   polyworld/screenocclusions
+
+const ShaderTarget =
+  when defined(emscripten):
+    glsl3WebGL
+  else:
+    glsl4Desktop
 
 type
   Fixture = object
     program, vertexArray, vertexBuffer: GLuint
     vertices: seq[Vec3]
 
+proc fixtureVertex(
+    position: Vec3,
+    viewProjection: Uniform[Mat4],
+    gl_Position: var Vec4
+) =
+  ## Transforms the fixture geometry with its camera matrix.
+  gl_Position = viewProjection * vec4(position, 1)
+
+proc fixtureFragment(color: Uniform[Vec3], fragColor: var Vec4) =
+  ## Colors the geometry without lighting so AO is independently observable.
+  fragColor = vec4(color, 1)
+
 proc shader(kind: GLenum, source: string): GLuint =
   ## Compiles the fixture's minimal solid-color geometry shader.
   result = glCreateShader(kind)
-  let sources = allocCStringArray(["#version 410 core\n" & source])
+  let sources = allocCStringArray([source])
   defer: deallocCStringArray(sources)
   glShaderSource(result, 1, sources, nil)
   glCompileShader(result)
@@ -22,19 +40,18 @@ proc shader(kind: GLenum, source: string): GLuint =
 proc initFixture(): Fixture =
   ## Creates a floor and box renderer without importing game assets.
   let
-    vertex = shader(GL_VERTEX_SHADER, """
-layout(location = 0) in vec3 position;
-uniform mat4 viewProjection;
-void main() { gl_Position = viewProjection * vec4(position, 1.0); }
-""")
-    fragment = shader(GL_FRAGMENT_SHADER, """
-uniform vec3 color;
-out vec4 fragColor;
-void main() { fragColor = vec4(color, 1.0); }
-""")
+    vertex = shader(
+      GL_VERTEX_SHADER,
+      toShader(fixtureVertex, ShaderTarget, shaderVertex)
+    )
+    fragment = shader(
+      GL_FRAGMENT_SHADER,
+      toShader(fixtureFragment, ShaderTarget, shaderFragment)
+    )
   result.program = glCreateProgram()
   glAttachShader(result.program, vertex)
   glAttachShader(result.program, fragment)
+  glBindAttribLocation(result.program, 0, "position")
   glLinkProgram(result.program)
   glDeleteShader(vertex)
   glDeleteShader(fragment)

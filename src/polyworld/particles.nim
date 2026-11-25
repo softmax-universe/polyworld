@@ -26,18 +26,12 @@ const
   ]
   ParticleVertexSource =
     when defined(emscripten):
-      toShader(gameParticleVertex, glsl3WebGL, shaderVertex).replace(
-        "precision highp float;",
-        "precision highp float;\nprecision highp int;"
-      )
+      toShader(gameParticleVertex, glsl3WebGL, shaderVertex)
     else:
       toShader(gameParticleVertex, glsl4Desktop, shaderVertex)
   ParticleFragmentSource =
     when defined(emscripten):
-      toShader(gameParticleFragment, glsl3WebGL, shaderFragment).replace(
-        "precision highp float;",
-        "precision highp float;\nprecision highp int;"
-      )
+      toShader(gameParticleFragment, glsl3WebGL, shaderFragment)
     else:
       toShader(gameParticleFragment, glsl4Desktop, shaderFragment)
 

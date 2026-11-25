@@ -2,6 +2,7 @@
 
 {.warning[UnusedImport]: off.}
 import
+  test_assets,
   test_options,
   test_maps,
   test_nav,

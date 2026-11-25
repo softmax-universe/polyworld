@@ -150,6 +150,20 @@ proc generatedCharacterAssets*(): seq[Asset] =
     if clip.name in CharacterClips:
       result.add modelAsset(directory / clip.file)
 
+proc abilityIconPath*(name: string, directory = DataRoot / "abilities"): string =
+  ## Uses the shared matching art until an optional CTA icon is installed.
+  result = directory / (name & ".png")
+  if fileExists(result):
+    return
+  let fallback =
+    case name
+    of "cta_icicle": "ice_spear"
+    of "cta_glacier": "ice_wall"
+    of "cta_lightning": "lightning_storm"
+    of "cta_blizzard": "frost_sigil"
+    else: name
+  result = directory / (fallback & ".png")
+
 proc browserAssets*(): seq[Asset] =
   ## Declares the art used by all party classes and dungeon levels.
   result = hudAssets(LogoPath)
@@ -168,6 +182,6 @@ proc browserAssets*(): seq[Asset] =
     result.add fileAsset(path)
   for name in AbilityIconFiles:
     if name.len > 0:
-      result.add fileAsset("abilities/" & name & ".png")
+      result.add fileAsset(abilityIconPath(name))
   for name in gearIcons():
     result.add fileAsset(GearIconDir & name & ".png")

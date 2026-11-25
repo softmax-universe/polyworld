@@ -336,11 +336,10 @@ proc addHudIcons(builder: AtlasBuilder) =
 
 proc addAbilityIcons(builder: AtlasBuilder) =
   ## Packs every ability art file used by the action bar.
-  const AbilityDir = DataRoot & "/abilities/"
   for _, name in AbilityIconFiles:
     if name.len == 0:
       continue
-    let icon = readImage(AbilityDir & name & ".png").resize(128, 128)
+    let icon = readImage(abilityIconPath(name)).resize(128, 128)
     if not builder.addImage("ability_" & name, icon):
       raise newException(
         ValueError,

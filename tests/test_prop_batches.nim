@@ -1,10 +1,18 @@
-include ../src/polyworld/quadterrain
+when defined(useMetal4):
+  include ../src/polyworld/backends/metal/quadterrain
+else:
+  include ../src/polyworld/backends/opengl/quadterrain
 
-proc fixtureModel(texture: GLuint, height = 1.0'f): PropModel =
+proc fixtureModel(texture: uint, height = 1.0'f): PropModel =
   ## Builds a tiny textured triangle without requiring a graphics context.
+  let textureHandle =
+    when defined(useMetal4):
+      Texture(handle: cast[MTLTexture](texture))
+    else:
+      Texture(texture)
   PropModel(
     name: "triangle",
-    textureArray: texture,
+    textureArray: textureHandle,
     materialColors: true,
     vertices: @[
       0.0'f, 0, 0, 1, 0.5, 0.25, 0, 1, 0,

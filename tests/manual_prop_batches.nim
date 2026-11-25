@@ -44,10 +44,10 @@ block gpuUpdates:
     tile.kind = GrassTile
   installImmutableLayers(@[layer])
   let
-    texture = buildTextureArray(@[@[newImage(1, 1)]], GL_CLAMP_TO_EDGE.GLint)
-    tree = fixturePlacement(fixtureModel(texture), -1)
-    house = fixturePlacement(fixtureModel(texture), 10)
-    taller = fixturePlacement(fixtureModel(texture, 2), 10)
+    texture = createTextureArray(@[@[newImage(1, 1)]], repeat = false)
+    tree = fixturePlacement(fixtureModel(textureId(texture)), -1)
+    house = fixturePlacement(fixtureModel(textureId(texture)), 10)
+    taller = fixturePlacement(fixtureModel(textureId(texture), 2), 10)
   propPlacements = @[tree, house]
   bakeTerrain()
   let

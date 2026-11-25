@@ -6,6 +6,8 @@ inline GLSL, or source-string patches. The unit suite checks this convention.
 
 Use an explicit shader stage and target when calling `toShader`. Desktop renderers
 use GLSL 330 or 410; browser renderers use `glsl3WebGL` and require WebGL 2.
+Metal renderers use `metalMSL`. See [rendering backends](backends.md) for the
+backend layout, Metal frame ownership, and GPU regression commands.
 The Shady commit in `nimby.lock` handles fragment depth, native fragment coordinate
 origins, integer precision, and inverse sine. Use the locked dependencies when
 building. A worktree-local `.deps` directory or symlink supplies isolated
@@ -49,8 +51,9 @@ depth preservation, screen coordinates, fog, resizing, and MSAA behavior.
 | Crewrift | `games/crewrift/crewrift.nim` |
 | Monster | `games/monster/monster.nim` |
 
-For each entry point, run `nim check PATH`, `nim c PATH`, and
-`nim c -d:emscripten PATH`. The last command requires Emscripten and writes a
+For each entry point, run `nim check PATH`, `nim c PATH`,
+`nim c -d:useMetal4 PATH`, and `nim c -d:emscripten PATH`. The last command
+requires Emscripten and writes a
 browser bundle under the game's `emscripten` directory. Each game packs the art
 it needs instead of embedding the entire art repository.
 

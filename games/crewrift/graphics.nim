@@ -4,14 +4,12 @@ import
   std/[math, os, strutils, times, unicode],
   chroma, gltf, opengl, pixie, silky, vmath, windy,
   polyworld/[actioncam, assets, characters, chargen, chrome, common, gameuis,
-    pathing, player, quadterrain, rtscameras, shapes, toon, viewers],
-  sim, maps, cameras, game, replays, skins, stars
+    pathing, player, quadterrain, rtscameras, shadows, shapes, toon, viewers],
+  sim, maps, cameras, game, replays, skins, stars, assets
 
 const
   AtlasPath = TmpRoot & "/crewrift.atlas.png"
   CrewHeight = 1.8'f
-  CrewLibrary = DataRoot & "/characters/chargen"
-  CrewClips = ["Idle_Loop", "Walk_Loop", "Interact"]
   White = rgbx(255, 255, 255, 255)
   Ink = rgbx(233, 241, 250, 255)
   Muted = rgbx(155, 174, 194, 255)
@@ -713,6 +711,24 @@ proc drawReplayControls(
     window.size.x.float32, window.size.y.float32))
   sk.mousePos = window.mousePos.vec2
 
+proc initUnshadowedTexture(): GLuint =
+  ## Supplies complete comparison samplers for the unshadowed ship renderer.
+  var depth = high(uint32)
+  glGenTextures(1, result.addr)
+  glBindTexture(GL_TEXTURE_2D, result)
+  glTexImage2D(
+    GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24.GLint, 1, 1, 0,
+    GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, depth.addr
+  )
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST.GLint)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST.GLint)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE.GLint)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE.GLint)
+  glTexParameteri(
+    GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE.GLint)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL.GLint)
+  glBindTexture(GL_TEXTURE_2D, 0)
+
 proc runGraphics*(initial: Options) =
   ## Runs the playable native or browser viewer with fixed simulation ticks.
   configureCapture(initial.capture, "crewrift.png")
@@ -818,6 +834,13 @@ proc runGraphics*(initial: Options) =
   defer:
     saveReplay(options.record, game.recording)
     window.close()
+  var unshadowedTexture = initUnshadowedTexture()
+  sunShadowTextures = [unshadowedTexture, unshadowedTexture]
+  defer:
+    for texture in sunShadowTextures.mitems:
+      if texture == unshadowedTexture:
+        texture = 0
+    glDeleteTextures(1, unshadowedTexture.addr)
   var
     terrain = loadShipSkin()
     markers = initShapeRenderer()
@@ -1144,4 +1167,5 @@ proc runGraphics*(initial: Options) =
     if captureFrame(window, captureFrames):
       break
     window.swapBuffers()
+    reportReplayFrame(game.frame.int32, 0)
     waitForDisplay()

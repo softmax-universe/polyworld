@@ -238,7 +238,7 @@ proc awaitFence(ctx: GpuContext, value: uint64) =
     ctx.completed = ctx.native.fence.getCompletedValue()
 
 proc beginFrame*(ctx: GpuContext) =
-  ## Starts one command list after the preceding frame completed.
+  ## Wait for this allocator only when both frame slots are in flight.
   if ctx == nil or ctx.native.device == nil:
     raise newException(GpuError, "DirectX context has been destroyed")
   if ctx.command != nil:
@@ -327,7 +327,7 @@ proc destroy*(ctx: GpuContext) =
 
 proc buffer(ctx: GpuContext, size: int, kind: uint32): ID3D12Resource =
   counted: inc bufferCreates
-  ## Allocates host-visible upload or readback storage.
+  ## Selects the initial state for default, upload, and readback heaps.
   var
     heap = D3D12_HEAP_PROPERTIES(typ: kind,
       CreationNodeMask: 1, VisibleNodeMask: 1)

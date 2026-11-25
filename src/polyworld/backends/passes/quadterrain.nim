@@ -36,7 +36,7 @@ when defined(useDirectX) or defined(useVulkan):
   type SceneProp* = tuple[pack: PropPack, name: string, position: Vec3, facing, scale: float32]
 
   proc replaceTexturedGroup*(group: int32, props: openArray[SceneProp]) =
-    ## Rebuild just the changed textured batches when a landmark is added or lost.
+    ## Rebuild changed batches when landmark models or transforms change.
     var kept = 0
     for i in 0 ..< propPlacements.len:
       if propPlacements[i].group == group: continue
@@ -587,7 +587,7 @@ proc drawTerrainSunDepth*(firstVertex = 0, vertexCount = -1) {.measure.} =
 when defined(useDirectX) or defined(useVulkan):
   proc drawCachedTerrainSunDepth*(step: int) =
     ## Seed a freshly cleared shadow pass with its stationary terrain casters.
-    ## Buildings and animated characters are drawn into the live map afterward.
+    ## Dynamic actors continue drawing into the live map after the restore.
     let target = gpuRenderer.target
     let cached = addr terrainShadowCache[step]
     if cached.target == nil or cached.target.width != target.width or cached.target.height != target.height:

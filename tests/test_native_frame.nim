@@ -188,6 +188,21 @@ drawStream(program, rightQuad, 6, DrawState())
 let streams = captureTargetImage()
 doAssert streams[10, 24].r == 255 and streams[70, 24].b == 255
 endFrame(false)
+# Exhaust both the DirectX material table page and the Vulkan draw-set pool.
+beginFrame(80, 48, color(0, 0, 0, 1))
+let beforeDraws = gpuRenderer.ctx.submitted
+for i in 0 .. 68:
+  let material = newTexture(image)
+  sampled.bindTexture("sourceTexture", material)
+  draw(sampled, fullscreen, 3)
+  destroy(material)
+program.setUniform("tint", vec4(0, 1, 0, 1))
+for i in 0 .. 2048:
+  draw(program, fullscreen, 3)
+doAssert gpuRenderer.ctx.submitted == beforeDraws
+let last = captureTargetImage()
+doAssert last[40, 24].g == 255
+endFrame(false)
 destroy(resolvedCopy)
 destroy(copy)
 destroy(target)

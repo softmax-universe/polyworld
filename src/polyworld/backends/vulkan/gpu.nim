@@ -294,7 +294,7 @@ proc memoryType(ctx: GpuContext, bits, flags: uint32): uint32 =
 
 proc newBuffer(ctx: GpuContext, size: int, usage: uint32, deviceLocal = false, preferMappedLocal = false): GpuBuffer =
   counted: inc bufferCreates
-  ## Allocates coherent mapped storage for vertices, uniforms, or transfers.
+  ## Allocate device-local geometry or a coherently mapped transfer range.
   result = GpuBuffer(ctx: ctx, size: max(16, size), capacity: max(16, size))
   var
     info = VkBufferCreateInfo(sType: VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -348,7 +348,7 @@ proc uploadUniform(ctx: GpuContext, data: GpuConstants): VkDescriptorBufferInfo 
   ctx.uniformOffset = offset + bytes
 
 proc drawDescriptors(ctx: GpuContext): ptr DrawDescriptors =
-  ## Reuses a unique descriptor pair per draw after the preceding frame ends.
+  ## Reuse descriptor sets only after the owning frame slot retires.
   let poolIndex = ctx.drawCursor div MaxDraws
   if poolIndex == ctx.frames[ctx.slot].descriptorPools.len:
     ctx.frames[ctx.slot].descriptorPools.add ctx.descriptorPool()

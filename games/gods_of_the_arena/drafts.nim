@@ -14,6 +14,9 @@ const
     Lich, DruidWarden, Warlock, DemonHunter, Berserker
   ]
 
+type DraftCardState = enum
+  PickedCard, WaitingCard, ReadyCard, SelectedCard
+
 var selectedClass = -1'i32
 
 proc playerName(index: int): string =
@@ -55,27 +58,31 @@ proc drawDraft*(sk: Silky, window: Window, size: Vec2, playing: bool) =
     activeIndex = world.heroIndex(activeId)
     active = world.heroes[activeIndex]
     playerIndex = options.playerSlot.int - 1
-    canPick = playerIndex == activeIndex and not run.replayMode and
+    ownTurn = playerIndex == activeIndex and not run.replayMode and
       not run.historyPlayback
+    canPick = ownTurn and playing
     accent = teamColor(active.team)
     secondsLeft = (world.draftTicksLeft() + TickRate - 1) div TickRate
     name = sk.fittedLabel(playerName(activeIndex), 280, "Bold")
     status =
-      (if canPick: "Your turn" else: name & " is picking") & "  /  " &
+      (if not playing: "Draft paused"
+       elif canPick: "Select a hero, then lock in"
+       else: name & " is picking") & "  /  " &
       (if active.team == RedTeam: "Red team" else: "Blue team") &
       "  /  Pick " & $(world.draftTurn + 1) & " of " & $world.heroes.len &
       "  /  " & $secondsLeft & "s left"
   sk.drawRect(vec2(0), draftSize, rgbx(12, 21, 30, 255))
   sk.drawLabel(
-    world.draftMode.draftName() & " / Choose your hero",
+    if canPick: "YOUR TURN - CHOOSE YOUR HERO"
+    else: world.draftMode.draftName() & " / Hero selection",
     layout.title.origin,
     layout.title.size,
-    White,
+    if canPick: Gold else: Muted,
     "H1",
     CenterAlign
   )
   sk.drawLabel(status, layout.status.origin, layout.status.size,
-    accent, "Bold", CenterAlign)
+    if canPick: Gold else: accent, "Bold", CenterAlign)
   sk.drawSprite(
     WhiteTileKey,
     layout.deadline.origin,
@@ -88,21 +95,35 @@ proc drawDraft*(sk: Silky, window: Window, size: Vec2, playing: bool) =
     layout.deadline.origin,
     vec2(layout.deadline.size.x * world.draftTicksLeft().float32 /
       DraftPickTicks.float32, layout.deadline.size.y),
-    if secondsLeft <= 3: Gold else: accent,
+    if canPick or secondsLeft <= 3: Gold else: accent,
     radius = 4
   )
-  if selectedClass >= 0 and not world.heroAvailable(selectedClass):
-    selectedClass = -1
+  if not ownTurn or
+    (selectedClass >= 0 and not world.heroAvailable(selectedClass)):
+      selectedClass = -1
   for i, class in DraftClasses:
     let
       card = layout.heroes[i]
       available = world.heroAvailable(class.ord.int32)
       hovered = not pointerBlocked and sk.hovered(card)
-      selected = class.ord == selectedClass
+      state =
+        if not available: PickedCard
+        elif not canPick: WaitingCard
+        elif class.ord == selectedClass: SelectedCard
+        else: ReadyCard
       fill =
-        if not available: rgbx(25, 30, 36, 255)
-        elif hovered and canPick: CardHover
-        else: CardFill
+        case state
+        of PickedCard: rgbx(25, 30, 36, 255)
+        of WaitingCard: rgbx(22, 29, 37, 255)
+        of SelectedCard: rgbx(65, 57, 35, 255)
+        of ReadyCard:
+          if hovered: rgbx(54, 52, 39, 255)
+          else: rgbx(34, 41, 47, 255)
+      portraitTint =
+        case state
+        of PickedCard: rgbx(125, 125, 125, 255)
+        of WaitingCard: rgbx(150, 158, 170, 255)
+        of ReadyCard, SelectedCard: White
       portraitSize = min(card.size.x - 8, card.size.y - 32)
       portraitOrigin = card.origin + vec2(
         (card.size.x - portraitSize) / 2, card.size.y - 32 - portraitSize
@@ -112,18 +133,29 @@ proc drawDraft*(sk: Silky, window: Window, size: Vec2, playing: bool) =
         size: vec2(card.size.x - 8, 28)
       )
     sk.hoverSound(card, canPick and available and not pointerBlocked)
-    if selected:
-      sk.drawSprite(WhiteTileKey, card.origin - vec2(3),
-        card.size + vec2(6), Gold, radius = 9)
+    if state in {ReadyCard, SelectedCard}:
+      let border = if state == SelectedCard: 4.0'f else: 2.0'f
+      sk.drawSprite(WhiteTileKey, card.origin - vec2(border),
+        card.size + vec2(border * 2),
+        if state == SelectedCard or hovered: Gold
+        else: rgbx(196, 157, 70, 255), radius = 6 + border)
     sk.drawSprite(WhiteTileKey, card.origin, card.size, fill, radius = 6)
     sk.drawSprite(
       if available: HeroPortraitKeys[class] else: class.draftedPortraitKey(),
       portraitOrigin,
       vec2(portraitSize),
-      if available: White else: rgbx(125, 125, 125, 255)
+      portraitTint
     )
     sk.drawLabel(class.heroSpec.name, label.origin, label.size,
-      if available: White else: Muted, "Bold", CenterAlign)
+      if state in {ReadyCard, SelectedCard}: White else: Muted,
+      "Bold", CenterAlign)
+    if state == SelectedCard:
+      let badge = GameUiPanel(
+        origin: card.origin + vec2(6), size: vec2(card.size.x - 12, 24)
+      )
+      sk.drawSprite(WhiteTileKey, badge.origin, badge.size, Gold, radius = 4)
+      sk.drawLabel("SELECTED", badge.origin, badge.size,
+        rgbx(22, 24, 28, 255), "Small", CenterAlign)
     if not available:
       for index, hero in world.heroes:
         if hero.drafted and hero.class == class and
@@ -145,13 +177,15 @@ proc drawDraft*(sk: Silky, window: Window, size: Vec2, playing: bool) =
         playSound(SelectSound)
       selectedClass = class.ord.int32
   let
-    enabled = canPick and selectedClass >= 0 and playing
+    enabled = canPick and selectedClass >= 0
     title =
-      if selectedClass >= 0: HeroClass(selectedClass).heroSpec.name
+      if not playing: "Draft paused"
+      elif selectedClass >= 0: HeroClass(selectedClass).heroSpec.name
       elif canPick: "Select a hero"
       else: name & " is picking"
     detail =
       if selectedClass >= 0: HeroClass(selectedClass).heroSpec.role
+      elif not ownTurn: "Available heroes light up when it is your turn."
       else: "A random available hero is picked when time runs out."
     button = layout.confirm
   sk.hoverSound(button, enabled and not pointerBlocked)
@@ -165,7 +199,8 @@ proc drawDraft*(sk: Silky, window: Window, size: Vec2, playing: bool) =
     if enabled: Gold else: CardFill,
     radius = 6
   )
-  sk.drawLabel(if canPick: "LOCK IN HERO" else: "WAITING FOR PICK",
+  sk.drawLabel(if not playing: "DRAFT PAUSED"
+    elif canPick: "LOCK IN HERO" else: "WAITING FOR PICK",
     button.origin, button.size,
     if enabled: rgbx(22, 24, 28, 255) else: Muted, "Bold", CenterAlign)
   if enabled and not pointerBlocked and sk.hovered(button) and

@@ -1093,7 +1093,7 @@ proc runGraphics*(initial: Options) =
       )
     scene.finishCharacters()
     sk.uiScale = 1
-    sk.beginUi(window, window.size)
+    sk.beginGameUi(window, window.size)
     if sk.drawHud(window, game, state, slot, TransportHeight * uiScale, vp):
       actionCam.takeManual()
     sk.drawReplayControls(

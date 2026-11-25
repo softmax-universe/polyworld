@@ -2,6 +2,10 @@ import std/[os, strutils]
 
 switch("hint", "[CC]:off")
 
+when (defined(useDirectX) and defined(useVulkan)) or
+    (defined(useMetal4) and (defined(useDirectX) or defined(useVulkan))):
+  error("Select one rendering backend per build.")
+
 --path:"src"
 let
   projectRoot = currentSourcePath().parentDir

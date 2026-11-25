@@ -694,7 +694,7 @@ proc runGraphics*() =
       when not defined(sceneCapture):
         profileBlock "ui":
           prepareUi(sk)
-          sk.beginUi(window, window.size)
+          sk.beginGameUi(window, window.size)
 
           ## World overlays drawn in HUD space: occupant portraits float over
           ## each occupied house, and gesture icons over busy villagers.

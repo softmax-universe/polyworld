@@ -1,8 +1,1 @@
-import pixie, common
-
-type
-  WorldBarTexture* = MetalTexture
-  WorldBarGpu = object
-    program: MetalProgram
-    vertexBuffer: MetalBuffer
-    whiteTexture: MetalTexture
+include ../passes/worldbars_types

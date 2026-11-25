@@ -5,12 +5,8 @@ import
   shady, vmath,
   particleshaders
 
-when defined(useDirectX):
-  {.error: "Polyworld DirectX backend is not implemented.".}
-elif defined(useVulkan):
-  {.error: "Polyworld Vulkan backend is not implemented.".}
-elif defined(useMetal4):
-  include backends/metal/particles_types
+when defined(useDirectX) or defined(useVulkan) or defined(useMetal4):
+  include backends/passes/particles_types
 else:
   include backends/opengl/particles_types
 
@@ -293,11 +289,7 @@ proc particlePathVisible*(
               visibility[row * width + col] == 0: return false
   true
 
-when defined(useDirectX):
-  {.error: "Polyworld DirectX backend is not implemented.".}
-elif defined(useVulkan):
-  {.error: "Polyworld Vulkan backend is not implemented.".}
-elif defined(useMetal4):
-  include backends/metal/particles
+when defined(useDirectX) or defined(useVulkan) or defined(useMetal4):
+  include backends/passes/particles
 else:
   include backends/opengl/particles

@@ -240,15 +240,16 @@ proc toonDepthVert(
   parts = vertexUV1
   opacity = vertexColor.a
 
-proc toonDepthFrag(
-  uv: Vec2, parts: Vec2, opacity: float32, fragColor: var Vec4
-) =
+proc toonDepthCutout(uv: Vec2, parts: Vec2, opacity: float32) =
   let albedo: Vec4 = texture(toonBaseColorTexture, uv) * toonBaseColorFactor
   let
     cutoff = if toonPackedParts: parts.y else: toonAlphaCutoff
     alpha = if toonPackedParts: albedo.a * opacity else: albedo.a
   if alpha < cutoff:
     discardFragment()
+
+proc toonDepthFrag(uv: Vec2, parts: Vec2, opacity: float32, fragColor: var Vec4) =
+  toonDepthCutout(uv, parts, opacity)
   fragColor = vec4(1.0'f, 1.0'f, 1.0'f, 1.0'f)
 
 ## Background: a full-screen sky-to-ground gradient in the palette's
@@ -277,6 +278,9 @@ proc toonBackgroundFrag(screenY: float32, fragColor: var Vec4) =
     let t = screenY / horizon
     fragColor = mix(toonGroundColor, toonHorizonColor, t)
 
+when defined(useDirectX) or defined(useVulkan):
+  import polyworld/backends/native/stages
+
 const
   ToonShaderTarget =
     when defined(useMetal4):
@@ -285,14 +289,22 @@ const
       glsl3WebGL
     else:
       glsl4Desktop
-  ToonVertSrc* = toShader(toonVert, ToonShaderTarget, shaderVertex)
-  ToonFragSrc* = toShader(toonFrag, ToonShaderTarget, shaderFragment)
-  ToonDepthVertSrc* = toShader(toonDepthVert, ToonShaderTarget, shaderVertex)
-  ToonDepthFragSrc* = toShader(toonDepthFrag, ToonShaderTarget, shaderFragment)
-  ToonBackgroundVertSrc* =
-    toShader(toonBackgroundVert, ToonShaderTarget, shaderVertex)
-  ToonBackgroundFragSrc* =
-    toShader(toonBackgroundFrag, ToonShaderTarget, shaderFragment)
+
+template toonStage(fn, stage: untyped): string =
+  when defined(useDirectX) or defined(useVulkan):
+    nativeStage(fn, stage)
+  else:
+    toShader(fn, ToonShaderTarget, stage)
+
+const
+  ToonVertSrc* = toonStage(toonVert, shaderVertex)
+  ToonFragSrc* = toonStage(toonFrag, shaderFragment)
+  ToonDepthVertSrc* = toonStage(toonDepthVert, shaderVertex)
+  ToonDepthFragSrc* =
+    when defined(useDirectX) or defined(useVulkan): toonStage(toonDepthCutout, shaderFragment)
+    else: toonStage(toonDepthFrag, shaderFragment)
+  ToonBackgroundVertSrc* = toonStage(toonBackgroundVert, shaderVertex)
+  ToonBackgroundFragSrc* = toonStage(toonBackgroundFrag, shaderFragment)
 
 ## Light
 

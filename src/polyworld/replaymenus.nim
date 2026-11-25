@@ -1,3 +1,4 @@
+from polyworld/renderer import beginGameUi
 import
   std/[strutils, times],
   bumpy, chroma, pixie, silky, vmath, windy,
@@ -177,7 +178,7 @@ proc drawReplayBrowser*(
   sk.uiScale = min(requestedScale, max(0.1'f, min(
     window.size.x.float32 / 720, window.size.y.float32 / 600
   )))
-  sk.beginUi(window, window.size)
+  sk.beginGameUi(window, window.size)
   sk.textStyle = "LobbyBody"
   let
     view = window.size.vec2 / sk.uiScale

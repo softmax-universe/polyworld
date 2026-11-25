@@ -1,5 +1,1 @@
-import pixie, common
-
-type ParticleGpu = ref object
-  program: MetalProgram
-  sightTexture: MetalTexture
+include ../passes/particles_types

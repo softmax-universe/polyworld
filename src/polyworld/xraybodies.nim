@@ -22,14 +22,9 @@
 ## `xrayBodySettings` reads PREFIX=0 (off), PREFIX_COVERAGE and PREFIX_CELL
 ## (points per cell).
 
-when defined(useDirectX):
-  import backends/directx/renderer
-elif defined(useVulkan):
-  import backends/vulkan/renderer
-elif defined(useMetal4):
-  import backends/metal/xraybodies
+when defined(useDirectX) or defined(useVulkan) or defined(useMetal4):
+  import backends/passes/xraybodies
 else:
   import backends/opengl/xraybodies
 
-when not defined(useDirectX) and not defined(useVulkan):
-  export xraybodies
+export xraybodies

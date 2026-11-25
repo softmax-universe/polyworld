@@ -5,12 +5,8 @@ import std/[math, options]
 import silky, vmath, windy
 import ../core/sim, cardrenderer
 
-when defined(useDirectX):
-  import backends/directx/table
-elif defined(useVulkan):
-  import backends/vulkan/table
-elif defined(useMetal4):
-  import backends/metal/table
+when defined(useDirectX) or defined(useVulkan) or defined(useMetal4):
+  import backends/passes/table
 else:
   import backends/opengl/table
 export table

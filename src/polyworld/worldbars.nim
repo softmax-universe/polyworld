@@ -4,12 +4,8 @@ import
   std/math,
   chroma, shady, vmath
 
-when defined(useDirectX):
-  {.error: "Polyworld DirectX backend is not implemented.".}
-elif defined(useVulkan):
-  {.error: "Polyworld Vulkan backend is not implemented.".}
-elif defined(useMetal4):
-  include backends/metal/worldbars_types
+when defined(useDirectX) or defined(useVulkan) or defined(useMetal4):
+  include backends/passes/worldbars_types
 else:
   include backends/opengl/worldbars_types
 
@@ -288,11 +284,7 @@ proc finishFrame*(tracker: var DamageTrailTracker) =
       inc writeIndex
   tracker.trails.setLen(writeIndex)
 
-when defined(useDirectX):
-  {.error: "Polyworld DirectX backend is not implemented.".}
-elif defined(useVulkan):
-  {.error: "Polyworld Vulkan backend is not implemented.".}
-elif defined(useMetal4):
-  include backends/metal/worldbars
+when defined(useDirectX) or defined(useVulkan) or defined(useMetal4):
+  include backends/passes/worldbars
 else:
   include backends/opengl/worldbars

@@ -472,7 +472,7 @@ proc drawStatsOverlay*(sk: Silky, window: Window, layout: GameUiLayout,
     scale = sk.uiScale
     mouse = sk.mousePos
   sk.uiScale = statsScale(scale)
-  sk.beginUi(window, window.size)
+  sk.beginGameUi(window, window.size)
   sk.drawStats(window, statsViewport(layout, scale), state, current, history, options)
   sk.finishUi()
   sk.uiScale = scale

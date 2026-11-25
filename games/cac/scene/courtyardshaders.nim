@@ -3,6 +3,9 @@
 import std/math
 import shady, vmath
 
+when defined(useDirectX) or defined(useVulkan):
+  import polyworld/backends/native/stages
+
 const ShaderTarget =
   when defined(useMetal4): metalMSL
   elif defined(emscripten): glsl3WebGL
@@ -246,10 +249,14 @@ proc courtyardDepthFragment() =
 
 const
   CourtyardVertexSource* =
-    toShader(courtyardVertex, ShaderTarget, shaderVertex)
+    (when defined(useDirectX) or defined(useVulkan): nativeStage(courtyardVertex, shaderVertex)
+     else: toShader(courtyardVertex, ShaderTarget, shaderVertex))
   CourtyardFragmentSource* =
-    toShader(courtyardFragment, ShaderTarget, shaderFragment)
+    (when defined(useDirectX) or defined(useVulkan): nativeStage(courtyardFragment, shaderFragment)
+     else: toShader(courtyardFragment, ShaderTarget, shaderFragment))
   CourtyardDepthVertexSource* =
-    toShader(courtyardDepthVertex, ShaderTarget, shaderVertex)
+    (when defined(useDirectX) or defined(useVulkan): nativeStage(courtyardDepthVertex, shaderVertex)
+     else: toShader(courtyardDepthVertex, ShaderTarget, shaderVertex))
   CourtyardDepthFragmentSource* =
-    toShader(courtyardDepthFragment, ShaderTarget, shaderFragment)
+    (when defined(useDirectX) or defined(useVulkan): nativeStage(courtyardDepthFragment, shaderFragment)
+     else: toShader(courtyardDepthFragment, ShaderTarget, shaderFragment))

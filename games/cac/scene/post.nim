@@ -1,9 +1,7 @@
 ## Selects the CaC post renderer at compile time.
 
-when defined(useDirectX):
-  import backends/directx/post
-elif defined(useVulkan):
-  import backends/vulkan/post
+when defined(useDirectX) or defined(useVulkan):
+  import backends/native/post
 elif defined(useMetal4):
   import backends/metal/post
 else:

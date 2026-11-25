@@ -248,7 +248,7 @@ else:
         chat.voiceSpeaking = voice.speaking()
         chat.voiceStatus = voice.status()
         chat.voiceError = voice.error
-      sk.beginUi(window, window.size)
+      sk.beginGameUi(window, window.size)
       let spoken = sk.drawUi(
         window, world, chat, brain.messages,
         brain.pending or brain.explanationPending,

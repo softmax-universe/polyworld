@@ -2,14 +2,16 @@
 
 import gltf
 
-when defined(useMetal4):
+when defined(useDirectX) or defined(useVulkan):
+  import backends/native/meshes
+elif defined(useMetal4):
   import backends/metal/meshes
 
 proc clearModelGpu*(primitive: Primitive) =
   ## Invalidates one primitive after CPU geometry or material replacement.
   if primitive == nil:
     return
-  when defined(useMetal4):
+  when defined(useMetal4) or defined(useDirectX) or defined(useVulkan):
     modelMeshCache.release(primitive)
     modelMeshCache.release(primitive.material)
   else:

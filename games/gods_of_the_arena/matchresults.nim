@@ -99,7 +99,7 @@ proc drawMatchResults*(
     oldScale = sk.uiScale
     oldMouse = sk.mousePos
   sk.uiScale = resultScale(window.size.vec2, oldScale)
-  sk.beginUi(window, window.size)
+  sk.beginGameUi(window, window.size)
   let
     view = window.size.vec2 / sk.uiScale
     origin = (view - ResultPanelSize) / 2

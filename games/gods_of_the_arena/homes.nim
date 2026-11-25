@@ -1,3 +1,4 @@
+from polyworld/renderer import beginGameUi
 import
   chroma, pixie, silky, vmath, windy,
   polyworld/[chrome, gameuis, sounds]
@@ -36,7 +37,7 @@ proc drawGotaHome*(sk: Silky, window: Window, focus: var int): GotaHomeAction =
       window.size.x.float32 / 720,
       window.size.y.float32 / HomeSize.y
     )), 1080.0'f / HomeSize.y)
-    sk.beginUi(window, window.size)
+    sk.beginGameUi(window, window.size)
     sk.mousePos = window.mousePos.vec2 / sk.uiScale
     let
       view = window.size.vec2 / sk.uiScale

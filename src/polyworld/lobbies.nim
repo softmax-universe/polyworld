@@ -1,3 +1,4 @@
+from polyworld/renderer import beginGameUi
 import
   std/strutils,
   bumpy, chroma, pixie, silky, vmath, windy,
@@ -288,7 +289,7 @@ proc beginLobby*(
     if result.compact: window.size.x.float32 / canvas.x
     else: window.size.y.float32 / canvas.y
   )), if result.compact: 1920.0'f / canvas.x else: 1080.0'f / canvas.y)
-  sk.beginUi(window, window.size)
+  sk.beginGameUi(window, window.size)
   sk.textStyle = "LobbyBody"
   let
     view = window.size.vec2 / sk.uiScale

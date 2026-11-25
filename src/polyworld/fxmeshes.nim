@@ -2,12 +2,8 @@
 
 import fxmeshdata
 
-when defined(useDirectX):
-  import backends/directx/fxmeshes as backendFxMeshes
-elif defined(useVulkan):
-  import backends/vulkan/fxmeshes as backendFxMeshes
-elif defined(useMetal4):
-  import backends/metal/fxmeshes as backendFxMeshes
+when defined(useDirectX) or defined(useVulkan) or defined(useMetal4):
+  import backends/passes/fxmeshes as backendFxMeshes
 else:
   import backends/opengl/fxmeshes as backendFxMeshes
 

@@ -4,6 +4,9 @@ import
   std/math,
   shady, vmath
 
+when defined(useDirectX) or defined(useVulkan):
+  import polyworld/backends/native/stages
+
 const
   SkyPi = 3.14159265359'f
   SkyShaderTarget =
@@ -159,6 +162,8 @@ proc nightSkyFragment(outputColor: var Vec4, skyUv: Vec2) =
 
 const
   NightSkyVertexSource* =
-    toShader(nightSkyVertex, SkyShaderTarget, shaderVertex)
+    (when defined(useDirectX) or defined(useVulkan): nativeStage(nightSkyVertex, shaderVertex)
+     else: toShader(nightSkyVertex, SkyShaderTarget, shaderVertex))
   NightSkyFragmentSource* =
-    toShader(nightSkyFragment, SkyShaderTarget, shaderFragment)
+    (when defined(useDirectX) or defined(useVulkan): nativeStage(nightSkyFragment, shaderFragment)
+     else: toShader(nightSkyFragment, SkyShaderTarget, shaderFragment))

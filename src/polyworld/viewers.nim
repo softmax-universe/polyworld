@@ -185,7 +185,7 @@ proc drawSplash*(
 ) =
   ## Draws the theme logo centered on a black frame.
   clearFrame(color(0, 0, 0, 1))
-  sk.beginUi(window, window.size)
+  sk.beginGameUi(window, window.size)
   if name in sk.atlas.entries:
     let
       uv = sk.atlas.entries[name]

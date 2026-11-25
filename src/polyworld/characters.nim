@@ -14,8 +14,8 @@ import
   chroma, gltf, vmath, windy,
   animblend, charactermeshes, picking, shadows, toon
 
-when defined(useMetal4):
-  import backends/metal/charactercontexts
+when defined(useDirectX) or defined(useVulkan) or defined(useMetal4):
+  import backends/passes/charactercontexts
   export charactercontexts
 
 type
@@ -33,7 +33,7 @@ type
     mergedMesh*: int
 
   CharacterScene* = ref object
-    when defined(useMetal4):
+    when defined(useMetal4) or defined(useDirectX) or defined(useVulkan):
       renderer*: CharacterRenderer
     else:
       renderer*: Renderer
@@ -161,7 +161,7 @@ proc attachGear*(
 proc newCharacterScene*(window: Window): CharacterScene =
   ## Creates the shared PBR renderer and attaches its environment map, plus
   ## the toon renderer; `shading` picks which one draws.
-  when defined(useMetal4):
+  when defined(useMetal4) or defined(useDirectX) or defined(useVulkan):
     let renderer = newCharacterRenderer(window)
     let context = newPbrContext(nil)
   else:
@@ -173,7 +173,7 @@ proc newCharacterScene*(window: Window): CharacterScene =
     toon: newToonContext(),
     shading: PbrCharacters
   )
-  when not defined(useMetal4):
+  when not (defined(useMetal4) or defined(useDirectX) or defined(useVulkan)):
     result.context.attachEnvironmentMap(loadDefaultEnvironmentMap())
 
 proc useToonShading*(scene: CharacterScene, rim = ToonRimStrength) =
@@ -336,7 +336,7 @@ proc drawModel(
   of PbrCharacters:
     scene.context.transform = transform
     scene.context.tint = tint
-    when defined(useMetal4):
+    when defined(useMetal4) or defined(useDirectX) or defined(useVulkan):
       scene.renderer.drawPbr(scene.context, root)
     else:
       scene.context.draw(root)

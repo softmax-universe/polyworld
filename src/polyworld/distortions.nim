@@ -16,14 +16,9 @@
 ## Quads are depth tested without writing depth, pulled toward the camera by
 ## their radius, so hills and walls hide distortions behind them.
 
-when defined(useDirectX):
-  import backends/directx/renderer
-elif defined(useVulkan):
-  import backends/vulkan/renderer
-elif defined(useMetal4):
-  import backends/metal/distortions
+when defined(useDirectX) or defined(useVulkan) or defined(useMetal4):
+  import backends/passes/distortions
 else:
   import backends/opengl/distortions
 
-when not defined(useDirectX) and not defined(useVulkan):
-  export distortions
+export distortions

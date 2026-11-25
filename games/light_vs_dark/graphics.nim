@@ -2342,7 +2342,7 @@ proc runGraphics*(network: NetworkMatch = nil,
         prepareUi(sk)
         var menuOrigin: Vec2
         if matchMenu == HiddenMatchMenu:
-          sk.beginUi(window, window.size)
+          sk.beginGameUi(window, window.size)
         elif matchMenu == MatchSettings:
           menuOrigin = sk.beginOverlay(window, vec2(768, 488)) + vec2(24)
         else:
@@ -2461,7 +2461,7 @@ proc runGraphics*(network: NetworkMatch = nil,
           drawStatsOverlay(sk, window, teamColors)
           when not defined(emscripten):
             if saveAutomatically and matchResultsVisible():
-              sk.beginUi(window, window.size)
+              sk.beginGameUi(window, window.size)
               sk.menuLabel(if saveError.len > 0: saveError
                 elif replaySaving.savedPath.len > 0:
                   "Replay saved to your library." else: "",

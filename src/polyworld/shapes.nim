@@ -4,12 +4,8 @@ import
   std/math,
   chroma, shady, vmath
 
-when defined(useDirectX):
-  {.error: "Polyworld DirectX backend is not implemented.".}
-elif defined(useVulkan):
-  {.error: "Polyworld Vulkan backend is not implemented.".}
-elif defined(useMetal4):
-  include backends/metal/shapes_types
+when defined(useDirectX) or defined(useVulkan) or defined(useMetal4):
+  include backends/passes/shapes_types
 else:
   include backends/opengl/shapes_types
 
@@ -346,11 +342,7 @@ proc addLine*(
   ## Adds one flat ribbon segment in the XZ plane.
   renderer.addPolyline([a, b], color, halfWidth)
 
-when defined(useDirectX):
-  {.error: "Polyworld DirectX backend is not implemented.".}
-elif defined(useVulkan):
-  {.error: "Polyworld Vulkan backend is not implemented.".}
-elif defined(useMetal4):
-  include backends/metal/shapes
+when defined(useDirectX) or defined(useVulkan) or defined(useMetal4):
+  include backends/passes/shapes
 else:
   include backends/opengl/shapes

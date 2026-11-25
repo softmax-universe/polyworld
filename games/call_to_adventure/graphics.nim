@@ -2431,7 +2431,7 @@ proc runGraphics*() =
 
       profileBlock "ui":
         prepareUi(sk)
-        sk.beginUi(window, window.size)
+        sk.beginGameUi(window, window.size)
         drawUi(
           sk,
           window,

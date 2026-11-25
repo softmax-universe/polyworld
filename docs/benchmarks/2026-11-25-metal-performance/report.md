@@ -1,5 +1,7 @@
 # Polyworld Metal performance comparison
 
+> GotA correction: the OpenGL ambient-occlusion calls in this snapshot targeted the hidden window rather than the offscreen scene. GotA comparisons against OpenGL therefore did not render matching effects. The Metal-before/after comparison remains valid. See [the corrected GotA investigation](../../gota-metal-performance.md).
+
 Measured November 25, 2026 on an Apple M4 Pro MacBook Pro with 14 CPU cores,
 20 GPU cores, 24 GiB RAM, and macOS 27.2.1. The machine used AC power with
 background applications open. Hardware and toolchain details are in

@@ -1,5 +1,7 @@
 # Polyworld backend benchmark
 
+> GotA correction: the OpenGL ambient-occlusion calls in this snapshot targeted the hidden window rather than the offscreen scene. GotA comparisons against OpenGL therefore did not render matching effects. The Metal-before/after comparison remains valid. See [the corrected GotA investigation](../../gota-metal-performance.md).
+
 Measured on MacBook Pro with Apple M4 Pro, 14 CPU cores, 20 GPU cores, 24 GiB RAM, and macOS 27.2.1.
 
 Commit reference: `e65a5dee083679a10321d82e79a3fc08a70f1f7c`. The repository source fingerprint is `67137a33b015a57d7074e3dcb5c2c6526af346016d042808b4a8c9d0626ce1e7`. The benchmark hooks and runner were committed before measurement.

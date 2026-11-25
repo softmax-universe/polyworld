@@ -95,3 +95,8 @@ which predates the concurrent DirectX/Vulkan backend update.
 [Metal allocation and render-pass investigation](benchmarks/2026-11-25-metal-performance/report.md)
 records the before/after comparison, GPU timestamps, allocation counters,
 remaining synchronization limitation and all 37,800 measured frames.
+
+[GotA asynchronous Metal and throughput](gota-metal-performance.md) documents
+bounded frames in flight, corrected OpenGL AO targeting, explicit sampling
+parity, and the distinction between latency and completed-frame throughput.
+The interrupted shared-machine timing run does not establish a winner.

@@ -35,7 +35,9 @@ proc parseOptions*(parameters = commandLineParams()): Options =
     game: GameOptions(seed: 42, windowWidth: 1440, windowHeight: 900,
       speed: 1),
     model: DefaultMonsterModel,
-    saveDir: getDataDir() / "polyworld" / "monster"
+    saveDir:
+      when defined(emscripten): "/monster"
+      else: getDataDir() / "polyworld" / "monster"
   )
   try:
     var index = 0

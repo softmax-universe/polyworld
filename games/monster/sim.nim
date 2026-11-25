@@ -4,6 +4,9 @@ import
   polyworld/daycycles,
   common, resources
 
+when defined(emscripten):
+  import windy
+
 const
   MoveSpeed = 3.2'f
   Neighbors = [
@@ -1487,7 +1490,8 @@ proc observation*(world: World): string =
 proc saveWorld*(world: World, path: string) =
   ## Saves inventories and needs while excluding unfinished route state.
   try:
-    createDir(path.parentDir)
+    when not defined(emscripten):
+      createDir(path.parentDir)
     var saved = WorldSave(
       version: 8, seed: world.map.seed, tick: world.tick,
       creature: world.creature,
@@ -1502,8 +1506,11 @@ proc saveWorld*(world: World, path: string) =
       person.elapsed = 0
       person.retry = 0
       person.target = ""
-    writeFile(path & ".tmp", saved.toJson())
-    moveFile(path & ".tmp", path)
+    when defined(emscripten):
+      setConfig("Polyworld Monster", path, saved.toJson())
+    else:
+      writeFile(path & ".tmp", saved.toJson())
+      moveFile(path & ".tmp", path)
   except IOError, OSError:
     raise newException(MonsterError, "Cannot save Monster: " &
       getCurrentExceptionMsg())
@@ -1604,13 +1611,21 @@ proc validateRelationshipFields(body: string) =
 
 proc restoreWorld*(world: var World, path: string) =
   ## Atomically restores physical state and resumes independent NPC needs.
-  if not fileExists(path):
-    return
   try:
-    if getFileSize(path) > 256 * 1024:
-      raise newException(MonsterError, "Monster save is too large.")
-    let
+    var body: string
+    when defined(emscripten):
+      body = getConfig("Polyworld Monster", path)
+      if body.len == 0:
+        return
+      if body.len > 256 * 1024:
+        raise newException(MonsterError, "Monster save is too large.")
+    else:
+      if not fileExists(path):
+        return
+      if getFileSize(path) > 256 * 1024:
+        raise newException(MonsterError, "Monster save is too large.")
       body = readFile(path)
+    let
       saved = body.fromJson(WorldSave)
     if saved.seed != world.map.seed or saved.version notin 1 .. 8:
       raise newException(MonsterError, "Monster save version or seed differs.")

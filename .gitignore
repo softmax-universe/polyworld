@@ -38,6 +38,7 @@ games/light_vs_dark/emscripten/
 games/light_vs_dark/profiles/
 games/heartleaf/*.png
 games/heartleaf/emscripten/
+games/monster/emscripten/
 tmp/
 experiments/modular_chars/modular_chars_shot.png
 

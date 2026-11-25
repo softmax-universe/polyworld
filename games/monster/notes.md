@@ -250,6 +250,18 @@ fear, trust, and permanent destruction persist in current saves.
 
 ## Local validation
 
+Build the browser village with `nim c -d:emscripten games/monster/monster.nim`,
+then serve the repository and open `games/monster/emscripten/monster.html`.
+The browser supports the simulation, camera, inspection, and local `stop`
+command. World progress and conversation history persist in browser storage
+separately for each seed. Progress saves after world events and every ten
+seconds. Model conversations and voice remain available in the desktop game.
+
+With Playwright installed, `node games/monster/tests/browser_saves.cjs`
+checks actual world and conversation persistence across a page reload.
+Set `MONSTER_QA_URL` to the served browser build and, if needed,
+`MONSTER_QA_CHROMIUM` to a Chromium executable.
+
 The main Monster suite exercises planning, lesson persistence, and action
 feedback with loopback fixtures.
 

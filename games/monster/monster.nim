@@ -8,7 +8,10 @@ when not defined(headless):
     std/unicode,
     pixie, silky, vmath, windy,
     polyworld/[assets, rtscameras, viewers],
-    scenes, ui, hudassets, selections, voices, launches
+    scenes, ui, hudassets, selections
+
+  when not defined(emscripten):
+    import voices, launches
 
 const RepositoryRoot = currentSourcePath().parentDir.parentDir.parentDir
 
@@ -86,7 +89,9 @@ else:
       capturing = captureActive()
       worldPath = settings.saveDir / "world.json"
       savePath = if capturing: "" else: worldPath
-      atlasPath = RepositoryRoot / "tmp" / "monster.atlas.png"
+      atlasPath =
+        when defined(emscripten): "/tmp/monster.atlas.png"
+        else: RepositoryRoot / "tmp" / "monster.atlas.png"
       brain = newBrain(
         settings.saveDir / "conversation.json", settings.model,
         not settings.offline and (not capturing or settings.prompt.len > 0)
@@ -110,6 +115,7 @@ else:
     )
     sk.builder = builder
     defer:
+      window.onFrame = nil
       if not capturing:
         world.saveWorld(savePath)
       window.close()
@@ -121,17 +127,18 @@ else:
     )
     defer:
       scene.close()
-    let voice = newMonsterVoice(
-      historyCount = brain.messages.len,
-      enabled = not settings.offline and not settings.noVoice and
-        not settings.game.soundMuted and not capturing and
-        getEnv("COGAME_LLM").toLowerAscii() != "off"
-    )
-    defer:
-      voice.close()
-    voice.refreshKey()
-    if settings.conversation:
-      voice.setMode(ConversationMode)
+    when not defined(emscripten):
+      let voice = newMonsterVoice(
+        historyCount = brain.messages.len,
+        enabled = not settings.offline and not settings.noVoice and
+          not settings.game.soundMuted and not capturing and
+          getEnv("COGAME_LLM").toLowerAscii() != "off"
+      )
+      defer:
+        voice.close()
+      voice.refreshKey()
+      if settings.conversation:
+        voice.setMode(ConversationMode)
     var
       chat = initChatUi()
       clock: ViewingClock
@@ -155,12 +162,13 @@ else:
       following = selected.kind == MossSelection
     let started = epochTime()
     window.installInput(chat.addr)
-    while not window.closeRequested:
-      pollEvents()
-      voice.poll(window.focused)
+    window.onFrame = proc() =
+      ## Consumes input before Windy clears the browser's per-frame events.
+      when not defined(emscripten):
+        voice.poll(window.focused)
       if window.size.x <= 0 or window.size.y <= 0:
         sleep(20)
-        continue
+        return
       let dt =
         if capturing: 1'f / 60
         else: min(clock.viewingDelta(window), 0.1'f)
@@ -176,8 +184,9 @@ else:
         for text in world.events:
           echo text
       world.outcomes(brain, savePath)
-      voice.observe(brain.messages)
-      voice.submitPending(world, brain)
+      when not defined(emscripten):
+        voice.observe(brain.messages)
+        voice.submitPending(world, brain)
       discard world.sendPrompt(brain, settings.prompt, autoSent)
       chat.scale = chatScale(window.size.vec2)
       chat.updateMinimapCamera(window, world, cameraTarget, following)
@@ -229,15 +238,16 @@ else:
         renderTime, chat.selection
       )
       sk.uiScale = chat.scale
-      chat.voiceEnabled = voice.enabled
-      chat.voiceHasKey = voice.hasKey
-      chat.conversationMode = voice.mode == ConversationMode
-      chat.voiceConnected = voice.client.state == Connected
-      chat.voiceConnecting = voice.client.state == Connecting
-      chat.voiceListening = voice.listening()
-      chat.voiceSpeaking = voice.speaking()
-      chat.voiceStatus = voice.status()
-      chat.voiceError = voice.error
+      when not defined(emscripten):
+        chat.voiceEnabled = voice.enabled
+        chat.voiceHasKey = voice.hasKey
+        chat.conversationMode = voice.mode == ConversationMode
+        chat.voiceConnected = voice.client.state == Connected
+        chat.voiceConnecting = voice.client.state == Connecting
+        chat.voiceListening = voice.listening()
+        chat.voiceSpeaking = voice.speaking()
+        chat.voiceStatus = voice.status()
+        chat.voiceError = voice.error
       sk.beginUi(window, window.size)
       let spoken = sk.drawUi(
         window, world, chat, brain.messages,
@@ -247,18 +257,21 @@ else:
       )
       sk.endUi()
       window.syncInput(chat)
-      if chat.textModeRequested:
-        voice.setMode(TextMode)
-        chat.textModeRequested = false
-      if chat.conversationModeRequested:
-        voice.setMode(ConversationMode)
-        chat.conversationModeRequested = false
+      when not defined(emscripten):
+        if chat.textModeRequested:
+          voice.setMode(TextMode)
+          chat.textModeRequested = false
+        if chat.conversationModeRequested:
+          voice.setMode(ConversationMode)
+          chat.conversationModeRequested = false
       if spoken.len > 0:
-        voice.interrupt()
+        when not defined(emscripten):
+          voice.interrupt()
         if not world.speak(brain, spoken):
           chat.restoreInput(spoken)
-      voice.observe(brain.messages)
-      voice.poll(window.focused)
+      when not defined(emscripten):
+        voice.observe(brain.messages)
+        voice.poll(window.focused)
       if not capturing and epochTime() - lastSave > 10:
         world.saveWorld(savePath)
         lastSave = epochTime()
@@ -270,34 +283,41 @@ else:
           if settings.prompt.len > 0 and brain.failure.len > 0:
             raise newException(MonsterError, "Creature request failed: " & brain.failure)
           if window.captureFrame(frame):
-            break
+            when not defined(emscripten):
+              window.closeRequested = true
+            return
         else:
           inc frame
       if capturing and epochTime() - started > 120:
         raise newException(MonsterError, "Timed out waiting for capture.")
       if not capturing:
         window.swapBuffers()
+        reportReplayFrame(world.tick, 0)
+    while not window.closeRequested:
+      pollEvents()
       waitForDisplay()
 
 proc main() =
   ## Resolves repository assets and reports actionable startup failures.
   try:
-    when not defined(headless):
+    when not defined(headless) and not defined(emscripten):
       restoreMonsterDirectory()
     let settings = parseOptions()
     when not defined(headless):
       configureCapture(settings.game.capture, "output/monster.png")
-      if not settings.offline and not settings.noVoice and
-        not settings.game.soundMuted and
-        not captureActive() and
-        getEnv("COGAME_LLM").toLowerAscii() != "off":
-          if launchMonster():
-            return
-    setCurrentDir(RepositoryRoot)
+      when not defined(emscripten):
+        if not settings.offline and not settings.noVoice and
+          not settings.game.soundMuted and
+          not captureActive() and
+          getEnv("COGAME_LLM").toLowerAscii() != "off":
+            if launchMonster():
+              return
+    when not defined(emscripten):
+      setCurrentDir(RepositoryRoot)
     if not settings.game.capture.captureRequested():
       createDir(settings.saveDir)
     runGame(settings)
-    when not defined(headless):
+    when not defined(headless) and not defined(emscripten):
       finishMonster()
   except MonsterError, ScreenshotError, IOError:
     stderr.writeLine("Monster: " & getCurrentExceptionMsg())

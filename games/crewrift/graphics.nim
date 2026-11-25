@@ -883,7 +883,8 @@ proc runGraphics*(initial: Options) =
       state.text.len < VoteChatMaxChars:
         state.text.add rune.toUTF8()
   while not window.closeRequested:
-    pollEvents()
+    when not defined(emscripten):
+      pollEvents()
     let
       dt = min(clock.viewingDelta(window), 0.1'f)
       slot = if game.playback: -1 else: options.player
@@ -898,7 +899,8 @@ proc runGraphics*(initial: Options) =
       if state.typing:
         state.typing = false
       else:
-        break
+        when not defined(emscripten):
+          break
     if not state.typing:
       if window.buttonPressed[KeyTab]:
         actionCam.takeManual()
@@ -1168,4 +1170,7 @@ proc runGraphics*(initial: Options) =
       break
     window.swapBuffers()
     reportReplayFrame(game.frame.int32, 0)
+    when defined(emscripten):
+      # Reset consumed events before yielding for the next browser frame.
+      pollEvents()
     waitForDisplay()

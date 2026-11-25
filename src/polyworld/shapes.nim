@@ -2,30 +2,31 @@
 
 import
   std/math,
-  chroma, opengl, shady, vmath
+  chroma, shady, vmath
+
+when defined(useDirectX):
+  {.error: "Polyworld DirectX backend is not implemented.".}
+elif defined(useVulkan):
+  {.error: "Polyworld Vulkan backend is not implemented.".}
+elif defined(useMetal4):
+  include backends/metal/shapes_types
+else:
+  include backends/opengl/shapes_types
 
 const
   VertexFloats = 9
-  DefaultHalfWidth* = 0.12'f32
+  DefaultHalfWidth* = 0.12'f
   DefaultAlpha* = 128'u8
   CircleSides* = 24
   HexagonSides* = 6
-  MiterLimit = 2.5'f32
-  ShaderTarget =
-    when defined(emscripten):
-      glsl3WebGL
-    else:
-      glsl4Desktop
+  MiterLimit = 2.5'f
 
 type
   ShapeError* = object of CatchableError
   ShapeRenderer* = object
     ## Batches colored, optionally textured triangles in world space.
-    program: GLuint
-    vertexArray: GLuint
-    vertexBuffer: GLuint
-    whiteTexture: GLuint
-    texture*: GLuint
+    gpu: ShapeGpu
+    texture*: ShapeTexture
     vertices: seq[float32]
 
 var
@@ -52,123 +53,6 @@ proc shapeFragment(
 ) =
   ## Tints one sampled texel by the vertex color.
   fragColor = texture(shapeSampler, fragmentUv) * fragmentColor
-
-proc compileShaderStage(
-    kind: GLenum,
-    source,
-    label: string
-): GLuint =
-  ## Compiles one shape shader stage with a useful diagnostic.
-  result = glCreateShader(kind)
-  let sources = allocCStringArray([source])
-  defer:
-    deallocCStringArray(sources)
-  glShaderSource(result, 1, sources, nil)
-  glCompileShader(result)
-  var status: GLint
-  glGetShaderiv(result, GL_COMPILE_STATUS, status.addr)
-  if status == 0:
-    var length: GLint
-    glGetShaderiv(result, GL_INFO_LOG_LENGTH, length.addr)
-    var log = newString(length)
-    glGetShaderInfoLog(result, length, nil, log.cstring)
-    raise newException(
-      ShapeError,
-      label & " shader failed:\n" & log & "\n" & source
-    )
-
-proc compileProgram(): GLuint =
-  ## Compiles and links the shape shader program.
-  let
-    vertexShader = compileShaderStage(
-      GL_VERTEX_SHADER,
-      toShader(shapeVertex, ShaderTarget, shaderVertex),
-      "shape vertex"
-    )
-    fragmentShader = compileShaderStage(
-      GL_FRAGMENT_SHADER,
-      toShader(shapeFragment, ShaderTarget, shaderFragment),
-      "shape fragment"
-    )
-  result = glCreateProgram()
-  glAttachShader(result, vertexShader)
-  glAttachShader(result, fragmentShader)
-  glLinkProgram(result)
-  glDeleteShader(vertexShader)
-  glDeleteShader(fragmentShader)
-  var status: GLint
-  glGetProgramiv(result, GL_LINK_STATUS, status.addr)
-  if status == 0:
-    var length: GLint
-    glGetProgramiv(result, GL_INFO_LOG_LENGTH, length.addr)
-    var log = newString(length)
-    glGetProgramInfoLog(result, length, nil, log.cstring)
-    raise newException(
-      ShapeError,
-      "shape program failed:\n" & log
-    )
-
-proc makeWhiteTexture(): GLuint =
-  ## Builds a 1x1 white texel used when no atlas is bound.
-  glGenTextures(1, result.addr)
-  glBindTexture(GL_TEXTURE_2D, result)
-  var pixel = [255'u8, 255, 255, 255]
-  glTexImage2D(
-    GL_TEXTURE_2D,
-    0,
-    GL_RGBA.GLint,
-    1,
-    1,
-    0,
-    GL_RGBA,
-    GL_UNSIGNED_BYTE,
-    pixel[0].addr
-  )
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST.GLint)
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST.GLint)
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE.GLint)
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE.GLint)
-  glBindTexture(GL_TEXTURE_2D, 0)
-
-proc initShapeRenderer*(): ShapeRenderer =
-  ## Creates one dynamic mesh buffer for world-space shapes.
-  result.program = compileProgram()
-  result.whiteTexture = makeWhiteTexture()
-  glGenVertexArrays(1, result.vertexArray.addr)
-  glBindVertexArray(result.vertexArray)
-  glGenBuffers(1, result.vertexBuffer.addr)
-  glBindBuffer(GL_ARRAY_BUFFER, result.vertexBuffer)
-  const stride = (VertexFloats * sizeof(float32)).GLsizei
-  for attribute in [
-    (name: "worldPosition", count: 3, offset: 0),
-    (name: "texturePosition", count: 2, offset: 3 * sizeof(float32)),
-    (name: "vertexColor", count: 4, offset: 5 * sizeof(float32))
-  ]:
-    let location = glGetAttribLocation(
-      result.program,
-      attribute.name.cstring
-    )
-    doAssert location >= 0
-    glEnableVertexAttribArray(location.GLuint)
-    glVertexAttribPointer(
-      location.GLuint,
-      attribute.count.GLint,
-      cGL_FLOAT,
-      GL_FALSE,
-      stride,
-      cast[pointer](attribute.offset)
-    )
-  glBindVertexArray(0)
-
-proc closeShapeRenderer*(renderer: var ShapeRenderer) =
-    ## Releases owned GPU resources while the renderer's context is current.
-    ## The externally supplied texture is borrowed and remains alive.
-    ## Safe to repeat. Initialize a new renderer before drawing again.
-    glDeleteProgram(renderer.program)
-    glDeleteVertexArrays(1, renderer.vertexArray.addr)
-    glDeleteBuffers(1, renderer.vertexBuffer.addr)
-    glDeleteTextures(1, renderer.whiteTexture.addr)
-    renderer = ShapeRenderer()
 
 proc clear*(renderer: var ShapeRenderer) =
   ## Starts one empty batch while retaining its vertex allocation.
@@ -200,7 +84,7 @@ proc writeVertex(
   vertices[offset + 8] = color.a
 
 proc vertexColor(color: ColorRGBX): tuple[r, g, b, a: float32] {.inline.} =
-  const ByteScale = 1.0'f32 / 255.0'f32
+  const ByteScale = 1.0'f / 255.0'f
   let painted = tint(color)
   (painted.r.float32 * ByteScale, painted.g.float32 * ByteScale,
     painted.b.float32 * ByteScale, painted.a.float32 * ByteScale)
@@ -280,10 +164,10 @@ proc addSquare*(
     center: Vec3,
     size: float32,
     color: ColorRGBX,
-    angle = 0.0'f32
+    angle = 0.0'f
 ) =
   ## Adds a filled XZ square. `size` is the full edge length.
-  let h = size * 0.5'f32
+  let h = size * 0.5'f
   renderer.addQuad(
     center + rotateY(vec3(-h, 0, -h), angle),
     center + rotateY(vec3(h, 0, -h), angle),
@@ -298,7 +182,7 @@ proc addPolygon*(
     radius: float32,
     sides: int,
     color: ColorRGBX,
-    angle = 0.0'f32
+    angle = 0.0'f
 ) =
   ## Adds a filled regular polygon in the XZ plane.
   if sides < 3 or radius <= 0:
@@ -316,8 +200,8 @@ proc addPolygon*(
       p1,
       color,
       vec2(0.5, 0.5),
-      vec2(cos(a0) * 0.5'f32 + 0.5'f32, sin(a0) * 0.5'f32 + 0.5'f32),
-      vec2(cos(a1) * 0.5'f32 + 0.5'f32, sin(a1) * 0.5'f32 + 0.5'f32)
+      vec2(cos(a0) * 0.5'f + 0.5'f, sin(a0) * 0.5'f + 0.5'f),
+      vec2(cos(a1) * 0.5'f + 0.5'f, sin(a1) * 0.5'f + 0.5'f)
     )
 
 proc addCircle*(
@@ -335,7 +219,7 @@ proc addHexagon*(
     center: Vec3,
     radius: float32,
     color: ColorRGBX,
-    angle = 0.0'f32
+    angle = 0.0'f
 ) =
   ## Adds a filled XZ hexagon.
   renderer.addPolygon(center, radius, HexagonSides, color, angle)
@@ -345,15 +229,15 @@ proc flatNormal(a, b: Vec3): Vec3 =
   let
     d = vec3(b.x - a.x, 0, b.z - a.z)
     len2 = lengthSq(d)
-  if len2 < 1e-10'f32:
+  if len2 < 1e-10'f:
     return vec3(0)
-  let inv = 1.0'f32 / sqrt(len2)
+  let inv = 1.0'f / sqrt(len2)
   vec3(-d.z * inv, 0, d.x * inv)
 
 proc compactPoints(points: openArray[Vec3]): seq[Vec3] =
   ## Drops consecutive points that sit on top of each other.
   for point in points:
-    if result.len == 0 or lengthSq(point - result[^1]) >= 1e-8'f32:
+    if result.len == 0 or lengthSq(point - result[^1]) >= 1e-8'f:
       result.add point
 
 proc addPolyline*(
@@ -385,7 +269,7 @@ proc addPolyline*(
     let
       n0 = flatNormal(pts[i - 1], pts[i])
       n1 = flatNormal(pts[i], pts[i + 1])
-    if lengthSq(n0) < 1e-10'f32 or lengthSq(n1) < 1e-10'f32:
+    if lengthSq(n0) < 1e-10'f or lengthSq(n1) < 1e-10'f:
       let n = if lengthSq(n0) > 0: n0 else: n1
       leftIn[i] = pts[i] + n * halfWidth
       rightIn[i] = pts[i] - n * halfWidth
@@ -393,7 +277,7 @@ proc addPolyline*(
       rightOut[i] = rightIn[i]
       continue
     let combined = n0 + n1
-    if lengthSq(combined) < 1e-8'f32:
+    if lengthSq(combined) < 1e-8'f:
       leftIn[i] = pts[i] + n0 * halfWidth
       rightIn[i] = pts[i] - n0 * halfWidth
       leftOut[i] = pts[i] + n1 * halfWidth
@@ -402,7 +286,7 @@ proc addPolyline*(
     let
       bisector = normalize(combined)
       denom = dot(bisector, n0)
-    if denom > 1.0'f32 / MiterLimit:
+    if denom > 1.0'f / MiterLimit:
       let miter = bisector * (halfWidth / denom)
       leftIn[i] = pts[i] + miter
       rightIn[i] = pts[i] - miter
@@ -428,11 +312,11 @@ proc addPolyline*(
           pts[i],
           color
         )
-  var traveled = 0.0'f32
-  var total = 0.0'f32
+  var traveled = 0.0'f
+  var total = 0.0'f
   for i in 0 ..< pts.len - 1:
     total += length(pts[i + 1] - pts[i])
-  if total < 1e-8'f32:
+  if total < 1e-8'f:
     return
   for i in 0 ..< pts.len - 1:
     let
@@ -462,49 +346,11 @@ proc addLine*(
   ## Adds one flat ribbon segment in the XZ plane.
   renderer.addPolyline([a, b], color, halfWidth)
 
-proc draw*(
-    renderer: var ShapeRenderer,
-    viewProjection: Mat4,
-    opaque = false
-) =
-  ## Draws the shape batch, writing depth for opaque surfaces.
-  if renderer.vertices.len == 0:
-    return
-  glBindBuffer(GL_ARRAY_BUFFER, renderer.vertexBuffer)
-  glBufferData(
-    GL_ARRAY_BUFFER,
-    renderer.vertices.len * sizeof(float32),
-    renderer.vertices[0].addr,
-    GL_DYNAMIC_DRAW
-  )
-  glEnable(GL_DEPTH_TEST)
-  glDepthMask(if opaque: GL_TRUE else: GL_FALSE)
-  glDisable(GL_CULL_FACE)
-  if opaque:
-    glDisable(GL_BLEND)
-  else:
-    glEnable(GL_BLEND)
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
-  glUseProgram(renderer.program)
-  shapeViewProjection = viewProjection
-  glUniformMatrix4fv(
-    glGetUniformLocation(renderer.program, "shapeViewProjection"),
-    1,
-    GL_FALSE,
-    cast[ptr float32](shapeViewProjection.addr)
-  )
-  glActiveTexture(GL_TEXTURE0)
-  if renderer.texture != 0:
-    glBindTexture(GL_TEXTURE_2D, renderer.texture)
-  else:
-    glBindTexture(GL_TEXTURE_2D, renderer.whiteTexture)
-  glUniform1i(glGetUniformLocation(renderer.program, "shapeSampler"), 0)
-  glBindVertexArray(renderer.vertexArray)
-  glDrawArrays(
-    GL_TRIANGLES,
-    0,
-    (renderer.vertices.len div VertexFloats).GLsizei
-  )
-  glBindVertexArray(0)
-  glBindTexture(GL_TEXTURE_2D, 0)
-  glDepthMask(GL_TRUE)
+when defined(useDirectX):
+  {.error: "Polyworld DirectX backend is not implemented.".}
+elif defined(useVulkan):
+  {.error: "Polyworld Vulkan backend is not implemented.".}
+elif defined(useMetal4):
+  include backends/metal/shapes
+else:
+  include backends/opengl/shapes

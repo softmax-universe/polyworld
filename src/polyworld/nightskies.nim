@@ -1,4 +1,4 @@
-## Shared procedural stars and nebulae, authored once for both GL targets.
+## Shared procedural stars and nebulae, authored once in Shady.
 
 import
   std/math,
@@ -7,7 +7,8 @@ import
 const
   SkyPi = 3.14159265359'f
   SkyShaderTarget =
-    when defined(emscripten):
+    when defined(useMetal4): metalMSL
+    elif defined(emscripten):
       glsl3WebGL
     else:
       glsl3Desktop

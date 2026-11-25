@@ -1,7 +1,7 @@
 import
   std/[algorithm, os],
   chroma, pixie, silky, vmath, windy,
-  actioncam, chrome, gameuis, inputs, metrics, screenshots
+  actioncam, chrome, gameuis, inputs, metrics, screenshots, renderer
 
 const
   StatsWidth* = 1440.0'f
@@ -474,6 +474,6 @@ proc drawStatsOverlay*(sk: Silky, window: Window, layout: GameUiLayout,
   sk.uiScale = statsScale(scale)
   sk.beginUi(window, window.size)
   sk.drawStats(window, statsViewport(layout, scale), state, current, history, options)
-  sk.endUi()
+  sk.finishUi()
   sk.uiScale = scale
   sk.mousePos = mouse

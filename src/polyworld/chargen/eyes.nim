@@ -1,7 +1,7 @@
 import
   std/tables,
   gltf, pixie,
-  parts
+  parts, ../modelresources
 
 type
   EyeTexture* = object
@@ -75,7 +75,7 @@ proc applyPupilTint*(eyes: var EyeTextures, tint: array[3, float32]) =
   for texture in eyes.textures:
     let image = tintPupils(texture.art, texture.mask, tint)
     for primitive in texture.primitives:
-      primitive.clearFromGpu()
+      primitive.clearModelGpu()
       primitive.material.baseColor = image
       primitive.material.baseColorKtx2 = ""
   eyes.applied = tint

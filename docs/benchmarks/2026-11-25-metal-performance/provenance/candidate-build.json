@@ -1,0 +1,302 @@
+{
+  "commit": "08bbfb170b9cd4b8110b0525b54a337d5d05c00c",
+  "sourceHash": "aab0b89555b34e0e5353626d41d99ed93d67632aeaca3f7fb30642dc2f946e56",
+  "generated": "2026-11-25T20:37:59.750063+00:00",
+  "cases": [
+    {
+      "game": "cac",
+      "backend": "metal",
+      "passed": true,
+      "artifact": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/cac-metal",
+      "stages": [
+        {
+          "command": [
+            "nim",
+            "check",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:metalProfile",
+            "-d:useMetal4",
+            "/Users/me/p/polyworld-metal-perf/games/cac/cac.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/logs/cac-metal-check.log",
+          "started": 1795639115.039874,
+          "wallSeconds": 23.68069100379944
+        },
+        {
+          "command": [
+            "nim",
+            "c",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:metalProfile",
+            "-d:useMetal4",
+            "--nimcache:/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/cache/cac-metal",
+            "--out:/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/cac-metal",
+            "/Users/me/p/polyworld-metal-perf/games/cac/cac.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/logs/cac-metal-build.log",
+          "started": 1795639138.720963,
+          "wallSeconds": 16.51140308380127
+        }
+      ]
+    },
+    {
+      "game": "crewrift",
+      "backend": "metal",
+      "passed": true,
+      "artifact": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/crewrift-metal",
+      "stages": [
+        {
+          "command": [
+            "nim",
+            "check",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:metalProfile",
+            "-d:useMetal4",
+            "/Users/me/p/polyworld-metal-perf/games/crewrift/crewrift.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/logs/crewrift-metal-check.log",
+          "started": 1795639132.9816132,
+          "wallSeconds": 9.472932815551758
+        },
+        {
+          "command": [
+            "nim",
+            "c",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:metalProfile",
+            "-d:useMetal4",
+            "--nimcache:/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/cache/crewrift-metal",
+            "--out:/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/crewrift-metal",
+            "/Users/me/p/polyworld-metal-perf/games/crewrift/crewrift.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/logs/crewrift-metal-build.log",
+          "started": 1795639142.454855,
+          "wallSeconds": 13.842128038406372
+        }
+      ]
+    },
+    {
+      "game": "cta",
+      "backend": "metal",
+      "passed": true,
+      "artifact": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/cta-metal",
+      "stages": [
+        {
+          "command": [
+            "nim",
+            "check",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:metalProfile",
+            "-d:useMetal4",
+            "/Users/me/p/polyworld-metal-perf/games/call_to_adventure/cta.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/logs/cta-metal-check.log",
+          "started": 1795639079.750989,
+          "wallSeconds": 14.140863180160522
+        },
+        {
+          "command": [
+            "nim",
+            "c",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:metalProfile",
+            "-d:useMetal4",
+            "--nimcache:/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/cache/cta-metal",
+            "--out:/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/cta-metal",
+            "/Users/me/p/polyworld-metal-perf/games/call_to_adventure/cta.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/logs/cta-metal-build.log",
+          "started": 1795639093.892171,
+          "wallSeconds": 21.14625310897827
+        }
+      ]
+    },
+    {
+      "game": "gota",
+      "backend": "metal",
+      "passed": true,
+      "artifact": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/gota-metal",
+      "stages": [
+        {
+          "command": [
+            "nim",
+            "check",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:metalProfile",
+            "-d:useMetal4",
+            "/Users/me/p/polyworld-metal-perf/games/gods_of_the_arena/gota.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/logs/gota-metal-check.log",
+          "started": 1795639079.7509592,
+          "wallSeconds": 16.119041681289673
+        },
+        {
+          "command": [
+            "nim",
+            "c",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:metalProfile",
+            "-d:useMetal4",
+            "--nimcache:/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/cache/gota-metal",
+            "--out:/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/gota-metal",
+            "/Users/me/p/polyworld-metal-perf/games/gods_of_the_arena/gota.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/logs/gota-metal-build.log",
+          "started": 1795639095.870181,
+          "wallSeconds": 37.10957908630371
+        }
+      ]
+    },
+    {
+      "game": "heartleaf",
+      "backend": "metal",
+      "passed": true,
+      "artifact": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/heartleaf-metal",
+      "stages": [
+        {
+          "command": [
+            "nim",
+            "check",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:metalProfile",
+            "-d:useMetal4",
+            "/Users/me/p/polyworld-metal-perf/games/heartleaf/heartleaf.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/logs/heartleaf-metal-check.log",
+          "started": 1795639120.0493062,
+          "wallSeconds": 18.940284967422485
+        },
+        {
+          "command": [
+            "nim",
+            "c",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:metalProfile",
+            "-d:useMetal4",
+            "--nimcache:/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/cache/heartleaf-metal",
+            "--out:/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/heartleaf-metal",
+            "/Users/me/p/polyworld-metal-perf/games/heartleaf/heartleaf.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/logs/heartleaf-metal-build.log",
+          "started": 1795639138.98977,
+          "wallSeconds": 13.257781982421875
+        }
+      ]
+    },
+    {
+      "game": "lvd",
+      "backend": "metal",
+      "passed": true,
+      "artifact": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/lvd-metal",
+      "stages": [
+        {
+          "command": [
+            "nim",
+            "check",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:metalProfile",
+            "-d:useMetal4",
+            "/Users/me/p/polyworld-metal-perf/games/light_vs_dark/lvd.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/logs/lvd-metal-check.log",
+          "started": 1795639079.7509959,
+          "wallSeconds": 14.929682970046997
+        },
+        {
+          "command": [
+            "nim",
+            "c",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:metalProfile",
+            "-d:useMetal4",
+            "--nimcache:/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/cache/lvd-metal",
+            "--out:/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/lvd-metal",
+            "/Users/me/p/polyworld-metal-perf/games/light_vs_dark/lvd.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/logs/lvd-metal-build.log",
+          "started": 1795639094.680897,
+          "wallSeconds": 25.36770796775818
+        }
+      ]
+    },
+    {
+      "game": "monster",
+      "backend": "metal",
+      "passed": true,
+      "artifact": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/monster-metal",
+      "stages": [
+        {
+          "command": [
+            "nim",
+            "check",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:metalProfile",
+            "-d:useMetal4",
+            "/Users/me/p/polyworld-metal-perf/games/monster/monster.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/logs/monster-metal-check.log",
+          "started": 1795639152.2482932,
+          "wallSeconds": 10.04516887664795
+        },
+        {
+          "command": [
+            "nim",
+            "c",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:metalProfile",
+            "-d:useMetal4",
+            "--nimcache:/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/cache/monster-metal",
+            "--out:/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/monster-metal",
+            "/Users/me/p/polyworld-metal-perf/games/monster/monster.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/logs/monster-metal-build.log",
+          "started": 1795639162.293561,
+          "wallSeconds": 12.024449825286865
+        }
+      ]
+    }
+  ],
+  "passed": true
+}

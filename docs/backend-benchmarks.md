@@ -91,3 +91,7 @@ retain the trial range and repeat the matrix when comparing optimizations.
 contains the seven-game comparison, trial variation, browser cadence and all
 37,800 measured frames. It records the exact measured commit, `e65a5dee`,
 which predates the concurrent DirectX/Vulkan backend update.
+
+[Metal allocation and render-pass investigation](benchmarks/2026-11-25-metal-performance/report.md)
+records the before/after comparison, GPU timestamps, allocation counters,
+remaining synchronization limitation and all 37,800 measured frames.

@@ -13,7 +13,7 @@ proc setupEmscripten*(
   loadingLogo = "loading-logo.png",
   logoWidth = 320,
   logoHeight = 240,
-  minimumWebglVersion = 1,
+  minimumWebglVersion = 2,
   linkOptions = ""
 ) =
   ## Configures the wasm backend and writes the bundle next to the game.
@@ -60,16 +60,17 @@ proc setupEmscripten*(
         " " & quoteShell(cache)
       if dirExists(cache / "public"):
         cpDir(cache / "public", outputDir)
-      let
-        logoFile = outputDir / loadingLogo
-        logoData = readFile(cache / loadingLogo)
-      if not fileExists(logoFile) or readFile(logoFile) != logoData:
-        writeFile(logoFile, logoData)
-      logo = "<img id=\"loading-logo\" alt=\"Game logo\" " &
-        "width=\"" & $logoWidth & "\" height=\"" & $logoHeight &
-        "\" src=\"" & loadingLogo & "?v=" &
-        $hash(logoData) & "\" " &
-        "fetchpriority=\"high\">"
+      if loadingLogo.len > 0:
+        let
+          logoFile = outputDir / loadingLogo
+          logoData = readFile(cache / loadingLogo)
+        if not fileExists(logoFile) or readFile(logoFile) != logoData:
+          writeFile(logoFile, logoData)
+        logo = "<img id=\"loading-logo\" alt=\"Game logo\" " &
+          "width=\"" & $logoWidth & "\" height=\"" & $logoHeight &
+          "\" src=\"" & loadingLogo & "?v=" &
+          $hash(logoData) & "\" " &
+          "fetchpriority=\"high\">"
       preload = "--preload-file " & quoteShell(cache / "stage" & "@/polyworld_art")
       for asset in preloadMounts:
         preload.add " --preload-file " & quoteShell(

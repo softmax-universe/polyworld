@@ -7,7 +7,7 @@ class WebGamePackaging(unittest.TestCase):
         recipe = (Path(__file__).parents[1] / 'src/polyworld/emscripten.nims').read_text()
         start = recipe.index('    if game in ["gota", "lvd"]:') if '    if game in ["gota", "lvd"]:' in recipe else -1
         self.assertNotEqual(start, -1, 'Both multiplayer games must preload policies and export WebSocket callbacks')
-        section = recipe[start:recipe.index('    let shell =', start)]
+        section = recipe[start:recipe.index('    let shellData =', start)]
         self.assertIn('_windy_websocket_message_callback', section)
         self.assertIn('"@/policies/" & game', section)
         self.assertIn('@["base"]', section)

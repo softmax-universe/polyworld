@@ -10,6 +10,8 @@ when defined(backendBench):
     FrameSample = object
       frame, tick: int
       cpuMs, gpuWaitMs, workMs, intervalMs: float64
+      when defined(metalProfile) and defined(useMetal4):
+        metal*: MetalFrameProfile
     Distribution = object
       meanMs, medianMs, p95Ms, minMs, maxMs: float64
     BenchmarkSummary = object
@@ -111,6 +113,8 @@ when defined(backendBench):
       when defined(emscripten):
         report.readyMs = now
       publish(report.toJson())
+    when defined(metalProfile) and defined(useMetal4):
+      resetMetalProfile()
     doAssert not active, "Benchmark frame begun before previous frame ended"
     doAssert size.x.int == report.width and size.y.int == report.height,
       "Rendering dimensions changed during benchmark"
@@ -131,13 +135,16 @@ when defined(backendBench):
     if frameCount > report.warmup:
       if report.framesData.len == 0:
         report.startTick = tick
-      report.framesData.add FrameSample(
+      var sample = FrameSample(
         frame: frameCount, tick: tick,
         cpuMs: submitted - started,
         gpuWaitMs: completed - submitted,
         workMs: completed - started,
         intervalMs: currentInterval
       )
+      when defined(metalProfile) and defined(useMetal4):
+        sample.metal = readMetalProfile()
+      report.framesData.add(sample)
     if report.framesData.len < report.frames:
       return false
     var cpu, gpuWait, work, interval: seq[float64]

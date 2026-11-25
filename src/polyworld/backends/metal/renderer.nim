@@ -6,6 +6,9 @@ import
   silky/drawers/metal4 as silkyMetal,
   common, meshes, ../../screenshots
 
+when defined(metalProfile):
+  export MetalFrameProfile, resetMetalProfile, readMetalProfile
+
 const RendererBackend* = "metal"
 
 type

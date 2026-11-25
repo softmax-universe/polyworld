@@ -3,6 +3,10 @@ import
   metal4, pixie, shady, vmath, windy,
   uniforms
 
+when defined(metalProfile):
+  import profiles
+  export profiles
+
 import windy/platforms/apple/objc as nativeObjc
 
 export metal4
@@ -143,6 +147,11 @@ objc:
     sourceSize: MTLSize, toTexture: MTLTexture, destinationSlice: uint,
     destinationLevel: uint, destinationOrigin: MTLOrigin)
 
+when defined(metalProfile):
+  objc:
+    proc GPUStartTime(self: MTLCommandBuffer): float64
+    proc GPUEndTime(self: MTLCommandBuffer): float64
+
 var metalRenderer*: MetalRenderer
 
 proc presentVertex(
@@ -171,6 +180,8 @@ proc requireRenderer() =
 proc flushEncoder*() =
   ## Ends the current pass and resolves its multisampled attachments.
   if metalRenderer != nil and not metalRenderer.encoder.isNil:
+    when defined(metalProfile):
+      profileEndRenderPass()
     metalRenderer.encoder.endEncoding()
     metalRenderer.encoder = 0.MTLRenderCommandEncoder
 
@@ -368,11 +379,15 @@ proc generateMipmaps*(texture: MetalTexture) =
   let commands = if ownsCommands: metalRenderer.ctx.newCommandBuffer()
     else: metalRenderer.commandBuffer
   let encoder = commands.blitCommandEncoder()
+  when defined(metalProfile):
+    profileBlitPass()
   encoder.generateMipmapsForTexture(texture.handle)
   encoder.endEncoding()
   if ownsCommands:
     commands.commit()
     commands.waitUntilCompleted()
+    when defined(metalProfile):
+      profileCommandBuffer(commands.GPUStartTime(), commands.GPUEndTime())
     checkNSError(commands.error(), "Could not generate Metal texture mips")
 
 proc newTexture*(image: Image, linear = true, repeat = false,
@@ -403,6 +418,8 @@ proc updateBuffer*[T](buffer: MetalBuffer, data: openArray[T]) =
       unsafeAddr data[0], buffer.size.uint, 0
     )
     checkNil(buffer.handle, "Could not allocate a Metal vertex buffer")
+    when defined(metalProfile):
+      profileBuffer(buffer.size)
 
 proc newBuffer*[T](data: openArray[T]): MetalBuffer =
   ## Uploads typed vertex or index data into a retained Metal buffer.
@@ -566,6 +583,8 @@ proc ensureEncoder() =
         makePass(false, color(0, 0, 0, 0), false)
       )
     checkNil(metalRenderer.encoder, "Could not open a Metal render pass")
+    when defined(metalProfile):
+      profileRenderPass()
     metalRenderer.encoder.setViewport(MTLViewport(
       width: metalRenderer.viewport.x.float64,
       height: metalRenderer.viewport.y.float64, znear: 0, zfar: 1
@@ -580,6 +599,8 @@ proc clear*(color: Color, depth = true, stencil = false) =
     metalRenderer.commandBuffer.renderCommandEncoderWithDescriptor(
       makePass(true, color, depth, stencil)
     )
+  when defined(metalProfile):
+    profileRenderPass()
   flushEncoder()
 
 proc clearDepth*() =
@@ -589,6 +610,8 @@ proc clearDepth*() =
     metalRenderer.commandBuffer.renderCommandEncoderWithDescriptor(
       makePass(false, color(0, 0, 0, 0), true)
     )
+  when defined(metalProfile):
+    profileRenderPass()
   flushEncoder()
 
 proc setTarget*(target: RenderTarget = nil) =
@@ -632,6 +655,8 @@ proc copyTexture(source, destination: MetalTexture) =
     source.pixelFormat != destination.pixelFormat:
       raise newException(PolyworldMetalError, "Metal texture copy mismatch")
   let encoder = metalRenderer.commandBuffer.blitCommandEncoder()
+  when defined(metalProfile):
+    profileBlitPass()
   encoder.copyFromTexture(
     source.handle, 0, 0, MTLOrigin(),
     MTLSize(width: source.width.uint, height: source.height.uint, depth: 1),
@@ -799,6 +824,8 @@ proc bindUniforms(buffer: var UniformBuffer, vertex: bool) =
   ## Copies immutable per-draw constants, including large skinning buffers.
   if buffer.data.len == 0:
     return
+  when defined(metalProfile):
+    profileUniforms(buffer.data.len)
   let index = if vertex: 0'u else: 1'u
   if buffer.data.len <= 4096:
     if vertex:
@@ -814,6 +841,8 @@ proc bindUniforms(buffer: var UniformBuffer, vertex: bool) =
       buffer.data[0].addr, buffer.data.len.uint, 0
     )
     checkNil(nativeBuffer, "Could not upload Metal shader constants")
+    when defined(metalProfile):
+      profileBuffer(buffer.data.len)
     defer: nativeBuffer.release()
     if vertex:
       metalRenderer.encoder.setVertexBuffer(nativeBuffer, 0, index)
@@ -854,6 +883,8 @@ proc draw*(
   if count <= 0 or instanceCount <= 0:
     return
   ensureEncoder()
+  when defined(metalProfile):
+    profileDraw()
   var effectiveState = state
   if metalRenderer.hasStencilOverride:
     effectiveState.stencilTest = metalRenderer.stencilOverride.stencilTest
@@ -981,6 +1012,9 @@ proc endFrame*(present = true) =
       metalRenderer.commandBuffer.presentDrawable(drawable)
   metalRenderer.commandBuffer.commit()
   metalRenderer.commandBuffer.waitUntilCompleted()
+  when defined(metalProfile):
+    profileCommandBuffer(metalRenderer.commandBuffer.GPUStartTime(),
+      metalRenderer.commandBuffer.GPUEndTime())
   let error = metalRenderer.commandBuffer.error()
   let message = if error.isNil: "" else:
     messageNSError(error, "Polyworld Metal frame failed")

@@ -133,6 +133,7 @@ def build_case(game: str, backend: str, args: argparse.Namespace) -> dict:
     source = ROOT / "games" / directory / f"{entry}.nim"
     case = f"{game}-{backend}"
     flags = ["--hints:off", "-d:release", "-d:backendBench"]
+    flags.extend(f"-d:{name}" for name in args.define)
     if backend == "metal":
         flags.append("-d:useMetal4")
     elif backend == "webgl":
@@ -436,6 +437,8 @@ def main() -> None:
     parser.add_argument("--timeout", type=float, default=240)
     parser.add_argument("--build-timeout", type=float, default=1800)
     parser.add_argument("--nim", default="nim")
+    parser.add_argument("--define", action="append", default=[],
+                        help="Additional Nim compile-time definition; repeatable")
     parser.add_argument("--node", default="node")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()

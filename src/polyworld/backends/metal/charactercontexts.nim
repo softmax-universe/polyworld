@@ -76,7 +76,7 @@ proc newCharacterRenderer*(window: Window): CharacterRenderer =
 proc beginFrame*(renderer: CharacterRenderer, window: Window, size: IVec2) =
   ## Ensures character previews have a frame while preserving an active one.
   renderer.window = window
-  if metalRenderer.commandBuffer.isNil:
+  if not metalRenderer.frameActive:
     common.beginFrame(size.x.int, size.y.int, color(0, 0, 0, 1))
 
 proc clearScreen*(renderer: CharacterRenderer, color: Color) =

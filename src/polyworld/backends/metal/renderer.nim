@@ -9,7 +9,16 @@ import
 when defined(metalProfile):
   export MetalFrameProfile, resetMetalProfile, readMetalProfile
 
-const RendererBackend* = "metal"
+const
+  RendererBackend* = "metal"
+  BackendBenchSamples* {.intdefine.} = 1
+
+static:
+  doAssert BackendBenchSamples in [1, 2, 4, 8],
+    "backendBenchSamples must be 1, 2, 4, or 8"
+
+when defined(backendThroughput) and not defined(backendBench):
+  {.error: "backendThroughput requires a backendBench build".}
 
 type
   TextureHandle* = MetalTexture
@@ -25,7 +34,7 @@ var
 
 proc ensureFrame() =
   ## Starts one shared command buffer before the first rendering operation.
-  if metalRenderer.commandBuffer.isNil:
+  if not metalRenderer.frameActive:
     beginFrame(renderWindow.size.x, renderWindow.size.y, color(0, 0, 0, 1))
 
 proc initRenderer*(window: Window, samples = 1) =
@@ -50,7 +59,7 @@ proc newGameUi*(window: Window, atlasPath: string): Silky =
   newSilky(window, data.image, data.atlas, drawer)
 
 proc presentRenderer*(window: Window) =
-  ## Presents and completes the shared scene and UI command buffer.
+  ## Submits the shared scene and UI command buffer for presentation.
   if not metalRenderer.commandBuffer.isNil:
     endFrame(not captureActive() and not defined(backendBench))
 
@@ -169,3 +178,87 @@ proc readFramePixel*(): array[4, uint8] =
     MTLRegion(origin: MTLOrigin(), size: MTLSize(width: 1, height: 1, depth: 1)),
     0
   )
+
+when defined(backendThroughput):
+  type BenchmarkGpuStats* = object
+    submittedFrames*, completedFrames*, maxOutstanding*, capacity*: int
+
+  var
+    benchmarkFrames: seq[MTLCommandBuffer]
+    benchmarkStats: BenchmarkGpuStats
+
+  proc retireBenchmarkFrames() =
+    ## Counts completion of logical frame markers rather than upload commands.
+    while benchmarkFrames.len > 0:
+      let commands = benchmarkFrames[0]
+      case commands.status()
+      of MTLCommandBufferStatusCompleted:
+        commands.release()
+        benchmarkFrames.delete(0)
+        inc benchmarkStats.completedFrames
+      of MTLCommandBufferStatusError:
+        raise newException(PolyworldMetalError,
+          "Throughput benchmark frame failed on the GPU")
+      else:
+        break
+
+  proc readBenchmarkGpuStats*(): BenchmarkGpuStats =
+    ## Reports logical frame retirement without waiting for unfinished work.
+    pollGpu()
+    retireBenchmarkFrames()
+    result = benchmarkStats
+    result.capacity = MaxFramesInFlight
+
+  proc resetBenchmarkGpuStats*() =
+    ## Starts a measured window after the previous frame markers are drained.
+    retireBenchmarkFrames()
+    if benchmarkFrames.len != 0:
+      raise newException(PolyworldMetalError,
+        "Drain warmup frames before resetting throughput statistics")
+    benchmarkStats = BenchmarkGpuStats()
+
+  proc beginBenchmarkGpuFrame*() =
+    ## Bounds unfinished logical frames before the next CPU simulation update.
+    pollGpu()
+    retireBenchmarkFrames()
+    if benchmarkFrames.len >= MaxFramesInFlight:
+      when defined(metalProfile):
+        profileBackpressureWait()
+      benchmarkFrames[0].waitUntilCompleted()
+      pollGpu()
+      retireBenchmarkFrames()
+    if benchmarkFrames.len >= MaxFramesInFlight:
+      raise newException(PolyworldMetalError,
+        "Throughput frame queue did not retire completed work")
+
+  proc submitBenchmarkGpuFrame*() =
+    ## Submits one completed offscreen frame without a synchronous readback.
+    if not metalRenderer.frameActive or metalRenderer.commandBuffer.isNil:
+      raise newException(PolyworldMetalError,
+        "Throughput benchmark did not render an active frame")
+    if metalRenderer.frameTarget.samples != BackendBenchSamples:
+      raise newException(PolyworldMetalError,
+        "Metal benchmark target sample count differs from the request")
+    let commands = metalRenderer.commandBuffer
+    commands.retain()
+    try:
+      endFrame(false)
+    except:
+      commands.release()
+      raise
+    retireBenchmarkFrames()
+    benchmarkFrames.add(commands)
+    inc benchmarkStats.submittedFrames
+    benchmarkStats.maxOutstanding = max(benchmarkStats.maxOutstanding,
+      benchmarkFrames.len)
+    retireBenchmarkFrames()
+
+  proc drainBenchmarkGpuFrames*(): BenchmarkGpuStats =
+    ## Completes every submitted frame marker without opening another frame.
+    drainGpu()
+    retireBenchmarkFrames()
+    if benchmarkFrames.len != 0:
+      raise newException(PolyworldMetalError,
+        "Throughput drain left unfinished logical frames")
+    result = benchmarkStats
+    result.capacity = MaxFramesInFlight

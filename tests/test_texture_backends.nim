@@ -22,6 +22,7 @@ proc readPixels[T](
   ## Reads native storage to verify format, row alignment, mips and slices.
   result = newSeq[T](width * height * channels)
   when defined(useMetal4):
+    waitForGpu()
     texture.handle.getBytes(
       result[0].addr, (width * channels * sizeof(T)).uint,
       (width * height * channels * sizeof(T)).uint,

@@ -1,0 +1,9 @@
+Generated using the built-in image generation tool.
+
+Use case: stylized-concept
+Asset type: a wide landscape game screenshot reimagined as fine art.
+Primary request: Generate a Civilization-style strategy game screenshot painted entirely as a sumptuous Italian Renaissance oil painting.
+Composition: elevated three-quarter bird's-eye strategy map, broad continuous terrain with recognizable subtle hexagonal tiles, several cities, winding roads and a river, farms, forests, mountain ranges, a coastline and sailing ships, tiny army formations and heraldic banners. A thriving walled Renaissance city with a cathedral dome anchors the map. Preserve the unmistakable overview and information hierarchy of a Civilization gameplay screenshot.
+Style and medium: authentic Renaissance oil on linen, layered luminous glazes, delicate detailed brushwork, subtle canvas grain, warm golden light and soft chiaroscuro, atmospheric depth, rich earth colors and ultramarine sea. Every part including the interface is painted by hand as part of the same artwork; exquisite miniature architecture and landscape detail.
+Interface: a slim painted resource bar along the top, tasteful small parchment city-name ribbons, a compact decorative minimap in a lower corner, and a small turn button in the other lower corner. Restrained Renaissance cartographic ornament and gold leaf accents. Minimal legible text: city labels "ROMA", "FIRENZE", "VENEZIA"; turn button "NEXT TURN". Keep the map dominant and the interface compact.
+Constraints: full-bleed landscape composition approximately 16:9. The image itself fills the canvas, with no physical picture frame, no room or monitor around it, no watermark. It must feel both like an actual Civilization gameplay scene and a richly crafted Renaissance oil painting.

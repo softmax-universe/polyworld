@@ -1,0 +1,11 @@
+Generated using the built-in image generation tool with transparent_background=true.
+
+Use case: style-transfer
+Asset type: a single isolated game-unit sprite, transparent PNG.
+Primary request: Transform the supplied tiny pixel-art archer sprite into a finely painted Renaissance oil-painting version, matching the painterly aesthetic of a Renaissance Civilization strategy game.
+Input image: Image 1 is the edit target and the authoritative reference for the character, silhouette, equipment, clothing, proportions, pose, and viewing angle.
+Keep: exactly one full-body archer, the reference's left-facing three-quarter stance, tall curved bow at the left, arms and hands in the same archery pose, short reddish-tan clothing, exposed legs and simple footwear. Preserve the recognizable silhouette and original arrangement. Carefully interpret the tiny source rather than adding armor, a cloak, scenery, or new equipment.
+Style: Renaissance oil-painted miniature, warm earth pigments, subtle luminous glazes, refined small visible brushstrokes, gentle chiaroscuro, natural figure anatomy and cloth. Painterly modeled volume and edges, consistent with an oil-painted historical strategy-game unit. Replace pixel blocks with painted detail. Keep the face small and the bow, bowstring, hands and legs readable.
+Composition: isolated complete figure centered with a little clear padding, bow and all extremities fully in frame; enlarge the source into a high-quality sprite while preserving its proportions and pose.
+Background: truly transparent alpha surrounding the entire figure and in the gaps between the limbs and bow. No black backdrop, no painted landscape, no canvas rectangle, no ground plane, no cast ground shadow, no checkerboard baked into the image.
+Constraints: no text, no border, no duplicate characters, no extra objects. One transparent-background painted archer sprite.

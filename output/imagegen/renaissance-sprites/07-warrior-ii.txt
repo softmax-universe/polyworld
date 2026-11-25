@@ -1,0 +1,7 @@
+Generated using built-in image generation, transparent_background=true.
+
+Use case: style-transfer.
+Create one transparent painted sprite of the adult historical figure in reference image 1 at row 2, column 3, whose label is "Warrior II". Reference image 1 is authoritative for the pose, clothing and equipment. Reference image 2 is only the oil-painting medium and lighting reference.
+The figure is calmly standing for a historical costume illustration, wearing a short yellow ochre belted tunic, simple sandals, and a small dark head covering. Preserve the original right-facing three-quarter stance and the long diagonal wooden pole with a small metal tip held in his hands as shown in the source. There is no combat, no action against anyone, no injury, and no additional person.
+Paint in the same refined warm Renaissance oil-paint style as reference image 2: fine visible brushwork, soft modeled anatomy, earth-pigment glazes, delicate light. Do not copy the reference archer's bow or feathered cap.
+Exactly one complete full-body unit centered in a square image, about 1024x1024, all extremities and equipment completely inside the image with generous clear padding. Truly transparent alpha surrounding the figure and in all gaps. No ground, ground shadow, text, labels, grid, picture frame, checkerboard, or solid background.

@@ -1,0 +1,10 @@
+Generated using built-in image generation, transparent_background=true.
+
+Use case: style-transfer. Asset type: one isolated transparent game sprite.
+Reference image 1 is a labeled 4x4 sprite sheet. Recreate ONLY the specified unit from it, as a SINGLE full-body figure with original pose, facing direction, clothing colors, equipment, and recognizable silhouette. Do not recreate the grid or any neighboring units.
+Reference image 2 is STYLE ONLY: match its warm Renaissance oil-painted miniature finish, fine visible brushwork, soft modeled anatomy, luminous earth-pigment glazes, gentle warm directional light, and dark painted contours. Do not borrow its cap, feathers, bow, costume, or pose.
+The Renaissance part is the painting medium, not a redesign of the original historical unit. Natural proportions with a clear strategy-game-unit silhouette.
+Composition: one complete unit centered on a square canvas, ideally 1024 by 1024, with at least 8% clear padding around ALL extremities and long weapons. Keep all feet and equipment intact.
+Background: genuinely transparent alpha throughout the surroundings and all gaps between body and equipment. No checkerboard, no flat background color, no canvas rectangle, no pedestal or ground, no cast ground shadow, no labels, no text, no border. Only the requested sprite.
+
+Source target: row 2, column 1, labeled Warrior. A standing ancient infantryman holding a very long straight upright spear on the LEFT side of the image, spear extending above his head. Preserve the source's full-body three-quarter stance, olive brown short belted tunic, bare lower legs, simple dark leather footwear, short dark hair or simple dark head covering, one arm extending slightly outward. He has no shield and no bow. Match the original spear and pose.

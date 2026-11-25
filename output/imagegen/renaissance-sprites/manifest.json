@@ -1,0 +1,255 @@
+{
+  "generation": "Built-in image generation, one call per sprite; transparent_background=true.",
+  "style": "Renaissance oil-painted miniature matched to previously generated archer.",
+  "sheet": {
+    "file": "renaissance-sprites-sheet.png",
+    "width": 4096,
+    "height": 4096,
+    "columns": 4,
+    "rows": 4,
+    "order": "Same row-major order as supplied reference",
+    "assembly": "Original generated sprites resized proportionally into 1024px transparent cells; individual PNGs remain at original resolution."
+  },
+  "sprites": [
+    {
+      "name": "Slaves",
+      "file": "01-slaves.png",
+      "prompt": "01-slaves.txt",
+      "width": 1254,
+      "height": 1254,
+      "row": 0,
+      "column": 0,
+      "sheet_frame": {
+        "x": 0,
+        "y": 0,
+        "width": 1024,
+        "height": 1024
+      }
+    },
+    {
+      "name": "Citizens",
+      "file": "02-citizens.png",
+      "prompt": "02-citizens.txt",
+      "width": 1254,
+      "height": 1254,
+      "row": 0,
+      "column": 1,
+      "sheet_frame": {
+        "x": 1024,
+        "y": 0,
+        "width": 1024,
+        "height": 1024
+      }
+    },
+    {
+      "name": "Settlers",
+      "file": "03-settlers.png",
+      "prompt": "03-settlers.txt",
+      "width": 1254,
+      "height": 1254,
+      "row": 0,
+      "column": 2,
+      "sheet_frame": {
+        "x": 2048,
+        "y": 0,
+        "width": 1024,
+        "height": 1024
+      }
+    },
+    {
+      "name": "Caravan",
+      "file": "04-caravan.png",
+      "prompt": "04-caravan.txt",
+      "width": 1254,
+      "height": 1254,
+      "row": 0,
+      "column": 3,
+      "sheet_frame": {
+        "x": 3072,
+        "y": 0,
+        "width": 1024,
+        "height": 1024
+      }
+    },
+    {
+      "name": "Warrior",
+      "file": "05-warrior.png",
+      "prompt": "05-warrior.txt",
+      "width": 1254,
+      "height": 1254,
+      "row": 1,
+      "column": 0,
+      "sheet_frame": {
+        "x": 0,
+        "y": 1024,
+        "width": 1024,
+        "height": 1024
+      }
+    },
+    {
+      "name": "Bowman",
+      "file": "06-bowman.png",
+      "prompt": "06-bowman.txt",
+      "width": 1254,
+      "height": 1254,
+      "row": 1,
+      "column": 1,
+      "sheet_frame": {
+        "x": 1024,
+        "y": 1024,
+        "width": 1024,
+        "height": 1024
+      }
+    },
+    {
+      "name": "Warrior II",
+      "file": "07-warrior-ii.png",
+      "prompt": "07-warrior-ii.txt",
+      "width": 1254,
+      "height": 1254,
+      "row": 1,
+      "column": 2,
+      "sheet_frame": {
+        "x": 2048,
+        "y": 1024,
+        "width": 1024,
+        "height": 1024
+      }
+    },
+    {
+      "name": "Warrior III",
+      "file": "08-warrior-iii.png",
+      "prompt": "08-warrior-iii.txt",
+      "width": 1254,
+      "height": 1254,
+      "row": 1,
+      "column": 3,
+      "sheet_frame": {
+        "x": 3072,
+        "y": 1024,
+        "width": 1024,
+        "height": 1024
+      }
+    },
+    {
+      "name": "Legionary",
+      "file": "09-legionary.png",
+      "prompt": "09-legionary.txt",
+      "width": 1254,
+      "height": 1254,
+      "row": 2,
+      "column": 0,
+      "sheet_frame": {
+        "x": 0,
+        "y": 2048,
+        "width": 1024,
+        "height": 1024
+      }
+    },
+    {
+      "name": "Phalanx",
+      "file": "10-phalanx.png",
+      "prompt": "10-phalanx.txt",
+      "width": 1254,
+      "height": 1254,
+      "row": 2,
+      "column": 1,
+      "sheet_frame": {
+        "x": 1024,
+        "y": 2048,
+        "width": 1024,
+        "height": 1024
+      }
+    },
+    {
+      "name": "Horseman I",
+      "file": "11-horseman-i.png",
+      "prompt": "11-horseman-i.txt",
+      "width": 1254,
+      "height": 1254,
+      "row": 2,
+      "column": 2,
+      "sheet_frame": {
+        "x": 2048,
+        "y": 2048,
+        "width": 1024,
+        "height": 1024
+      }
+    },
+    {
+      "name": "Horseman II",
+      "file": "12-horseman-ii.png",
+      "prompt": "12-horseman-ii.txt",
+      "width": 1254,
+      "height": 1254,
+      "row": 2,
+      "column": 3,
+      "sheet_frame": {
+        "x": 3072,
+        "y": 2048,
+        "width": 1024,
+        "height": 1024
+      }
+    },
+    {
+      "name": "Horseman III",
+      "file": "13-horseman-iii.png",
+      "prompt": "13-horseman-iii.txt",
+      "width": 1254,
+      "height": 1254,
+      "row": 3,
+      "column": 0,
+      "sheet_frame": {
+        "x": 0,
+        "y": 3072,
+        "width": 1024,
+        "height": 1024
+      }
+    },
+    {
+      "name": "Ballista",
+      "file": "14-ballista.png",
+      "prompt": "14-ballista.txt",
+      "width": 1254,
+      "height": 1254,
+      "row": 3,
+      "column": 1,
+      "sheet_frame": {
+        "x": 1024,
+        "y": 3072,
+        "width": 1024,
+        "height": 1024
+      }
+    },
+    {
+      "name": "Siege Tower",
+      "file": "15-siege-tower.png",
+      "prompt": "15-siege-tower.txt",
+      "width": 1254,
+      "height": 1254,
+      "row": 3,
+      "column": 2,
+      "sheet_frame": {
+        "x": 2048,
+        "y": 3072,
+        "width": 1024,
+        "height": 1024
+      }
+    },
+    {
+      "name": "Catapult",
+      "file": "16-catapult.png",
+      "prompt": "16-catapult.txt",
+      "width": 1254,
+      "height": 1254,
+      "row": 3,
+      "column": 3,
+      "sheet_frame": {
+        "x": 3072,
+        "y": 3072,
+        "width": 1024,
+        "height": 1024
+      }
+    }
+  ]
+}

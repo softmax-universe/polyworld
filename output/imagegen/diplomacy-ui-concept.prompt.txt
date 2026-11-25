@@ -1,0 +1,39 @@
+Use case: ui-mockup.
+Create a polished, production-quality medieval real-time strategy DIPLOMACY UI redesign using the attached image as the functional reference. Inspired by classic Warcraft and Age of Empires interfaces: hand-painted dark slate, carved stone, restrained burnished bronze, subtle engraved ornament, rich cloth heraldry, warm ivory lettering, tactile beveled buttons. Beautifully crafted but extremely legible, practical game UI. No franchise logos. No characters or scenery. Crisp straight-on orthographic screenshot, high resolution, landscape approximately 2048x1536.
+
+Composition: a cohesive UI design presentation on a very dark charcoal background. One large main diplomacy window occupies about 70% of width on the left; two smaller interaction-state panels stacked on the right show the end-alliance confirmation and the resulting countdown. All panels share the same visual system. Generous breathing room, strong clean alignment, crisp readable text, moderate ornament only around panel edges. Main window must visually dominate. No large decorative weapon props. Avoid excessive tiny text.
+
+MAIN WINDOW:
+Header "DIPLOMACY", smaller subtitle "Peace first. Then alliance.", compact X close button.
+Under header a horizontal legend with exactly three equal relationship badges: "WAR" with red crossed swords, "PEACE" with muted sage olive branch, "ALLIANCE" with blue-and-gold linked shields. These are the only relationship states. Offers and countdowns are secondary lines, never a fourth relationship state.
+Then six well-spaced player rows, retaining original player names and their faction colors. Left of each row a beautiful compact shield on a cloth banner; faction color used only in banner and crest. Beside it the name and explicit relationship badge. Align contextual actions on the right; smaller status text below. Hairline bronze separators and lightly inset dark backgrounds distinguish rows. Main friendly buttons warm bronze, destructive buttons subdued dark red, withdraw buttons neutral. State icons supplement text and color.
+
+Row 1: green crest, "Briar", badge "PEACE". Secondary "No combat · Separate vision". Buttons "Propose alliance" and "Declare war".
+Row 2: red crest, "Cinder", badge "WAR". Secondary "Combat enabled". Button "Propose peace".
+Row 3: purple crest, "Dawn", badge "PEACE". Visually prioritized with subtle warm gold outline, small sealed-letter icon. Secondary "Incoming alliance proposal · 00:42". Buttons "Accept" and "Decline".
+Row 4: yellow crest, "Ember", badge "ALLIANCE". Eye icon and "Shared vision". Button "End alliance".
+Row 5: teal crest, "Flint", badge "PEACE". Small outgoing-arrow letter icon. Secondary "Alliance proposal sent · 00:55". Button "Withdraw offer".
+Row 6: blue crest, "Gale", badge "PEACE". Amber hourglass and secondary "War begins in 00:10", fine amber countdown progress line. Buttons "Propose peace" and "Withdraw war". Keep current state PEACE because the warning has not elapsed.
+Footer subtle page navigation with left and right arrows and "1 / 2". Small instructional footer: "Proposals require agreement."
+
+RIGHT UPPER PANEL:
+Small understated exterior label "CONFIRMATION".
+Carved bronze panel heading "END ALLIANCE?"
+Yellow Ember crest beside "Ember".
+A clearly readable transition line with small icons: "ALLIANCE  →  20s  →  PEACE".
+Body exactly "Shared vision stays active for 20 seconds." and below "War requires a separate declaration."
+Two prominent buttons: neutral "Keep alliance", muted red "End alliance".
+This is a separate interaction preview, not an additional active player row.
+
+RIGHT LOWER PANEL:
+Small understated exterior label "COOLDOWN".
+Heading "ALLIANCE ENDING".
+Yellow Ember crest beside "Ember" and current blue-gold badge "ALLIANCE".
+Large elegant hourglass countdown "00:14" with a partially depleted thin amber progress bar.
+Copy "Peace begins when the timer ends." and "Shared vision remains active."
+Disabled subdued button "Declare war" with lock icon.
+Small helper text "Available after the alliance ends."
+No cancel or withdraw button in this panel: the end-alliance countdown cannot be cancelled.
+This is the resulting state preview after confirming the upper panel.
+
+Priorities: sophisticated handsome classic RTS aesthetic; readable UI typography, elegant small-cap serif headings with very readable body lettering; functional hierarchy over ornament. High contrast foreground, consistent button heights, tidy iconography. No modern SaaS pills, neon bloom, cartoon characters, excessive flourishes, huge empty areas, marketing copy, arbitrary numbers, extra states, misspellings, watermarks or cropped panel edges. Preserve every listed name and all requested exact labels. Treat the attachment as the functional content reference, not a constraint on visual polish.

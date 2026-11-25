@@ -1,0 +1,10 @@
+Generated using built-in image generation, transparent_background=true.
+
+Use case: style-transfer. Asset type: one isolated transparent game sprite.
+Reference image 1 is a labeled 4x4 sprite sheet. Recreate ONLY the specified unit from it, as a SINGLE full-body figure with original pose, facing direction, clothing colors, equipment, and recognizable silhouette. Do not recreate the grid or any neighboring units.
+Reference image 2 is STYLE ONLY: match its warm Renaissance oil-painted miniature finish, fine visible brushwork, soft modeled anatomy, luminous earth-pigment glazes, gentle warm directional light, and dark painted contours. Do not borrow its cap, feathers, bow, costume, or pose.
+The Renaissance part is the painting medium, not a redesign of the original historical unit. Natural proportions with a clear strategy-game-unit silhouette.
+Composition: one complete unit centered on a square canvas, ideally 1024 by 1024, with at least 8% clear padding around ALL extremities and long weapons. Keep all feet and equipment intact.
+Background: genuinely transparent alpha throughout the surroundings and all gaps between body and equipment. No checkerboard, no flat background color, no canvas rectangle, no pedestal or ground, no cast ground shadow, no labels, no text, no border. Only the requested sprite.
+
+Source target: row 2, column 4, labeled Warrior III. A standing ancient infantryman facing LEFT in three-quarter view, wearing a dark olive-brown belted knee-length tunic, simple dark cap or short dark head covering, bare lower legs and simple leather sandals. Preserve source pose: a spear extends diagonally toward the LEFT from his hands, and a medium round dark brown wooden shield covers his other arm at the RIGHT side of the image. The shield is circular viewed in perspective, with restrained wooden or leather texture and no invented heraldic emblem. No bow. Keep original orientation and compact stance.

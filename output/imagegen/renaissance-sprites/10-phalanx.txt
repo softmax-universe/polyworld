@@ -1,0 +1,11 @@
+Built-in image_gen with transparent_background=true.
+
+Use case: style-transfer
+Asset type: one isolated historical strategy-game unit sprite.
+Primary request: Repaint only the unit in Image 1 row 3 column 2, labeled Phalanx, in the beautiful Renaissance oil-painted miniature style of Image 2.
+Image roles: Image 1 is the authoritative source for unit identity, full-body pose, silhouette, orientation, equipment and colors. Image 2 is ONLY a brushwork, lighting and rendering-style reference; do not copy its character or clothing.
+Subject: One full-body ancient Greek phalanx soldier standing upright in the same three-quarter stance, silver helmet with green crest, silver armor and pale clothing. He holds a very long vertical spear along his left side. A large green oval shield decorated with yellow-gold geometric radial ornament covers his right side. Preserve source pose, orientation, colors and equipment. No bow or feathered Renaissance hat.
+Style: authentic Renaissance oil painting, rich warm earth pigments, subtle luminous glazes, fine visible brushwork, modeled natural anatomy, soft chiaroscuro and warm directional illumination matching Image 2. The subject remains ancient; this is a medium change, not a historical redesign. Detailed but readable as a game unit.
+Composition: exactly one complete unit isolated, full body and all weapons in frame with generous 8 percent transparent padding on every side; centered square 1024x1024 composition.
+Background: real transparent alpha everywhere outside the unit, including enclosed gaps. No floor, no terrain, no cast shadow, no canvas rectangle, no opaque backdrop, no baked checkerboard.
+Constraints: Generate only the specified single source unit, not the source sheet. No labels, no words, no frame, no extra characters, no added equipment.

@@ -75,7 +75,7 @@ proc atlasTexture*(sk: Silky): TextureHandle =
     let size = sk.atlasImageSize()
     handle.retain()
     atlasViews[key] = textureFromNative(handle, size.x, size.y,
-      MTLPixelFormatRGBA8Unorm, ownsHandle = true)
+      MTLPixelFormatRGBA8Unorm, ownsHandle = true, anisotropy = 1)
   atlasViews[key]
 
 proc setRenderViewport*(size: IVec2) =

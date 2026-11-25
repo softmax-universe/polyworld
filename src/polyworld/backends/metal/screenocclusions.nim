@@ -37,6 +37,7 @@ proc ensureSize(
     target = newRenderTarget(
       max(size.x div 2, 1), max(size.y div 2, 1), depth = false
     )
+    target.color.setTextureSampling(linear = true, anisotropy = 1)
 
 proc initScreenOcclusion*(
     settings = defaultScreenOcclusionSettings()

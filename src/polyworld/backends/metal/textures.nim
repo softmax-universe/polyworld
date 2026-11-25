@@ -73,7 +73,8 @@ proc allocateTexture(
   try:
     result = textureFromNative(
       handle, width, height, format, ownsHandle = true,
-      linear = linear, repeat = repeat
+      linear = linear, repeat = repeat,
+      anisotropy = (if arrayTexture: 8'u else: 1'u)
     )
   except:
     handle.release()

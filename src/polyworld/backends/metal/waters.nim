@@ -63,6 +63,9 @@ proc initWaters*() =
     noiseImage.data[index] = rgbx(value, value, value, 255)
   foamNoiseTexture = newTexture(noiseImage, linear = true, repeat = true,
     mipmaps = true)
+  foamNoiseTexture.setTextureSampling(
+    linear = true, repeat = true, anisotropy = 1
+  )
   let white = newImage(1, 1)
   white.fill(rgba(255, 255, 255, 255))
   blankTexture = newTexture(white, linear = false)
@@ -100,6 +103,7 @@ proc beginReflection*(size: IVec2) {.measure.} =
     destroy(reflectionTarget)
     reflectionTarget = newRenderTarget(size.x, size.y,
       colorFormat = MTLPixelFormatRGBA16Float)
+    reflectionTarget.color.setTextureSampling(linear = true, anisotropy = 1)
   pushTarget(reflectionTarget)
   reflectionActive = true
   clearDepth()
@@ -141,6 +145,7 @@ proc captureScene*(size: IVec2) {.measure.} =
     destroy(sceneCopy)
     sceneCopy = newRenderTarget(size.x, size.y,
       colorFormat = source.color.pixelFormat, stencil = source.stencil)
+    sceneCopy.color.setTextureSampling(linear = true, anisotropy = 1)
     sceneCopy.depth.setTextureSampling(linear = false)
   copyTarget(source, sceneCopy, color = true, depth = true)
 

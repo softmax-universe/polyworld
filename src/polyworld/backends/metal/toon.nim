@@ -33,6 +33,7 @@ proc setRamp*(ctx: ToonContext, image: Image) =
   ## Replaces the shading ramp while preserving linear filtering.
   ctx.rampTexture.destroy()
   ctx.rampTexture = newTexture(image)
+  ctx.rampTexture.setTextureSampling(linear = true, anisotropy = 1)
 
 proc newToonContext*(): ToonContext =
   ## Builds Shady-generated programs for the engine's active Metal device.

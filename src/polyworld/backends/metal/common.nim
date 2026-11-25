@@ -273,7 +273,8 @@ proc destroy*(target: RenderTarget) =
       destroy(target.multisampleDepth)
     destroy(target.multisampleColor)
 
-proc sampler(linear, repeat, comparison: bool): MTLSamplerState =
+proc sampler(linear, repeat, comparison: bool,
+    anisotropy = 8'u): MTLSamplerState =
   ## Creates an explicit sampling state for a texture.
   let descriptor = MTLSamplerDescriptor.alloc().init()
   defer: descriptor.release()
@@ -282,7 +283,7 @@ proc sampler(linear, repeat, comparison: bool): MTLSamplerState =
   descriptor.setMinFilter(filter)
   descriptor.setMagFilter(filter)
   descriptor.setMipFilter(MTLSamplerMipFilterLinear)
-  descriptor.setMaxAnisotropy(if linear: 8'u else: 1'u)
+  descriptor.setMaxAnisotropy(if linear: anisotropy else: 1'u)
   let mode = if repeat: MTLSamplerAddressModeRepeat
     else: MTLSamplerAddressModeClampToEdge
   descriptor.setSAddressMode(mode)
@@ -293,21 +294,28 @@ proc sampler(linear, repeat, comparison: bool): MTLSamplerState =
   checkNil(result, "Could not create a Metal sampler")
 
 proc setTextureSampling*(texture: MetalTexture, linear: bool,
-    repeat = false) =
+    repeat = false, anisotropy = 8'u) =
   ## Replaces the sampling state without changing texture contents.
   texture.sampler.release()
-  texture.sampler = sampler(linear, repeat, false)
+  texture.sampler = sampler(linear, repeat, false, anisotropy)
+
+proc setComparisonSampling*(texture: MetalTexture, linear = true,
+    anisotropy = 8'u) =
+  ## Configures depth comparisons independently of ordinary texture sampling.
+  texture.comparisonSampler.release()
+  texture.comparisonSampler = sampler(linear, false, true, anisotropy)
 
 proc textureFromNative*(
   handle: MTLTexture, width, height: int, pixelFormat: MTLPixelFormat,
-  ownsHandle = false, linear = true, repeat = false
+  ownsHandle = false, linear = true, repeat = false, anisotropy = 8'u
 ): MetalTexture =
   ## Wraps a native texture with the engine's sampling and lifetime metadata.
   requireRenderer()
   checkNil(handle, "Cannot wrap a nil Metal texture")
   result = MetalTexture(
     handle: handle, width: width, height: height, pixelFormat: pixelFormat,
-    ownsHandle: ownsHandle, sampler: sampler(linear, repeat, false)
+    ownsHandle: ownsHandle,
+    sampler: sampler(linear, repeat, false, anisotropy)
   )
   metalRenderer.textures.add(result)
 

@@ -5,13 +5,13 @@ when defined(takeScreenshot):
   import std/strutils
 when not defined(emscripten) or defined(takeScreenshot):
   import ../core/replays
-import opengl, pixie, silky, vmath, windy
+import pixie, silky, vmath, windy
 import ../core/sim, ../core/sessions, ../core/bots, ../core/eventtext
 import ../app, ../bench, ../ui/hud, ../scene/table, ../play,
   ../scene/cardrenderer, ../vfx/vfxrenderer, ../scene/post,
   ../scene/courtyard, ../scene/towerarena,
   ../ui/tuning, ../ui/matchmenu, ../ui/controls, ../replayer, ../audios
-import polyworld/[characters, chrome, menus, player, sounds, viewers]
+import polyworld/[renderer, characters, chrome, menus, player, sounds, viewers]
 when defined(emscripten):
   import ../net/web
 else:
@@ -847,10 +847,7 @@ proc runDuel*(app: App) =
           post.layer = layer
           post.settings.enabled = true
     post.beginScene(window.size, CameraNear, CameraFar)
-    glClearColor(0.035, 0.045, 0.065, 1)
-    glStencilMask(0xff)
-    glClearStencil(0)
-    glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT or GL_STENCIL_BUFFER_BIT)
+    clearFrame(color(0.035, 0.045, 0.065, 1), stencil = true)
     let environmentTime =
       when defined(takeScreenshot):
         parseFloat(getEnv("CAC_SCENE_TIME", $animationTime)).float32
@@ -869,9 +866,7 @@ proc runDuel*(app: App) =
 
     beginCharacters(scene, window, view, projection, cameraEye)
     scene.lightLikeCourtyard(currentSide)
-    glEnable(GL_STENCIL_TEST)
-    glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE)
-    glStencilFunc(GL_ALWAYS, 0, 0xff)
+    beginStencil(0)
     if phase == ChooseClasses:
       drawClassHeroes(classHover, animationTime, cameraEye)
     else:
@@ -880,7 +875,7 @@ proc runDuel*(app: App) =
           player = game.players[playerIndex]
           look = play.heroLook(game, playerIndex, hoveredTarget,
             attackChoices, attackHoverTarget)
-        glStencilFunc(GL_ALWAYS, (playerIndex + 1).GLint, 0xff)
+        beginStencil(playerIndex + 1)
         if look.targetable:
           vfx.addTargetRing(
             duelLayout.heroPosition(playerIndex) + vec3(0, 0.04, 0),
@@ -898,7 +893,7 @@ proc runDuel*(app: App) =
           sizeFactor = look.sizeFactor
         )
     finishCharacters(scene)
-    glDisable(GL_STENCIL_TEST)
+    endStencil()
     if post.beginMaterialNormals():
       if phase == PlayGame:
         courtyard.draw(viewProjection, cameraEye, environmentTime, currentSide,
@@ -921,13 +916,7 @@ proc runDuel*(app: App) =
       vfx.draw(viewProjection)
     post.present(window.size, app.captureFramebuffer)
 
-    glDisable(GL_DEPTH_TEST)
-    glDisable(GL_CULL_FACE)
-    glDisable(GL_BLEND)
-    when not defined(emscripten):
-      glDisable(GL_MULTISAMPLE)
-    glActiveTexture(GL_TEXTURE0)
-    glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
+    prepareUi(sk)
     benchStart(Ui)
     sk.mousePos = window.mousePos.vec2 / sk.uiScale
     when PostLayerControls:
@@ -1058,7 +1047,7 @@ proc runDuel*(app: App) =
       if phase == PlayGame:
         app.updateReplaySaving(game.gameOver or app.atLaunchTickLimit())
     menu.draw(app)
-    sk.endUi()
+    sk.finishUi()
     sk.drawHudFaces()
     benchStop(Ui)
     benchEndFrame("duel")
@@ -1069,11 +1058,8 @@ proc runDuel*(app: App) =
         if screenshotFrame mod 2 == 0:
           let
             outputDir = getEnv("CAC_CAPTURE_SEQUENCE")
-            frameImage = newImage(window.size.x, window.size.y)
+            frameImage = readFrameImage(window.size.x, window.size.y)
           createDir(outputDir)
-          glReadPixels(0, 0, window.size.x.GLsizei, window.size.y.GLsizei,
-            GL_RGBA, GL_UNSIGNED_BYTE, frameImage.data[0].addr)
-          frameImage.flipVertical()
           frameImage.writeFile(outputDir / &"frame-{screenshotFrame div 2:04}.png")
         if screenshotFrame >= max(2, parseInt(getEnv("CAC_CAPTURE_FRAME", "120"))):
           quit(0)

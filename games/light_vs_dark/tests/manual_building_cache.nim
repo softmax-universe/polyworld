@@ -1,6 +1,6 @@
 ## Requires desktop OpenGL and LvD building assets for texture comparisons.
 
-include ../../../src/polyworld/quadterrain
+include ../../../src/polyworld/backends/opengl/quadterrain
 import
   windy,
   ../assets as lvdAssets,

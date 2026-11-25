@@ -1,6 +1,6 @@
 ## Native hidden-GL regression for LvD's byte-per-cell fog upload.
 ## Run from repository root; requires desktop OpenGL, but no terrain art.
-include polyworld/quadterrain
+include polyworld/backends/opengl/quadterrain
 import windy
 import ../[maps, sim]
 import polyworld/visions
@@ -146,7 +146,7 @@ block visibilityUpload:
   glActiveTexture(GL_TEXTURE0)
   let green = newImage(1, 1)
   green.fill(rgbx(45, 180, 65, 255))
-  let material = buildTextureArray(@[@[green]], GL_CLAMP_TO_EDGE.GLint)
+  let material = createTextureArray(@[@[green]], repeat = false)
   glBindTexture(GL_TEXTURE_2D_ARRAY, material)
   var vao: GLuint
   glGenVertexArrays(1, vao.addr)

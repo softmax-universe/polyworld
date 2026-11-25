@@ -4,7 +4,8 @@ import std/math
 import shady, vmath
 
 const ShaderTarget =
-  when defined(emscripten): glsl3WebGL
+  when defined(useMetal4): metalMSL
+  elif defined(emscripten): glsl3WebGL
   else: glsl3Desktop
 
 var

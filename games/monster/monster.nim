@@ -7,7 +7,7 @@ when not defined(headless):
   import
     std/unicode,
     pixie, silky, vmath, windy,
-    polyworld/[assets, rtscameras, viewers],
+    polyworld/[assets, renderer, rtscameras, viewers],
     scenes, ui, hudassets, selections
 
   when not defined(emscripten):
@@ -123,7 +123,7 @@ else:
     defer:
       captureTarget.releaseScreenshotTarget()
     let scene = newMonsterScene(
-      window, world.map, sk.atlas, sk.atlasTextureId()
+      window, world.map, sk.atlas, sk.atlasTexture()
     )
     defer:
       scene.close()
@@ -255,7 +255,7 @@ else:
         brain.available(), brain.failure, cameraTarget, cameraDistance,
         following
       )
-      sk.endUi()
+      sk.finishUi()
       window.syncInput(chat)
       when not defined(emscripten):
         if chat.textModeRequested:
@@ -291,7 +291,7 @@ else:
       if capturing and epochTime() - started > 120:
         raise newException(MonsterError, "Timed out waiting for capture.")
       if not capturing:
-        window.swapBuffers()
+        window.presentFrame()
         reportReplayFrame(world.tick, 0)
     while not window.closeRequested:
       pollEvents()

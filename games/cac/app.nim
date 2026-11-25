@@ -2,12 +2,12 @@
 ## the class choice. A mode is a client of the core that presents its match
 ## with these.
 import std/[options, os]
-import chroma, opengl, pixie, silky, vmath, windy
+import chroma, pixie, silky, vmath, windy
 import core/sim, core/sessions, core/bots, ui/cardfaces, scene/cardrenderer,
   vfx/vfxrenderer, scene/post, scene/table, scene/courtyard, scene/heroes,
   ui/hud, ui/heroselect, ui/frontendassets, scene/heroselectstage, paths,
   replayer, net/multiplayer
-import polyworld/[assets, characters, chargen, connections,
+import polyworld/[renderer, assets, characters, chargen, connections,
   menus, viewers]
 from polyworld/cli import CliError, DurationFlags
 
@@ -43,7 +43,7 @@ type
     playerNames*: seq[string]
     returnToMenu*: bool
     battlefieldPlayers: int
-    captureFramebuffer*: GLuint
+    captureFramebuffer*: FramebufferHandle
     captureTarget: ScreenshotTarget
     humanSeat*: Option[Seat]
       ## The class and deck the human brought with `--deck PATH.bas`;
@@ -375,7 +375,7 @@ proc setBattlefield*(app: App, playerCount: int) =
 proc closeCapture*(app: App) =
   ## Releases the hidden capture target while the window context is alive.
   app.captureTarget.releaseScreenshotTarget()
-  app.captureFramebuffer = 0
+  app.captureFramebuffer = default(FramebufferHandle)
 
 proc beginCaptureFrame*(app: App) =
   ## Renders screenshots offscreen without depending on a visible Cocoa drawable.

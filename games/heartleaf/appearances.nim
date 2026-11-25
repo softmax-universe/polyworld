@@ -1,6 +1,6 @@
 import
-  chroma, gltf, opengl, pixie, vmath, windy,
-  polyworld/[characters, chargen, common],
+  chroma, gltf, pixie, vmath, windy,
+  polyworld/[renderer, characters, chargen, common],
   content
 
 const
@@ -42,8 +42,14 @@ proc gnomePortrait*(
     view = lookAt(eye, target, vec3(0, 1, 0))
     projection = ortho(-extent, extent, -extent, extent, 0.02'f, 50'f)
   scene.beginCharacters(window, view, projection, eye)
-  glViewport(0, 0, Size, Size)
-  scene.renderer.clearScreen(color(0.10, 0.12, 0.16, 1))
+  var portraitTarget = newFrameTarget(Size, Size)
+  pushFrameTarget(portraitTarget)
+  defer:
+    popFrameTarget()
+    destroyFrameTarget(portraitTarget)
+    setRenderViewport(window.size)
+  setRenderViewport(ivec2(Size, Size))
+  clearFrame(color(0.10, 0.12, 0.16, 1))
   scene.drawCharacter(
     model,
     vec3(0),
@@ -52,15 +58,4 @@ proc gnomePortrait*(
     0.35'f
   )
   scene.finishCharacters()
-  result = newImage(Size, Size)
-  glReadPixels(
-    0,
-    0,
-    Size,
-    Size,
-    GL_RGBA,
-    GL_UNSIGNED_BYTE,
-    result.data[0].addr
-  )
-  result.flipVertical()
-  glViewport(0, 0, window.size.x, window.size.y)
+  result = readFrameImage(Size, Size)

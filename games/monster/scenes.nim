@@ -1,7 +1,7 @@
 import
   std/[math, tables],
-  chroma, gltf, opengl, silky/atlas, vmath, windy,
-  polyworld/[assets, characters, chargen, daycycles, groves, lighting,
+  chroma, gltf, silky/atlas, vmath, windy,
+  polyworld/[renderer, modelresources, assets, characters, chargen, daycycles, groves, lighting,
     pathing, quadterrain, rtscameras, selectionoutlines, shadows,
     terrainsurfaces, toon, treegen, worldbars, worldtexts],
   polyworld/common as artpaths,
@@ -56,7 +56,7 @@ type
     creatureText: WorldText
     labelFont: FontAtlas
     atlasSize: int
-    labelTexture: GLuint
+    labelTexture: TextureHandle
     closed: bool
 
 proc addBox(node: Node, position, size, tint: Vec3) =
@@ -232,9 +232,9 @@ proc close*(scene: MonsterScene) =
   models.add scene.woodcutters
   for model in models:
     if model != nil:
-      model.file.root.clearFromGpu()
+      model.file.root.clearModelGpu()
       for merged in model.mergedMeshes:
-        merged.clearFromGpu()
+        merged.clearModelGpu()
   if scene.characters != nil:
     scene.characters.context.destroy()
   scene.creature = nil
@@ -276,7 +276,7 @@ proc newMonsterScene*(
   window: Window,
   map: MonsterMap,
   atlas: SilkyAtlas,
-  atlasTexture: GLuint
+  atlasTexture: TextureHandle
 ): MonsterScene =
   ## Loads the village, generated woodland, and the temporary LvD creature.
   result = MonsterScene()
@@ -815,8 +815,7 @@ proc drawScene*(
       scene.characters.drawCharacter(pose)
     scene.characters.sunDepthPass = false
   scene.characters.beginCharacters(window, view, projection, eye)
-  glClearColor(0.14'f, 0.22'f, 0.25'f, 1'f)
-  glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
+  clearFrame(color(0.14'f, 0.22'f, 0.25'f, 1'f))
   scene.characters.toon.drawBackground()
   drawTerrain(viewProjection)
   scenery.drawScenery(viewProjection)

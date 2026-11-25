@@ -17,6 +17,7 @@ var
   inverseProjection: Uniform[Mat4]
   texel: Uniform[Vec2]
   projectionScale: Uniform[Vec2]
+  projectionY: Uniform[float32]
   direction: Uniform[Vec2]
   tint: Uniform[Vec3]
   radius, intensity, bias, normalDetail: Uniform[float32]
@@ -43,7 +44,8 @@ proc viewPosition(point: Vec2): Vec3 =
     snapped = (floor(point / texel) + 0.5'f) * texel
     depth = texture(depthTexture, snapped).x
     view = inverseProjection *
-      vec4(snapped.x * 2.0'f - 1.0'f, snapped.y * 2.0'f - 1.0'f,
+      vec4(snapped.x * 2.0'f - 1.0'f,
+        (snapped.y * 2.0'f - 1.0'f) * projectionY,
         depth * 2.0'f - 1.0'f, 1.0'f)
   result = view.xyz / view.w
 
@@ -56,7 +58,7 @@ proc viewNormal(point: Vec2, center: Vec3): Vec3 =
     down = center - viewPosition(point - vec2(0.0'f, texel.y))
     dx = if abs(right.z) < abs(left.z): right else: left
     dy = if abs(up.z) < abs(down.z): up else: down
-  result = normalize(cross(dx, dy))
+  result = normalize(cross(dx, dy)) * projectionY
 
 proc surfaceNormal(point: Vec2, center: Vec3, detail: float32): Vec3 =
   ## Blends mapped surface relief into the depth-reconstructed normal.

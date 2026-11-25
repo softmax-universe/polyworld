@@ -1,8 +1,8 @@
 ## Main menu, local setup and shared Polyworld room lifecycle for CaC.
 import
   std/[os, strutils, tables, uri],
-  bumpy, chroma, opengl, pixie, silky, vmath, windy,
-  polyworld/[chrome, connections, homes, lobbies, menus, policies,
+  bumpy, chroma, pixie, silky, vmath, windy,
+  polyworld/[renderer, chrome, connections, homes, lobbies, menus, policies,
     roomclients, rooms, sounds, viewers],
   app, core/[battlesetup, sessions, sim], net/[multiplayer, web], ui/controls,
   homes as cacHomes
@@ -368,10 +368,7 @@ proc runFrontend*(app: App, connection: var Connection,
       ## Render one menu state while the outer loop owns network pumping.
       app.beginCaptureFrame()
       # The arena's initialization and last battle leave 3D depth state active.
-      glDisable(GL_DEPTH_TEST)
-      glDisable(GL_STENCIL_TEST)
-      glDisable(GL_CULL_FACE)
-      glDisable(GL_SCISSOR_TEST)
+      prepareUi(sk)
       updateSounds()
       publishStatus(("Cards and Casters / " & $page).cstring)
       let needsName = not eligibleName(preferences.name)
@@ -419,13 +416,13 @@ proc runFrontend*(app: App, connection: var Connection,
               error = problem.msg
         if error.len > 0:
           sk.menuLabel(error, at + vec2(0, 272), color = LobbyRed)
-        sk.endUi()
+        sk.finishUi()
         presentMenuFrame()
         return
       when not defined(emscripten):
         if frontendState.browsingReplays:
           replayAction = sk.drawReplayBrowser(window, replayBrowser)
-          sk.endUi()
+          sk.finishUi()
           presentMenuFrame()
           return
       if page == HomeMenu:
@@ -462,7 +459,7 @@ proc runFrontend*(app: App, connection: var Connection,
           sk.menuLabel(error, vec2(24, 24), color = LobbyRed)
         when not defined(emscripten):
           drawReplayRetry()
-        sk.endUi()
+        sk.finishUi()
         presentMenuFrame()
         return
       var layout: LobbyLayout
@@ -907,7 +904,7 @@ proc runFrontend*(app: App, connection: var Connection,
       when not defined(emscripten):
         drawReplayRetry()
       sk.textStyle = "Default"
-      sk.endUi()
+      sk.finishUi()
       presentMenuFrame()
     pollEvents()
     waitForDisplay()

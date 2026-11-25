@@ -2,7 +2,7 @@
 
 import
   std/[math, os, strutils, tables, times],
-  bumpy, chroma, opengl, pixie, silky, vmath,
+  bumpy, chroma, pixie, silky, vmath,
   assets, brushes, content, groves, landscapes, sim, game, maps, replays, ui, walls,
   aiming, cameras, controls, faces, lighting, spelleffects, multiplayer, homes, lobbies, cursors, pointers,
   minimaporders, spectator, chats, chatinput, chatui, shops, audios, matchresults,
@@ -16,7 +16,7 @@ import
   polyworld/quadterrain,
   polyworld/shadows, polyworld/screenocclusions,
   polyworld/terrainsurfaces, polyworld/waters,
-  polyworld/[displays, chrome, inputs, rtscameras, selectionoutlines, shapes, viewers,
+  polyworld/[renderer, displays, chrome, inputs, rtscameras, selectionoutlines, shapes, viewers,
     visions, worldbars, worldtexts, connections, roomclients, rooms, menus, networks]
 
 when defined(emscripten):
@@ -1247,7 +1247,7 @@ proc runGraphics*(
         viewProjection,
         cameraRight,
         cameraUp,
-        sk.atlasTextureId()
+        sk.atlasTexture()
       )
 
   proc pickEntity(viewProjection: Mat4): int32 =
@@ -1624,7 +1624,7 @@ proc runGraphics*(
         vec3(0, 0.35'f, 0)
     waypointShapes.addPolyline(waypointRoute, rgbx(116, 242, 226, 255), 0.09'f)
     waypointShapes.draw(viewProjection)
-    waypointText.draw(viewProjection, right, up, sk.atlasTextureId())
+    waypointText.draw(viewProjection, right, up, sk.atlasTexture())
 
   proc playerMode(): bool =
     ## Returns whether this client issues orders for one hero.
@@ -3158,9 +3158,8 @@ proc runGraphics*(
         profileBlock "Main pass":
           beginGotaFrame()
           when not defined(emscripten):
-            glEnable(GL_MULTISAMPLE)
-          glClearColor(0.05, 0.06, 0.09, 1.0)
-          glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
+            setMultisampling(true)
+          clearFrame(color(0.05, 0.06, 0.09, 1.0))
           scene.toon.drawBackground()
           updateTerrainVision()
           if showTiles and (terrainEdgeWorld != run.world or
@@ -3253,11 +3252,12 @@ proc runGraphics*(
                 )
                 drawWorldCharacters(scene, worldCharacters, worldCharacterCount)
                 finishCharacters(scene)
+              endReflection()
               if captureActive():
                 beginGotaFrame()
               else:
-                glBindFramebuffer(GL_FRAMEBUFFER, 0)
-              glViewport(0, 0, window.size.x, window.size.y)
+                bindFrameTarget()
+              setRenderViewport(window.size)
           drawWaterBody(
             lake,
             viewProjection,
@@ -3381,13 +3381,7 @@ proc runGraphics*(
 
       profileBlock "ui":
         if not cleanScreenshot and matchMenu != MatchResults:
-          glDisable(GL_DEPTH_TEST)
-          glDisable(GL_CULL_FACE)
-          glDisable(GL_BLEND)
-          when not defined(emscripten):
-            glDisable(GL_MULTISAMPLE)
-          glActiveTexture(GL_TEXTURE0)
-          glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
+          prepareUi(sk)
           var menuOrigin: Vec2
           if matchMenu == HiddenMatchMenu:
             sk.beginUi(window, window.size)
@@ -3644,19 +3638,13 @@ proc runGraphics*(
                else: run.visibleReplayChat(
                  if viewMode == 0: -1 else: viewMode - 1)),
               network.canHumanChat)
-          sk.endUi()
+          sk.finishUi()
           window.syncChatInput(chat)
           if matchMenu == HiddenMatchMenu:
             drawStatsOverlay(sk, window)
           window.syncChatInput(chat)
         if not cleanScreenshot and matchMenu == MatchResults:
-          glDisable(GL_DEPTH_TEST)
-          glDisable(GL_CULL_FACE)
-          glDisable(GL_BLEND)
-          when not defined(emscripten):
-            glDisable(GL_MULTISAMPLE)
-          glActiveTexture(GL_TEXTURE0)
-          glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
+          prepareUi(sk)
           let
             heroId = if playerMode(): playerHeroId() else: 0'i32
             ready = network == nil or
@@ -3675,7 +3663,7 @@ proc runGraphics*(
                 elif replaySaving.savedPath.len > 0:
                   "Replay saved to your library." else: "",
                 vec2(24, 24), 1000, MenuAccent)
-              sk.endUi()
+              sk.finishUi()
       profileBlock "present":
         presentGotaFrame()
         reportDirectorFrame(

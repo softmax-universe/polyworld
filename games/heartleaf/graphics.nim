@@ -6,8 +6,8 @@
 
 import
   std/[math, os, strutils, times],
-  fixxy, opengl, pixie, vmath, windy, silky,
-  polyworld/[actioncam, assets, characters, chargen, chrome, clickmarks,
+  fixxy, pixie, vmath, windy, silky,
+  polyworld/[renderer, actioncam, assets, characters, chargen, chrome, clickmarks,
     common, gameuis, inputs, occlusions, pathing, player, profiles, quadterrain, rtscameras,
     shadows, shapes, tapes, terrainsurfaces, viewers],
   content,
@@ -662,10 +662,9 @@ proc runGraphics*() =
           scene.sunDepthPass = false
         discard beginScreenshotFrame(screenshotTarget, window)
         if captureLayer in {BuildingsLayer, VegetationLayer, PropsLayer}:
-          glClearColor(0, 0, 0, 0)
+          clearFrame(color(0, 0, 0, 0))
         else:
-          glClearColor(0.13, 0.19, 0.12, 1)
-        glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
+          clearFrame(color(0.13, 0.19, 0.12, 1))
         drawTerrain(viewProjection, showTiles,
           drawGround = captureLayer in {AllLayer, GroundLayer})
         if captureLayer == AllLayer:
@@ -694,13 +693,7 @@ proc runGraphics*() =
           worldShapes.draw(viewProjection)
       when not defined(sceneCapture):
         profileBlock "ui":
-          glDisable(GL_DEPTH_TEST)
-          glDisable(GL_CULL_FACE)
-          glDisable(GL_BLEND)
-          when not defined(emscripten):
-            glDisable(GL_MULTISAMPLE)
-          glActiveTexture(GL_TEXTURE0)
-          glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
+          prepareUi(sk)
           sk.beginUi(window, window.size)
 
           ## World overlays drawn in HUD space: occupant portraits float over
@@ -760,7 +753,7 @@ proc runGraphics*() =
           )
           if speedClicked:
             snapFollowCamera()
-          sk.endUi()
+          sk.finishUi()
       if captureFrame(window, screenshotFrame, 30, "heartleaf.png"):
         when not defined(emscripten):
           window.closeRequested = true

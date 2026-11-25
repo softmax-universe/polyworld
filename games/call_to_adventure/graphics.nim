@@ -9,8 +9,8 @@
 
 import
   std/[math, tables, times],
-  chroma, fixxy, opengl, pixie, silky, vmath, windy,
-  polyworld/[actioncam, assets, characters, clickmarks, common, inputs,
+  chroma, fixxy, pixie, silky, vmath, windy,
+  polyworld/[renderer, actioncam, assets, characters, clickmarks, common, inputs,
     particles, particleshaders, chrome, pathing, player, profiles,
     quadterrain, rtscameras, screenocclusions, selectionoutlines, shadows,
     shapes, tapes, terrainsurfaces, viewers, visions, worldbars, worldtexts,
@@ -1704,7 +1704,7 @@ proc runGraphics*() =
       viewProjection,
       cameraRight,
       cameraUp,
-      sk.atlasTextureId()
+      sk.atlasTexture()
     )
 
   proc attackTargetSlot(visibleFrom: int): int32 =
@@ -2347,11 +2347,10 @@ proc runGraphics*() =
             scene.sunDepthPass = false
 
         discard screenshotTarget.beginScreenshotFrame(window)
-        glViewport(0, 0, window.size.x.GLsizei, window.size.y.GLsizei)
+        setRenderViewport(window.size)
         when not defined(emscripten):
-          glEnable(GL_MULTISAMPLE)
-        glClearColor(0, 0, 0, 1)
-        glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
+          setMultisampling(true)
+        clearFrame(color(0, 0, 0, 1))
 
         if layerVertexRanges.len > visibleFrom:
           let
@@ -2431,13 +2430,7 @@ proc runGraphics*() =
         )
 
       profileBlock "ui":
-        glDisable(GL_DEPTH_TEST)
-        glDisable(GL_CULL_FACE)
-        glDisable(GL_BLEND)
-        when not defined(emscripten):
-          glDisable(GL_MULTISAMPLE)
-        glActiveTexture(GL_TEXTURE0)
-        glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
+        prepareUi(sk)
         sk.beginUi(window, window.size)
         drawUi(
           sk,
@@ -2452,7 +2445,7 @@ proc runGraphics*() =
           focusPlayerHero,
           renderAlpha
         )
-        sk.endUi()
+        sk.finishUi()
         drawStatsOverlay(sk, window)
       if captureFrame(window, screenshotFrame):
         when not defined(emscripten):

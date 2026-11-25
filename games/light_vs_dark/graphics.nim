@@ -9,8 +9,8 @@
 
 import
   std/[math, strformat, tables, times, unicode],
-  chroma, fixxy, opengl, pixie, vmath, windy, silky,
-  polyworld/[actioncam, assets, characters, chargen, chrome, clickmarks, common,
+  chroma, fixxy, pixie, vmath, windy, silky,
+  polyworld/[renderer, actioncam, assets, characters, chargen, chrome, clickmarks, common,
     inputs, lighting, particles, particleshaders, pathing, player, pointers,
     profiles, gameuis,
     quadterrain, rtscameras, selectionoutlines, shapes, shadows, tapes, toon,
@@ -1800,7 +1800,7 @@ proc runGraphics*(network: NetworkMatch = nil,
       viewProjection,
       cameraRight,
       cameraUp,
-      sk.atlasTextureId()
+      sk.atlasTexture()
     )
 
   proc particleTargetPosition(id: int32, requireVisible = false): tuple[
@@ -2259,11 +2259,10 @@ proc runGraphics*(network: NetworkMatch = nil,
           scene.sunDepthPass = true
           drawWorldUnits()
           scene.sunDepthPass = false
-        glBindFramebuffer(GL_FRAMEBUFFER, captureTarget.framebuffer)
+        bindFrameTarget(captureTarget.framebuffer)
         when not defined(emscripten):
-          glEnable(GL_MULTISAMPLE)
-        glClearColor(0.05, 0.06, 0.09, 1.0)
-        glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
+          setMultisampling(true)
+        clearFrame(color(0.05, 0.06, 0.09, 1.0))
         scene.toon.drawBackground()
         updateTerrainVision()
         drawTerrain(viewProjection, showTiles)
@@ -2340,13 +2339,7 @@ proc runGraphics*(network: NetworkMatch = nil,
           dt
         )
       profileBlock "ui":
-        glDisable(GL_DEPTH_TEST)
-        glDisable(GL_CULL_FACE)
-        glDisable(GL_BLEND)
-        when not defined(emscripten):
-          glDisable(GL_MULTISAMPLE)
-        glActiveTexture(GL_TEXTURE0)
-        glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
+        prepareUi(sk)
         var menuOrigin: Vec2
         if matchMenu == HiddenMatchMenu:
           sk.beginUi(window, window.size)
@@ -2463,7 +2456,7 @@ proc runGraphics*(network: NetworkMatch = nil,
               sk.menuLabel(saveError, origin + vec2(0, 340), 464)
         if matchMenu == HiddenMatchMenu and hooks.overlay != nil:
           hooks.overlay()
-        sk.endUi()
+        sk.finishUi()
         if matchMenu == HiddenMatchMenu:
           drawStatsOverlay(sk, window, teamColors)
           when not defined(emscripten):
@@ -2473,7 +2466,7 @@ proc runGraphics*(network: NetworkMatch = nil,
                 elif replaySaving.savedPath.len > 0:
                   "Replay saved to your library." else: "",
                 vec2(24, 24), 1000, MenuAccent)
-              sk.endUi()
+              sk.finishUi()
         # Silky ends rune capture when no editable field was submitted. Restore
         # chat capture after ALL UI passes, without interfering with Settings.
         if matchMenu == HiddenMatchMenu:

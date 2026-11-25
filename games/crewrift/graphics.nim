@@ -2,8 +2,8 @@
 
 import
   std/[math, os, strutils, times, unicode],
-  chroma, gltf, opengl, pixie, silky, vmath, windy,
-  polyworld/[actioncam, assets, characters, chargen, chrome, common, gameuis,
+  chroma, gltf, pixie, silky, vmath, windy,
+  polyworld/[renderer, modelresources, actioncam, assets, characters, chargen, chrome, common, gameuis,
     pathing, player, quadterrain, rtscameras, shadows, shapes, toon, viewers],
   sim, maps, cameras, game, replays, skins, stars, assets
 
@@ -75,40 +75,14 @@ proc crewPortrait(window: Window, scene: CharacterScene,
     view = lookAt(eye, target, vec3(0, 1, 0))
     projection = ortho(-extent, extent, -extent, extent, 0.02'f, 50.0'f)
   scene.beginCharacters(window, view, projection, eye)
-  var
-    previousFramebuffer: GLint
-    framebuffer, colorBuffer, depthBuffer: GLuint
-  glGetIntegerv(GL_FRAMEBUFFER_BINDING, previousFramebuffer.addr)
-  glGenFramebuffers(1, framebuffer.addr)
-  glGenRenderbuffers(1, colorBuffer.addr)
-  glGenRenderbuffers(1, depthBuffer.addr)
+  var portraitTarget = newFrameTarget(Size, Size)
+  pushFrameTarget(portraitTarget)
   defer:
-    glBindFramebuffer(GL_FRAMEBUFFER, previousFramebuffer.GLuint)
-    glDeleteFramebuffers(1, framebuffer.addr)
-    glDeleteRenderbuffers(1, colorBuffer.addr)
-    glDeleteRenderbuffers(1, depthBuffer.addr)
-    glViewport(0, 0, window.size.x, window.size.y)
-  glBindFramebuffer(GL_FRAMEBUFFER, framebuffer)
-  glBindRenderbuffer(GL_RENDERBUFFER, colorBuffer)
-  glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, Size, Size)
-  glFramebufferRenderbuffer(
-    GL_FRAMEBUFFER,
-    GL_COLOR_ATTACHMENT0,
-    GL_RENDERBUFFER,
-    colorBuffer
-  )
-  glBindRenderbuffer(GL_RENDERBUFFER, depthBuffer)
-  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, Size, Size)
-  glFramebufferRenderbuffer(
-    GL_FRAMEBUFFER,
-    GL_DEPTH_ATTACHMENT,
-    GL_RENDERBUFFER,
-    depthBuffer
-  )
-  if glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE:
-    raise newException(CrewriftError, "Cannot create crew portrait framebuffer.")
-  glViewport(0, 0, Size, Size)
-  scene.renderer.clearScreen(color(0.10, 0.12, 0.16, 1))
+    popFrameTarget()
+    destroyFrameTarget(portraitTarget)
+    setRenderViewport(window.size)
+  setRenderViewport(ivec2(Size, Size))
+  clearFrame(color(0.10, 0.12, 0.16, 1))
   scene.drawCharacter(
     model,
     vec3(0),
@@ -117,18 +91,7 @@ proc crewPortrait(window: Window, scene: CharacterScene,
     0.35'f
   )
   scene.finishCharacters()
-  result = newImage(Size, Size)
-  glReadBuffer(GL_COLOR_ATTACHMENT0)
-  glReadPixels(
-    0,
-    0,
-    Size,
-    Size,
-    GL_RGBA,
-    GL_UNSIGNED_BYTE,
-    result.data[0].addr
-  )
-  result.flipVertical()
+  result = readFrameImage(Size, Size)
 
 proc inside(mouse, origin, size: Vec2): bool =
   ## Tests one explicit HUD hit rectangle.
@@ -534,8 +497,7 @@ proc drawHud(
       not mouseOverDebugMenu(window.mousePos.vec2)
   if toggleHovered and window.buttonReleased[MouseLeft]:
     state.showRooms = not state.showRooms
-  glDisable(GL_DEPTH_TEST)
-  glDisable(GL_CULL_FACE)
+  prepareUi(sk)
   if state.showRooms and (state.camera.overview or slot < 0):
     for room in world.rooms:
       let point = viewProjection * vec4(
@@ -711,24 +673,6 @@ proc drawReplayControls(
     window.size.x.float32, window.size.y.float32))
   sk.mousePos = window.mousePos.vec2
 
-proc initUnshadowedTexture(): GLuint =
-  ## Supplies complete comparison samplers for the unshadowed ship renderer.
-  var depth = high(uint32)
-  glGenTextures(1, result.addr)
-  glBindTexture(GL_TEXTURE_2D, result)
-  glTexImage2D(
-    GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24.GLint, 1, 1, 0,
-    GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, depth.addr
-  )
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST.GLint)
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST.GLint)
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE.GLint)
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE.GLint)
-  glTexParameteri(
-    GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE.GLint)
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL.GLint)
-  glBindTexture(GL_TEXTURE_2D, 0)
-
 proc runGraphics*(initial: Options) =
   ## Runs the playable native or browser viewer with fixed simulation ticks.
   configureCapture(initial.capture, "crewrift.png")
@@ -834,13 +778,9 @@ proc runGraphics*(initial: Options) =
   defer:
     saveReplay(options.record, game.recording)
     window.close()
-  var unshadowedTexture = initUnshadowedTexture()
-  sunShadowTextures = [unshadowedTexture, unshadowedTexture]
+  initUnshadowedShadows()
   defer:
-    for texture in sunShadowTextures.mitems:
-      if texture == unshadowedTexture:
-        texture = 0
-    glDeleteTextures(1, unshadowedTexture.addr)
+    closeUnshadowedShadows()
   var
     terrain = loadShipSkin()
     markers = initShapeRenderer()
@@ -848,7 +788,7 @@ proc runGraphics*(initial: Options) =
     captureTarget: ScreenshotTarget
   defer:
     captureTarget.releaseScreenshotTarget()
-    terrain.clearFromGpu()
+    terrain.clearModelGpu()
     markers.closeShapeRenderer()
     starField.close()
   let
@@ -859,7 +799,7 @@ proc runGraphics*(initial: Options) =
   scene.toon.shadowColor = color(0.68, 0.74, 0.84, 1)
   defer:
     for visual in visuals:
-      visual.model.file.root.clearFromGpu()
+      visual.model.file.root.clearModelGpu()
     scene.context.destroy()
   for i in 0 ..< game.world.players.len:
     visuals.add Visual(model: loadCrew(game.world.players[i].color, manifest))
@@ -1053,7 +993,7 @@ proc runGraphics*(initial: Options) =
       )
     scene.beginCharacters(window, view, projection, eye)
     discard captureTarget.beginScreenshotFrame(window)
-    scene.renderer.clearScreen(color(0.025, 0.045, 0.085, 1))
+    clearFrame(color(0.025, 0.045, 0.085, 1))
     starField.draw(
       vp,
       eye,
@@ -1164,11 +1104,11 @@ proc runGraphics*(initial: Options) =
       uiScale
     )
     sk.drawDebugMenu(window)
-    sk.endUi()
+    sk.finishUi()
     inc renderedFrames
     if captureFrame(window, captureFrames):
       break
-    window.swapBuffers()
+    window.presentFrame()
     reportReplayFrame(game.frame.int32, 0)
     when defined(emscripten):
       # Reset consumed events before yielding for the next browser frame.

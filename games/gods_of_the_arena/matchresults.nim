@@ -1,7 +1,7 @@
 import
   std/strutils,
   chroma, pixie, silky, vmath, windy,
-  polyworld/[assets, chrome, gameuis],
+  polyworld/[renderer, assets, chrome, gameuis],
   content, sim
 
 const
@@ -153,6 +153,6 @@ proc drawMatchResults*(
       origin + vec2(40, 481), vec2(680, 22), ResultMuted, "Small", CenterAlign)
   result = ready and hovered and window.buttonPressed[MouseLeft]
   sk.mouseConsumed = true
-  sk.endUi()
+  sk.finishUi()
   sk.uiScale = oldScale
   sk.mousePos = oldMouse

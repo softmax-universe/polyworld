@@ -28,6 +28,13 @@ proc defaultGameName*(player: string): string =
   ## Preserve the display name exactly, including punctuation and Unicode.
   player & "'s game"
 
+proc refreshGameName*(name, previousDefault: var string, player: string) =
+  ## Follow the current player name until the room title is customized.
+  let currentDefault = defaultGameName(player)
+  if name == previousDefault:
+    name = currentDefault
+  previousDefault = currentDefault
+
 proc canEditGameName*(snapshot: RoomMessage, self: uint32): bool =
   ## Guests always see authoritative read-only settings.
   snapshot.phase == Lobby and snapshot.participant == self

@@ -1,8 +1,8 @@
 ## Execute production frontend AST routes without graphics, browser or sockets.
 import std/[macros, os, strutils, unittest]
 import vmath, jsony
-import polyworld/menus
-import ../[playernames, settings]
+import polyworld/[menus, roomclients, rooms]
+import ../[content, joiningseats, lobbies, playernames, settings]
 
 macro needsName(): untyped =
   let tree = parseStmt(readFile(currentSourcePath().parentDir.parentDir / "frontend.nim"))
@@ -48,8 +48,14 @@ macro frontendRoute(route: static[string]): untyped =
             result.add node[j]
           return
     if target == "multiplayer" and node.kind == nnkOfBranch and
-        node[0].eqIdent("PlayMultiplayer"):
+        node[0].eqIdent("GotaPlayMultiplayer"):
       return node[^1]
+    if target == "roomDraft" and node.kind == nnkCall and
+        node[0].repr == "roomName.refreshGameName":
+      return node
+    if target == "createRoom" and node.kind == nnkIfStmt and
+        "\"Create Room\"" in node[0][0].repr:
+      return node[0][^1]
     if target == "candidate" and node.kind == nnkLetSection:
       for child in node:
         if child.kind == nnkIdentDefs and child[0].eqIdent("valid"):
@@ -75,7 +81,7 @@ macro frontendRoute(route: static[string]): untyped =
   doAssert result != nil, "Missing production route: " & route
 
 type TestConnection = ref object
-  client: tuple[connected: bool, name: string]
+  client: RoomClient
 var socketCalls: int
 var savedPreferences: Preferences
 proc close(connection: TestConnection) = discard
@@ -87,9 +93,8 @@ proc savePreferences(preferences: Preferences, app: string) =
 proc gotaIdentity(): int = 0
 proc connect(server, name: string, identity: int): TestConnection =
   inc socketCalls
-  TestConnection(client: (true, name))
+  TestConnection(client: RoomClient(connected: true, name: name))
 const AppName = "test"
-const HeroClassCount = 10
 
 proc tryConnect(name: string): tuple[sockets: int, pending: bool] =
   var
@@ -101,6 +106,7 @@ proc tryConnect(name: string): tuple[sockets: int, pending: bool] =
     preparedRevision, viewedRevision = 0'u32
     configPending = false
     multiplayerHuman = -1
+    joiningSeat: JoiningSeat
     networkPolicies: array[HeroClassCount, LocalPolicy]
   socketCalls = 0
   frontendRoute("connect")
@@ -173,6 +179,73 @@ suite "GotA name prompt production routes":
     check not editingPlayer
     check launchLocal
     check not localLaunchRequested
+
+  test "first name confirmation reaches the room creation message":
+    for chosen in ["mason :)", "  Zoë 雪 🙂  ", repeat("é", 32)]:
+      var
+        preferences = Preferences()
+        updated = Preferences(name: chosen)
+        editingPlayer = true
+        localLaunchRequested, launchLocal: bool
+        connection: TestConnection
+        roomName, roomNameDefault, error: string
+        joiningSeat: JoiningSeat
+        lobbyUi = (scroll: 12,)
+      let
+        name = chosen
+        publicRoom = true
+        config = (maxTicks: 24,)
+      frontendRoute("confirm")
+      check preferences.name == chosen
+      check not needsName()
+      connection = connect("test", preferences.name, gotaIdentity())
+      frontendRoute("createRoom")
+      check connection.client.outgoing.len == 1
+      let sent = decode(connection.client.outgoing[0])
+      check sent.kind == CreateRoom
+      check sent.name == chosen & "'s game"
+      check lobbyUi.scroll == 0
+
+  test "renaming refreshes automatic drafts and preserves custom titles":
+    for custom in [false, true]:
+      var
+        preferences = Preferences(name: "Original")
+        updated = Preferences(name: "  Current 雪  ")
+        editingPlayer = true
+        localLaunchRequested, launchLocal: bool
+        connection = connect("test", preferences.name, gotaIdentity())
+        roomName, roomNameDefault, error: string
+        joiningSeat: JoiningSeat
+        lobbyUi = (scroll: 12,)
+      let
+        name = updated.name
+        publicRoom = false
+        config = (maxTicks: 24,)
+        customTitle = "Friends' 雪 match"
+      frontendRoute("roomDraft")
+      check roomName == "Original's game"
+      if custom:
+        roomName = customTitle
+      frontendRoute("confirm")
+      check connection.client.name == name
+      frontendRoute("createRoom")
+      check connection.client.outgoing.len == 1
+      let sent = decode(connection.client.outgoing[0])
+      check sent.kind == CreateRoom
+      check sent.name == (if custom: customTitle else: name & "'s game")
+
+  test "settings name updates refresh the displayed automatic draft":
+    var
+      preferences = Preferences(name: "Original")
+      roomName, roomNameDefault: string
+    frontendRoute("roomDraft")
+    preferences.name = "Current"
+    frontendRoute("roomDraft")
+    check roomName == "Current's game"
+    roomName = ""
+    preferences.name = "Newest"
+    frontendRoute("roomDraft")
+    check roomName == ""
 
   test "cancel retires pending local launch":
     var

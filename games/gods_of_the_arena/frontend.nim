@@ -31,6 +31,7 @@ proc runFrontend*() =
     page = HomeMenu
     error: string
     roomName: string
+    roomNameDefault: string
     matchName: string
     invite =
       if options.roomCode.len > 0: options.roomCode
@@ -89,7 +90,6 @@ proc runFrontend*() =
       replayPreferences = readReplayPreferences()
   except MenusError, IOError, OSError:
     error = getCurrentExceptionMsg()
-  roomName = defaultGameName(preferences.name)
   preferences.applyPreferences(window,
     configureDisplay = not captureActive() and
       WindowSizeFlag notin options.specifiedFlags)
@@ -470,6 +470,7 @@ proc runFrontend*() =
           sk.lobbyLabel("CREATE ROOM", create + vec2(44, 0), width - 44,
             "LobbyHeading")
           sk.lobbyLabel("Room name", create + vec2(0, 52), width)
+          roomName.refreshGameName(roomNameDefault, preferences.name)
           sk.lobbyInput(window, "roomName", roomName,
             create + vec2(0, 96), width)
           sk.lobbyLabel("Visibility", create + vec2(0, 146), width)
@@ -484,6 +485,7 @@ proc runFrontend*() =
             create + vec2(0, 238), width, tint = LobbyMuted)
           if sk.lobbyButton("Create Room", create + vec2(0, 288), width,
             "cross", connected and roomName.strip().len > 0):
+              roomName.refreshGameName(roomNameDefault, preferences.name)
               joiningSeat.beginJoiningSeat()
               connection.client.send(RoomMessage(
                 kind: CreateRoom, name: roomName, number: HeroClassCount,

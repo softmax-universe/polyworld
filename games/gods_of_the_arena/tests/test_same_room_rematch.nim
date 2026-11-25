@@ -12,8 +12,8 @@ macro afterGraphics(): untyped =
   proc find(node: NimNode): NimNode =
     if node.kind == nnkStmtList:
       for i, child in node:
-        if child.kind == nnkLetSection and child.len == 1 and
-            child[0][0].eqIdent("quitToMenu"):
+        if child.kind == nnkTryStmt and
+            "quitToMenu = runGraphics" in child.repr:
           result = newStmtList()
           for j in i + 1 ..< node.len:
             if node[j].kind == nnkContinueStmt: break
@@ -48,6 +48,9 @@ proc assertResultViewExits(network: NetworkMatch) =
   proc pollEvents() = doAssert false, "Must exit old graphics before another result frame"
   proc updateWindowSettings(window: tuple[closeRequested: bool]) = discard
   proc waitForDisplay() = discard
+  proc captureActive(): bool =
+    ## Models ordinary interactive playback without screenshot capture.
+    false
   resultViewLoop()
 proc readGotaPreferences(): string = "preserved preferences"
 const AppName = "test"
@@ -174,6 +177,7 @@ proc sameRoomRematch() =
         networkPolicies[2] = LocalPolicy(name: "Private base bot", bytes: sources[2])
         const HomeMenu = 0
         let quitToMenu = false
+        let matchError = ""
         afterGraphics()
         doAssert prepared == nil and preparedRevision == 0
         doAssert connection != nil

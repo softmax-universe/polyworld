@@ -78,6 +78,30 @@ proc atlasTexture*(sk: Silky): TextureHandle =
       MTLPixelFormatRGBA8Unorm, ownsHandle = true, anisotropy = 1)
   atlasViews[key]
 
+proc drawUiLayer*(sk: Silky, vertices: openArray[DrawerVertex],
+    size: Vec2, scale: float32) =
+  ## Encodes a supplied UI layer into the active target without submitting it.
+  if vertices.len == 0:
+    return
+  if size.x <= 0 or size.y <= 0 or scale <= 0:
+    raise newException(PolyworldMetalError, "Invalid UI layer dimensions")
+  ensureFrame()
+  let
+    target = metalRenderer.target.color
+    factor = vec2(target.width.float32, target.height.float32) / size * scale
+  var scaled: seq[DrawerVertex]
+  var data = vertices[0].unsafeAddr
+  if factor != vec2(1):
+    scaled = @vertices
+    for vertex in scaled.mitems:
+      vertex.pos *= factor
+      vertex.clipPos *= factor
+      vertex.clipSize *= factor
+    data = scaled[0].addr
+  flushEncoder()
+  sk.drawer.setExternalFrame(metalRenderer.commandBuffer, target.handle)
+  sk.drawer.endFrame(sk.image, size, data, vertices.len)
+
 proc setRenderViewport*(size: IVec2) =
   ## Sets the viewport for the current and subsequent render encoders.
   ensureFrame()

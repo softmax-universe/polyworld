@@ -1,9 +1,10 @@
 ## Verifies Metal card baking, shared atlas sampling, and queued UI retention.
 
-import std/os
+when defined(saveRenderCaptures):
+  import std/os
 import pixie, silky, silky/drawers/metal4, vmath, windy
 import polyworld/backends/metal/common
-from polyworld/renderer import initRenderer
+from polyworld/renderer import initRenderer, drawUiLayer
 import ../../scene/[cardrenderer, table]
 import ../../baseset
 
@@ -46,9 +47,16 @@ for frame in 0 .. 1:
     metalRenderer.target.color.handle)
   sk.endUi()
   sk.drawHudFaces()
+  sk.isolatedDrawing(rect(370, 270, 4, 8)):
+    sk.drawRect(vec2(368, 268), vec2(12, 12), rgbx(255, 0, 0, 255))
+    sk.drawUiLayer(sk.drawer.layers[0], vec2(Width, Height), 2)
   endFrame(false)
   let image = captureImage()
   doAssert image[8, 8].r > 240, "Face baking lost previously queued UI."
+  doAssert image[744, 544].r > 240 and image[744, 544].g < 10,
+    "Supplied UI layers must honor their logical scale."
+  doAssert image[752, 544].r < 20,
+    "Scaled UI layers must retain their clipping bounds."
   var
     changed = 0
     difference = 0
@@ -80,9 +88,10 @@ for frame in 0 .. 1:
   doAssert backPixels > 2000, "The shared Silky atlas did not render."
   doAssert image[600, 540].g > image[600, 540].r * 2,
     "The solid card geometry did not render."
-  if frame == 0:
-    createDir("tmp/backends")
-    image.writeFile("tmp/backends/cac-metal-cards.png")
+  when defined(saveRenderCaptures):
+    if frame == 0:
+      createDir("tmp/backends")
+      image.writeFile("tmp/backends/cac-metal-cards.png")
   echo "Metal cards frame ", frame, ": ", changed,
     " face pixels; consistent world and HUD orientation."
 drawer.close()

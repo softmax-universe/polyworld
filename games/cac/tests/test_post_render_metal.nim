@@ -27,7 +27,8 @@ proc glowFragment(uv: Vec2, fragColor: var Vec4) =
     uv.y > 0.4'f and uv.y < 0.6'f: 1.0'f else: 0.0'f
   fragColor = vec4(enabled * 0.5'f, enabled * 0.4'f, enabled * 0.3'f, 1.0'f)
 
-let window = newWindow("CaC Metal post regression", ivec2(Width, Height))
+let window = newWindow("CaC Metal post regression", ivec2(Width, Height),
+  visible = false)
 initMetal(window)
 let
   scene = newProgram(toShader(sceneVertex, metalMSL, shaderVertex),

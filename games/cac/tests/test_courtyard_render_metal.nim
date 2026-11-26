@@ -9,7 +9,8 @@ import ../scene/post as postfx
 
 const Width = 640
 const Height = 400
-let window = newWindow("CaC Metal courtyard regression", ivec2(Width, Height))
+let window = newWindow("CaC Metal courtyard regression", ivec2(Width, Height),
+  visible = false)
 initMetal(window)
 
 proc occluderVertex(position: Vec2, gl_Position: var Vec4) =
@@ -43,6 +44,7 @@ delEnv("CAC_STONE_NORMALS")
 
 proc readColor(target: RenderTarget): Image =
   ## Reads a completed offscreen color attachment.
+  waitForGpu()
   result = newImage(target.width, target.height)
   target.color.handle.getBytes(result.data[0].addr, (target.width * 4).uint,
     MTLRegion(origin: MTLOrigin(), size: MTLSize(width: target.width.uint,

@@ -1,14 +1,19 @@
 ## Keeps native rendering calls inside their selected implementations.
 
-import std/[os, re, strutils]
+import std/[os, pegs, strutils]
 
 const Root = currentSourcePath().parentDir.parentDir
 
+proc symbol(pattern: string): Peg =
+  ## Match whole identifiers using Nim's built-in parser.
+  parsePeg("(^ / !\\w .) (" & pattern & ") !\\w")
+
 let
-  nativeSymbols = re"\b(?:(?<!\x22)opengl(?!\x22)|GL(?:uint|int|enum|sizei|float|double|boolean|bitfield)|GL_[A-Z0-9_]+|gl[A-Z][a-z][a-zA-Z0-9]*)\b"
-  directxSymbols = re"\b(?:ID3D12\w+|D3D12_[A-Z0-9_]+)\b"
-  vulkanSymbols = re"\b(?:vkCmd\w+|vkCreate\w+|VK_[A-Z0-9_]+)\b"
-  metalSymbols = re"\b(?:MTL[A-Z][a-zA-Z0-9]*|CAMetalLayer|metal4)\b"
+  nativeSymbols = peg"""(^ / !('"' / \w) .) 'opengl' !('"' / \w)""" /
+    symbol("'GL' ('uint' / 'int' / 'enum' / 'sizei' / 'float' / 'double' / 'boolean' / 'bitfield') / 'GL_' [A-Z0-9_]+ / 'gl' [A-Z] [a-z] [a-zA-Z0-9]*")
+  directxSymbols = symbol("'ID3D12' \\w+ / 'D3D12_' [A-Z0-9_]+")
+  vulkanSymbols = symbol("('vkCmd' / 'vkCreate') \\w+ / 'VK_' [A-Z0-9_]+")
+  metalSymbols = symbol("'MTL' [A-Z] [a-zA-Z0-9]* / 'CAMetalLayer' / 'metal4'")
 
 proc checkBackends(directory: string) =
   ## Checks engine and game production sources, excluding driver fixtures.

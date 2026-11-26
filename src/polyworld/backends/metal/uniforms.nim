@@ -1,21 +1,22 @@
 import
-  shady/[errors, layouts], vmath
+  vmath,
+  ../../shadermetadata
 
 type
   PolyworldMetalUniformError* = object of CatchableError
   UniformBuffer* = object
-    layout*: UniformLayout
+    layout*: ShaderLayout
     data*: seq[byte]
 
 proc initUniformBuffer*(source: string): UniformBuffer =
   ## Allocates the native Metal layout of a generated Shady uniform block.
   try:
-    result.layout = metalUniformLayout(source)
-  except ShadyError as error:
+    result.layout = metalShaderLayout(source)
+  except ShaderMetadataError as error:
     raise newException(PolyworldMetalUniformError, error.msg)
   result.data = newSeq[byte](result.layout.size)
 
-proc requireKind(field: UniformField, kind: string) =
+proc requireKind(field: ShaderField, kind: string) =
   ## Rejects a host value that does not match the shader field type.
   if field.kind != kind:
     raise newException(
@@ -29,7 +30,7 @@ proc store[T](buffer: var UniformBuffer, offset: int, value: T) =
 
 proc writeValue[T](
   buffer: var UniformBuffer,
-  field: UniformField,
+  field: ShaderField,
   offset: int,
   value: T
 ) =
@@ -96,7 +97,8 @@ proc writeValue[T](
     field.requireKind("float" & $dimensions & "x" & $dimensions)
     for column in 0 ..< dimensions:
       for row in 0 ..< dimensions:
-        buffer.store(offset + column * 16 + row * 4, value[column, row])
+        buffer.store(offset + column * field.matrixStride + row * 4,
+          value[column, row])
   else:
     raise newException(
       PolyworldMetalUniformError,
@@ -105,39 +107,40 @@ proc writeValue[T](
 
 proc setUniform*[T](
   buffer: var UniformBuffer,
-  name: string,
+  name: string or int,
   value: T
 ): bool =
   ## Updates a named field, returning false when this stage has no such field.
-  for field in buffer.layout.fields:
-    if field.name != name:
-      continue
-    when T is Vec2 or T is Vec3 or T is Vec4 or
-      T is IVec2 or T is IVec3 or T is IVec4 or
-      T is UVec2 or T is UVec3 or T is UVec4 or
-      T is Mat3 or T is Mat4:
-        if field.count != 1:
-          raise newException(
-            PolyworldMetalUniformError,
-            "Uniform " & name & " expects " & $field.count & " elements"
-          )
-        buffer.writeValue(field, field.offset, value)
-    elif T is array or T is seq:
-      if value.len != field.count:
-        raise newException(
-          PolyworldMetalUniformError,
-          "Uniform " & name & " expects " & $field.count &
-            " elements, got " & $value.len
-        )
-      var offset = field.offset
-      for item in value:
-        buffer.writeValue(field, offset, item)
-        offset += field.size
-    else:
+  let index = buffer.layout.fieldIndex(name)
+  if index < 0:
+    return false
+  let field = buffer.layout.fields[index]
+  when T is Vec2 or T is Vec3 or T is Vec4 or
+    T is IVec2 or T is IVec3 or T is IVec4 or
+    T is UVec2 or T is UVec3 or T is UVec4 or
+    T is Mat3 or T is Mat4:
       if field.count != 1:
         raise newException(
           PolyworldMetalUniformError,
-          "Uniform " & name & " expects " & $field.count & " elements"
+          "Uniform " & field.name & " expects " & $field.count & " elements"
         )
       buffer.writeValue(field, field.offset, value)
-    return true
+  elif T is array or T is seq:
+    if value.len != field.count:
+      raise newException(
+        PolyworldMetalUniformError,
+        "Uniform " & field.name & " expects " & $field.count &
+          " elements, got " & $value.len
+      )
+    var offset = field.offset
+    for item in value:
+      buffer.writeValue(field, offset, item)
+      offset += field.stride
+  else:
+    if field.count != 1:
+      raise newException(
+        PolyworldMetalUniformError,
+        "Uniform " & field.name & " expects " & $field.count & " elements"
+      )
+    buffer.writeValue(field, field.offset, value)
+  true

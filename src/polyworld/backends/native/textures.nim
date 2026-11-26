@@ -28,23 +28,18 @@ proc loadTerrainTextures*(
   paths: openArray[string], forceRgba = false
 ): tuple[texture: TextureArray, compressed: bool] =
   ## Uploads authored terrain mips as linear RGBA with independent height alpha.
-  let
-    source = readTerrainTextures(paths)
-    info = source.infos[0]
+  let plan = prepareTerrainTextures(paths)
   result.texture = allocateTexture(
-    info.width, info.height, source.files.len, info.levelCount,
+    plan.width, plan.height, plan.layerCount, plan.levelCount,
     Rgba8, linear = true, repeat = true,
     arrayTexture = true
   )
   try:
-    for layer, bytes in source.files:
-      for level in 0 ..< info.levelCount:
-        let pixels = decodeBc3(bytes, source.infos[layer], level)
-        uploadArrayLevel(
-          result.texture, layer, level,
-          max(1, info.width shr level), max(1, info.height shr level),
-          unsafeAddr pixels[0]
-        )
+    for upload in plan.textureUploads():
+      uploadArrayLevel(
+        result.texture, upload.layer, upload.level,
+        upload.width, upload.height, upload.data()
+      )
   except:
     deleteTexture(result.texture)
     raise
@@ -53,18 +48,18 @@ proc createTextureArray*(
   layers: seq[seq[Image]], repeat: bool
 ): TextureArray =
   ## Uploads explicit RGBA mip chains without modifying their alpha channels.
-  validateTextureArray(layers)
+  let plan = prepareTextureArray(layers)
   result = allocateTexture(
-    layers[0][0].width, layers[0][0].height, layers.len, layers[0].len,
+    plan.width, plan.height, plan.layerCount, plan.levelCount,
     Rgba8, linear = true, repeat = repeat,
     arrayTexture = true
   )
   try:
-    for layer, levels in layers:
-      for level, mip in levels:
-        uploadArrayLevel(
-          result, layer, level, mip.width, mip.height, mip.data[0].addr
-        )
+    for upload in plan.textureUploads():
+      uploadArrayLevel(
+        result, upload.layer, upload.level,
+        upload.width, upload.height, upload.data()
+      )
   except:
     deleteTexture(result)
     raise
@@ -73,15 +68,15 @@ proc updateTextureArrayLayer*(
   texture: TextureArray, layer: int, levels: seq[Image]
 ) =
   ## Replaces one allocated array layer with its explicit RGBA mip chain.
-  validateTextureLevels(levels)
+  let plan = prepareTextureArray(@[levels])
   if texture == nil or layer < 0 or
     layer >= texture.handle.layers or
-    levels.len > texture.handle.mipLevels or
-    levels[0].width != texture.width or levels[0].height != texture.height:
+    plan.levelCount > texture.handle.mipLevels or
+    plan.width != texture.width or plan.height != texture.height:
       raise newException(AssetError, "Invalid texture array layer.")
-  for level, mip in levels:
+  for upload in plan.textureUploads():
     uploadArrayLevel(
-      texture, layer, level, mip.width, mip.height, mip.data[0].addr
+      texture, layer, upload.level, upload.width, upload.height, upload.data()
     )
 
 proc updateDataTexture(

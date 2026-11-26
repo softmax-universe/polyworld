@@ -96,23 +96,18 @@ proc loadTerrainTextures*(
   paths: openArray[string], forceRgba = false
 ): tuple[texture: TextureArray, compressed: bool] =
   ## Uploads authored terrain mips as linear RGBA with independent height alpha.
-  let
-    source = readTerrainTextures(paths)
-    info = source.infos[0]
+  let plan = prepareTerrainTextures(paths)
   result.texture = allocateTexture(
-    info.width, info.height, source.files.len, info.levelCount,
+    plan.width, plan.height, plan.layerCount, plan.levelCount,
     MTLPixelFormatRGBA8Unorm, linear = true, repeat = true,
     arrayTexture = true
   )
   try:
-    for layer, bytes in source.files:
-      for level in 0 ..< info.levelCount:
-        let pixels = decodeBc3(bytes, source.infos[layer], level)
-        initializeArrayLevel(
-          result.texture, layer, level,
-          max(1, info.width shr level), max(1, info.height shr level),
-          unsafeAddr pixels[0]
-        )
+    for upload in plan.textureUploads():
+      initializeArrayLevel(
+        result.texture, upload.layer, upload.level,
+        upload.width, upload.height, upload.data()
+      )
   except:
     deleteTexture(result.texture)
     raise
@@ -121,18 +116,18 @@ proc createTextureArray*(
   layers: seq[seq[Image]], repeat: bool
 ): TextureArray =
   ## Uploads explicit RGBA mip chains without modifying their alpha channels.
-  validateTextureArray(layers)
+  let plan = prepareTextureArray(layers)
   result = allocateTexture(
-    layers[0][0].width, layers[0][0].height, layers.len, layers[0].len,
+    plan.width, plan.height, plan.layerCount, plan.levelCount,
     MTLPixelFormatRGBA8Unorm, linear = true, repeat = repeat,
     arrayTexture = true
   )
   try:
-    for layer, levels in layers:
-      for level, mip in levels:
-        initializeArrayLevel(
-          result, layer, level, mip.width, mip.height, mip.data[0].addr
-        )
+    for upload in plan.textureUploads():
+      initializeArrayLevel(
+        result, upload.layer, upload.level,
+        upload.width, upload.height, upload.data()
+      )
   except:
     deleteTexture(result)
     raise
@@ -141,11 +136,11 @@ proc updateTextureArrayLayer*(
   texture: TextureArray, layer: int, levels: seq[Image]
 ) =
   ## Orders layer updates between earlier and later GPU draws without waiting.
-  validateTextureLevels(levels)
+  let plan = prepareTextureArray(@[levels])
   if texture == nil or layer < 0 or
     layer >= texture.handle.arrayLength().int or
-    levels.len > texture.handle.mipmapLevelCount().int or
-    levels[0].width != texture.width or levels[0].height != texture.height:
+    plan.levelCount > texture.handle.mipmapLevelCount().int or
+    plan.width != texture.width or plan.height != texture.height:
       raise newException(AssetError, "Invalid texture array layer.")
   let pool = nativeObjc.NSAutoreleasePool.new()
   defer:
@@ -159,28 +154,28 @@ proc updateTextureArrayLayer*(
     profileBlitPass()
   defer:
     encoder.endEncoding()
-  for level, mip in levels:
+  for upload in plan.textureUploads():
     let
-      rowBytes = mip.width * 4
+      rowBytes = upload.width * 4
       rowStride = (rowBytes + UploadRowAlignment - 1) and
         not (UploadRowAlignment - 1)
     var
       padded: seq[byte]
-      data = cast[pointer](mip.data[0].addr)
+      data = upload.data()
     if rowStride != rowBytes:
-      padded.setLen(rowStride * mip.height)
-      for row in 0 ..< mip.height:
+      padded.setLen(rowStride * upload.height)
+      for row in 0 ..< upload.height:
         copyMem(
           padded[row * rowStride].addr,
           cast[pointer](cast[uint](data) + (row * rowBytes).uint),
           rowBytes
         )
       data = padded[0].addr
-    let upload = uploadBytes(data, rowStride * mip.height)
+    let slice = uploadBytes(data, rowStride * upload.height)
     encoder.copyFromBuffer(
-      upload.buffer, upload.offset, rowStride.uint, 0,
-      MTLSize(width: mip.width.uint, height: mip.height.uint, depth: 1),
-      texture.handle, layer.uint, level.uint, MTLOrigin()
+      slice.buffer, slice.offset, rowStride.uint, 0,
+      MTLSize(width: upload.width.uint, height: upload.height.uint, depth: 1),
+      texture.handle, layer.uint, upload.level.uint, MTLOrigin()
     )
 
 proc updateDataTexture(

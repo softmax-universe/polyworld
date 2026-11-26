@@ -42,35 +42,25 @@ proc loadTerrainTextures*(
   paths: openArray[string], forceRgba = false
 ): tuple[texture: TextureArray, compressed: bool] =
   ## Uploads prebuilt terrain mips, decoding only for the compatibility path.
-  let
-    source = readTerrainTextures(paths)
-    files = source.files
-    infos = source.infos
   result.compressed = supportsBc3(forceRgba)
+  let plan = prepareTerrainTextures(paths, result.compressed)
   glGenTextures(1, result.texture.addr)
   glBindTexture(GL_TEXTURE_2D_ARRAY, result.texture)
   try:
-    for level in 0 ..< infos[0].levelCount:
+    for level in 0 ..< plan.levelCount:
       let
-        width = max(1, infos[0].width shr level)
-        height = max(1, infos[0].height shr level)
-      var bytes = ""
-      for i, info in infos:
-        if result.compressed:
-          let mip = info.levels[level]
-          bytes.add files[i][mip.byteOffset ..< mip.byteOffset + mip.byteLength]
-        else:
-          bytes.add decodeBc3(files[i], info, level)
+        size = plan.mipSize(level)
+        bytes = plan.packedTextureLevel(level)
       if result.compressed:
         glCompressedTexImage3D(
-          GL_TEXTURE_2D_ARRAY, level.GLint, infos[0].glInternalFormat,
-          width.GLsizei, height.GLsizei, files.len.GLsizei, 0,
+          GL_TEXTURE_2D_ARRAY, level.GLint, GL_COMPRESSED_RGBA_S3TC_DXT5_EXT,
+          size.width.GLsizei, size.height.GLsizei, plan.layerCount.GLsizei, 0,
           bytes.len.GLsizei, unsafeAddr bytes[0]
         )
       else:
         glTexImage3D(
           GL_TEXTURE_2D_ARRAY, level.GLint, GL_RGBA8.GLint,
-          width.GLsizei, height.GLsizei, files.len.GLsizei, 0,
+          size.width.GLsizei, size.height.GLsizei, plan.layerCount.GLsizei, 0,
           GL_RGBA, GL_UNSIGNED_BYTE, unsafeAddr bytes[0]
         )
       let error = glGetError()
@@ -79,7 +69,7 @@ proc loadTerrainTextures*(
           AssetError, "Terrain upload failed: " & $error.uint32
         )
     glTexParameteri(
-      GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL, (infos[0].levelCount - 1).GLint
+      GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL, (plan.levelCount - 1).GLint
     )
     glTexParameteri(
       GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR.GLint
@@ -107,25 +97,25 @@ proc createTextureArray*(
   layers: seq[seq[Image]], repeat: bool
 ): TextureArray =
   ## Uploads explicit RGBA mip chains without modifying their alpha channels.
-  validateTextureArray(layers)
+  let plan = prepareTextureArray(layers)
   glGenTextures(1, result.addr)
   glBindTexture(GL_TEXTURE_2D_ARRAY, result)
   try:
-    for level, mip in layers[0]:
+    for level in 0 ..< plan.levelCount:
+      let size = plan.mipSize(level)
       glTexImage3D(
         GL_TEXTURE_2D_ARRAY, level.GLint, GL_RGBA8.GLint,
-        mip.width.GLsizei, mip.height.GLsizei, layers.len.GLsizei,
+        size.width.GLsizei, size.height.GLsizei, plan.layerCount.GLsizei,
         0, GL_RGBA, GL_UNSIGNED_BYTE, nil
       )
-    for layer, levels in layers:
-      for level, mip in levels:
-        glTexSubImage3D(
-          GL_TEXTURE_2D_ARRAY, level.GLint, 0, 0, layer.GLint,
-          mip.width.GLsizei, mip.height.GLsizei, 1,
-          GL_RGBA, GL_UNSIGNED_BYTE, mip.data[0].addr
-        )
+    for upload in plan.textureUploads():
+      glTexSubImage3D(
+        GL_TEXTURE_2D_ARRAY, upload.level.GLint, 0, 0, upload.layer.GLint,
+        upload.width.GLsizei, upload.height.GLsizei, 1,
+        GL_RGBA, GL_UNSIGNED_BYTE, upload.data()
+      )
     glTexParameteri(
-      GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL, (layers[0].len - 1).GLint
+      GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL, (plan.levelCount - 1).GLint
     )
     when not defined(emscripten):
       glTexParameterf(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_ANISOTROPY_EXT, 8.0)
@@ -151,16 +141,16 @@ proc updateTextureArrayLayer*(
   texture: TextureArray, layer: int, levels: seq[Image]
 ) =
   ## Replaces one allocated array layer with its explicit RGBA mip chain.
-  validateTextureLevels(levels)
+  let plan = prepareTextureArray(@[levels])
   if texture == 0 or layer < 0:
     raise newException(AssetError, "Invalid texture array layer.")
   glBindTexture(GL_TEXTURE_2D_ARRAY, texture)
   try:
-    for level, mip in levels:
+    for upload in plan.textureUploads():
       glTexSubImage3D(
-        GL_TEXTURE_2D_ARRAY, level.GLint, 0, 0, layer.GLint,
-        mip.width.GLsizei, mip.height.GLsizei, 1,
-        GL_RGBA, GL_UNSIGNED_BYTE, mip.data[0].addr
+        GL_TEXTURE_2D_ARRAY, upload.level.GLint, 0, 0, layer.GLint,
+        upload.width.GLsizei, upload.height.GLsizei, 1,
+        GL_RGBA, GL_UNSIGNED_BYTE, upload.data()
       )
     let error = glGetError()
     if error != GL_NO_ERROR:

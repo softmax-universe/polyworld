@@ -64,7 +64,8 @@ proc chain(color: ColorRGBX): seq[Image] =
     image.fill(color)
     result.add image
 
-let window = newWindow("Texture backend tests", ivec2(32), vsync = false)
+let window = newWindow("Texture backend tests", ivec2(32),
+  visible = false, vsync = false)
 when defined(useMetal4):
   initMetal(window)
 else:

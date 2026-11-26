@@ -2,9 +2,21 @@ import
   flatty/binny, gltf/ktx2, pixie,
   assets
 
-type TerrainTextureData* = object
-  files*: seq[string]
-  infos*: seq[Ktx2TextureInfo]
+type
+  TerrainTextureData* = object
+    files*: seq[string]
+    infos*: seq[Ktx2TextureInfo]
+  TextureEncoding* = enum
+    TextureRgba8, TextureBc3
+  TextureUpload* = object
+    layer*, level*, width*, height*: int
+    image: Image
+    bytes: string
+  TextureUploadPlan* = object
+    width*, height*, layerCount*, levelCount*: int
+    encoding*: TextureEncoding
+    images: seq[seq[Image]]
+    terrain: TerrainTextureData
 
 proc decode565(value: uint16): array[3, uint8] =
   ## Expands RGB565 endpoints into straight RGB bytes.
@@ -135,3 +147,91 @@ proc validateTextureArray*(layers: seq[seq[Image]]) =
       levels[0].width != layers[0][0].width or
       levels[0].height != layers[0][0].height:
         raise newException(AssetError, "Texture array layers must match.")
+
+proc prepareTextureArray*(layers: seq[seq[Image]]): TextureUploadPlan =
+  ## Validates authored mip chains and retains their pixels until upload.
+  validateTextureArray(layers)
+  TextureUploadPlan(
+    width: layers[0][0].width,
+    height: layers[0][0].height,
+    layerCount: layers.len,
+    levelCount: layers[0].len,
+    encoding: TextureRgba8,
+    images: layers
+  )
+
+proc prepareTerrainTextures*(
+  paths: openArray[string], compressed = false
+): TextureUploadPlan =
+  ## Retains validated terrain sources and selects native or decoded payloads.
+  let source = readTerrainTextures(paths)
+  TextureUploadPlan(
+    width: source.infos[0].width,
+    height: source.infos[0].height,
+    layerCount: source.files.len,
+    levelCount: source.infos[0].levelCount,
+    encoding: (if compressed: TextureBc3 else: TextureRgba8),
+    terrain: source
+  )
+
+proc mipSize*(plan: TextureUploadPlan, level: int): tuple[width, height: int] =
+  ## Returns one validated mip extent shared by allocation and upload paths.
+  if level < 0 or level >= plan.levelCount:
+    raise newException(AssetError, "Invalid texture mip level.")
+  (max(1, plan.width shr level), max(1, plan.height shr level))
+
+proc textureUpload*(
+  plan: TextureUploadPlan, layer, level: int
+): TextureUpload =
+  ## Prepares one owned terrain payload or retained authored image on demand.
+  if layer < 0 or layer >= plan.layerCount:
+    raise newException(AssetError, "Invalid texture array layer.")
+  let size = plan.mipSize(level)
+  result = TextureUpload(
+    layer: layer,
+    level: level,
+    width: size.width,
+    height: size.height
+  )
+  if plan.terrain.files.len == 0:
+    result.image = plan.images[layer][level]
+  elif plan.encoding == TextureBc3:
+    let mip = plan.terrain.infos[layer].levels[level]
+    result.bytes = plan.terrain.files[layer][
+      mip.byteOffset ..< mip.byteOffset + mip.byteLength
+    ]
+  else:
+    result.bytes = decodeBc3(
+      plan.terrain.files[layer], plan.terrain.infos[layer], level
+    )
+
+proc byteCount*(upload: TextureUpload): int =
+  ## Returns the complete compressed or RGBA payload size of a subresource.
+  if upload.image != nil: upload.image.data.len * 4
+  else: upload.bytes.len
+
+proc data*(upload: TextureUpload): pointer =
+  ## Borrows payload bytes while this upload record remains alive.
+  if upload.byteCount() == 0:
+    raise newException(AssetError, "Texture upload payload cannot be empty.")
+  if upload.image != nil: cast[pointer](upload.image.data[0].unsafeAddr)
+  else: cast[pointer](upload.bytes[0].unsafeAddr)
+
+iterator textureUploads*(plan: TextureUploadPlan): TextureUpload =
+  ## Prepares only one subresource at a time to bound decoded CPU storage.
+  for level in 0 ..< plan.levelCount:
+    for layer in 0 ..< plan.layerCount:
+      yield plan.textureUpload(layer, level)
+
+proc packedTextureLevel*(plan: TextureUploadPlan, level: int): string =
+  ## Packs array slices contiguously for APIs that allocate a whole mip at once.
+  discard plan.mipSize(level)
+  for layer in 0 ..< plan.layerCount:
+    let
+      upload = plan.textureUpload(layer, level)
+      offset = result.len
+      length = upload.byteCount()
+    if length > int.high - offset:
+      raise newException(AssetError, "Texture payload exceeds addressable size.")
+    result.setLen(offset + length)
+    copyMem(result[offset].addr, upload.data(), length)

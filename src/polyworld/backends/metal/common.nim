@@ -1,7 +1,7 @@
 import
-  std/[strutils, tables],
+  std/tables,
   metal4, pixie, shady, vmath, windy,
-  uniforms, uploads, submissions, ../../renderdescriptions
+  uniforms, uploads, submissions, ../../[renderdescriptions, shadermetadata]
 
 when defined(metalProfile):
   import profiles
@@ -32,10 +32,7 @@ type
     stencil*: bool
     borrowsColor, borrowsDepth: bool
     resolved: bool
-  TextureBinding = object
-    name: string
-    index, samplerIndex: int
-    comparison: bool
+  TextureBinding = ShaderTextureBinding
   PipelineEntry = object
     layout: VertexLayout
     blend: renderdescriptions.BlendMode
@@ -459,34 +456,6 @@ proc newBuffer*[T](data: openArray[T]): MetalBuffer =
   result.updateBuffer(data)
   metalRenderer.buffers.add(result)
 
-proc parseBinding(line, marker: string): int =
-  ## Reads an integer attribute from compiler-generated MSL.
-  let start = line.find(marker)
-  if start < 0:
-    return -1
-  try:
-    result = parseInt(line[start + marker.len ..< line.find(')', start)])
-  except ValueError as error:
-    raise newException(PolyworldMetalError, error.msg)
-
-proc textureBindings(source: string): seq[TextureBinding] =
-  ## Reflects named texture and sampler indices from Shady declarations.
-  for line in source.splitLines():
-    let index = parseBinding(line, "[[texture(")
-    if index >= 0:
-      let words = strutils.splitWhitespace(line.strip())
-      result.add(TextureBinding(
-        name: words[1], index: index, samplerIndex: index,
-        comparison: words[0].startsWith("depth")
-      ))
-  for line in source.splitLines():
-    let index = parseBinding(line, "[[sampler(")
-    if index >= 0:
-      let words = strutils.splitWhitespace(line.strip())
-      for binding in result.mitems:
-        if words[1] == binding.name & "Sampler":
-          binding.samplerIndex = index
-
 proc compileFunction(source, entry: string): MTLFunction =
   ## Compiles one generated Shady stage through the native Metal compiler.
   nativePool()
@@ -511,10 +480,10 @@ proc newProgram*(
   result = MetalProgram(
     vertexSource: vertexSource, fragmentSource: fragmentSource, layout: layout,
     vertexUniforms: initUniformBuffer(vertexSource),
-    fragmentUniforms: initUniformBuffer(fragmentSource),
-    vertexTextures: textureBindings(vertexSource),
-    fragmentTextures: textureBindings(fragmentSource)
+    fragmentUniforms: initUniformBuffer(fragmentSource)
   )
+  result.vertexTextures = result.vertexUniforms.layout.textures
+  result.fragmentTextures = result.fragmentUniforms.layout.textures
   try:
     result.vertexFunction = compileFunction(vertexSource, "vertexMain")
     result.fragmentFunction = compileFunction(fragmentSource, "fragmentMain")
@@ -748,14 +717,11 @@ proc vertexDescriptor(program: MetalProgram, layout: VertexLayout):
   let buffer = result.layouts().objectAtIndexedSubscript(GeometryBufferIndex)
   buffer.setStride(layout.stride.uint)
   buffer.setStepFunction(MTLVertexStepFunctionPerVertex)
-  for line in program.vertexSource.splitLines():
-    let location = parseBinding(line, "[[attribute(")
-    if location < 0:
-      continue
-    let words = strutils.splitWhitespace(line.strip())
+  for input in program.vertexUniforms.layout.inputs:
+    let location = input.index
     var found = false
     for attribute in layout.attributes:
-      if attribute.name == words[1]:
+      if attribute.name == input.name:
         found = true
         let descriptor = result.attributes().objectAtIndexedSubscript(
           location.uint
@@ -775,7 +741,7 @@ proc vertexDescriptor(program: MetalProgram, layout: VertexLayout):
         descriptor.setBufferIndex(GeometryBufferIndex)
     if not found:
       raise newException(PolyworldMetalError,
-        "Missing Metal vertex attribute: " & words[1])
+        "Missing Metal vertex attribute: " & input.name)
 
 proc pipeline(program: MetalProgram, state: DrawState,
     layout: VertexLayout): MTLRenderPipelineState =

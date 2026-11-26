@@ -277,20 +277,20 @@ proc newProgram*(vertexSource, fragmentSource: string, layout = VertexLayout()):
   let ps = if f.source.len > 0: parseJson(fragment[1]) else: newJObject()
   result = ShaderProgram(label: vertex[0] & " / " & fragment[0], layouts: @[layout], code: ProgramCode(vertex: v.binary, fragment: f.binary),
     vertex: uniformLayout(vs).constants, fragment: uniformLayout(ps).constants)
-  for input in vs{"inputs"}.getElems():
-    result.code.inputs.add ShaderInput(name: input["name"].getStr(),
-      semantic: "TEXCOORD", location: input["location"].getInt())
+  for input in result.vertex.layout.inputs:
+    result.code.inputs.add ShaderInput(name: input.name,
+      semantic: "TEXCOORD", location: input.index)
   for stage, data in [result.vertex, result.fragment]:
     for i, field in data.layout.fields:
       result.uniformFields.mgetOrPut(field.name, [0, 0])[stage] = i + 1
-  for stage, reflection in [vs, ps]:
-    for sampler in reflection{"textures"}.getElems():
-      let name = sampler["name"].getStr()
-      let binding = sampler["binding"].getInt()
+  for stage, data in [result.vertex, result.fragment]:
+    for sampler in data.layout.textures:
+      let name = sampler.name
+      let binding = sampler.index
       doAssert binding in 0 ..< MaxTextures
       let slot = binding + (if stage == 0: MaxTextures else: 0)
       result.bindingIndices.mgetOrPut(name, @[]).add result.bindings.len
-      result.bindings.add (slot, sampler["type"].getStr().endsWith("Shadow"), GpuImage(nil))
+      result.bindings.add (slot, sampler.comparison, GpuImage(nil))
   gpuRenderer.programs.add result
 
 proc layoutIndex(p: ShaderProgram, layout: VertexLayout): int =

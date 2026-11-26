@@ -14,6 +14,9 @@ proc illuminated(image: Image): int =
 let window = newWindow("Shared effects verification", ivec2(128), visible = false)
 when defined(useMetal4):
   initMetal(window)
+elif defined(useDirectX) or defined(useVulkan):
+  initNative(window)
+  template captureImage(): Image = captureTargetImage()
 else:
   window.makeContextCurrent()
   loadExtensions()
@@ -129,11 +132,15 @@ system.closeParticles()
 system.closeParticles()
 when defined(useMetal4):
   doAssert not atlas.handle.isNil
+elif defined(useDirectX) or defined(useVulkan):
+  doAssert atlas.handle != nil
 else:
   doAssert atlas.handle != 0
 atlas.destroy()
 when defined(useMetal4):
   shutdownMetal()
+elif defined(useDirectX) or defined(useVulkan):
+  shutdownNative()
 else:
   fixtureTarget.destroy()
 window.close()

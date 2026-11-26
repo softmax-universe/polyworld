@@ -25,21 +25,26 @@ proc backgroundFrag(fragColor: var Vec4, uv: Vec2) =
 
 proc checkWaterBody() =
   ## Checks reflected and tinted water over the captured opaque scene.
+  let size = ivec2(64)
   let window = newWindow(
-    "Shared water body check", ivec2(64), visible = false, vsync = false
+    "Shared water body check", size, visible = false, vsync = false
   )
   defer: window.close()
   when defined(useMetal4):
     initMetal(window)
     defer: shutdownMetal()
+    template beginFixture(value: untyped) = beginFrame(size.x, size.y, value)
   else:
-    window.makeContextCurrent()
-    loadExtensions()
+    when not (defined(useDirectX) or defined(useVulkan)):
+      window.makeContextCurrent()
+      loadExtensions()
     initNative(window)
-    let frame = newRenderTarget(64, 64)
+    when defined(useDirectX) or defined(useVulkan):
+      defer: shutdownNative()
+    let frame = newRenderTarget(size.x, size.y)
     defer: destroy(frame)
-    template beginFrame(width, height, value: untyped) =
-      ## Starts the same scene on an offscreen GL target.
+    template beginFixture(value: untyped) =
+      ## Keeps the scene independent of the platform's minimum window size.
       setTarget(frame)
       clear(value)
     template captureImage(): untyped =
@@ -84,14 +89,14 @@ proc checkWaterBody() =
   params.fadeDistance = 0.01
   let body = WaterBody(layer: 0, params: params)
   for reflected in [false, true]:
-    beginFrame(64, 64, color(0.1, 0.2, 0.3, 1))
-    captureScene(window.size)
+    beginFixture(color(0.1, 0.2, 0.3, 1))
+    captureScene(size)
     if reflected:
-      beginReflection(window.size)
+      beginReflection(size)
       drawWaterSky(viewProjection, eye, sky, sky, sky)
       endReflection()
     drawWaterBody(
-      body, viewProjection, eye, window.size, vec3(0, 1, 0),
+      body, viewProjection, eye, size, vec3(0, 1, 0),
       color(1, 1, 1, 1), ivec4(0, 0, 64, 64), reflected
     )
     let output = captureImage()
@@ -116,11 +121,11 @@ proc checkWaterBody() =
     destroy(backgroundVertices)
   params.colorStrength = 0
   let clearWater = WaterBody(layer: 0, params: params)
-  beginFrame(64, 64, color(1, 0, 0, 1))
+  beginFixture(color(1, 0, 0, 1))
   draw(background, backgroundVertices, 3)
-  captureScene(window.size)
+  captureScene(size)
   drawWaterBody(
-    clearWater, viewProjection, eye, window.size, vec3(0, 1, 0),
+    clearWater, viewProjection, eye, size, vec3(0, 1, 0),
     color(1, 1, 1, 1), ivec4(0, 0, 64, 64), false
   )
   let refracted = captureImage()

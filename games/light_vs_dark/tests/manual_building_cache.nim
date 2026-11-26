@@ -1,14 +1,14 @@
 ## Requires desktop OpenGL and LvD building assets for texture comparisons.
 
-include ../../../src/polyworld/backends/opengl/quadterrain
+include ../../../src/polyworld/backends/passes/quadterrain
 import
   windy,
   ../assets as lvdAssets,
   ../factions
 
-proc texturePixels(texture: GLuint): seq[uint8] =
+proc texturePixels(texture: Texture): seq[uint8] =
   ## Reads the uploaded atlas, including the neutral material layer.
-  glBindTexture(GL_TEXTURE_2D_ARRAY, texture)
+  glBindTexture(GL_TEXTURE_2D_ARRAY, texture.handle)
   var width, height, depth: GLint
   glGetTexLevelParameteriv(GL_TEXTURE_2D_ARRAY, 0, GL_TEXTURE_WIDTH, width.addr)
   glGetTexLevelParameteriv(

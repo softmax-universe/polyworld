@@ -26,6 +26,7 @@ proc checkOutlines(msaa: MSAA) =
   let window = newWindow(
     "Character occlusion check",
     ivec2(320, 240),
+    visible = false,
     vsync = false,
     msaa = msaa
   )
@@ -44,6 +45,9 @@ proc checkOutlines(msaa: MSAA) =
   glEnable(GL_MULTISAMPLE)
 
   for size in [window.size, window.size div 2, window.size]:
+    glViewport(0, 0, size.x, size.y)
+    let sceneCompare = if size == window.size: GL_LEQUAL else: GL_LESS
+    glDepthFunc(sceneCompare)
     let
       left = size.x div 4
       bottom = size.y div 4
@@ -75,7 +79,7 @@ proc checkOutlines(msaa: MSAA) =
       outline.drawOutline(vec3(0, 0, 1))
       doAssert (pixel(left - 1, lower)[2] > 200) == (coverage > 0),
         "Outlines must preserve scenery depth."
-      doAssert integer(GL_DEPTH_FUNC) == GL_LEQUAL.GLint
+      doAssert integer(GL_DEPTH_FUNC) == sceneCompare.GLint
       doAssert integer(GL_DEPTH_WRITEMASK) == GL_TRUE.GLint
       doAssert integer(GL_FRAMEBUFFER_BINDING) == 0
 

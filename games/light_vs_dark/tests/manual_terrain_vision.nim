@@ -1,6 +1,6 @@
 ## Native hidden-GL regression for LvD's byte-per-cell fog upload.
 ## Run from repository root; requires desktop OpenGL, but no terrain art.
-include polyworld/backends/opengl/quadterrain
+include polyworld/backends/passes/quadterrain
 import windy
 import ../[maps, sim]
 import polyworld/visions
@@ -53,7 +53,7 @@ proc worldVisibility(world: World, mode: int32): seq[uint8] =
     result = blurVisibility(result, world.map.side, world.map.side)
 
 proc readVisibility(): seq[uint8] =
-  glBindTexture(GL_TEXTURE_2D, visibilityTexture)
+  glBindTexture(GL_TEXTURE_2D, visibilityTexture.handle)
   glPixelStorei(GL_PACK_ALIGNMENT, 1)
   result.setLen(visibilitySize * visibilitySize)
   glGetTexImage(GL_TEXTURE_2D, 0, GL_RED, GL_UNSIGNED_BYTE, result[0].addr)
@@ -66,11 +66,9 @@ block visibilityUpload:
   window.makeContextCurrent()
   loadExtensions()
   # Allocate the same R8 target without requiring optional terrain art.
-  glGenTextures(1, visibilityTexture.addr)
-  glBindTexture(GL_TEXTURE_2D, visibilityTexture)
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR.GLint)
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR.GLint)
-  visibilitySize = 0
+  visibilityTexture = createR8Texture(1, 1, [0'u8])
+  visibilitySize = 1
+  defer: visibilityTexture.destroy()
 
   # LvD's ordinary 90-wide map has tightly packed rows, not GL's default
   # 92-byte aligned rows. Asymmetric data detects drift, flips and scaling.
@@ -81,7 +79,7 @@ block visibilityUpload:
       expected[y * Side + x] = uint8((x * 7 + y * 19) mod 256)
   glPixelStorei(GL_UNPACK_ALIGNMENT, 4)
   uploadTerrainVisibility(expected, Side)
-  glBindTexture(GL_TEXTURE_2D, visibilityTexture)
+  glBindTexture(GL_TEXTURE_2D, visibilityTexture.handle)
   glPixelStorei(GL_PACK_ALIGNMENT, 1)
   var actual = newSeq[uint8](expected.len)
   glGetTexImage(GL_TEXTURE_2D, 0, GL_RED, GL_UNSIGNED_BYTE, actual[0].addr)
@@ -117,11 +115,10 @@ block visibilityUpload:
 
   # Render the actual terrain shader and its world-space UVs, without art.
   # Constant varyings keep lighting/materials identical between fog states.
-  let vertexSource = toShader(
-    terrainProbeVertex, OpenGlShaderTarget, shaderVertex
-  )
-  var program = compileProgram(vertexSource,
-    toShader(terrainFrag, OpenGlShaderTarget, shaderFragment))
+  let vertexSource = nativeStage(terrainProbeVertex, shaderVertex)
+  let terrainProbe = newProgram(vertexSource, nativeStage(terrainFrag, shaderFragment))
+  defer: terrainProbe.destroy()
+  var program = terrainProbe.handle
   glUseProgram(program)
   for name in ["envHighlight", "envShadow"]:
     glUniform3f(glGetUniformLocation(program, name.cstring), 1, 1, 1)
@@ -147,7 +144,8 @@ block visibilityUpload:
   let green = newImage(1, 1)
   green.fill(rgbx(45, 180, 65, 255))
   let material = createTextureArray(@[@[green]], repeat = false)
-  glBindTexture(GL_TEXTURE_2D_ARRAY, material)
+  glBindTexture(GL_TEXTURE_2D_ARRAY, material.handle)
+  defer: material.destroy()
   var vao: GLuint
   glGenVertexArrays(1, vao.addr)
   glBindVertexArray(vao)
@@ -168,7 +166,7 @@ block visibilityUpload:
   proc sample(cells: seq[uint8], side, x, y: int): ColorRGBX =
     glActiveTexture(GL_TEXTURE1)
     uploadTerrainVisibility(cells, side)
-    glBindTexture(GL_TEXTURE_2D, visibilityTexture)
+    glBindTexture(GL_TEXTURE_2D, visibilityTexture.handle)
     glUniform1f(glGetUniformLocation(program, "visibilityOffset"), side.float32 / 2)
     glUniform1f(glGetUniformLocation(program, "visibilityScale"), 1'f32 / side.float32)
     glUniform2f(glGetUniformLocation(program, "probePosition"),
@@ -199,8 +197,9 @@ block visibilityUpload:
     " unexplored=", unexplored
 
   # Building props use the same world-space mapping and fog values.
-  program = compileProgram(vertexSource,
-    toShader(propFrag, OpenGlShaderTarget, shaderFragment))
+  let propProbe = newProgram(vertexSource, nativeStage(propFrag, shaderFragment))
+  defer: propProbe.destroy()
+  program = propProbe.handle
   glUseProgram(program)
   for name in ["envHighlight", "envShadow"]:
     glUniform3f(glGetUniformLocation(program, name.cstring), 1, 1, 1)

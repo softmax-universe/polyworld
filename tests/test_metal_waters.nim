@@ -30,7 +30,8 @@ proc checkPixel(image: Image, red, green: int) =
   doAssert abs(pixel.g.int - green) <= 1, $pixel
   doAssert pixel.b == 0 and pixel.a == 255, $pixel
 
-let window = newWindow("Metal water regression", ivec2(64), vsync = false)
+let window = newWindow("Metal water regression", ivec2(64),
+  visible = false, vsync = false)
 initMetal(window)
 installWaters()
 let

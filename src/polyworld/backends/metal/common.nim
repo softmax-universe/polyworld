@@ -1,7 +1,8 @@
 import
   std/tables,
   metal4, pixie, shady, vmath, windy,
-  uniforms, uploads, submissions, ../../[renderdescriptions, shadermetadata]
+  uniforms, uploads, submissions,
+  ../../[renderdescriptions, shadermetadata, targetplans]
 
 when defined(metalProfile):
   import profiles
@@ -339,45 +340,52 @@ proc newRenderTarget*(
 ): RenderTarget =
   ## Allocates resolved attachments and optional multisample attachments.
   requireRenderer()
-  if width <= 0 or height <= 0 or samples <= 0:
+  var plan: TargetPlan
+  try:
+    plan = planRenderTarget(width, height, samples, color, depth,
+      stencil, mipmapped)
+  except TargetPlanError:
     raise newException(PolyworldMetalError, "Invalid Metal target dimensions")
   result = RenderTarget(width: width, height: height, samples: samples,
-    stencil: stencil and depth)
-  if color:
+    stencil: plan.stencil)
+  if plan.color:
     result.color = allocateTexture(width, height, colorFormat,
-      mipmapped = mipmapped)
-    if samples > 1:
-      result.multisampleColor = allocateTexture(
-        width, height, colorFormat, samples
-      )
-  if depth:
-    let format = if stencil: MTLPixelFormatDepth32Float_Stencil8
+      mipmapped = plan.colorMipLevels > 1)
+  if plan.multisampleColor:
+    result.multisampleColor = allocateTexture(
+      width, height, colorFormat, samples
+    )
+  if plan.depth:
+    let format = if plan.stencil: MTLPixelFormatDepth32Float_Stencil8
       else: MTLPixelFormatDepth32Float
     result.depth = allocateTexture(width, height, format)
-    if samples > 1:
+    if plan.multisampleDepth:
       result.multisampleDepth = allocateTexture(width, height, format, samples)
 
 proc renderSamples*(target: RenderTarget): int =
   ## Returns the sample count of the target's current rendering phase.
-  if target.resolved: 1 else: target.samples
+  renderSampleCount(target.samples, target.resolved)
 
 proc shareDepth*(target, source: RenderTarget) =
   ## Shares an existing depth attachment with a compatible color pass.
   if target == source:
     return
-  if target.width != source.width or target.height != source.height or
-    target.samples != source.samples:
-      raise newException(PolyworldMetalError, "Shared depth target mismatch")
+  var plan: DepthSharePlan
+  try:
+    plan = planDepthShare(target.targetExtent(), source.targetExtent(),
+      target.borrowsDepth, source.stencil, source.resolved)
+  except TargetPlanError:
+    raise newException(PolyworldMetalError, "Shared depth target mismatch")
   if target == metalRenderer.target:
     flushEncoder()
-  if not target.borrowsDepth:
+  if plan.releaseDepth:
     destroy(target.depth)
     destroy(target.multisampleDepth)
   target.borrowsDepth = true
   target.depth = source.depth
   target.multisampleDepth = source.multisampleDepth
-  target.stencil = source.stencil
-  target.resolved = source.resolved
+  target.stencil = plan.stencil
+  target.resolved = plan.resolved
 
 proc updateTexture*(texture: MetalTexture, image: Image) =
   ## Orders RGBA updates after earlier GPU readers without CPU synchronization.
@@ -605,8 +613,9 @@ proc clear*(color: Color, depth = true, stencil = false) =
       raise newException(PolyworldMetalError, "No active Metal render target")
   nativePool()
   flushEncoder()
-  if depth or metalRenderer.target.depth == nil:
-    metalRenderer.target.resolved = false
+  metalRenderer.target.resolved = resolvedAfterClear(
+    metalRenderer.target.resolved, metalRenderer.target.depth != nil, depth
+  )
   metalRenderer.encoder =
     metalRenderer.commandBuffer.renderCommandEncoderWithDescriptor(
       makePass(true, color, depth, stencil)
@@ -977,10 +986,10 @@ proc ensureFrame*(width, height: int) =
   if metalRenderer.frameActive:
     return
   ensureCommands()
-  if metalRenderer.frameTarget == nil or
-    metalRenderer.frameTarget.width != width or
-    metalRenderer.frameTarget.height != height or
-    metalRenderer.frameTarget.samples != metalRenderer.frameSamples:
+  if metalRenderer.frameTarget == nil or needsTargetResize(
+    metalRenderer.frameTarget.targetExtent(),
+    targetExtent(width, height, metalRenderer.frameSamples)
+  ):
       destroy(metalRenderer.frameTarget)
       metalRenderer.frameTarget = newRenderTarget(width, height,
         samples = metalRenderer.frameSamples, stencil = true)

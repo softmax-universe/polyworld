@@ -16,6 +16,7 @@ type
   FrameStorage = object
     serial: uint64
     uploadPages, uniformPages, transient: seq[GpuBuffer]
+    uploads, uniforms: UploadPlan
     drawSets: seq[DrawDescriptors]
     descriptorPools: seq[VkDescriptorPool]
   GpuContext* = ref object
@@ -38,8 +39,7 @@ type
     textureLayout, uniformLayout: VkDescriptorSetLayout
     layout: VkPipelineLayout
     memory: VkPhysicalDeviceMemoryProperties
-    uploadPage, uploadOffset: int
-    uniformPage, uniformOffset, uniformAlignment, uniformRange: int
+    uniformAlignment, uniformRange: int
     drawCursor: int
 
   GpuBuffer* = ref object
@@ -219,11 +219,9 @@ proc beginFrame*(ctx: GpuContext) =
   ctx.frames[ctx.slot].transient.setLen(0)
   ctx.buffer = ctx.presentation.commandBuffers[ctx.slot]
   vkResetCommandBuffer(ctx.buffer, VkCommandBufferResetFlags(0)).checked("Reset command buffer")
-  ctx.uniformPage = 0
-  ctx.uniformOffset = 0
+  ctx.frames[ctx.slot].uniforms.resetUploadPlan()
   ctx.drawCursor = 0
-  ctx.uploadPage = 0
-  ctx.uploadOffset = 0
+  ctx.frames[ctx.slot].uploads.resetUploadPlan()
   var info = VkCommandBufferBeginInfo(
     sType: VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
     flags: VkCommandBufferUsageFlags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT))
@@ -332,21 +330,22 @@ proc uploadUniform(ctx: GpuContext, data: GpuConstants): VkDescriptorBufferInfo 
   let bytes = max(16, data.words.len * sizeof(uint32))
   if bytes > min(UniformPageBytes, ctx.uniformRange):
     raise newException(GpuError, "Vulkan uniform block exceeds device limits")
-  var offset = alignedBytes(ctx.uniformOffset, ctx.uniformAlignment)
-  if offset + bytes > UniformPageBytes:
-    inc ctx.uniformPage
-    offset = 0
-  if ctx.uniformPage == ctx.frames[ctx.slot].uniformPages.len:
-    ctx.frames[ctx.slot].uniformPages.add(ctx.newBuffer(UniformPageBytes,
+  let
+    frame = addr ctx.frames[ctx.slot]
+    reservation = frame.uniforms.reserveUpload(
+      bytes, ctx.uniformAlignment, UniformPageBytes
+    )
+  if reservation.allocate:
+    frame.uniformPages.add(ctx.newBuffer(reservation.capacity,
       VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, preferMappedLocal = true))
   let
-    page = ctx.frames[ctx.slot].uniformPages[ctx.uniformPage]
-    destination = cast[pointer](cast[uint](page.mapped) + offset.uint)
+    page = frame.uniformPages[reservation.page]
+    destination = cast[pointer](cast[uint](page.mapped) + reservation.offset.uint)
   if data.words.len > 0:
     copyMem(destination, data.words[0].unsafeAddr, data.words.len * 4)
   result = VkDescriptorBufferInfo(buffer: page.buffer,
-    offset: offset.uint64, range: bytes.uint64)
-  ctx.uniformOffset = offset + bytes
+    offset: reservation.offset.uint64, range: bytes.uint64)
+  frame.uniforms.commitUpload(reservation)
 
 proc drawDescriptors(ctx: GpuContext): ptr DrawDescriptors =
   ## Reuse descriptor sets only after the owning frame slot retires.
@@ -368,15 +367,22 @@ proc drawDescriptors(ctx: GpuContext): ptr DrawDescriptors =
   inc ctx.drawCursor
 
 proc uploadSlice(ctx: GpuContext, bytes, alignment: int): tuple[buffer: VkBuffer, mapped: pointer, offset: int] =
-  var offset = alignedBytes(ctx.uploadOffset, alignment)
-  while ctx.uploadPage < ctx.frames[ctx.slot].uploadPages.len and offset + bytes > ctx.frames[ctx.slot].uploadPages[ctx.uploadPage].capacity:
-    inc ctx.uploadPage
-    offset = 0
-  if ctx.uploadPage == ctx.frames[ctx.slot].uploadPages.len:
-    ctx.frames[ctx.slot].uploadPages.add ctx.newBuffer(max(4 * 1024 * 1024, alignedBytes(bytes, 65536)), VK_BUFFER_USAGE_TRANSFER_SRC_BIT or VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
-  let page = ctx.frames[ctx.slot].uploadPages[ctx.uploadPage]
-  ctx.uploadOffset = offset + bytes
-  (page.buffer, cast[pointer](cast[uint](page.mapped) + offset.uint), offset)
+  ## Reserves CPU upload storage while keeping native allocation backend-local.
+  let
+    frame = addr ctx.frames[ctx.slot]
+    reservation = frame.uploads.reserveUpload(
+      bytes, alignment, 4 * 1024 * 1024, 65536
+    )
+  if bytes == 0:
+    return
+  if reservation.allocate:
+    frame.uploadPages.add ctx.newBuffer(reservation.capacity,
+      VK_BUFFER_USAGE_TRANSFER_SRC_BIT or VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
+  let page = frame.uploadPages[reservation.page]
+  frame.uploads.commitUpload(reservation)
+  (page.buffer,
+    cast[pointer](cast[uint](page.mapped) + reservation.offset.uint),
+    reservation.offset)
 
 proc streamVertices*[T](ctx: GpuContext, view: var GpuBuffer, values: openArray[T]) =
   let bytes = values.len * sizeof(T)

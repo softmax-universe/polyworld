@@ -23,6 +23,7 @@ type
     constantsList: ID3D12GraphicsCommandList
     fence: uint64
     uploadPages, uniformPages: seq[UniformPage]
+    uploads, uniforms: UploadPlan
     descriptorPages: seq[DescriptorPage]
   GpuContext* = ref object
     frames: array[2, FrameStorage]
@@ -40,8 +41,6 @@ type
     activePage: DescriptorPage
     activeProgram: GpuProgram
     recording: uint64
-    uploadPage, uploadOffset: int
-    uniformPage, uniformOffset: int
 
   GpuTexture* = ref object
     id: uint64
@@ -80,7 +79,6 @@ type
   UniformPage = object
     resource, local: ID3D12Resource
     mapped: pointer
-    capacity: int
 
   GpuEncoder* = object
     ctx: GpuContext
@@ -252,11 +250,9 @@ proc beginFrame*(ctx: GpuContext) =
   ctx.activeProgram = nil
   ctx.command.setGraphicsRootSignature(ctx.root)
   inc ctx.recording
-  ctx.uploadPage = 0
-  ctx.uploadOffset = 0
+  ctx.frames[ctx.slot].uploads.resetUploadPlan()
   ctx.descriptorPage = 0
-  ctx.uniformPage = 0
-  ctx.uniformOffset = 0
+  ctx.frames[ctx.slot].uniforms.resetUploadPlan()
 
 proc submitFrame*(ctx: GpuContext) =
   ## Queue one completed list and retire its storage behind a fence.
@@ -268,14 +264,15 @@ proc submitFrame*(ctx: GpuContext) =
   let frame = addr ctx.frames[ctx.slot]
   var lists = [cast[ID3D12CommandList](ctx.command), cast[ID3D12CommandList](ctx.command)]
   var listCount = 1'u32
-  if ctx.uniformOffset > 0:
+  if frame.uniforms.pages.len > 0 and
+      frame.uniforms.pages[frame.uniforms.current].used > 0:
     # All constants are now final. Copy the occupied pages before executing
     # the draw list, in the same ExecuteCommandLists call and fence epoch.
     let uploads = frame.constantsList
     uploads.reset(frame.allocator, nil)
-    for i in 0 .. ctx.uniformPage:
+    for i in 0 .. frame.uniforms.current:
       let page = addr frame.uniformPages[i]
-      let bytes = if i == ctx.uniformPage: ctx.uniformOffset else: UniformPageBytes
+      let bytes = frame.uniforms.pages[i].used
       # New buffers start in COPY_DEST. Reused buffers decay to COMMON
       # between submissions and promote for the copy.
       uploads.copyBufferRegion(page.local, 0, page.resource, 0, bytes.uint64)
@@ -346,39 +343,48 @@ proc uploadUniform(ctx: GpuContext, data: GpuConstants): uint64 =
     reserved = alignedBytes(max(1, bytes), 256)
   if reserved > 64 * 1024:
     raise newException(GpuError, "DirectX uniform block exceeds 64 KiB")
-  if ctx.uniformOffset + reserved > UniformPageBytes:
-    inc ctx.uniformPage
-    ctx.uniformOffset = 0
-  if ctx.uniformPage == ctx.frames[ctx.slot].uniformPages.len:
-    var page = UniformPage(resource: ctx.buffer(UniformPageBytes, D3D12_HEAP_TYPE_UPLOAD))
+  let
+    frame = addr ctx.frames[ctx.slot]
+    reservation = frame.uniforms.reserveUpload(reserved, 256, UniformPageBytes)
+  if reservation.allocate:
+    var page = UniformPage(resource: ctx.buffer(reservation.capacity, D3D12_HEAP_TYPE_UPLOAD))
     try:
       page.resource.map(0, nil, page.mapped.addr)
-      page.local = ctx.buffer(UniformPageBytes, D3D12_HEAP_TYPE_DEFAULT)
+      page.local = ctx.buffer(reservation.capacity, D3D12_HEAP_TYPE_DEFAULT)
     except Exception:
       page.resource.release()
       raise
-    ctx.frames[ctx.slot].uniformPages.add(page)
+    frame.uniformPages.add(page)
   let
-    page = ctx.frames[ctx.slot].uniformPages[ctx.uniformPage]
-    destination = cast[pointer](cast[uint](page.mapped) + ctx.uniformOffset.uint)
+    page = frame.uniformPages[reservation.page]
+    destination = cast[pointer](cast[uint](page.mapped) + reservation.offset.uint)
   if bytes > 0:
     copyMem(destination, data.words[0].unsafeAddr, bytes)
-  result = page.local.getGPUVirtualAddress() + ctx.uniformOffset.uint64
-  ctx.uniformOffset += reserved
+  result = page.local.getGPUVirtualAddress() + reservation.offset.uint64
+  frame.uniforms.commitUpload(reservation)
 
 proc uploadSlice(ctx: GpuContext, bytes, alignment: int): tuple[resource: ID3D12Resource, mapped: pointer, offset: int] =
-  var offset = alignedBytes(ctx.uploadOffset, alignment)
-  while ctx.uploadPage < ctx.frames[ctx.slot].uploadPages.len and offset + bytes > ctx.frames[ctx.slot].uploadPages[ctx.uploadPage].capacity:
-    inc ctx.uploadPage
-    offset = 0
-  if ctx.uploadPage == ctx.frames[ctx.slot].uploadPages.len:
-    let capacity = max(4 * 1024 * 1024, alignedBytes(bytes, 65536))
-    var page = UniformPage(resource: ctx.buffer(capacity, D3D12_HEAP_TYPE_UPLOAD), capacity: capacity)
-    page.resource.map(0, nil, page.mapped.addr)
-    ctx.frames[ctx.slot].uploadPages.add page
-  let page = ctx.frames[ctx.slot].uploadPages[ctx.uploadPage]
-  ctx.uploadOffset = offset + bytes
-  (page.resource, cast[pointer](cast[uint](page.mapped) + offset.uint), offset)
+  ## Reserves CPU upload storage while keeping native allocation backend-local.
+  let
+    frame = addr ctx.frames[ctx.slot]
+    reservation = frame.uploads.reserveUpload(
+      bytes, alignment, 4 * 1024 * 1024, 65536
+    )
+  if bytes == 0:
+    return
+  if reservation.allocate:
+    var page = UniformPage(resource: ctx.buffer(reservation.capacity, D3D12_HEAP_TYPE_UPLOAD))
+    try:
+      page.resource.map(0, nil, page.mapped.addr)
+    except Exception:
+      page.resource.release()
+      raise
+    frame.uploadPages.add page
+  let page = frame.uploadPages[reservation.page]
+  frame.uploads.commitUpload(reservation)
+  (page.resource,
+    cast[pointer](cast[uint](page.mapped) + reservation.offset.uint),
+    reservation.offset)
 
 proc streamVertices*[T](ctx: GpuContext, view: var GpuBuffer, values: openArray[T]) =
   let bytes = values.len * sizeof(T)

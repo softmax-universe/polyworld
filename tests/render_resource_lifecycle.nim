@@ -21,7 +21,8 @@ proc alive(shapes: ShapeRenderer, expected: bool) =
   doAssert (glIsBuffer(shapes.gpu.vertexBuffer) == GL_TRUE) == expected
   doAssert (glIsTexture(shapes.gpu.whiteTexture) == GL_TRUE) == expected
 
-let window = newWindow("Renderer resource lifetime", ivec2(64), vsync = false)
+let window = newWindow("Renderer resource lifetime", ivec2(64),
+  visible = false, vsync = false)
 window.makeContextCurrent()
 loadExtensions()
 

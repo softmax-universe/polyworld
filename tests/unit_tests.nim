@@ -8,6 +8,7 @@ import
   test_backend_boundaries,
   test_render_descriptions, test_texture_uploads, test_shader_metadata,
   test_measurements,
+  test_upload_plans, test_target_plans,
   test_hashes,
   test_rngs, test_mailboxes,
   test_tapes, test_replaysaves, test_replaylibraries,

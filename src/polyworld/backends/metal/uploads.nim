@@ -1,6 +1,6 @@
 ## Reuses CPU-visible upload chunks without changing earlier encoded draws.
 
-import metal4
+import metal4, ../../uploadplans
 
 when defined(metalProfile):
   import profiles
@@ -11,7 +11,7 @@ const
   UploadRetainedBytes* = 16 * 1024 * 1024
 
 type
-  PolyworldMetalUploadError* = object of CatchableError
+  PolyworldMetalUploadError* = PolyworldUploadError
   UploadSlice* = object
     buffer*: MTLBuffer
     offset*: uint
@@ -19,17 +19,14 @@ type
   UploadChunk = object
     buffer: MTLBuffer
     address: pointer
-    capacity, used: int
   UploadArena* = object
     chunks: seq[UploadChunk]
-    current: int
+    plan: UploadPlan
     allocations: uint64
 
 proc aligned(size: int): int =
   ## Rounds a valid byte count to the shared upload alignment.
-  if size < 0 or size > int.high - (UploadAlignment - 1):
-    raise newException(PolyworldMetalUploadError, "Invalid Metal upload size")
-  (size + UploadAlignment - 1) and not (UploadAlignment - 1)
+  alignedBytes(size, UploadAlignment)
 
 proc allocate(device: MTLDevice, capacity: int): UploadChunk =
   ## Allocates one persistently mapped shared buffer owned by the arena.
@@ -44,7 +41,7 @@ proc allocate(device: MTLDevice, capacity: int): UploadChunk =
       "Could not map a Metal upload chunk")
   when defined(metalProfile):
     profileBuffer(capacity)
-  UploadChunk(buffer: buffer, address: address, capacity: capacity)
+  UploadChunk(buffer: buffer, address: address)
 
 proc upload*(
   arena: var UploadArena,
@@ -60,27 +57,23 @@ proc upload*(
   if data == nil or device.isNil or chunkBytes <= 0:
     raise newException(PolyworldMetalUploadError,
       "Metal uploads require data, a device, and positive chunk capacity")
-  let capacity = aligned(max(chunkBytes, required))
-  while arena.current < arena.chunks.len:
-    let chunk = addr arena.chunks[arena.current]
-    if required <= chunk.capacity - chunk.used:
-      break
-    if chunk.used == 0:
-      let replacement = allocate(device, capacity)
-      chunk.buffer.release()
-      chunk[] = replacement
-      inc arena.allocations
-      break
-    inc arena.current
-  if arena.current == arena.chunks.len:
-    arena.chunks.add allocate(device, capacity)
+  let reservation = arena.plan.reserveUpload(
+    required, UploadAlignment, chunkBytes, UploadAlignment, replaceEmpty = true
+  )
+  if reservation.allocate:
+    let replacement = allocate(device, reservation.capacity)
+    if reservation.page == arena.chunks.len:
+      arena.chunks.add replacement
+    else:
+      arena.chunks[reservation.page].buffer.release()
+      arena.chunks[reservation.page] = replacement
     inc arena.allocations
-  let chunk = addr arena.chunks[arena.current]
+  let chunk = addr arena.chunks[reservation.page]
   result = UploadSlice(
-    buffer: chunk.buffer, offset: chunk.used.uint, size: size
+    buffer: chunk.buffer, offset: reservation.offset.uint, size: size
   )
   copyMem(cast[pointer](cast[uint](chunk.address) + result.offset), data, size)
-  chunk.used += required
+  arena.plan.commitUpload(reservation)
 
 proc resetUploads*(arena: var UploadArena,
     retainedLimit = UploadRetainedBytes) =
@@ -93,21 +86,23 @@ proc resetUploads*(arena: var UploadArena,
     count = 0
     retained = 0
   for i in 0 ..< arena.chunks.len:
-    var chunk = arena.chunks[i]
-    if chunk.capacity <= retainedLimit - retained:
-      chunk.used = 0
+    let
+      chunk = arena.chunks[i]
+      page = arena.plan.pages[i]
+    if page.capacity <= retainedLimit - retained:
       arena.chunks[count] = chunk
+      arena.plan.pages[count] = page
       inc count
-      retained += chunk.capacity
+      retained += page.capacity
     else:
       chunk.buffer.release()
   arena.chunks.setLen(count)
-  arena.current = 0
+  arena.plan.pages.setLen(count)
+  arena.plan.resetUploadPlan()
 
 proc capacityBytes*(arena: UploadArena): int =
   ## Reports retained storage without counting per-draw slices twice.
-  for chunk in arena.chunks:
-    result += chunk.capacity
+  arena.plan.capacityBytes()
 
 proc allocationCount*(arena: UploadArena): uint64 =
   ## Reports native buffer creations for allocation regression checks.

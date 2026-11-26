@@ -1,6 +1,6 @@
 ## Shared scene commands for the D3D12 and Vulkan implementations.
 import std/[json, strutils, tables], pixie, vmath, windy, shady
-import device, stages, framecounts
+import device, stages, framecounts, ../../targetplans
 export device, stages
 
 type
@@ -146,19 +146,34 @@ proc updateTexture*(texture: GpuImage, image: Image) = texture.uploadImage(image
 
 proc newRenderTarget*(width, height: int, color = true, depth = true, samples = 1,
     colorFormat = Rgba8, stencil = false, mipmapped = false): RenderTarget =
-  result = RenderTarget(width: width, height: height, samples: gpuRenderer.ctx.sampleCount(samples, colorFormat, (if stencil: DepthStencil else: Depth32f), color, depth), stencil: stencil)
-  if color:
+  var plan: TargetPlan
+  try:
+    plan = planRenderTarget(width, height, samples, color, depth,
+      stencil, mipmapped)
+  except TargetPlanError as error:
+    raise newException(GpuError, error.msg)
+  let supported = gpuRenderer.ctx.sampleCount(samples, colorFormat,
+    (if stencil: DepthStencil else: Depth32f), color, depth)
+  plan = planRenderTarget(width, height, supported, color, depth,
+    stencil, mipmapped)
+  result = RenderTarget(width: width, height: height, samples: supported,
+    stencil: plan.stencil)
+  if plan.color:
     result.color = allocateImage(width, height, colorFormat,
-      levels = (if mipmapped: mipCount(width, height) else: 1))
-  if depth:
-    result.depth = allocateImage(width, height, if stencil: DepthStencil else: Depth32f, linear = false)
-
-  if result.samples > 1:
-    if color: result.multisampleColor = allocateImage(width, height, colorFormat, samples = result.samples)
-    if depth: result.multisampleDepth = allocateImage(width, height, result.depth.pixelFormat, samples = result.samples)
+      levels = plan.colorMipLevels)
+  if plan.depth:
+    result.depth = allocateImage(width, height,
+      if plan.stencil: DepthStencil else: Depth32f, linear = false)
+  if plan.multisampleColor:
+    result.multisampleColor = allocateImage(width, height, colorFormat,
+      samples = supported)
+  if plan.multisampleDepth:
+    result.multisampleDepth = allocateImage(width, height,
+      result.depth.pixelFormat, samples = supported)
 
 proc renderSamples*(target: RenderTarget): int =
-  if target.resolved: 1 else: target.samples
+  ## Returns the sample count of the target's current rendering phase.
+  renderSampleCount(target.samples, target.resolved)
 
 proc resolveForUi*(): RenderTarget =
   result = gpuRenderer.target
@@ -167,18 +182,22 @@ proc resolveForUi*(): RenderTarget =
 proc setFrameSamples*(samples: int) =
   gpuRenderer.frameSamples = gpuRenderer.ctx.sampleCount(samples, Rgba8, DepthStencil)
 
-
 proc shareDepth*(target, source: RenderTarget) =
+  ## Shares a compatible depth attachment without taking ownership of it.
   if target == source: return
-  if target.width != source.width or target.height != source.height or target.samples != source.samples:
+  var plan: DepthSharePlan
+  try:
+    plan = planDepthShare(target.targetExtent(), source.targetExtent(),
+      target.borrowsDepth, source.stencil, source.resolved)
+  except TargetPlanError:
     raise newException(GpuError, "Shared depth dimensions differ")
-  if not target.borrowsDepth:
+  if plan.releaseDepth:
     target.depth.destroy()
     target.multisampleDepth.destroy()
   target.multisampleDepth = source.multisampleDepth
   target.depth = source.depth
-  target.resolved = source.resolved
-  target.stencil = source.stencil
+  target.resolved = plan.resolved
+  target.stencil = plan.stencil
   target.borrowsDepth = true
 
 proc driverTarget(target: RenderTarget, read = false): GpuTarget =
@@ -200,7 +219,8 @@ proc frameActive*(): bool = gpuRenderer.ctx.command != nil
 proc ensureFrame*(width, height: int) =
   if frameActive(): return
   let r = gpuRenderer
-  if r.frameTarget == nil or r.frameTarget.width != width or r.frameTarget.height != height or r.frameTarget.samples != r.frameSamples:
+  if r.frameTarget == nil or needsTargetResize(r.frameTarget.targetExtent(),
+      targetExtent(width, height, r.frameSamples)):
     r.frameTarget.destroy()
     r.frameTarget = newRenderTarget(width, height, samples = r.frameSamples, stencil = true)
   collect()
@@ -230,7 +250,9 @@ proc popTarget*() =
 
 proc clear*(color: Color, depth = true, stencil = false) =
   ensureFrame()
-  if depth or gpuRenderer.target.depth == nil: gpuRenderer.target.resolved = false
+  gpuRenderer.target.resolved = resolvedAfterClear(
+    gpuRenderer.target.resolved, gpuRenderer.target.depth != nil, depth
+  )
   gpuRenderer.ctx.beginPass(gpuRenderer.target.driverTarget(), true, depth, color, stencil).endPass()
 
 proc clearDepth*() =

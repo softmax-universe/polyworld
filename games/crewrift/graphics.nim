@@ -776,7 +776,8 @@ proc runGraphics*(initial: Options) =
   )
   sk.builder = builder
   defer:
-    saveReplay(options.record, game.recording)
+    when not defined(backendBench):
+      saveReplay(options.record, game.recording)
     window.close()
   initUnshadowedShadows()
   defer:
@@ -826,6 +827,9 @@ proc runGraphics*(initial: Options) =
     when not defined(emscripten):
       pollEvents()
     when defined(frameBench): beginBenchFrame(window)
+    let benchmarkGameplay = game.world.phase != RoleReveal
+    if benchmarkGameplay:
+      beginBenchmarkFrame("crewrift", window.size)
     let
       dt = min(clock.viewingDelta(window), 0.1'f)
       slot = if game.playback: -1 else: options.player
@@ -1112,6 +1116,10 @@ proc runGraphics*(initial: Options) =
     sk.drawDebugMenu(window)
     sk.finishUi()
     inc renderedFrames
+    if benchmarkGameplay and endBenchmarkFrame(game.frame):
+      when not defined(emscripten):
+        window.closeRequested = true
+      break
     if captureFrame(window, captureFrames):
       break
     window.presentFrame()

@@ -348,7 +348,8 @@ proc runGraphics*(
       echo "Live multiplayer follows the server clock; --play and --speed " &
         "apply to local games, replays, and spectators."
   initializeGraphics()
-  let saveAutomatically = autoSaveReplay and not captureActive()
+  let saveAutomatically = autoSaveReplay and not captureActive() and
+    not defined(backendBench)
   stopSounds()
   defer: stopSounds()
   clearHudTooltip()
@@ -2804,6 +2805,14 @@ proc runGraphics*(
       followSelection = false
       actionCam.takeManual()
 
+  when defined(backendBench):
+    # Start the matched renderer workload after drafting and initial movement.
+    if network == nil and not run.replayMode:
+      for _ in 0 ..< 120 * TickRate:
+        if run.world.gameOver:
+          break
+        advanceGame()
+
   var
     viewingClock: ViewingClock
     cameraSeekSerial = -1
@@ -2816,8 +2825,10 @@ proc runGraphics*(
     ProfileWarmupFrames == 0:
     # Exclude loading and the requested simulation seek from frame captures.
     startTrace()
+  var benchmarkFinished = false
   window.onFrame = proc() =
     when defined(frameBench): beginBenchFrame(window)
+    beginBenchmarkFrame("gota", window.size)
     updateSounds()
     updateMatchResults()
     let previousCapture = bindingCapture
@@ -3204,7 +3215,7 @@ proc runGraphics*(
               )
 
           occlusion.settings.enabled = preferences.ambientOcclusion
-          occlusion.captureGround(window.size)
+          occlusion.captureGround(window.size, screenshotTarget.framebuffer)
 
           if showOccludedCharacters:
             profileBlock "Character outline pass":
@@ -3226,7 +3237,9 @@ proc runGraphics*(
             finishCharacters(scene)
 
         profileBlock "Ambient occlusion":
-          occlusion.applyScreenOcclusion(window.size, projection)
+          occlusion.applyScreenOcclusion(
+            window.size, projection, screenshotTarget.framebuffer
+          )
 
         # The arena's lakes, each with its own reflection. The water mirrors the sky,
         # terrain, towers and characters; particles, spells and markers stay out of it.
@@ -3279,7 +3292,7 @@ proc runGraphics*(
                 drawWorldCharacters(scene, worldCharacters, worldCharacterCount)
                 finishCharacters(scene)
               endReflection()
-              if captureActive():
+              if captureActive() or defined(backendBench):
                 beginGotaFrame()
               else:
                 bindFrameTarget()
@@ -3690,6 +3703,11 @@ proc runGraphics*(
                   "Replay saved to your library." else: "",
                 vec2(24, 24), 1000, MenuAccent)
               sk.finishUi()
+      if endBenchmarkFrame(run.world.tick.int):
+        benchmarkFinished = true
+        when not defined(emscripten):
+          window.closeRequested = true
+        return
       profileBlock "present":
         presentGotaFrame()
         reportDirectorFrame(
@@ -3711,7 +3729,7 @@ proc runGraphics*(
       when not defined(emscripten):
         window.closeRequested = true
 
-  while not window.closeRequested and not leaveMatch:
+  while not window.closeRequested and not leaveMatch and not benchmarkFinished:
     if network != nil:
       connection.pump()
       if network.returnedToLobby():

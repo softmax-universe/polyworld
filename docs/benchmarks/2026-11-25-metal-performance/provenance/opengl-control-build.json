@@ -1,0 +1,827 @@
+{
+  "commit": "19343a14a2260d5bb70bb92ea8788ffd8074ecee",
+  "sourceHash": "67137a33b015a57d7074e3dcb5c2c6526af346016d042808b4a8c9d0626ce1e7",
+  "generated": "2026-11-25T19:54:18.294679+00:00",
+  "cases": [
+    {
+      "game": "cac",
+      "backend": "metal",
+      "passed": true,
+      "artifact": "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/cac-metal",
+      "stages": [
+        {
+          "command": [
+            "nim",
+            "check",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:useMetal4",
+            "/Users/me/p/polyworld-backends/games/cac/cac.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/cac-metal-check.log",
+          "started": 1795636566.155352,
+          "wallSeconds": 11.671343803405762
+        },
+        {
+          "command": [
+            "nim",
+            "c",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:useMetal4",
+            "--nimcache:/Users/me/p/polyworld-backends/tmp/benchmarks/cache/cac-metal",
+            "--out:/Users/me/p/polyworld-backends/tmp/benchmarks/bin/cac-metal",
+            "/Users/me/p/polyworld-backends/games/cac/cac.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/cac-metal-build.log",
+          "started": 1795636577.826879,
+          "wallSeconds": 12.536793947219849
+        }
+      ]
+    },
+    {
+      "game": "cac",
+      "backend": "opengl",
+      "passed": true,
+      "artifact": "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/cac-opengl",
+      "stages": [
+        {
+          "command": [
+            "nim",
+            "check",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "/Users/me/p/polyworld-backends/games/cac/cac.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/cac-opengl-check.log",
+          "started": 1795636549.22776,
+          "wallSeconds": 9.284209966659546
+        },
+        {
+          "command": [
+            "nim",
+            "c",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "--nimcache:/Users/me/p/polyworld-backends/tmp/benchmarks/cache/cac-opengl",
+            "--out:/Users/me/p/polyworld-backends/tmp/benchmarks/bin/cac-opengl",
+            "/Users/me/p/polyworld-backends/games/cac/cac.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/cac-opengl-build.log",
+          "started": 1795636558.512244,
+          "wallSeconds": 13.404515981674194
+        }
+      ]
+    },
+    {
+      "game": "cac",
+      "backend": "webgl",
+      "passed": true,
+      "artifact": "/Users/me/p/polyworld-backends/tmp/benchmarks/web/cac/cac.html",
+      "stages": [
+        {
+          "command": [
+            "nim",
+            "check",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:emscripten",
+            "/Users/me/p/polyworld-backends/games/cac/cac.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/cac-webgl-check.log",
+          "started": 1795636571.917272,
+          "wallSeconds": 9.658865928649902
+        },
+        {
+          "command": [
+            "nim",
+            "c",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:emscripten",
+            "--nimcache:/Users/me/p/polyworld-backends/tmp/benchmarks/cache/cac-webgl",
+            "/Users/me/p/polyworld-backends/games/cac/cac.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/cac-webgl-build.log",
+          "started": 1795636581.5763469,
+          "wallSeconds": 47.71585416793823
+        }
+      ]
+    },
+    {
+      "game": "crewrift",
+      "backend": "metal",
+      "passed": true,
+      "artifact": "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/crewrift-metal",
+      "stages": [
+        {
+          "command": [
+            "nim",
+            "check",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:useMetal4",
+            "/Users/me/p/polyworld-backends/games/crewrift/crewrift.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/crewrift-metal-check.log",
+          "started": 1795636629.292799,
+          "wallSeconds": 7.907417058944702
+        },
+        {
+          "command": [
+            "nim",
+            "c",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:useMetal4",
+            "--nimcache:/Users/me/p/polyworld-backends/tmp/benchmarks/cache/crewrift-metal",
+            "--out:/Users/me/p/polyworld-backends/tmp/benchmarks/bin/crewrift-metal",
+            "/Users/me/p/polyworld-backends/games/crewrift/crewrift.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/crewrift-metal-build.log",
+          "started": 1795636637.2003992,
+          "wallSeconds": 9.908102750778198
+        }
+      ]
+    },
+    {
+      "game": "crewrift",
+      "backend": "opengl",
+      "passed": true,
+      "artifact": "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/crewrift-opengl",
+      "stages": [
+        {
+          "command": [
+            "nim",
+            "check",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "/Users/me/p/polyworld-backends/games/crewrift/crewrift.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/crewrift-opengl-check.log",
+          "started": 1795636628.822874,
+          "wallSeconds": 7.489743947982788
+        },
+        {
+          "command": [
+            "nim",
+            "c",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "--nimcache:/Users/me/p/polyworld-backends/tmp/benchmarks/cache/crewrift-opengl",
+            "--out:/Users/me/p/polyworld-backends/tmp/benchmarks/bin/crewrift-opengl",
+            "/Users/me/p/polyworld-backends/games/crewrift/crewrift.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/crewrift-opengl-build.log",
+          "started": 1795636636.3127968,
+          "wallSeconds": 9.482043266296387
+        }
+      ]
+    },
+    {
+      "game": "crewrift",
+      "backend": "webgl",
+      "passed": true,
+      "artifact": "/Users/me/p/polyworld-backends/tmp/benchmarks/web/crewrift/crewrift.html",
+      "stages": [
+        {
+          "command": [
+            "nim",
+            "check",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:emscripten",
+            "/Users/me/p/polyworld-backends/games/crewrift/crewrift.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/crewrift-webgl-check.log",
+          "started": 1795636645.7953842,
+          "wallSeconds": 6.847194671630859
+        },
+        {
+          "command": [
+            "nim",
+            "c",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:emscripten",
+            "--nimcache:/Users/me/p/polyworld-backends/tmp/benchmarks/cache/crewrift-webgl",
+            "/Users/me/p/polyworld-backends/games/crewrift/crewrift.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/crewrift-webgl-build.log",
+          "started": 1795636652.642765,
+          "wallSeconds": 90.66953897476196
+        }
+      ]
+    },
+    {
+      "game": "cta",
+      "backend": "metal",
+      "passed": true,
+      "artifact": "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/cta-metal",
+      "stages": [
+        {
+          "command": [
+            "nim",
+            "check",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:useMetal4",
+            "/Users/me/p/polyworld-backends/games/call_to_adventure/cta.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/cta-metal-check.log",
+          "started": 1795636526.173635,
+          "wallSeconds": 9.73106598854065
+        },
+        {
+          "command": [
+            "nim",
+            "c",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:useMetal4",
+            "--nimcache:/Users/me/p/polyworld-backends/tmp/benchmarks/cache/cta-metal",
+            "--out:/Users/me/p/polyworld-backends/tmp/benchmarks/bin/cta-metal",
+            "/Users/me/p/polyworld-backends/games/call_to_adventure/cta.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/cta-metal-build.log",
+          "started": 1795636535.905169,
+          "wallSeconds": 13.322101831436157
+        }
+      ]
+    },
+    {
+      "game": "cta",
+      "backend": "opengl",
+      "passed": true,
+      "artifact": "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/cta-opengl",
+      "stages": [
+        {
+          "command": [
+            "nim",
+            "check",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "/Users/me/p/polyworld-backends/games/call_to_adventure/cta.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/cta-opengl-check.log",
+          "started": 1795636505.89931,
+          "wallSeconds": 8.866177082061768
+        },
+        {
+          "command": [
+            "nim",
+            "c",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "--nimcache:/Users/me/p/polyworld-backends/tmp/benchmarks/cache/cta-opengl",
+            "--out:/Users/me/p/polyworld-backends/tmp/benchmarks/bin/cta-opengl",
+            "/Users/me/p/polyworld-backends/games/call_to_adventure/cta.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/cta-opengl-build.log",
+          "started": 1795636514.7657,
+          "wallSeconds": 11.407207012176514
+        }
+      ]
+    },
+    {
+      "game": "cta",
+      "backend": "webgl",
+      "passed": true,
+      "artifact": "/Users/me/p/polyworld-backends/tmp/benchmarks/web/cta/cta.html",
+      "stages": [
+        {
+          "command": [
+            "nim",
+            "check",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:emscripten",
+            "/Users/me/p/polyworld-backends/games/call_to_adventure/cta.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/cta-webgl-check.log",
+          "started": 1795636536.7171578,
+          "wallSeconds": 8.974440336227417
+        },
+        {
+          "command": [
+            "nim",
+            "c",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:emscripten",
+            "--nimcache:/Users/me/p/polyworld-backends/tmp/benchmarks/cache/cta-webgl",
+            "/Users/me/p/polyworld-backends/games/call_to_adventure/cta.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/cta-webgl-build.log",
+          "started": 1795636545.6918,
+          "wallSeconds": 82.61473894119263
+        }
+      ]
+    },
+    {
+      "game": "gota",
+      "backend": "metal",
+      "passed": true,
+      "artifact": "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/gota-metal",
+      "stages": [
+        {
+          "command": [
+            "nim",
+            "check",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:useMetal4",
+            "/Users/me/p/polyworld-backends/games/gods_of_the_arena/gota.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/gota-metal-check.log",
+          "started": 1795636458.2956538,
+          "wallSeconds": 10.653980255126953
+        },
+        {
+          "command": [
+            "nim",
+            "c",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:useMetal4",
+            "--nimcache:/Users/me/p/polyworld-backends/tmp/benchmarks/cache/gota-metal",
+            "--out:/Users/me/p/polyworld-backends/tmp/benchmarks/bin/gota-metal",
+            "/Users/me/p/polyworld-backends/games/gods_of_the_arena/gota.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/gota-metal-build.log",
+          "started": 1795636468.949812,
+          "wallSeconds": 13.454290866851807
+        }
+      ]
+    },
+    {
+      "game": "gota",
+      "backend": "opengl",
+      "passed": true,
+      "artifact": "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/gota-opengl",
+      "stages": [
+        {
+          "command": [
+            "nim",
+            "check",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "/Users/me/p/polyworld-backends/games/gods_of_the_arena/gota.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/gota-opengl-check.log",
+          "started": 1795636458.295677,
+          "wallSeconds": 10.026978015899658
+        },
+        {
+          "command": [
+            "nim",
+            "c",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "--nimcache:/Users/me/p/polyworld-backends/tmp/benchmarks/cache/gota-opengl",
+            "--out:/Users/me/p/polyworld-backends/tmp/benchmarks/bin/gota-opengl",
+            "/Users/me/p/polyworld-backends/games/gods_of_the_arena/gota.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/gota-opengl-build.log",
+          "started": 1795636468.3228211,
+          "wallSeconds": 13.01908278465271
+        }
+      ]
+    },
+    {
+      "game": "gota",
+      "backend": "webgl",
+      "passed": true,
+      "artifact": "/Users/me/p/polyworld-backends/tmp/benchmarks/web/gota/gota.html",
+      "stages": [
+        {
+          "command": [
+            "nim",
+            "check",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:emscripten",
+            "/Users/me/p/polyworld-backends/games/gods_of_the_arena/gota.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/gota-webgl-check.log",
+          "started": 1795636458.295712,
+          "wallSeconds": 9.421975135803223
+        },
+        {
+          "command": [
+            "nim",
+            "c",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:emscripten",
+            "--nimcache:/Users/me/p/polyworld-backends/tmp/benchmarks/cache/gota-webgl",
+            "/Users/me/p/polyworld-backends/games/gods_of_the_arena/gota.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/gota-webgl-build.log",
+          "started": 1795636467.7178729,
+          "wallSeconds": 68.99848318099976
+        }
+      ]
+    },
+    {
+      "game": "heartleaf",
+      "backend": "metal",
+      "passed": true,
+      "artifact": "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/heartleaf-metal",
+      "stages": [
+        {
+          "command": [
+            "nim",
+            "check",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:useMetal4",
+            "/Users/me/p/polyworld-backends/games/heartleaf/heartleaf.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/heartleaf-metal-check.log",
+          "started": 1795636607.98476,
+          "wallSeconds": 9.174363851547241
+        },
+        {
+          "command": [
+            "nim",
+            "c",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:useMetal4",
+            "--nimcache:/Users/me/p/polyworld-backends/tmp/benchmarks/cache/heartleaf-metal",
+            "--out:/Users/me/p/polyworld-backends/tmp/benchmarks/bin/heartleaf-metal",
+            "/Users/me/p/polyworld-backends/games/heartleaf/heartleaf.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/heartleaf-metal-build.log",
+          "started": 1795636617.159538,
+          "wallSeconds": 11.662755966186523
+        }
+      ]
+    },
+    {
+      "game": "heartleaf",
+      "backend": "opengl",
+      "passed": true,
+      "artifact": "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/heartleaf-opengl",
+      "stages": [
+        {
+          "command": [
+            "nim",
+            "check",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "/Users/me/p/polyworld-backends/games/heartleaf/heartleaf.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/heartleaf-opengl-check.log",
+          "started": 1795636590.3642712,
+          "wallSeconds": 7.82598876953125
+        },
+        {
+          "command": [
+            "nim",
+            "c",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "--nimcache:/Users/me/p/polyworld-backends/tmp/benchmarks/cache/heartleaf-opengl",
+            "--out:/Users/me/p/polyworld-backends/tmp/benchmarks/bin/heartleaf-opengl",
+            "/Users/me/p/polyworld-backends/games/heartleaf/heartleaf.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/heartleaf-opengl-build.log",
+          "started": 1795636598.190496,
+          "wallSeconds": 9.793635129928589
+        }
+      ]
+    },
+    {
+      "game": "heartleaf",
+      "backend": "webgl",
+      "passed": true,
+      "artifact": "/Users/me/p/polyworld-backends/tmp/benchmarks/web/heartleaf/heartleaf.html",
+      "stages": [
+        {
+          "command": [
+            "nim",
+            "check",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:emscripten",
+            "/Users/me/p/polyworld-backends/games/heartleaf/heartleaf.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/heartleaf-webgl-check.log",
+          "started": 1795636628.3076532,
+          "wallSeconds": 6.993910789489746
+        },
+        {
+          "command": [
+            "nim",
+            "c",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:emscripten",
+            "--nimcache:/Users/me/p/polyworld-backends/tmp/benchmarks/cache/heartleaf-webgl",
+            "/Users/me/p/polyworld-backends/games/heartleaf/heartleaf.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/heartleaf-webgl-build.log",
+          "started": 1795636635.301731,
+          "wallSeconds": 78.83250689506531
+        }
+      ]
+    },
+    {
+      "game": "lvd",
+      "backend": "metal",
+      "passed": true,
+      "artifact": "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/lvd-metal",
+      "stages": [
+        {
+          "command": [
+            "nim",
+            "check",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:useMetal4",
+            "/Users/me/p/polyworld-backends/games/light_vs_dark/lvd.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/lvd-metal-check.log",
+          "started": 1795636482.4046478,
+          "wallSeconds": 9.597123146057129
+        },
+        {
+          "command": [
+            "nim",
+            "c",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:useMetal4",
+            "--nimcache:/Users/me/p/polyworld-backends/tmp/benchmarks/cache/lvd-metal",
+            "--out:/Users/me/p/polyworld-backends/tmp/benchmarks/bin/lvd-metal",
+            "/Users/me/p/polyworld-backends/games/light_vs_dark/lvd.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/lvd-metal-build.log",
+          "started": 1795636492.001939,
+          "wallSeconds": 13.896944046020508
+        }
+      ]
+    },
+    {
+      "game": "lvd",
+      "backend": "opengl",
+      "passed": true,
+      "artifact": "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/lvd-opengl",
+      "stages": [
+        {
+          "command": [
+            "nim",
+            "check",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "/Users/me/p/polyworld-backends/games/light_vs_dark/lvd.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/lvd-opengl-check.log",
+          "started": 1795636481.342698,
+          "wallSeconds": 9.134386777877808
+        },
+        {
+          "command": [
+            "nim",
+            "c",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "--nimcache:/Users/me/p/polyworld-backends/tmp/benchmarks/cache/lvd-opengl",
+            "--out:/Users/me/p/polyworld-backends/tmp/benchmarks/bin/lvd-opengl",
+            "/Users/me/p/polyworld-backends/games/light_vs_dark/lvd.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/lvd-opengl-build.log",
+          "started": 1795636490.4773052,
+          "wallSeconds": 13.804651021957397
+        }
+      ]
+    },
+    {
+      "game": "lvd",
+      "backend": "webgl",
+      "passed": true,
+      "artifact": "/Users/me/p/polyworld-backends/tmp/benchmarks/web/lvd/lvd.html",
+      "stages": [
+        {
+          "command": [
+            "nim",
+            "check",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:emscripten",
+            "/Users/me/p/polyworld-backends/games/light_vs_dark/lvd.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/lvd-webgl-check.log",
+          "started": 1795636504.282645,
+          "wallSeconds": 8.71806001663208
+        },
+        {
+          "command": [
+            "nim",
+            "c",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:emscripten",
+            "--nimcache:/Users/me/p/polyworld-backends/tmp/benchmarks/cache/lvd-webgl",
+            "/Users/me/p/polyworld-backends/games/light_vs_dark/lvd.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/lvd-webgl-build.log",
+          "started": 1795636513.000896,
+          "wallSeconds": 53.15349507331848
+        }
+      ]
+    },
+    {
+      "game": "monster",
+      "backend": "metal",
+      "passed": true,
+      "artifact": "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/monster-metal",
+      "stages": [
+        {
+          "command": [
+            "nim",
+            "check",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:useMetal4",
+            "/Users/me/p/polyworld-backends/games/monster/monster.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/monster-metal-check.log",
+          "started": 1795636665.109632,
+          "wallSeconds": 8.449605941772461
+        },
+        {
+          "command": [
+            "nim",
+            "c",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:useMetal4",
+            "--nimcache:/Users/me/p/polyworld-backends/tmp/benchmarks/cache/monster-metal",
+            "--out:/Users/me/p/polyworld-backends/tmp/benchmarks/bin/monster-metal",
+            "/Users/me/p/polyworld-backends/games/monster/monster.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/monster-metal-build.log",
+          "started": 1795636673.559467,
+          "wallSeconds": 11.162882089614868
+        }
+      ]
+    },
+    {
+      "game": "monster",
+      "backend": "opengl",
+      "passed": true,
+      "artifact": "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/monster-opengl",
+      "stages": [
+        {
+          "command": [
+            "nim",
+            "check",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "/Users/me/p/polyworld-backends/games/monster/monster.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/monster-opengl-check.log",
+          "started": 1795636647.109022,
+          "wallSeconds": 7.70476508140564
+        },
+        {
+          "command": [
+            "nim",
+            "c",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "--nimcache:/Users/me/p/polyworld-backends/tmp/benchmarks/cache/monster-opengl",
+            "--out:/Users/me/p/polyworld-backends/tmp/benchmarks/bin/monster-opengl",
+            "/Users/me/p/polyworld-backends/games/monster/monster.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/monster-opengl-build.log",
+          "started": 1795636654.813974,
+          "wallSeconds": 10.295016050338745
+        }
+      ]
+    },
+    {
+      "game": "monster",
+      "backend": "webgl",
+      "passed": true,
+      "artifact": "/Users/me/p/polyworld-backends/tmp/benchmarks/web/monster/monster.html",
+      "stages": [
+        {
+          "command": [
+            "nim",
+            "check",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:emscripten",
+            "/Users/me/p/polyworld-backends/games/monster/monster.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/monster-webgl-check.log",
+          "started": 1795636684.723017,
+          "wallSeconds": 7.346383094787598
+        },
+        {
+          "command": [
+            "nim",
+            "c",
+            "--hints:off",
+            "-d:release",
+            "-d:backendBench",
+            "-d:emscripten",
+            "--nimcache:/Users/me/p/polyworld-backends/tmp/benchmarks/cache/monster-webgl",
+            "/Users/me/p/polyworld-backends/games/monster/monster.nim"
+          ],
+          "exitCode": 0,
+          "log": "/Users/me/p/polyworld-backends/tmp/benchmarks/logs/monster-webgl-build.log",
+          "started": 1795636692.06965,
+          "wallSeconds": 45.867326974868774
+        }
+      ]
+    }
+  ],
+  "passed": true
+}

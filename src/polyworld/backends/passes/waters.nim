@@ -62,6 +62,7 @@ proc initWaters*() =
     noiseImage.data[index] = rgbx(value, value, value, 255)
   foamNoiseTexture = newTexture(noiseImage, linear = true, repeat = true,
     mipmaps = true)
+  foamNoiseTexture.setPassSampling(linear = true, repeat = true)
   let white = newImage(1, 1)
   white.fill(rgba(255, 255, 255, 255))
   blankTexture = newTexture(white, linear = false)
@@ -99,6 +100,7 @@ proc beginReflection*(size: IVec2) {.measure.} =
     destroy(reflectionTarget)
     reflectionTarget = newRenderTarget(size.x, size.y,
       colorFormat = Rgba16f)
+    reflectionTarget.color.setPassSampling(linear = true)
   pushTarget(reflectionTarget)
   reflectionActive = true
   clearDepth()
@@ -140,6 +142,8 @@ proc captureScene*(size: IVec2) {.measure.} =
     destroy(sceneCopy)
     sceneCopy = newRenderTarget(size.x, size.y,
       colorFormat = source.color.pixelFormat, stencil = source.stencil)
+    sceneCopy.color.setPassSampling(linear = true)
+    sceneCopy.depth.setPassSampling(linear = false)
   copyTarget(source, sceneCopy, color = true, depth = true)
 
 proc drawWaterBody*(body: WaterBody, viewProjection: Mat4, eye: Vec3, windowSize: IVec2,

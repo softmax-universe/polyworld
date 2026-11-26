@@ -2,7 +2,14 @@ import
   metal4, pixie,
   common, ../../[assets, texturedata]
 
-const TextureType2DArray = 3'u
+import windy/platforms/apple/objc as nativeObjc
+
+when defined(metalProfile):
+  import profiles
+
+const
+  TextureType2DArray = 3'u
+  UploadRowAlignment = 256
 
 type
   Texture* = MetalTexture
@@ -20,6 +27,14 @@ objc:
     withBytes: pointer, bytesPerRow: uint, bytesPerImage: uint
   ) =
     ## Uploads one complete mip level of one array slice.
+  proc copyFromBuffer(
+    self: MTLBlitCommandEncoder, x: MTLBuffer,
+    sourceOffset, sourceBytesPerRow, sourceBytesPerImage: uint,
+    sourceSize: MTLSize, toTexture: MTLTexture,
+    destinationSlice, destinationLevel: uint,
+    destinationOrigin: MTLOrigin
+  ) =
+    ## Copies staged pixels into one array slice after earlier queued draws.
 
 proc deleteTexture*(texture: var Texture) =
   ## Releases an owned texture and clears the caller's handle.
@@ -40,6 +55,9 @@ proc allocateTexture(
     raise newException(AssetError, "Invalid Metal texture dimensions.")
   if metalRenderer == nil or metalRenderer.ctx.device.isNil:
     raise newException(AssetError, "Initialize Metal before creating textures.")
+  let pool = nativeObjc.NSAutoreleasePool.new()
+  defer:
+    pool.release()
   let descriptor = MTLTextureDescriptor.texture2DDescriptorWithPixelFormat(
     format, width.uint, height.uint, mipCount > 1
   )
@@ -55,16 +73,17 @@ proc allocateTexture(
   try:
     result = textureFromNative(
       handle, width, height, format, ownsHandle = true,
-      linear = linear, repeat = repeat
+      linear = linear, repeat = repeat,
+      anisotropy = (if arrayTexture: 8'u else: 1'u)
     )
   except:
     handle.release()
     raise
 
-proc uploadArrayLevel(
+proc initializeArrayLevel(
   texture: TextureArray, layer, level, width, height: int, data: pointer
 ) =
-  ## Copies complete RGBA pixels into one mip of an allocated native slice.
+  ## Populates a fresh array before any GPU command can access its storage.
   texture.handle.replaceRegion(
     MTLRegion(
       origin: MTLOrigin(x: 0, y: 0, z: 0),
@@ -89,7 +108,7 @@ proc loadTerrainTextures*(
     for layer, bytes in source.files:
       for level in 0 ..< info.levelCount:
         let pixels = decodeBc3(bytes, source.infos[layer], level)
-        uploadArrayLevel(
+        initializeArrayLevel(
           result.texture, layer, level,
           max(1, info.width shr level), max(1, info.height shr level),
           unsafeAddr pixels[0]
@@ -111,7 +130,7 @@ proc createTextureArray*(
   try:
     for layer, levels in layers:
       for level, mip in levels:
-        uploadArrayLevel(
+        initializeArrayLevel(
           result, layer, level, mip.width, mip.height, mip.data[0].addr
         )
   except:
@@ -121,16 +140,47 @@ proc createTextureArray*(
 proc updateTextureArrayLayer*(
   texture: TextureArray, layer: int, levels: seq[Image]
 ) =
-  ## Replaces one allocated array layer with its explicit RGBA mip chain.
+  ## Orders layer updates between earlier and later GPU draws without waiting.
   validateTextureLevels(levels)
   if texture == nil or layer < 0 or
     layer >= texture.handle.arrayLength().int or
     levels.len > texture.handle.mipmapLevelCount().int or
     levels[0].width != texture.width or levels[0].height != texture.height:
       raise newException(AssetError, "Invalid texture array layer.")
+  let pool = nativeObjc.NSAutoreleasePool.new()
+  defer:
+    pool.release()
+  ensureCommands()
+  flushEncoder()
+  let encoder = metalRenderer.commandBuffer.blitCommandEncoder()
+  if encoder.isNil:
+    raise newException(AssetError, "Could not create a texture upload encoder.")
+  when defined(metalProfile):
+    profileBlitPass()
+  defer:
+    encoder.endEncoding()
   for level, mip in levels:
-    uploadArrayLevel(
-      texture, layer, level, mip.width, mip.height, mip.data[0].addr
+    let
+      rowBytes = mip.width * 4
+      rowStride = (rowBytes + UploadRowAlignment - 1) and
+        not (UploadRowAlignment - 1)
+    var
+      padded: seq[byte]
+      data = cast[pointer](mip.data[0].addr)
+    if rowStride != rowBytes:
+      padded.setLen(rowStride * mip.height)
+      for row in 0 ..< mip.height:
+        copyMem(
+          padded[row * rowStride].addr,
+          cast[pointer](cast[uint](data) + (row * rowBytes).uint),
+          rowBytes
+        )
+      data = padded[0].addr
+    let upload = uploadBytes(data, rowStride * mip.height)
+    encoder.copyFromBuffer(
+      upload.buffer, upload.offset, rowStride.uint, 0,
+      MTLSize(width: mip.width.uint, height: mip.height.uint, depth: 1),
+      texture.handle, layer.uint, level.uint, MTLOrigin()
     )
 
 proc updateDataTexture(

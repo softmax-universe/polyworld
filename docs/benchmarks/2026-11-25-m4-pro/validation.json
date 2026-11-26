@@ -1,0 +1,83 @@
+{
+  "passed": true,
+  "caseCount": 63,
+  "expectedCaseCount": 63,
+  "measuredFrameCount": 37800,
+  "expectedMeasuredFrameCount": 37800,
+  "tickChecks": [
+    {
+      "game": "gota",
+      "referenceBackend": "opengl",
+      "referenceTrial": 1,
+      "cases": 9,
+      "startTick": 2928,
+      "endTick": 3168,
+      "equalEveryMeasuredFrame": true,
+      "mismatches": []
+    },
+    {
+      "game": "lvd",
+      "referenceBackend": "metal",
+      "referenceTrial": 1,
+      "cases": 9,
+      "startTick": 48,
+      "endTick": 288,
+      "equalEveryMeasuredFrame": true,
+      "mismatches": []
+    },
+    {
+      "game": "cta",
+      "referenceBackend": "webgl",
+      "referenceTrial": 1,
+      "cases": 9,
+      "startTick": 48,
+      "endTick": 288,
+      "equalEveryMeasuredFrame": true,
+      "mismatches": []
+    },
+    {
+      "game": "cac",
+      "referenceBackend": "opengl",
+      "referenceTrial": 1,
+      "cases": 9,
+      "startTick": 1,
+      "endTick": 4,
+      "equalEveryMeasuredFrame": true,
+      "mismatches": []
+    },
+    {
+      "game": "heartleaf",
+      "referenceBackend": "metal",
+      "referenceTrial": 1,
+      "cases": 9,
+      "startTick": 48,
+      "endTick": 288,
+      "equalEveryMeasuredFrame": true,
+      "mismatches": []
+    },
+    {
+      "game": "crewrift",
+      "referenceBackend": "webgl",
+      "referenceTrial": 1,
+      "cases": 9,
+      "startTick": 168,
+      "endTick": 408,
+      "equalEveryMeasuredFrame": true,
+      "mismatches": []
+    },
+    {
+      "game": "monster",
+      "referenceBackend": "opengl",
+      "referenceTrial": 1,
+      "cases": 9,
+      "startTick": 60,
+      "endTick": 360,
+      "equalEveryMeasuredFrame": true,
+      "mismatches": []
+    }
+  ],
+  "errors": [],
+  "notes": [
+    "Matching tick arrays verify simulation progression, not pixel or world-state identity."
+  ]
+}

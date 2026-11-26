@@ -143,7 +143,8 @@ proc configureSoundLaunch*(silent: bool, explicit = true) =
 
 proc readPreferences*(app: string): Preferences =
   ## Loads native or browser settings through Windy's configuration storage.
-  let bytes = getConfig(app, "settings.json")
+  let bytes = when defined(backendBench): ""
+    else: getConfig(app, "settings.json")
   result = Preferences()
   if bytes.len > 0:
     try:

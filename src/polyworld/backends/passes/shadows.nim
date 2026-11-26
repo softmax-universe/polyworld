@@ -44,6 +44,7 @@ proc initSunShadows*(
     sunTargets[step] = newRenderTarget(
       SunShadowMapSize, SunShadowMapSize, color = false, depth = true
     )
+    sunTargets[step].depth.setPassSampling(comparison = true)
     sunShadowTextures[step] = sunTargets[step].depth
     pushTarget(sunTargets[step])
     clearDepth()
@@ -121,6 +122,7 @@ proc initUnshadowedShadows*() =
   if unshadowedTarget != nil:
     return
   unshadowedTarget = newRenderTarget(1, 1, color = false, depth = true)
+  unshadowedTarget.depth.setPassSampling(linear = false, comparison = true)
   pushTarget(unshadowedTarget)
   clearDepth()
   popTarget()

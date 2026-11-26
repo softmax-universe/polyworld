@@ -83,7 +83,7 @@ proc drawCardReadingView(
 proc runDuel*(app: App) =
   ## Presents a duel using public replay names when they are available.
   bindApp(app)
-  when not defined(emscripten):
+  when not defined(emscripten) and not defined(backendBench):
     app.useReplayRecording()
   app.setBattlefield(2)
   let names = if app.replay != nil: app.replay.playerNames()
@@ -95,13 +95,16 @@ proc runDuel*(app: App) =
       sessionOptions.common.pauseOnStart)
     # Captures can replay a cast from its visual seed.
     play =
-      if captureActive():
-        when defined(takeScreenshot):
-          initTablePlay(parseBiggestInt(getEnv("CAC_VFX_SEED", "20260909")))
-        else:
-          initTablePlay(20260909)
+      when defined(backendBench):
+        initTablePlay(42)
       else:
-        initTablePlay()
+        if captureActive():
+          when defined(takeScreenshot):
+            initTablePlay(parseBiggestInt(getEnv("CAC_VFX_SEED", "20260909")))
+          else:
+            initTablePlay(20260909)
+        else:
+          initTablePlay()
     animationTime = 0.0'f32
     hudTime = 0.0'f
     lastFrameTime = epochTime()
@@ -193,7 +196,7 @@ proc runDuel*(app: App) =
   proc startDuel(seats: openArray[Seat], seed: int64) =
     ## Deals the exact setup that the local replay will reproduce.
     game = newGame(seats, seed, recordEvents = true)
-    when not defined(emscripten):
+    when not defined(emscripten) and not defined(backendBench):
       play.recorder = app.beginReplayRecording(seats, seed, setupMessages)
       setupMessages.setLen(0)
     play.resetTable()
@@ -611,8 +614,12 @@ proc runDuel*(app: App) =
   window.onButtonPress = proc(button: Button) =
     ## Keep the shared UI size shortcuts available during a battle.
     discard window.scaleKey(button, app.preferences, sk.uiScale, AppName)
+  var benchmarkFinished = false
   window.onFrame = proc() =
     when defined(frameBench): beginBenchFrame(window)
+    let benchmarkGameplay = phase == PlayGame
+    if benchmarkGameplay:
+      beginBenchmarkFrame("cac", window.size)
     app.beginCaptureFrame()
     when not defined(emscripten):
       window.updateWindowSettings()
@@ -1044,7 +1051,7 @@ proc runDuel*(app: App) =
         play.presentationIdle(game) and not play.attackActive)
       for cue in play.audio.takeSounds():
         playSound(cue)
-    when not defined(emscripten):
+    when not defined(emscripten) and not defined(backendBench):
       if phase == PlayGame:
         app.updateReplaySaving(game.gameOver or app.atLaunchTickLimit())
     menu.draw(app)
@@ -1052,6 +1059,11 @@ proc runDuel*(app: App) =
     sk.drawHudFaces()
     benchStop(Ui)
     benchEndFrame("duel")
+    if benchmarkGameplay and endBenchmarkFrame(game.turnNumber):
+      benchmarkFinished = true
+      when not defined(emscripten):
+        window.closeRequested = true
+      return
     var screenshotComplete = false
     when defined(takeScreenshot):
       if existsEnv("CAC_CAPTURE_SEQUENCE"):
@@ -1084,9 +1096,10 @@ proc runDuel*(app: App) =
       app.replay.reportFrame()
 
   try:
-    while not window.closeRequested and not app.returnToMenu:
-      pollEvents()
-      waitForDisplay()
+    while not window.closeRequested and not app.returnToMenu and
+      not benchmarkFinished:
+        pollEvents()
+        waitForDisplay()
   finally:
     stopSounds()
     window.onFrame = nil

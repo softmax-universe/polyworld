@@ -29,7 +29,8 @@ proc makePatternTexture(kind: FxTexture): GpuImage =
     pixels = buildFxPattern(kind)
     image = newImage(FxTextureSize, FxTextureSize)
   copyMem(image.data[0].addr, pixels[0].unsafeAddr, pixels.len)
-  newTexture(image, linear = true, repeat = true, mipmaps = true)
+  result = newTexture(image, linear = true, repeat = true, mipmaps = true)
+  result.setPassSampling(linear = true, repeat = true)
 
 proc initFxRenderer*(): FxRenderer {.raises: [FxMeshError].} =
   ## Compiles the shared Shady program and creates its pattern textures.

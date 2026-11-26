@@ -3,7 +3,7 @@
 when not defined(useMetal4):
   {.error: "Run this rendering regression with -d:useMetal4.".}
 
-include ../src/polyworld/backends/metal/quadterrain
+include ../src/polyworld/backends/passes/quadterrain
 import windy
 
 const TestSize = 192

@@ -1,0 +1,41 @@
+{
+  "passed": true,
+  "caseCount": 63,
+  "measuredFrameCount": 37800,
+  "equalEveryMeasuredTick": true,
+  "tickRanges": {
+    "crewrift": [
+      168,
+      408
+    ],
+    "monster": [
+      60,
+      360
+    ],
+    "heartleaf": [
+      48,
+      288
+    ],
+    "cac": [
+      1,
+      4
+    ],
+    "lvd": [
+      48,
+      288
+    ],
+    "cta": [
+      48,
+      288
+    ],
+    "gota": [
+      2928,
+      3168
+    ]
+  },
+  "notes": [
+    "Tick equality verifies progression, not complete state or pixel identity.",
+    "Engine pass/allocation counters exclude Silky internal allocations and encoders.",
+    "GPU spans include the full shared command buffer, including Silky."
+  ]
+}

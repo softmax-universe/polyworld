@@ -11,6 +11,7 @@ const
   BenchStep* = 1'f32 / 60
   Backend =
     when defined(emscripten): "WebGL"
+    elif defined(useMetal4): "Metal"
     elif defined(useVulkan): "Vulkan"
     elif defined(useDirectX): "DirectX"
     else: "OpenGL"

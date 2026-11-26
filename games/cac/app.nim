@@ -379,7 +379,7 @@ proc closeCapture*(app: App) =
 
 proc beginCaptureFrame*(app: App) =
   ## Renders screenshots offscreen without depending on a visible Cocoa drawable.
-  if captureActive():
+  if captureActive() or defined(backendBench):
     when not defined(emscripten):
       doAssert not app.window.visible, "Capture windows must stay hidden"
     app.captureFramebuffer =

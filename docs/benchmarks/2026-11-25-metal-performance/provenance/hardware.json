@@ -1,0 +1,48 @@
+{
+  "collectedAt": "2026-11-25T19:29:31.016840+00:00",
+  "model": "MacBook Pro",
+  "modelIdentifier": "Mac16,8",
+  "chip": "Apple M4 Pro",
+  "cpuCores": 14,
+  "performanceCores": 10,
+  "efficiencyCores": 4,
+  "gpuCores": 20,
+  "memoryBytes": 25769803776,
+  "metalSupport": "Metal 4",
+  "os": {
+    "name": "macOS",
+    "version": "27.2.1",
+    "build": "26B131"
+  },
+  "display": {
+    "name": "ROG PG279Q",
+    "width": 2560,
+    "height": 1440,
+    "refreshHz": 144,
+    "asleepAtCollection": true
+  },
+  "software": {
+    "nim": "2.4.0",
+    "nimCommit": "14991af742d0833503741fd9a0918133d1bcf8a4",
+    "clang": "Apple clang 21.0.0 (clang-2100.4.1.1)",
+    "emscripten": "6.0.1-git",
+    "chrome": "158.0.8127.37"
+  },
+  "configuredPowerMode": {
+    "AC": 0,
+    "battery": 0
+  },
+  "previousValidatedWebglRenderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro, Unspecified Version)",
+  "buildNotes": [
+    "Native release build, ARM64; bassyNative enables BASIC JIT where supported.",
+    "WebGL release and -O3 link; wasm32, ARC, goto exceptions, Asyncify, threads off.",
+    "Browser size is CSS viewport times DPR; native Windy size is physical backing pixels."
+  ],
+  "methodNotes": [
+    "Do not compare capture-mode default sample counts: OpenGL screenshot target is single-sample, Metal frame target follows game MSAA.",
+    "Time synchronized rendered work separately from presentation/vsync and browser requestAnimationFrame intervals.",
+    "Completion wait includes GPU completion and one-pixel readback overhead; it is not a GPU timestamp duration."
+  ],
+  "powerSourceAtMeasurement": "AC Power",
+  "backgroundApplications": "User applications remained open; working-desktop measurements."
+}

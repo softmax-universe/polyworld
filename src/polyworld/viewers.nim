@@ -3,9 +3,12 @@
 import
   std/[math, os, strutils, times],
   chroma, pixie, silky, vmath, windy,
-  actioncam, assets, fullscreens, player, screenshots, renderer
+  actioncam, assets, fullscreens, player, screenshots, renderer, benchmarks
 
-export screenshots, renderer
+export screenshots, renderer, benchmarks
+
+when defined(frameBench) and defined(backendBench):
+  {.error: "Select either frameBench or backendBench, not both".}
 
 when defined(frameBench):
   import framebench
@@ -85,7 +88,7 @@ proc viewingDelta*(clock: var ViewingClock, window: Window): float32 =
     result = max(now - clock.last, 0).float32
   clock.last = now
   clock.hidden = hidden
-  if captureActive() or defined(frameBench):
+  if captureActive() or defined(frameBench) or defined(backendBench):
     result = 1.0'f / 60
 
 proc damping*(rate, dt: float32): float32 =
@@ -169,15 +172,41 @@ proc initGameWindow*(
     visible = true
 ): (Window, Silky) =
   ## Creates the viewer and renderer, keeping screenshot captures hidden.
+  let
+    selectedSize =
+      when defined(frameBench):
+        ivec2(BenchWidth, BenchHeight)
+      elif defined(backendBench):
+        ivec2(1280, 800)
+      else:
+        size
+    selectedMsaa =
+      when defined(frameBench):
+        msaaDisabled
+      elif defined(backendBench):
+        when BackendBenchSamples == 1:
+          msaaDisabled
+        elif BackendBenchSamples == 2:
+          msaa2x
+        elif BackendBenchSamples == 4:
+          msaa4x
+        elif BackendBenchSamples == 8:
+          msaa8x
+        else:
+          {.error: "backendBenchSamples must be 1, 2, 4, or 8".}
+      else:
+        msaa
   let window = newWindow(
     title,
-    (when defined(frameBench): ivec2(BenchWidth, BenchHeight) else: size),
-    visible = visible and not captureActive(),
-    vsync = vsync and not captureActive() and not defined(frameBench),
-    msaa = (when defined(frameBench): msaaDisabled else: msaa)
+    selectedSize,
+    visible = visible and not captureActive() and
+      (not defined(backendBench) or defined(emscripten)),
+    vsync = vsync and not captureActive() and not defined(frameBench) and
+      not defined(backendBench),
+    msaa = selectedMsaa
   )
   window.prepareDesktopFullscreen()
-  initRenderer(window, (when defined(frameBench): 1 else: max(1, ord(msaa))))
+  initRenderer(window, max(1, ord(selectedMsaa)))
   let sk = newGameUi(window, atlasPath)
   sk.applyThemePatches()
   (window, sk)
@@ -227,7 +256,7 @@ proc holdSplash*(
     seconds = SplashSeconds
 ) =
   ## Keeps the splash up until the hold time elapses.
-  if captureActive() or defined(emscripten):
+  if captureActive() or defined(emscripten) or defined(backendBench):
     drawSplash(sk, window, splash.name)
   else:
     while epochTime() - splash.startedAt < seconds:
@@ -246,7 +275,8 @@ proc presentFrame*(window: Window, paceHz = 60) =
   when defined(frameBench) and not defined(pipelinedBench): endBenchFrame(window)
   window.presentRenderer()
   when defined(frameBench) and defined(pipelinedBench): endPresentedBenchFrame(window)
-  if paceHz <= 0 or captureActive() or defined(frameBench):
+  if paceHz <= 0 or captureActive() or defined(frameBench) or
+      defined(backendBench):
     presentDeadline = 0
     presentPaceHz = 0
     return
@@ -272,9 +302,13 @@ proc frameDelta*(
   let now = epochTime()
   result = clamp(now - lastFrameTime, 0.0, 0.1).float32
   lastFrameTime = now
-  when defined(frameBench): result = BenchStep
+  when defined(frameBench):
+    result = BenchStep
   else:
-    if captureActive(): result = captureStep
+    if defined(backendBench):
+      result = 1.0'f / 60
+    elif captureActive():
+      result = captureStep
 
 proc simulationActive*(transport: Player): bool =
   ## Returns whether presentation should advance on this frame.

@@ -390,7 +390,8 @@ proc runGraphics*(network: NetworkMatch = nil,
   ## Owns match resources; the application window survives returning to the main menu.
   let
     captureHidden = hidden or captureActive()
-    saveAutomatically = autoSaveReplay and not captureActive()
+    saveAutomatically = autoSaveReplay and not captureActive() and
+      not defined(backendBench)
   initializeGraphics(visible = not captureHidden)
   var captureTarget: ScreenshotTarget
   defer: releaseScreenshotTarget(captureTarget)
@@ -2061,8 +2062,10 @@ proc runGraphics*(network: NetworkMatch = nil,
     holdSplash(sk, window, splash)
   if hooks.ready != nil:
     hooks.ready(actionCam)
+  var benchmarkFinished = false
   window.onFrame = proc() =
     when defined(frameBench): beginBenchFrame(window)
+    beginBenchmarkFrame("lvd", window.size)
     profileBlock "frame":
       discard beginScreenshotFrame(captureTarget, window, captureHidden)
       updateSounds()
@@ -2476,6 +2479,11 @@ proc runGraphics*(network: NetworkMatch = nil,
       finishHumanCommunicationFrame()
       if hooks.frame != nil and hooks.frame():
         leaveMatch = true
+      if endBenchmarkFrame(run.world.tick.int):
+        benchmarkFinished = true
+        when not defined(emscripten):
+          window.closeRequested = true
+        return
       when not defined(emscripten):
         if captureFrame(window, screenshotFrame, 3, "light_vs_dark.png"):
           window.closeRequested = true
@@ -2647,7 +2655,7 @@ proc runGraphics*(network: NetworkMatch = nil,
       cancelGameplayGestures()
       window.runeInputEnabled = false
 
-  while not window.closeRequested and not leaveMatch:
+  while not window.closeRequested and not leaveMatch and not benchmarkFinished:
     pollEvents()
     waitForDisplay()
   window.onFrame = nil

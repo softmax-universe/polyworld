@@ -204,8 +204,8 @@ proc readFramePixel*(): array[4, uint8] =
   )
 
 when defined(backendThroughput):
-  type BenchmarkGpuStats* = object
-    submittedFrames*, completedFrames*, maxOutstanding*, capacity*: int
+  from ../../measurements import BenchmarkGpuStats
+  export BenchmarkGpuStats
 
   var
     benchmarkFrames: seq[MTLCommandBuffer]

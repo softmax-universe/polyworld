@@ -1,38 +1,22 @@
 import pixie, shady, vmath, windy
 import polyworld/backends/native/common
 
-var
-  tint: Uniform[Vec4]
-  sourceTexture: Uniform[Sampler2D]
-  sampleUv: Uniform[Vec2]
+import fixtures/renderconformance
 
-proc vertex(gl_Position: var Vec4, position: Vec2) =
-  ## Places the smoke triangle in clip space.
-  gl_Position = vec4(position.x, position.y, 0, 1)
-
-proc fragment(fragColor: var Vec4) =
-  ## Emits a uniform color for pixel verification.
-  fragColor = tint
-
-proc textureFragment(fragColor: var Vec4) =
-  ## Samples a texel for immutable texture upload verification.
-  fragColor = texture(sourceTexture, sampleUv)
-
-let window = newWindow("Native frame validation", ivec2(64, 64), visible = false)
+let window = newWindow("Native frame validation", ivec2(FixtureSize), visible = false)
 initNative(window)
 let
   program = newProgram(nativeStage(vertex, shaderVertex),
     nativeStage(fragment, shaderFragment), VertexLayout(stride: 8, attributes: @[
       VertexAttribute(name: "position", format: Float2)
     ]))
-  vertices = newBuffer([-1.0'f, -1, 1, -1, 0, 1])
-  fullscreen = newBuffer([-1.0'f, -1, 3, -1, -1, 3])
+  vertices = newBuffer(TriangleVertices)
+  fullscreen = newBuffer(FullscreenVertices)
 program.setUniform("tint", vec4(1, 0, 0, 1))
 beginFrame(64, 64, color(0, 0, 0, 1))
 draw(program, vertices, 3, DrawState(depthTest: true, depthWrite: true))
 let firstImage = captureTargetImage()
-doAssert firstImage[32, 32].r > 240
-doAssert firstImage[0, 0].r == 0
+firstImage.verifyTriangle(rgbx(255, 0, 0, 255))
 let wire = newBuffer([7'u16, 0, 1, 2])
 clear(color(0, 0, 0, 1))
 draw(program, vertices, 3, DrawState(wireframe: true), indices = wire, first = 1, index32 = false)
@@ -52,7 +36,7 @@ draw(program, vertices, 3, DrawState(depthTest: true, depthWrite: true,
   stencilTest: true, stencilWrite: true, stencilReference: 7,
   stencilCompare: Always))
 let secondImage = captureTargetImage()
-doAssert secondImage[32, 32].g > 240
+secondImage.verifyTriangle(rgbx(0, 255, 0, 255))
 let resolvedCopy = snapshotTarget()
 pushTarget(resolvedCopy)
 clear(color(1, 1, 1, 1), depth = false)
@@ -88,10 +72,8 @@ doAssert resumedImage[30, 20].g == 0
 beginFrame(64, 64, color(0, 0, 0, 1))
 let
   image = newImage(1, 1)
-  left = newBuffer([-1.0'f, -1, 0, -1, 0, 1,
-    -1.0'f, -1, 0, 1, -1, 1])
-  right = newBuffer([0.0'f, -1, 1, -1, 1, 1,
-    0.0'f, -1, 1, 1, 0, 1])
+  left = newBuffer(LeftVertices)
+  right = newBuffer(RightVertices)
   sampled = newProgram(nativeStage(vertex, shaderVertex),
     nativeStage(textureFragment, shaderFragment), VertexLayout(stride: 8, attributes: @[VertexAttribute(name: "position", format: Float2)]))
 image.fill(color(1, 0, 0, 1))
@@ -103,9 +85,7 @@ image.fill(color(0, 1, 0, 1))
 texture.updateTexture(image)
 draw(sampled, right, 6)
 let uploadImage = captureTargetImage()
-doAssert uploadImage[16, 32].r > 240
-# This verifies the earlier draw retained the original texture pixels.
-doAssert uploadImage[48, 32].g > 240
+uploadImage.verifySplit(rgbx(255, 0, 0, 255), rgbx(0, 255, 0, 255))
 
 let stripes = newImage(2, 2)
 stripes[0, 0] = rgbx(255, 0, 0, 255)
@@ -132,9 +112,7 @@ pushTarget(target)
 program.setUniform("tint", vec4(0, 1, 0, 1))
 draw(program, right, 6)
 let overlayImage = captureTargetImage()
-doAssert overlayImage[16, 32].r > 240
-# This verifies rebinding cannot resolve stale multisample color over UI.
-doAssert overlayImage[48, 32].g > 240
+overlayImage.verifySplit(rgbx(255, 0, 0, 255), rgbx(0, 255, 0, 255))
 clear(color(0, 0, 0, 1), stencil = true)
 doAssert target.renderSamples() == gpuRenderer.ctx.sampleCount(4, Rgba8, DepthStencil)
 popTarget()
@@ -165,8 +143,9 @@ endFrame(true)
 # Each queued list owns its upload bytes and descriptors until its fence signals.
 # Update in place between two draws, then retire that geometry before presenting.
 setFrameSamples(1)
-let leftQuad = [-1'f32, -1, 0, -1, 0, 1, -1, -1, 0, 1, -1, 1]
-let rightQuad = [0'f32, -1, 1, -1, 1, 1, 0, -1, 1, 1, 0, 1]
+let
+  leftQuad = LeftVertices
+  rightQuad = RightVertices
 for frame in 0 .. 6:
   beginFrame(80, 48, color(0, 0, 0, 1))
   let geometry = newBuffer(leftQuad)

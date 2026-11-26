@@ -1,6 +1,5 @@
 ## Active game-frame timings for builds made with -d:frameBench.
-import std/[json, monotimes, times]
-import windy, vmath, renderer
+import windy, vmath, renderer, measurements
 when not defined(emscripten): import sounds
 
 const
@@ -8,65 +7,57 @@ const
   BenchFrames* {.intdefine.} = 180
   BenchWidth* {.intdefine.} = 800
   BenchHeight* {.intdefine.} = 560
-  BenchStep* = 1'f32 / 60
-  Backend =
-    when defined(emscripten): "WebGL"
-    elif defined(useMetal4): "Metal"
-    elif defined(useVulkan): "Vulkan"
-    elif defined(useDirectX): "DirectX"
-    else: "OpenGL"
+  BenchStep* = BenchmarkStep.float32
+  Mode = when defined(pipelinedBench): Presentation else: Latency
 
 static:
   doAssert BenchWarmup > 0 and BenchFrames > 0
 
+let configuration = benchmarkConfig(Mode, BenchWidth, BenchHeight,
+  warmup = BenchWarmup, frames = BenchFrames)
 var
-  started, previousStart: MonoTime
-  intervalMs: float64
-  active: bool
-  frames: int
-  samples, intervals: seq[float64]
+  clock = FrameClock(config: configuration)
+  measurement = newBenchmarkReport(configuration)
 
 proc beginBenchFrame*(window: Window) =
-  doAssert window.size == ivec2(BenchWidth, BenchHeight),
+  ## Starts the shared measurement clock after validating the viewport.
+  doAssert window.size == ivec2(configuration.width.int32, configuration.height.int32),
     "Benchmark viewport was " & $window.size
-  active = true
-  previousStart = started
-  started = getMonoTime()
-  intervalMs = (started - previousStart).inNanoseconds.float64 * 1e-6
+  clock.beginMeasurement(benchmarkNow())
 
-proc report(window: Window) =
-  if samples.len == BenchFrames:
-    let record = %*{"backend": Backend, "width": window.size.x, "height": window.size.y,
-      "mode": (when defined(pipelinedBench): "pipelined" else: "synchronized"),
-      "warmup": BenchWarmup, "frame_ms": samples, "interval_ms": intervals}
-    echo "POLYWORLD_FRAME_BENCH ", $record
-    when not defined(emscripten): closeSounds()
-    quit(0)
+proc report() =
+  ## Publishes the common report with aliases for existing native runners.
+  if not clock.measurementComplete():
+    return
+  measurement.completeReport()
+  echo "POLYWORLD_FRAME_BENCH ", measurement.benchmarkPayload(legacyFrame = true)
+  when not defined(emscripten): closeSounds()
+  quit(0)
 
 proc endBenchFrame*(window: Window) =
-  if not active: return
+  ## Measures completed work before presentation without changing its timing.
+  if not clock.active:
+    return
   finishGpu()
-  let elapsed = (getMonoTime() - started).inNanoseconds.float64 * 1e-6
-  active = false
-  inc frames
-  if frames > BenchWarmup:
-    samples.add elapsed
-    intervals.add intervalMs
-  report(window)
+  let elapsed = benchmarkNow() - clock.started
+  if clock.finishMeasurement():
+    measurement.framesData.add FrameSample(frame: clock.frames,
+      workMs: elapsed, intervalMs: clock.intervalMs)
+  report()
 
 when defined(pipelinedBench):
-  var previousPresent: MonoTime
+  var previousPresent: float64
 
   proc endPresentedBenchFrame*(window: Window) =
-    # Account for every measured frame, event-loop time, and the final drain.
-    # Only the warmup boundary and final boundary synchronize the GPU.
-    if not active: return
-    active = false
-    inc frames
-    if frames == BenchWarmup or frames == BenchWarmup + BenchFrames: finishGpu()
-    let now = getMonoTime()
-    if frames > BenchWarmup:
-      samples.add (now - started).inNanoseconds.float64 * 1e-6
-      intervals.add (now - previousPresent).inNanoseconds.float64 * 1e-6
+    ## Measures presentation cadence, draining only at measurement boundaries.
+    if not clock.active:
+      return
+    let measured = clock.finishMeasurement()
+    if clock.frames == clock.config.warmup or clock.measurementComplete():
+      finishGpu()
+    let now = benchmarkNow()
+    if measured:
+      measurement.framesData.add FrameSample(frame: clock.frames,
+        workMs: now - clock.started, intervalMs: now - previousPresent)
     previousPresent = now
-    report(window)
+    report()

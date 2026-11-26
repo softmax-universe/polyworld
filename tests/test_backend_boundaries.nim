@@ -5,7 +5,7 @@ import std/[os, re, strutils]
 const Root = currentSourcePath().parentDir.parentDir
 
 let
-  nativeSymbols = re"\b(?:opengl|GL(?:uint|int|enum|sizei|float|double|boolean|bitfield)|GL_[A-Z0-9_]+|gl[A-Z][a-z][a-zA-Z0-9]*)\b"
+  nativeSymbols = re"\b(?:(?<!\x22)opengl(?!\x22)|GL(?:uint|int|enum|sizei|float|double|boolean|bitfield)|GL_[A-Z0-9_]+|gl[A-Z][a-z][a-zA-Z0-9]*)\b"
   directxSymbols = re"\b(?:ID3D12\w+|D3D12_[A-Z0-9_]+)\b"
   vulkanSymbols = re"\b(?:vkCmd\w+|vkCreate\w+|VK_[A-Z0-9_]+)\b"
   metalSymbols = re"\b(?:MTL[A-Z][a-zA-Z0-9]*|CAMetalLayer|metal4)\b"

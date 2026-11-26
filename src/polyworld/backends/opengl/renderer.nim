@@ -37,8 +37,8 @@ var
 when defined(backendThroughput):
   const BenchmarkQueueCapacity = 3
 
-  type BenchmarkGpuStats* = object
-    submittedFrames*, completedFrames*, maxOutstanding*, capacity*: int
+  from ../../measurements import BenchmarkGpuStats
+  export BenchmarkGpuStats
 
   var
     benchmarkFences: array[BenchmarkQueueCapacity, GLsync]

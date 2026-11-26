@@ -72,7 +72,7 @@ proc uploadPose(program: ShaderProgram, joints: openArray[Mat4]) =
   if joints.len > 128:
     raise newException(GltfError, "Toon supports at most 128 skin joints.")
   if joints.len > 0:
-    when defined(useDirectX) or defined(useVulkan):
+    when not defined(useMetal4):
       program.setUniform("toonJointMatrices", joints)
     else:
       var palette: array[128, Mat4]

@@ -85,6 +85,9 @@ proc mipCount*(width, height: int): int =
 proc destroy*(buffer: VertexBuffer) =
   ## Releases owned buffer storage without changing caller bindings.
   if buffer != nil and buffer.handle != 0:
+    for binding in buffer.arrays.mitems:
+      glDeleteVertexArrays(1, binding.vao.addr)
+    buffer.arrays.setLen(0)
     glDeleteBuffers(1, buffer.handle.addr)
     buffer.handle = 0
     buffer.size = 0

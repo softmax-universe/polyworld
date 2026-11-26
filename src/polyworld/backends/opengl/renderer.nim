@@ -60,6 +60,7 @@ proc initRenderer*(window: Window, samples = 1) =
 
 proc shutdownRenderer*() =
   ## Releases shared model resources before the active context is closed.
+  passapi.endSceneDraws()
   passMeshes.clearModelResources()
   passapi.destroy(uiProgram)
   uiProgram = nil
@@ -72,6 +73,7 @@ proc newGameUi*(window: Window, atlasPath: string): Silky =
 
 proc presentRenderer*(window: Window) =
   ## Presents the completed OpenGL back buffer.
+  passapi.endSceneDraws()
   passapi.gpuRenderer.active = false
   when not defined(backendBench):
     window.swapBuffers()
@@ -132,6 +134,7 @@ proc bindFrameTarget*(target: FramebufferHandle = 0) =
 
 proc clearFrame*(value: Color, depth = true, stencil = false) =
   ## Clears the requested attachments with writable depth and stencil.
+  passapi.invalidateDrawState()
   glClearColor(value.r, value.g, value.b, value.a)
   var mask = GL_COLOR_BUFFER_BIT
   if depth:
@@ -145,6 +148,7 @@ proc clearFrame*(value: Color, depth = true, stencil = false) =
 
 proc prepareUi*(sk: Silky) =
   ## Restores the drawing state needed by a UI pass.
+  passapi.endSceneDraws()
   passapi.clearStencilState()
   glDisable(GL_DEPTH_TEST)
   glDisable(GL_STENCIL_TEST)
@@ -157,10 +161,17 @@ proc prepareUi*(sk: Silky) =
 
 proc finishUi*(sk: Silky) =
   ## Submits queued UI geometry into the active frame target.
+  passapi.endSceneDraws()
   sk.endUi()
+
+proc beginGameUi*(sk: Silky, window: Window, size: IVec2) =
+  ## Return the context before Silky begins an application UI pass.
+  passapi.endSceneDraws()
+  sk.beginUi(window, size)
 
 proc beginStencil*(reference: int) =
   ## Marks fragments from the following character draws.
+  passapi.invalidateDrawState()
   passapi.setStencil(true, reference)
   glEnable(GL_STENCIL_TEST)
   glStencilMask(0xff)
@@ -169,6 +180,7 @@ proc beginStencil*(reference: int) =
 
 proc endStencil*() =
   ## Ends character stencil marking.
+  passapi.invalidateDrawState()
   passapi.clearStencilState()
   glStencilMask(0)
   glDisable(GL_STENCIL_TEST)
@@ -339,12 +351,14 @@ proc releaseScreenshotTarget*(target: var ScreenshotTarget) =
 proc beginScreenshotFrame*(target: var ScreenshotTarget, window: Window,
     enabled = captureActive()): FramebufferHandle =
   ## Binds an offscreen surface when a hidden window is being captured.
+  passapi.beginSceneDraws()
   let offscreen = enabled or
     (defined(backendBench) and not defined(emscripten))
   if not offscreen:
     screenshotFrame = FrameTarget()
-    bindFrameTarget()
-    setRenderViewport(window.size)
+    glBindFramebuffer(GL_FRAMEBUFFER, 0)
+    glViewport(0, 0, window.size.x.GLsizei, window.size.y.GLsizei)
+    passapi.syncFrameTarget(0, window.size)
     return 0
   const Samples = when defined(backendBench): BackendBenchSamples else: 1
   if target.framebuffer == 0 or target.size != window.size or

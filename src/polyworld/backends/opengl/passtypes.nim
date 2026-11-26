@@ -14,10 +14,15 @@ type
     kind*: UniformKind
     components*, count*: int
     words*: seq[uint32]
+    dirtyCount*: int
+  VertexInputs* = ref object
+    stride*: int
+    attributes*: seq[tuple[slot: GLuint, format: VertexFormat, offset: int]]
   VertexBuffer* = ref object
     handle*: GLuint
     target*: GLenum
     size*: int
+    arrays*: seq[tuple[inputs: VertexInputs, vao: GLuint]]
   GpuImage* = ref object
     handle*, sampler*: GLuint
     target*, nativeFormat*: GLenum
@@ -41,19 +46,21 @@ type
     fieldLocations*: seq[GLint]
     fieldArrays*: seq[bool]
     uniforms*: Table[string, GLint]
-    textures*: Table[string, GpuImage]
     samplerUnits*: Table[string, int]
-    samplerTargets*: Table[string, GLenum]
+    samplers*: seq[tuple[location: GLint, target: GLenum, image: GpuImage]]
     attributes*: Table[string, GLint]
-    enabledAttributes*: seq[GLuint]
-    values*: OrderedTable[GLint, UniformValue]
+    defaultInputs*: VertexInputs
+    otherInputs*: seq[tuple[layout: VertexLayout, inputs: VertexInputs]]
+    values*: Table[GLint, UniformValue]
+    dirtyUniforms*: seq[GLint]
+    samplersInitialized*: bool
   TargetState* = object
     read*, draw*: GLint
     viewport*: array[4, GLint]
     target*: RenderTarget
   RendererState* = ref object
     window*: Window
-    target*, frameTarget*: RenderTarget
+    target*, frameTarget*, defaultDrawable*: RenderTarget
     viewport*: IVec2
     stack*: seq[TargetState]
     stencilOverride*: DrawState

@@ -114,10 +114,13 @@ proc drawPrimitive(renderer: CharacterRenderer, ctx: PbrContext,
   if renderer.jointMatrices.len > 128:
     raise newException(GltfError, "Character PBR supports at most 128 joints.")
   if renderer.jointMatrices.len > 0:
-    var palette: array[128, Mat4]
-    for i, joint in renderer.jointMatrices:
-      palette[i] = joint
-    shader.setUniform("jointMatrices", palette)
+    when defined(useMetal4) or defined(useDirectX) or defined(useVulkan):
+      var palette: array[128, Mat4]
+      for i, joint in renderer.jointMatrices:
+        palette[i] = joint
+      shader.setUniform("jointMatrices", palette)
+    else:
+      shader.setUniform("jointMatrices", renderer.jointMatrices)
   shader.setUniform("baseColorFactor", material.baseColorFactor.colorVector)
   let emission = vec3(material.emissiveFactor.r, material.emissiveFactor.g,
     material.emissiveFactor.b) *

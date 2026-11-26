@@ -9,7 +9,7 @@ else:
 
 export renderer
 
-when not (defined(useDirectX) or defined(useVulkan)):
+when defined(useMetal4):
   import silky, vmath, windy
   proc beginGameUi*(sk: Silky, window: Window, size: IVec2) =
     sk.beginUi(window, size)

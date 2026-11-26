@@ -14,14 +14,14 @@ type ResourceHandles = object
 proc handles(bars: WorldBarRenderer): ResourceHandles =
   ## Snapshots the concrete resources owned by the shared billboard pass.
   ResourceHandles(program: bars.gpu.program.handle,
-    vertexArray: bars.gpu.program.vao,
+    vertexArray: bars.gpu.program.stream.arrays[0].vao,
     vertexBuffer: bars.gpu.program.stream.handle,
     texture: bars.gpu.whiteTexture.handle)
 
 proc handles(shapes: ShapeRenderer): ResourceHandles =
   ## Snapshots the concrete resources owned by the shared shape pass.
   ResourceHandles(program: shapes.gpu.program.handle,
-    vertexArray: shapes.gpu.program.vao,
+    vertexArray: shapes.gpu.program.stream.arrays[0].vao,
     vertexBuffer: shapes.gpu.program.stream.handle,
     texture: shapes.gpu.whiteTexture.handle)
 

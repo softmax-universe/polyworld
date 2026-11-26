@@ -45,6 +45,14 @@ proc colorFormat(storage: GLenum): TextureFormat =
 proc syncFrameTarget*(framebuffer: GLuint, size: IVec2,
     stencil = true, main = false) =
   ## Adopts a framebuffer owned by the application without taking its lifetime.
+  let drawable = gpuRenderer.defaultDrawable
+  if framebuffer == 0 and stencil and drawable != nil and
+      drawable.width == size.x and drawable.height == size.y:
+    gpuRenderer.target = drawable
+    gpuRenderer.frameTarget = drawable
+    gpuRenderer.viewport = size
+    gpuRenderer.active = true
+    return
   let previous = saveTarget()
   glBindFramebuffer(GL_FRAMEBUFFER, framebuffer)
   defer:
@@ -151,6 +159,8 @@ proc syncFrameTarget*(framebuffer: GLuint, size: IVec2,
   gpuRenderer.active = true
   if main or gpuRenderer.frameTarget == nil or framebuffer == 0:
     gpuRenderer.frameTarget = target
+  if framebuffer == 0 and stencil:
+    gpuRenderer.defaultDrawable = target
 
 proc targetFromNative*(framebuffer: GLuint, size = IVec2()): RenderTarget =
   ## Describes a borrowed legacy framebuffer without changing active pass state.
@@ -177,6 +187,7 @@ converter borrowedTarget*(framebuffer: GLuint): RenderTarget =
 
 proc initNative*(window: Window) =
   ## Connects the shared pass state to the already selected OpenGL context.
+  gpuRenderer.defaultDrawable = nil
   gpuRenderer.window = window
   var framebuffer: GLint
   glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, framebuffer.addr)

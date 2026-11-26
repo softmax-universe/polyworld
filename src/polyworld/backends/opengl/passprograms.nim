@@ -24,7 +24,26 @@ type
     target: GLenum
     texture, sampler: GLint
 
-var drawScopeDepth = 0
+var
+  drawScopeDepth = 0
+  savedTextures: seq[SavedTexture]
+  sceneDrawsActive = false
+  sceneState: SavedDraw
+  drawStateKnown = false
+  lastDrawState: DrawState
+
+proc invalidateDrawState*() =
+  ## The frame owner can also change depth and stencil outside shared draws.
+  drawStateKnown = false
+
+proc restoreTextures() =
+  ## A unit's sampler is shared by texture targets. Unwind in reverse order.
+  for index in countdown(savedTextures.high, 0):
+    let item = savedTextures[index]
+    glActiveTexture((GL_TEXTURE0.uint32 + item.unit.uint32).GLenum)
+    glBindTexture(item.target, item.texture.GLuint)
+    glBindSampler(item.unit.GLuint, item.sampler.GLuint)
+  savedTextures.setLen(0)
 
 proc depthFragment(gl_FragCoord: Vec4, gl_FragDepth: var float32) =
   ## Supplies an explicit fragment entry point for shared depth-only passes.
@@ -149,7 +168,6 @@ proc newProgram*(vertexSource, fragmentSource: string,
     raise newException(GpuError, "OpenGL program linking failed:\n" &
       message.strip(chars = {'\0'}) & "\nVertex source:\n" & vertexSource &
       "\nFragment source:\n" & fragmentCode)
-  glGenVertexArrays(1, result.vao.addr)
   var count, capacity: GLint
   glGetProgramiv(result.handle, GL_ACTIVE_UNIFORMS, count.addr)
   glGetProgramiv(result.handle, GL_ACTIVE_UNIFORM_MAX_LENGTH, capacity.addr)
@@ -171,7 +189,7 @@ proc newProgram*(vertexSource, fragmentSource: string,
     if target != 0.GLenum and location >= 0:
       let unit = result.samplerUnits.len
       result.samplerUnits[name] = unit
-      result.samplerTargets[name] = target
+      result.samplers.add (location, target, GpuImage(nil))
       result.reflection.textures.add ShaderTextureBinding(
         name: name, index: unit, samplerIndex: unit,
         comparison: kind in [GL_SAMPLER_2D_SHADOW,
@@ -208,7 +226,7 @@ proc destroy*(program: ShaderProgram) =
   if program.handle != 0:
     glDeleteProgram(program.handle)
     program.handle = 0
-  program.textures.clear()
+  program.samplers.setLen(0)
   program.values.clear()
   program.stream.destroy()
   program.stream = nil
@@ -216,25 +234,25 @@ proc destroy*(program: ShaderProgram) =
 proc setVertexLayout*(program: ShaderProgram, layout: VertexLayout) =
   ## Selects the default vertex description for following draws.
   program.layout = layout
+  program.defaultInputs = nil
 
 proc location(program: ShaderProgram, name: string): GLint =
   ## Resolves each parameter name once, including inactive parameters.
-  let field = program.reflection.fieldIndex(uniformName(name))
-  if field >= 0:
-    return program.fieldLocations[field]
-  if name notin program.uniforms:
-    program.uniforms[name] = glGetUniformLocation(program.handle, name.cstring)
-  program.uniforms[name]
+  program.uniforms.withValue(name, cached):
+    return cached[]
+  result = glGetUniformLocation(program.handle, name.cstring)
+  program.uniforms[name] = result
 
 proc storeUniform(program: ShaderProgram, name: string, kind: UniformKind,
     components, count: int, data: pointer, words: int) =
   ## Retains parameter bytes until draw time without changing GL bindings.
-  var uniformLocation = program.location(name)
-  if uniformLocation < 0 or count == 0:
+  if count == 0:
     return
   var
-    field = program.reflection.fieldIndex(uniformName(name))
+    field = program.reflection.fieldIndex(name)
+    uniformLocation = if field >= 0: program.fieldLocations[field] else: program.location(name)
     first = 0
+  if uniformLocation < 0: return
   if field < 0 and name.endsWith("]"):
     let bracket = name.rfind('[')
     if bracket >= 0:
@@ -252,24 +270,29 @@ proc storeUniform(program: ShaderProgram, name: string, kind: UniformKind,
         program.reflection.fields[field].columns == elementWords
   if arrayField:
     uniformLocation = program.fieldLocations[field]
-  var value: UniformValue
-  discard program.values.pop(uniformLocation, value)
-  value.kind = kind
-  value.components = components
+  let value = addr program.values.mgetOrPut(uniformLocation, UniformValue())
+  var total = count
   if arrayField:
     # Array and element setters share one payload, including element zero.
     # Keep supplied counts when GL optimizes unused trailing elements away.
-    value.count = max(value.count,
+    total = max(value.count,
       max(program.reflection.fields[field].count, first + count))
-    value.words.setLen(value.count * elementWords)
   else:
     first = 0
-    value.count = count
-    value.words.setLen(words)
+  let offset = first * elementWords
+  if value.count == total and value.kind == kind and value.components == components and
+      value.words.len == total * elementWords and
+      equalMem(value.words[offset].addr, data, words * sizeof(uint32)):
+    return
+  value.kind = kind
+  value.components = components
+  value.count = total
+  value.words.setLen(total * elementWords)
   if words > 0:
-    copyMem(value.words[first * elementWords].addr, data,
-      words * sizeof(uint32))
-  program.values[uniformLocation] = move(value)
+    copyMem(value.words[offset].addr, data, words * sizeof(uint32))
+  if value.dirtyCount == 0:
+    program.dirtyUniforms.add uniformLocation
+  value.dirtyCount = if arrayField: max(value.dirtyCount, first + count) else: count
 
 proc setUniform*[T](program: ShaderProgram, name: string,
     values: openArray[T])
@@ -340,15 +363,16 @@ proc setUniform*[T](program: ShaderProgram, name: string,
 proc bindTexture*(program: ShaderProgram, name: string, image: GpuImage) =
   ## Records a sampled image without disturbing the caller's GL bindings.
   let key = uniformName(name)
-  if key in program.samplerUnits:
-    program.textures[key] = image
+  program.samplerUnits.withValue(key, unit):
+    program.samplers[unit[]].image = image
 
 proc bindTexture*(program: ShaderProgram, name: string, image: GLuint) =
   ## Borrows an existing GL texture using its reflected sampler target.
   let key = uniformName(name)
-  if key in program.samplerUnits:
-    program.textures[key] = GpuImage(handle: image,
-      target: program.samplerTargets[key], ownsHandle: false)
+  program.samplerUnits.withValue(key, unit):
+    let slot = addr program.samplers[unit[]]
+    if slot.image == nil or slot.image.handle != image or slot.image.sampler != 0:
+      slot.image = GpuImage(handle: image, target: slot.target)
 
 proc setEnabled(capability: GLenum, enabled: GLboolean) =
   ## Applies a capability without assuming prior state.
@@ -426,6 +450,24 @@ proc restoreDraw(state: SavedDraw) =
   when not defined(emscripten):
     glPolygonMode(GL_FRONT_AND_BACK, state.polygonMode[0].GLenum)
 
+proc endSceneDraws*() =
+  ## Return ownership of the context to external code, including Silky.
+  if sceneDrawsActive:
+    doAssert drawScopeDepth == 1
+    dec drawScopeDepth
+    restoreTextures()
+    restoreDraw(sceneState)
+    sceneDrawsActive = false
+
+proc beginSceneDraws*() =
+  ## Share one caller-state snapshot across the game's scene passes.
+  if not sceneDrawsActive:
+    doAssert drawScopeDepth == 0
+    sceneState = saveDraw()
+    inc drawScopeDepth
+    sceneDrawsActive = true
+    invalidateDrawState()
+
 template preserveDrawState*(body: untyped) =
   ## Restores caller state once around a nested sequence of shared draws.
   block:
@@ -439,6 +481,7 @@ template preserveDrawState*(body: untyped) =
     finally:
       dec drawScopeDepth
       if ownsState:
+        restoreTextures()
         restoreDraw(savedState)
 
 proc nativeCompare(value: DepthCompare): GLenum =
@@ -499,10 +542,11 @@ proc applyDraw(state: DrawState) =
 
 proc uploadUniforms(program: ShaderProgram) =
   ## Uploads staged parameter bytes after binding their owning program.
-  for uniformLocation, value in program.values:
+  for uniformLocation in program.dirtyUniforms:
+    let value = addr program.values[uniformLocation]
     let
       data = value.words[0].unsafeAddr
-      count = value.count.GLsizei
+      count = value.dirtyCount.GLsizei
     case value.kind
     of UniformFloat:
       let numbers = cast[ptr GLfloat](data)
@@ -534,6 +578,8 @@ proc uploadUniforms(program: ShaderProgram) =
     of UniformMat4:
       glUniformMatrix4fv(uniformLocation, count, GL_FALSE,
         cast[ptr GLfloat](data))
+    value.dirtyCount = 0
+  program.dirtyUniforms.setLen(0)
 
 proc bindingQuery(target: GLenum): GLenum =
   ## Returns the state query for a sampled texture target.
@@ -546,46 +592,82 @@ proc bindingQuery(target: GLenum): GLenum =
         return GL_TEXTURE_BINDING_BUFFER
     GL_TEXTURE_BINDING_2D
 
-proc bindTextures(program: ShaderProgram): seq[SavedTexture] =
-  ## Binds reflected sampler units and remembers their prior texture state.
-  for name, unit in program.samplerUnits:
-    glUniform1i(program.location(name), unit.GLint)
-    let image = program.textures.getOrDefault(name)
+proc bindTextures(program: ShaderProgram) =
+  ## Save each affected binding once for the entire shared pass.
+  for unit, slot in program.samplers:
+    if not program.samplersInitialized:
+      glUniform1i(slot.location, unit.GLint)
+    let image = slot.image
+    let target = slot.target
     if image == nil:
+      # An unassigned sampler sees the caller's binding for this unit.
+      var restoredSampler = false
+      for item in savedTextures:
+        if item.unit != unit: continue
+        if not restoredSampler:
+          glBindSampler(unit.GLuint, item.sampler.GLuint)
+          restoredSampler = true
+        if item.target == target:
+          glActiveTexture((GL_TEXTURE0.uint32 + unit.uint32).GLenum)
+          glBindTexture(target, item.texture.GLuint)
+          break
       continue
-    var saved = SavedTexture(unit: unit, target: program.samplerTargets[name])
+    var saved = SavedTexture(unit: unit, target: target)
     glActiveTexture((GL_TEXTURE0.uint32 + unit.uint32).GLenum)
-    glGetIntegerv(bindingQuery(saved.target), saved.texture.addr)
-    glGetIntegerv(GL_SAMPLER_BINDING, saved.sampler.addr)
+    var found = false
+    for item in savedTextures:
+      if item.unit == unit and item.target == saved.target:
+        found = true
+        break
+    if not found:
+      glGetIntegerv(bindingQuery(saved.target), saved.texture.addr)
+      glGetIntegerv(GL_SAMPLER_BINDING, saved.sampler.addr)
+      savedTextures.add saved
     glBindTexture(saved.target, image.handle)
     glBindSampler(unit.GLuint, image.sampler)
-    result.add saved
+  program.samplersInitialized = true
 
-proc restoreTextures(saved: openArray[SavedTexture]) =
-  ## Restores every texture unit modified by the draw.
-  for item in saved:
-    glActiveTexture((GL_TEXTURE0.uint32 + item.unit.uint32).GLenum)
-    glBindTexture(item.target, item.texture.GLuint)
-    glBindSampler(item.unit.GLuint, item.sampler.GLuint)
-
-proc configureVertices(program: ShaderProgram, vertices: VertexBuffer,
-    layout: VertexLayout) =
-  ## Maps a shared vertex description to its program's attribute locations.
-  for attribute in program.enabledAttributes:
-    glDisableVertexAttribArray(attribute)
-  program.enabledAttributes.setLen(0)
-  if vertices == nil:
-    return
-  glBindBuffer(GL_ARRAY_BUFFER, vertices.handle)
+proc vertexInputs(program: ShaderProgram, layout: VertexLayout): VertexInputs =
+  ## Resolve semantics once per linked program and vertex layout.
+  result = VertexInputs(stride: layout.stride)
   for attribute in layout.attributes:
     if attribute.name notin program.attributes:
-      program.attributes[attribute.name] = glGetAttribLocation(program.handle,
-        attribute.name.cstring)
+      program.attributes[attribute.name] = glGetAttribLocation(program.handle, attribute.name.cstring)
     let location = program.attributes[attribute.name]
-    if location < 0:
-      continue
+    if location >= 0:
+      result.attributes.add (location.GLuint, attribute.format, attribute.offset)
+
+proc bindVertices(program: ShaderProgram, vertices: VertexBuffer, layout: VertexLayout) =
+  ## Buffer-owned VAOs persist across material, pass and program changes.
+  if vertices == nil:
+    if program.vao == 0:
+      glGenVertexArrays(1, program.vao.addr)
+    glBindVertexArray(program.vao)
+    return
+  var inputs: VertexInputs
+  if layout.stride == 0:
+    if program.defaultInputs == nil:
+      program.defaultInputs = program.vertexInputs(program.layout)
+    inputs = program.defaultInputs
+  else:
+    for item in program.otherInputs:
+      if item.layout == layout:
+        inputs = item.inputs
+        break
+    if inputs == nil:
+      inputs = program.vertexInputs(layout)
+      program.otherInputs.add (layout, inputs)
+  for binding in vertices.arrays:
+    if binding.inputs == inputs or binding.inputs[] == inputs[]:
+      glBindVertexArray(binding.vao)
+      return
+  var vao: GLuint
+  glGenVertexArrays(1, vao.addr)
+  glBindVertexArray(vao)
+  glBindBuffer(GL_ARRAY_BUFFER, vertices.handle)
+  for attribute in inputs.attributes:
     let
-      slot = location.GLuint
+      slot = attribute.slot
       count = case attribute.format
         of Float1, UInt1: 1
         of Float2, UInt2: 2
@@ -593,15 +675,14 @@ proc configureVertices(program: ShaderProgram, vertices: VertexBuffer,
         of Float4, UInt4, Unorm8x4: 4
       pointer = cast[pointer](attribute.offset)
     glEnableVertexAttribArray(slot)
-    glVertexAttribDivisor(slot, 0)
     if attribute.format in {UInt1, UInt2, UInt3, UInt4}:
       glVertexAttribIPointer(slot, count.GLint, GL_UNSIGNED_INT,
-        layout.stride.GLsizei, pointer)
+        inputs.stride.GLsizei, pointer)
     else:
       glVertexAttribPointer(slot, count.GLint,
         if attribute.format == Unorm8x4: GL_UNSIGNED_BYTE else: cGL_FLOAT,
-        attribute.format == Unorm8x4, layout.stride.GLsizei, pointer)
-    program.enabledAttributes.add slot
+        attribute.format == Unorm8x4, inputs.stride.GLsizei, pointer)
+  vertices.arrays.add (inputs, vao)
 
 proc draw*(program: ShaderProgram, vertices: VertexBuffer, count: int,
     state = DrawState(), indices: VertexBuffer = nil, first = 0,
@@ -615,6 +696,7 @@ proc draw*(program: ShaderProgram, vertices: VertexBuffer, count: int,
     saved = saveDraw()
   defer:
     if ownsState:
+      restoreTextures()
       restoreDraw(saved)
   var effective = state
   if gpuRenderer.hasStencilOverride:
@@ -622,14 +704,14 @@ proc draw*(program: ShaderProgram, vertices: VertexBuffer, count: int,
     effective.stencilWrite = gpuRenderer.stencilOverride.stencilWrite
     effective.stencilCompare = gpuRenderer.stencilOverride.stencilCompare
     effective.stencilReference = gpuRenderer.stencilOverride.stencilReference
-  applyDraw(effective)
+  if not sceneDrawsActive or not drawStateKnown or lastDrawState != effective:
+    applyDraw(effective)
+    lastDrawState = effective
+    drawStateKnown = true
   glUseProgram(program.handle)
-  glBindVertexArray(program.vao)
-  configureVertices(program, vertices,
-    if layout.stride > 0: layout else: program.layout)
+  bindVertices(program, vertices, layout)
   program.uploadUniforms()
-  let textures = program.bindTextures()
-  defer: restoreTextures(textures)
+  program.bindTextures()
   let primitive = case effective.primitive
     of Triangles: GL_TRIANGLES
     of Lines: GL_LINES

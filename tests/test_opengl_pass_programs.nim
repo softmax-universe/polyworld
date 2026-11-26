@@ -157,6 +157,25 @@ proc main() =
   draw(program, vertices, 3, DrawState(), indices, index32 = true)
   assertPixel([128'u8, 191, 255, 255])
   doAssert program.values[program.fieldLocations[bonesField]].count == 4
+  glActiveTexture(GL_TEXTURE0)
+  glBindTexture(GL_TEXTURE_2D, target)
+  glActiveTexture(GL_TEXTURE1)
+  glBindVertexArray(callerVao)
+  beginSceneDraws()
+  preserveDrawState:
+    draw(program, vertices, 3, indices = indices)
+    program.setUniform("bones[1]", matrix(0.25))
+    draw(program, vertices, 3, indices = indices)
+  endSceneDraws()
+  assertPixel([128'u8, 64, 255, 255])
+  var binding: GLint
+  glGetIntegerv(GL_VERTEX_ARRAY_BINDING, binding.addr)
+  doAssert binding.GLuint == callerVao
+  glGetIntegerv(GL_ACTIVE_TEXTURE, binding.addr)
+  doAssert binding.GLenum == GL_TEXTURE1
+  glActiveTexture(GL_TEXTURE0)
+  glGetIntegerv(GL_TEXTURE_BINDING_2D, binding.addr)
+  doAssert binding.GLuint == target
   doAssert glGetError() == GL_NO_ERROR
   echo "PASS shared OpenGL uniforms, array writes, texture and draw state"
 

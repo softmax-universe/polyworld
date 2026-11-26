@@ -89,6 +89,14 @@ or `metalMSL`. The Windows drivers compile Shady stages at build time and embed
 DXIL or SPIR-V with uniform and texture reflection. Metal uniforms use Shady's reflected field offsets and alignment.
 There are no handwritten GLSL or Metal shader source strings.
 
+CaC cards and post-processing use the canonical stages in
+`games/cac/scene/backends/shaders`. Their rendering passes only select a shader
+target and bind resources. Fullscreen geometry and texture copies come from
+the engine's shared `screens` shaders, while CaC and engine ambient occlusion
+reuse the `occlusions` sampling, normal, blur, and tint helpers. Camera depth
+reconstruction and CaC's mapped normals retain their own settings. The former
+`cardshaders` and `postshaders` paths remain compatibility exports.
+
 Metal and native textures and fragment positions use a top-left origin.
 OpenGL and WebGL retain their bottom-left framebuffer convention. Shared screen
 effects explicitly convert coordinates when their math uses OpenGL's bottom-left

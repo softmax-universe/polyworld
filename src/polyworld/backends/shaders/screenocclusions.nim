@@ -26,9 +26,9 @@
 import
   std/[os, strutils],
   shady, vmath,
-  screens
+  screens, occlusions
 
-const OcclusionTaps = 16
+export screens.fullscreenVertex
 
 type
   ScreenOcclusionError* = object of CatchableError
@@ -44,8 +44,6 @@ type
       ## half height at that depth.
     bodyOcclusion*: float32
       ## Share of its darkening a pixel drawn after `captureGround` keeps.
-
-
 var
   depthTexture, groundTexture, occlusionTexture: Uniform[Sampler2D]
   inverseProjection: Uniform[Mat4]
@@ -56,16 +54,6 @@ var
   edgeScale, bodyOcclusion: Uniform[float32]
   tint: Uniform[Vec3]
   textureYTransform, fragmentYTransform: Uniform[Vec2]
-
-proc fullscreenVertex*(gl_Position: var Vec4, uv: var Vec2) =
-  ## Covers the framebuffer with a single triangle and normalized coordinates.
-  var corner = vec2(0.0'f)
-  if gl_VertexID == 1:
-    corner.x = 2.0'f
-  elif gl_VertexID == 2:
-    corner.y = 2.0'f
-  uv = corner
-  gl_Position = vec4(corner * 2.0'f - 1.0'f, vec2(0.0'f, 1.0'f))
 
 proc viewPosition(p: Vec2): Vec3 =
   ## Reconstructs positions at nearest depth texel centers to avoid row tilts.
@@ -83,17 +71,7 @@ proc viewNormal(p: Vec2, center: Vec3): Vec3 =
     left = center - viewPosition(p - vec2(texel.x, 0.0'f))
     up = viewPosition(p + vec2(0.0'f, texel.y)) - center
     down = center - viewPosition(p - vec2(0.0'f, texel.y))
-    dx =
-      if abs(right.z) < abs(left.z): right
-      else: left
-    dy =
-      if abs(up.z) < abs(down.z): up
-      else: down
-  result = normalize(cross(dx, dy))
-
-proc occlusionHash(p: Vec2): float32 =
-  ## Rotates the sample spiral independently for each framebuffer pixel.
-  result = fract(52.9829189'f * fract(dot(p, vec2(0.06711056'f, 0.00583715'f))))
+  result = depthNormal(right, left, up, down)
 
 proc occlusionFragment*(gl_FragCoord: Vec4, fragColor: var Vec4) =
   ## Samples a world-sized spiral around a depth-reconstructed surface normal.
@@ -114,15 +92,10 @@ proc occlusionFragment*(gl_FragCoord: Vec4, fragColor: var Vec4) =
   var occlusion = 0.0'f
   for i in 0 ..< OcclusionTaps:
     let
-      t = (float32(i) + 0.5'f) / float32(OcclusionTaps)
-      angle = float32(i) * 2.3999632'f + spin
-      offset = vec2(cos(angle), sin(angle)) * t * uvRadius
+      offset = occlusionOffset(float32(i), spin, uvRadius)
       delta = viewPosition(base + offset) - center
-      distance2 = dot(delta, delta)
-      falloff = max(0.0'f, 1.0'f - distance2 / (radius * radius))
-      cosine = dot(delta, normal) * inversesqrt(distance2 + 0.0001'f)
-    occlusion += falloff * max(0.0'f, cosine - bias)
-  let ao = clamp(1.0'f - intensity * occlusion / float32(OcclusionTaps), 0.0'f, 1.0'f)
+    occlusion += occlusionContribution(delta, normal, radius, bias)
+  let ao = occlusionAmount(occlusion, intensity)
   fragColor = vec4(ao, ao, ao, 1.0'f)
 
 proc viewDepth(p: Vec2): float32 =
@@ -145,7 +118,7 @@ proc blurFragment*(uv: Vec2, fragColor: var Vec4) =
     let
       p = uv + direction * float32(i)
       difference = abs(viewDepth(p) - centerDepth) * scale
-      weight = exp(-float32(i * i) / 12.0'f) * max(0.0'f, 1.0'f - difference)
+      weight = occlusionBlurWeight(i.int32, difference)
     total += texture(occlusionTexture, screenCoordinates(p, textureYTransform)).x * weight
     weights += weight
   let ao = total / max(weights, 0.0001'f)
@@ -161,7 +134,7 @@ proc multiplyFragment*(uv: Vec2, gl_FragCoord: Vec4, fragColor: var Vec4) =
   if texelFetch(depthTexture, pixel, 0).x <
     texelFetch(groundTexture, pixel, 0).x:
       ao = mix(1.0'f, ao, bodyOcclusion)
-  fragColor = vec4(mix(tint, vec3(1.0'f), ao), 1.0'f)
+  fragColor = occlusionTint(tint, ao)
 
 proc defaultScreenOcclusionSettings*(): ScreenOcclusionSettings =
   ## CaC's tuned values. Its blur sharpness of 40 per unit of relative depth

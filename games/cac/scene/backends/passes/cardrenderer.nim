@@ -5,7 +5,7 @@ import chroma, pixie, shady, silky, vmath
 import polyworld/backends/passes/common
 from polyworld/renderer import atlasTexture, drawUiLayer
 import ../../../core/core, ../../../ui/[cardfaces, silkyfaces]
-import ../../cardshaders
+import ../shaders/cards
 export silkyfaces.FaceState, silkyfaces.addFaceAssets
 
 type

@@ -1,11 +1,10 @@
 ## Shared CaC ambient occlusion, bloom, and final composition passes.
 
-from polyworld/backends/shaders/screens import fullscreenPosition
-
 import
   pixie, shady, vmath,
   polyworld/backends/passes/common,
-  ../../[postshared, postshaders]
+  polyworld/backends/shaders/screens,
+  ../../postshared, ../shaders/post
 
 from polyworld/renderer import FramebufferHandle
 
@@ -31,27 +30,8 @@ type
       layerPass: ShaderProgram
       inverseProjection: Mat4
 
-var copySource: Uniform[Sampler2D]
-
-proc fullscreenVertex(gl_Position: var Vec4, uv: var Vec2) =
-  ## Matches sampled texture coordinates to the framebuffer origin.
-  let corner = vec2(
-    float32((gl_VertexID mod 2) * 2),
-    float32((gl_VertexID div 2) * 2)
-  )
-  when PassTopLeftOrigin:
-    uv = vec2(corner.x, 1.0'f - corner.y)
-  else:
-    uv = corner
-  gl_Position = vec4(corner.x * 2.0'f - 1.0'f,
-    corner.y * 2.0'f - 1.0'f, 0.0'f, 1.0'f)
-
-proc copyFragment(uv: Vec2, fragColor: var Vec4) =
-  ## Resamples the scene into the smaller pre-VFX target.
-  fragColor = texture(copySource, uv)
-
 const
-  FullscreenVertex = nativeStage(fullscreenVertex, shaderVertex)
+  FullscreenVertex = nativeStage(fullscreenTextureVertex, shaderVertex)
   OcclusionFragment = nativeStage(postOcclusion, shaderFragment)
   BlurFragment = nativeStage(postBlur, shaderFragment)
   MultiplyFragment = nativeStage(postMultiply, shaderFragment)
@@ -105,21 +85,29 @@ proc ensureSize(post: var PostFx, size: IVec2) =
     target = newRenderTarget(levelSize.x, levelSize.y, depth = false)
     levelSize = ivec2(max(levelSize.x div 2, 1), max(levelSize.y div 2, 1))
 
+proc newPostProgram(fragment: string): ShaderProgram =
+  ## Compiles shared fullscreen stages with the target's sampling orientation.
+  result = newProgram(FullscreenVertex, fragment)
+  result.setUniform("screenTextureYTransform",
+    (when PassTopLeftOrigin: vec2(-1, 1) else: vec2(1, 0)))
+
 proc initPostFx*(): PostFx =
   ## Creates the AO, bloom, and composition programs.
   result.settings = defaultPostSettings()
   result.near = 0.1
   result.far = 100
-  result.occlusionPass = newProgram(nativeStage(fullscreenPosition, shaderVertex), OcclusionFragment)
-  result.blurPass = newProgram(FullscreenVertex, BlurFragment)
-  result.multiplyPass = newProgram(FullscreenVertex, MultiplyFragment)
-  result.prefilterPass = newProgram(FullscreenVertex, PrefilterFragment)
-  result.downPass = newProgram(FullscreenVertex, DownFragment)
-  result.upPass = newProgram(FullscreenVertex, UpFragment)
-  result.finalPass = newProgram(FullscreenVertex, FinalFragment)
-  result.copyPass = newProgram(FullscreenVertex, CopyFragment)
+  result.occlusionPass = newProgram(
+    nativeStage(fullscreenPosition, shaderVertex), OcclusionFragment
+  )
+  result.blurPass = newPostProgram(BlurFragment)
+  result.multiplyPass = newPostProgram(MultiplyFragment)
+  result.prefilterPass = newPostProgram(PrefilterFragment)
+  result.downPass = newPostProgram(DownFragment)
+  result.upPass = newPostProgram(UpFragment)
+  result.finalPass = newPostProgram(FinalFragment)
+  result.copyPass = newPostProgram(CopyFragment)
   when PostLayerControls:
-    result.layerPass = newProgram(FullscreenVertex, LayerFragment)
+    result.layerPass = newPostProgram(LayerFragment)
     let key =
       try:
         parseInt(getEnv("CAC_POST_LAYER", "1"))

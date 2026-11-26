@@ -60,7 +60,7 @@ proc initRenderer*(window: Window, samples = 1) =
 
 proc shutdownRenderer*() =
   ## Releases shared model resources before the active context is closed.
-  passapi.endSceneDraws()
+  passapi.endGameFrameDraws()
   passMeshes.clearModelResources()
   passapi.destroy(uiProgram)
   uiProgram = nil
@@ -73,7 +73,7 @@ proc newGameUi*(window: Window, atlasPath: string): Silky =
 
 proc presentRenderer*(window: Window) =
   ## Presents the completed OpenGL back buffer.
-  passapi.endSceneDraws()
+  passapi.endGameFrameDraws()
   passapi.gpuRenderer.active = false
   when not defined(backendBench):
     window.swapBuffers()
@@ -171,8 +171,9 @@ proc beginGameUi*(sk: Silky, window: Window, size: IVec2) =
 
 proc beginStencil*(reference: int) =
   ## Marks fragments from the following character draws.
-  passapi.invalidateDrawState()
   passapi.setStencil(true, reference)
+  if passapi.gameOwnsDrawState(): return
+  passapi.invalidateDrawState()
   glEnable(GL_STENCIL_TEST)
   glStencilMask(0xff)
   glStencilFunc(GL_ALWAYS, reference.GLint, 0xff)
@@ -180,8 +181,9 @@ proc beginStencil*(reference: int) =
 
 proc endStencil*() =
   ## Ends character stencil marking.
-  passapi.invalidateDrawState()
   passapi.clearStencilState()
+  if passapi.gameOwnsDrawState(): return
+  passapi.invalidateDrawState()
   glStencilMask(0)
   glDisable(GL_STENCIL_TEST)
 
@@ -351,7 +353,7 @@ proc releaseScreenshotTarget*(target: var ScreenshotTarget) =
 proc beginScreenshotFrame*(target: var ScreenshotTarget, window: Window,
     enabled = captureActive()): FramebufferHandle =
   ## Binds an offscreen surface when a hidden window is being captured.
-  passapi.beginSceneDraws()
+  passapi.beginGameFrameDraws()
   let offscreen = enabled or
     (defined(backendBench) and not defined(emscripten))
   if not offscreen:

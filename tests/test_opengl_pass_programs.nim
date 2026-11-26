@@ -176,6 +176,61 @@ proc main() =
   glActiveTexture(GL_TEXTURE0)
   glGetIntegerv(GL_TEXTURE_BINDING_2D, binding.addr)
   doAssert binding.GLuint == target
+
+  glEnable(GL_BLEND)
+  beginGameFrameDraws()
+  preserveDrawState:
+    discard
+  endGameFrameDraws()
+  doAssert glIsEnabled(GL_BLEND)
+
+  # A game pass consumes its node state even after foreign code changes GL.
+  # The same node must be reapplied on the far side of a UI handoff.
+  let marked = DrawState(depthTest: true, depthWrite: true, cull: CullBack,
+    blend: Additive, stencilWrite: true, stencilCompare: Always, stencilReference: 3)
+  beginGameFrameDraws()
+  for batch in 0..1:
+    glFrontFace(GL_CW)
+    glDisable(GL_DEPTH_TEST)
+    glDisable(GL_STENCIL_TEST)
+    glDepthMask(GL_FALSE)
+    glStencilMask(0)
+    preserveDrawState:
+      draw(program, vertices, 3, marked, indices)
+      doAssert glIsEnabled(GL_DEPTH_TEST) and glIsEnabled(GL_STENCIL_TEST)
+      glGetIntegerv(GL_STENCIL_WRITEMASK, binding.addr)
+      doAssert binding == 0xff
+      glGetIntegerv(GL_FRONT_FACE, binding.addr)
+      doAssert binding.GLenum == GL_CCW
+      var next = marked
+      next.depthWrite = false
+      next.stencilWrite = false
+      next.blend = PremultipliedAlpha
+      draw(program, vertices, 3, next, indices)
+      doAssert glIsEnabled(GL_DEPTH_TEST) and not glIsEnabled(GL_STENCIL_TEST)
+      withClearWriteMasks(true, true):
+        glGetIntegerv(GL_DEPTH_WRITEMASK, binding.addr)
+        doAssert binding == 1
+      glGetIntegerv(GL_DEPTH_WRITEMASK, binding.addr)
+      doAssert binding == 0
+      glGetIntegerv(GL_STENCIL_WRITEMASK, binding.addr)
+      doAssert binding == 0
+      glGetIntegerv(GL_BLEND_DST_RGB, binding.addr)
+      doAssert binding.GLenum == GL_ONE_MINUS_SRC_ALPHA
+    endSceneDraws()
+    doAssert not glIsEnabled(GL_DEPTH_TEST) and not glIsEnabled(GL_CULL_FACE)
+    doAssert not glIsEnabled(GL_BLEND) and not glIsEnabled(GL_STENCIL_TEST)
+    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, binding.addr)
+    doAssert binding.GLuint == callerVao
+  endGameFrameDraws()
+  glDepthMask(GL_FALSE)
+  glStencilMaskSeparate(GL_FRONT, 0x34)
+  glStencilMaskSeparate(GL_BACK, 0x56)
+  draw(program, vertices, 3, marked, indices)
+  for (field, expected) in [(GL_DEPTH_WRITEMASK, 0.GLint),
+      (GL_STENCIL_WRITEMASK, 0x34.GLint), (GL_STENCIL_BACK_WRITEMASK, 0x56.GLint)]:
+    glGetIntegerv(field, binding.addr)
+    doAssert binding == expected
   doAssert glGetError() == GL_NO_ERROR
   echo "PASS shared OpenGL uniforms, array writes, texture and draw state"
 

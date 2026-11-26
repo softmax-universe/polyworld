@@ -378,12 +378,13 @@ proc closeCapture*(app: App) =
   app.captureFramebuffer = default(FramebufferHandle)
 
 proc beginCaptureFrame*(app: App) =
-  ## Renders screenshots offscreen without depending on a visible Cocoa drawable.
-  if captureActive() or defined(backendBench):
+  ## Opens the game's drawing scope on both the visible and capture paths.
+  let capturing = captureActive() or defined(backendBench)
+  if capturing or RendererBackend in ["opengl", "webgl"]:
     when not defined(emscripten):
-      doAssert not app.window.visible, "Capture windows must stay hidden"
-    app.captureFramebuffer =
-      app.captureTarget.beginScreenshotFrame(app.window)
+      if capturing:
+        doAssert not app.window.visible, "Capture windows must stay hidden"
+    app.captureFramebuffer = app.captureTarget.beginScreenshotFrame(app.window)
 
 proc heroClip*(app: App, model: int, heroClass: HeroClass,
     dying, idleTime: float32): tuple[clip: int, time: float32] =

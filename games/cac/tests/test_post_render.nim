@@ -105,6 +105,11 @@ let resized = captureFrame(true, true, true, ivec2(96, 64))
 doAssert resized.width == 96 and resized.height == 64,
   "Post targets must resize with the caller's frame"
 discard captureFrame(true, true, true)
+when not defined(useMetal4):
+  beginGameFrameDraws()
+  doAssert captureFrame(true, false, false).data == occluded.data
+  doAssert captureFrame(false, true, true).data == bloomed.data
+  endGameFrameDraws()
 when PostLayerControls:
   for layer in PostLayer:
     effects.layer = layer

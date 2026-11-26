@@ -3,6 +3,7 @@
 import
   chroma, pixie, vmath, windy,
   passtypes, passresources, ../../targetplans
+from passprograms import withClearWriteMasks
 
 export passtypes
 
@@ -490,21 +491,16 @@ proc shareDepth*(target, source: RenderTarget) =
       source.multisampleDepth)
     checkTarget()
 
-proc depthClearValue(): float64 =
-  ## Reads clear depth using the precision exposed by the current API.
-  when defined(emscripten):
-    var value: GLfloat
-    glGetFloatv(GL_DEPTH_CLEAR_VALUE, value.addr)
-    result = value.float64
-  else:
-    glGetDoublev(GL_DEPTH_CLEAR_VALUE, result.addr)
-
-proc setDepthClear(value: float64) =
-  ## Uses the browser or desktop clear-depth entry point.
-  when defined(emscripten):
-    glClearDepthf(value.GLfloat)
-  else:
-    glClearDepth(value.GLdouble)
+proc clearDepthStencil(depth, stencil: bool) =
+  ## Supply clear values in the command, leaving the context's defaults intact.
+  if depth and stencil:
+    glClearBufferfi(GL_DEPTH_STENCIL, 0, 1, 0)
+  elif depth:
+    var value: GLfloat = 1
+    glClearBufferfv(GL_DEPTH, 0, value.addr)
+  elif stencil:
+    var value: GLint = 0
+    glClearBufferiv(GL_STENCIL, 0, value.addr)
 
 proc clear*(value: Color, depth = true, stencil = false) =
   ## Clears attachments with writable masks while preserving caller draw state.
@@ -516,54 +512,34 @@ proc clear*(value: Color, depth = true, stencil = false) =
     if resolved != target.resolved:
       target.resolved = resolved
       glBindFramebuffer(GL_DRAW_FRAMEBUFFER, drawFramebuffer(target))
-  var
-    colorMask: array[4, GLboolean]
-    depthMask: GLboolean
-    stencilMask, stencilBackMask, stencilValue: GLint
-    oldColor: array[4, GLfloat]
+  var colorMask: array[4, GLboolean]
   glGetBooleanv(GL_COLOR_WRITEMASK, colorMask[0].addr)
-  glGetBooleanv(GL_DEPTH_WRITEMASK, depthMask.addr)
-  glGetIntegerv(GL_STENCIL_WRITEMASK, stencilMask.addr)
-  glGetIntegerv(GL_STENCIL_BACK_WRITEMASK, stencilBackMask.addr)
-  glGetIntegerv(GL_STENCIL_CLEAR_VALUE, stencilValue.addr)
-  glGetFloatv(GL_COLOR_CLEAR_VALUE, oldColor[0].addr)
-  let oldDepth = depthClearValue()
   let scissored = glIsEnabled(GL_SCISSOR_TEST) == GL_TRUE
   defer:
     glColorMask(colorMask[0], colorMask[1], colorMask[2], colorMask[3])
-    glDepthMask(depthMask)
-    glStencilMaskSeparate(GL_FRONT, stencilMask.GLuint)
-    glStencilMaskSeparate(GL_BACK, stencilBackMask.GLuint)
-    glClearStencil(stencilValue)
-    setDepthClear(oldDepth)
-    glClearColor(oldColor[0], oldColor[1], oldColor[2], oldColor[3])
     if scissored: glEnable(GL_SCISSOR_TEST)
-  glDisable(GL_SCISSOR_TEST)
+  if scissored: glDisable(GL_SCISSOR_TEST)
   glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE)
-  glClearColor(value.r, value.g, value.b, value.a)
-  var mask = GL_COLOR_BUFFER_BIT.GLbitfield
-  if depth:
-    glDepthMask(GL_TRUE)
-    setDepthClear(1.0)
-    mask = mask or GL_DEPTH_BUFFER_BIT
-  if stencil:
-    glStencilMask(0xff)
-    glClearStencil(0)
-    mask = mask or GL_STENCIL_BUFFER_BIT
-  glClear(mask)
+  if target.ownsFramebuffer or target.framebuffer == 0:
+    if target.color != nil:
+      var rgba = [value.r, value.g, value.b, value.a]
+      glClearBufferfv(GL_COLOR, 0, rgba[0].addr)
+  else:
+    # A borrowed FBO can have additional enabled color attachments.
+    var oldColor: array[4, GLfloat]
+    glGetFloatv(GL_COLOR_CLEAR_VALUE, oldColor[0].addr)
+    glClearColor(value.r, value.g, value.b, value.a)
+    glClear(GL_COLOR_BUFFER_BIT)
+    glClearColor(oldColor[0], oldColor[1], oldColor[2], oldColor[3])
+  withClearWriteMasks(depth, stencil):
+    clearDepthStencil(depth, stencil)
 
 proc clearDepth*() =
   ## Clears the current depth attachment independently of scene color.
-  var previous: GLboolean
-  glGetBooleanv(GL_DEPTH_WRITEMASK, previous.addr)
-  let oldDepth = depthClearValue()
   let scissored = glIsEnabled(GL_SCISSOR_TEST) == GL_TRUE
-  glDisable(GL_SCISSOR_TEST)
-  glDepthMask(GL_TRUE)
-  setDepthClear(1.0)
-  glClear(GL_DEPTH_BUFFER_BIT)
-  setDepthClear(oldDepth)
-  glDepthMask(previous)
+  if scissored: glDisable(GL_SCISSOR_TEST)
+  withClearWriteMasks(true, false):
+    clearDepthStencil(true, false)
   if scissored: glEnable(GL_SCISSOR_TEST)
 
 proc setStencil*(write: bool, reference: int, compare = Always) =

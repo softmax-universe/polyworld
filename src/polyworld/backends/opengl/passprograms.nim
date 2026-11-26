@@ -28,6 +28,7 @@ var
   drawScopeDepth = 0
   savedTextures: seq[SavedTexture]
   sceneDrawsActive = false
+  gameFrameActive = false
   sceneState: SavedDraw
   drawStateKnown = false
   lastDrawState: DrawState
@@ -381,12 +382,13 @@ proc setEnabled(capability: GLenum, enabled: GLboolean) =
   else:
     glDisable(capability)
 
-proc saveDraw(): SavedDraw =
-  ## Saves state changed by a shared draw before returning to legacy callers.
+proc saveDraw(bindingsOnly = false): SavedDraw =
+  ## Game draws describe their raster state. Only foreign GL scopes borrow it.
   glGetIntegerv(GL_CURRENT_PROGRAM, result.program.addr)
   glGetIntegerv(GL_VERTEX_ARRAY_BINDING, result.vertexArray.addr)
   glGetIntegerv(GL_ARRAY_BUFFER_BINDING, result.arrayBuffer.addr)
   glGetIntegerv(GL_ACTIVE_TEXTURE, result.activeTexture.addr)
+  if bindingsOnly: return
   result.depth = glIsEnabled(GL_DEPTH_TEST)
   result.cull = glIsEnabled(GL_CULL_FACE)
   result.blend = glIsEnabled(GL_BLEND)
@@ -426,12 +428,12 @@ proc restoreStencil(face: GLenum, state: SavedStencil) =
   glStencilOpSeparate(face, state.fail.GLenum, state.depthFail.GLenum,
     state.depthPass.GLenum)
 
-proc restoreDraw(state: SavedDraw) =
-  ## Restores every program, buffer, blend, depth, raster, and stencil change.
+proc restoreDraw(state: SavedDraw, bindingsOnly = false) =
   glUseProgram(state.program.GLuint)
   glBindVertexArray(state.vertexArray.GLuint)
   glBindBuffer(GL_ARRAY_BUFFER, state.arrayBuffer.GLuint)
   glActiveTexture(state.activeTexture.GLenum)
+  if bindingsOnly: return
   setEnabled(GL_DEPTH_TEST, state.depth)
   setEnabled(GL_CULL_FACE, state.cull)
   setEnabled(GL_BLEND, state.blend)
@@ -456,33 +458,91 @@ proc endSceneDraws*() =
     doAssert drawScopeDepth == 1
     dec drawScopeDepth
     restoreTextures()
-    restoreDraw(sceneState)
+    restoreDraw(sceneState, bindingsOnly = gameFrameActive)
+    if gameFrameActive:
+      # Silky sets its blend factors and assumes ordinary filled, untested UI.
+      glDisable(GL_DEPTH_TEST)
+      glDepthMask(GL_TRUE)
+      glDisable(GL_CULL_FACE)
+      glDisable(GL_STENCIL_TEST)
+      glStencilMask(0xff)
+      glDisable(GL_BLEND)
+      glBlendEquation(GL_FUNC_ADD)
+      when not defined(emscripten):
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)
     sceneDrawsActive = false
+    invalidateDrawState()
 
 proc beginSceneDraws*() =
-  ## Share one caller-state snapshot across the game's scene passes.
+  ## Share borrowed bindings across passes, preserving raster state for foreign callers.
   if not sceneDrawsActive:
     doAssert drawScopeDepth == 0
-    sceneState = saveDraw()
+    sceneState = saveDraw(bindingsOnly = gameFrameActive)
     inc drawScopeDepth
     sceneDrawsActive = true
     invalidateDrawState()
 
-template preserveDrawState*(body: untyped) =
-  ## Restores caller state once around a nested sequence of shared draws.
+proc beginGameFrameDraws*() =
+  ## Defer acquiring GL bindings until the first shared pass actually draws.
+  if not gameFrameActive:
+    doAssert drawScopeDepth == 0
+    gameFrameActive = true
+
+proc endGameFrameDraws*() =
+  endSceneDraws()
+  gameFrameActive = false
+
+proc gameOwnsDrawState*(): bool =
+  gameFrameActive
+
+template withClearWriteMasks*(depth, stencil: bool, body: untyped) =
+  ## Borrow masks from the preceding node, or from GL in a foreign scope.
   block:
-    let ownsState = drawScopeDepth == 0
-    var savedState: SavedDraw
-    if ownsState:
-      savedState = saveDraw()
-    inc drawScopeDepth
+    if gameFrameActive and (depth or stencil): beginSceneDraws()
+    let known = sceneDrawsActive and drawStateKnown
+    var depthMask: GLboolean
+    var frontMask, backMask: GLint
+    if depth:
+      if known: depthMask = lastDrawState.depthWrite
+      elif not gameFrameActive: glGetBooleanv(GL_DEPTH_WRITEMASK, depthMask.addr)
+      glDepthMask(GL_TRUE)
+    if stencil:
+      if known:
+        frontMask = if lastDrawState.stencilWrite: 0xff else: 0
+        backMask = frontMask
+      elif not gameFrameActive:
+        glGetIntegerv(GL_STENCIL_WRITEMASK, frontMask.addr)
+        glGetIntegerv(GL_STENCIL_BACK_WRITEMASK, backMask.addr)
+      glStencilMask(0xff)
     try:
       body
     finally:
-      dec drawScopeDepth
+      # With no previous game draw, the first node establishes both masks.
+      if known or not gameFrameActive:
+        if depth: glDepthMask(depthMask)
+        if stencil:
+          glStencilMaskSeparate(GL_FRONT, frontMask.GLuint)
+          glStencilMaskSeparate(GL_BACK, backMask.GLuint)
+
+template preserveDrawState*(body: untyped) =
+  ## Restores caller state once around a nested sequence of shared draws.
+  block:
+    let
+      foreignScope = not gameFrameActive
+      ownsState = foreignScope and drawScopeDepth == 0
+    var savedState: SavedDraw
+    if ownsState:
+      savedState = saveDraw()
+      invalidateDrawState()
+    if foreignScope: inc drawScopeDepth
+    try:
+      body
+    finally:
+      if foreignScope: dec drawScopeDepth
       if ownsState:
         restoreTextures()
         restoreDraw(savedState)
+        invalidateDrawState()
 
 proc nativeCompare(value: DepthCompare): GLenum =
   ## Maps logical depth and stencil comparisons to the selected driver.
@@ -494,16 +554,21 @@ proc nativeCompare(value: DepthCompare): GLenum =
   of Greater: GL_GREATER
 
 proc applyDraw(state: DrawState) =
-  ## Applies the explicit state carried by a shared rendering pass.
-  setEnabled(GL_DEPTH_TEST, state.depthTest or state.depthWrite)
-  glDepthFunc(if state.depthTest: nativeCompare(state.depthCompare)
-    else: GL_ALWAYS)
-  glDepthMask(state.depthWrite)
-  setEnabled(GL_CULL_FACE, state.cull != CullNone)
-  glCullFace(if state.cull == CullFront: GL_FRONT else: GL_BACK)
-  glFrontFace(GL_CCW)
-  setEnabled(GL_BLEND, state.blend != Opaque)
-  if state.blend != Opaque:
+  ## Encode differences from the previous draw while this scope owns raster state.
+  template changed(field: untyped): bool =
+    not drawStateKnown or state.field != lastDrawState.field
+  if changed(depthTest) or changed(depthWrite):
+    setEnabled(GL_DEPTH_TEST, state.depthTest or state.depthWrite)
+  if changed(depthTest) or changed(depthCompare):
+    glDepthFunc(if state.depthTest: nativeCompare(state.depthCompare) else: GL_ALWAYS)
+  if changed(depthWrite): glDepthMask(state.depthWrite)
+  if changed(cull):
+    setEnabled(GL_CULL_FACE, state.cull != CullNone)
+    if state.cull != CullNone:
+      glCullFace(if state.cull == CullFront: GL_FRONT else: GL_BACK)
+  if not drawStateKnown: glFrontFace(GL_CCW)
+  if changed(blend): setEnabled(GL_BLEND, state.blend != Opaque)
+  if changed(blend) and state.blend != Opaque:
     var
       source = GL_SRC_ALPHA
       destination = GL_ONE_MINUS_SRC_ALPHA
@@ -530,15 +595,16 @@ proc applyDraw(state: DrawState) =
       discard
     glBlendFuncSeparate(source, destination, alphaSource, alphaDestination)
     glBlendEquationSeparate(GL_FUNC_ADD, GL_FUNC_ADD)
-  setEnabled(GL_STENCIL_TEST, state.stencilTest or state.stencilWrite)
-  glStencilFunc(nativeCompare(state.stencilCompare),
-    state.stencilReference.GLint, 0xff)
-  glStencilMask(if state.stencilWrite: 0xff.GLuint else: 0.GLuint)
-  glStencilOp(GL_KEEP, GL_KEEP,
-    if state.stencilWrite: GL_REPLACE else: GL_KEEP)
+  if changed(stencilTest) or changed(stencilWrite):
+    setEnabled(GL_STENCIL_TEST, state.stencilTest or state.stencilWrite)
+  if changed(stencilCompare) or changed(stencilReference):
+    glStencilFunc(nativeCompare(state.stencilCompare), state.stencilReference.GLint, 0xff)
+  if changed(stencilWrite):
+    glStencilMask(if state.stencilWrite: 0xff.GLuint else: 0.GLuint)
+    glStencilOp(GL_KEEP, GL_KEEP, if state.stencilWrite: GL_REPLACE else: GL_KEEP)
   when not defined(emscripten):
-    glPolygonMode(GL_FRONT_AND_BACK,
-      if state.wireframe: GL_LINE else: GL_FILL)
+    if changed(wireframe):
+      glPolygonMode(GL_FRONT_AND_BACK, if state.wireframe: GL_LINE else: GL_FILL)
 
 proc uploadUniforms(program: ShaderProgram) =
   ## Uploads staged parameter bytes after binding their owning program.
@@ -690,21 +756,26 @@ proc draw*(program: ShaderProgram, vertices: VertexBuffer, count: int,
   ## Draws shared geometry while preserving the caller's OpenGL state.
   if program == nil or program.handle == 0 or count <= 0 or instanceCount <= 0:
     return
+  if gameFrameActive: beginSceneDraws()
   let ownsState = drawScopeDepth == 0
   var saved: SavedDraw
   if ownsState:
     saved = saveDraw()
+    invalidateDrawState()
   defer:
     if ownsState:
       restoreTextures()
       restoreDraw(saved)
+      invalidateDrawState()
   var effective = state
   if gpuRenderer.hasStencilOverride:
     effective.stencilTest = gpuRenderer.stencilOverride.stencilTest
     effective.stencilWrite = gpuRenderer.stencilOverride.stencilWrite
     effective.stencilCompare = gpuRenderer.stencilOverride.stencilCompare
     effective.stencilReference = gpuRenderer.stencilOverride.stencilReference
-  if not sceneDrawsActive or not drawStateKnown or lastDrawState != effective:
+  if not sceneDrawsActive:
+    invalidateDrawState()
+  if not drawStateKnown or lastDrawState != effective:
     applyDraw(effective)
     lastDrawState = effective
     drawStateKnown = true

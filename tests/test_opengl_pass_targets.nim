@@ -148,6 +148,33 @@ proc verifyReadbackState() =
   glPixelStorei(GL_PACK_SKIP_PIXELS, 0)
   checkErrors()
 
+proc verifyClearMasks() =
+  let target = newRenderTarget(24, 24, stencil = true)
+  defer: target.destroy()
+  pushTarget(target)
+  defer: popTarget()
+  glDepthMask(GL_FALSE)
+  glStencilMaskSeparate(GL_FRONT, 0x13)
+  glStencilMaskSeparate(GL_BACK, 0x24)
+  glClearDepth(0.375)
+  glClearStencil(51)
+  glClearColor(0.25, 0.5, 0.75, 1)
+  clear(color(1, 0, 0, 1), depth = false)
+  clearDepth()
+  clear(color(0, 1, 0, 1), stencil = true)
+  for (field, expected) in [(GL_DEPTH_WRITEMASK, 0.GLint),
+      (GL_STENCIL_WRITEMASK, 0x13.GLint), (GL_STENCIL_BACK_WRITEMASK, 0x24.GLint),
+      (GL_STENCIL_CLEAR_VALUE, 51.GLint)]:
+    var actual: GLint
+    glGetIntegerv(field, actual.addr)
+    doAssert actual == expected
+  var depth: GLfloat
+  var rgba: array[4, GLfloat]
+  glGetFloatv(GL_DEPTH_CLEAR_VALUE, depth.addr)
+  glGetFloatv(GL_COLOR_CLEAR_VALUE, rgba[0].addr)
+  doAssert depth == 0.375 and rgba == [0.25'f32, 0.5, 0.75, 1]
+  checkErrors()
+
 proc main() =
   ## Runs the GPU fixture entirely in an invisible, non-activating window.
   let window = newWindow("Shared pass targets", ivec2(24), visible = false)
@@ -161,6 +188,7 @@ proc main() =
   verifyCompositionPhase()
   verifyDepthSharing()
   verifyReadbackState()
+  verifyClearMasks()
   echo "Shared OpenGL target resolve, depth copies, and readback state passed"
 
 main()

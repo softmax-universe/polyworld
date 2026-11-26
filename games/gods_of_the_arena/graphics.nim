@@ -3053,6 +3053,7 @@ proc runGraphics*(
         aimVisible = false
 
       profileBlock "drawWorld":
+        beginGotaFrame()
         # The clock changes palettes while the light stays fixed for
         # readable silhouettes and shadows on both sides of the map.
         scene.toon.setArenaHour(
@@ -3191,7 +3192,6 @@ proc runGraphics*(
               drawWorldCharacters(scene, worldCharacters, worldCharacterCount)
             scene.sunDepthPass = false
         profileBlock "Main pass":
-          beginGotaFrame()
           when not defined(emscripten):
             setMultisampling(true)
           clearFrame(color(0.05, 0.06, 0.09, 1.0))

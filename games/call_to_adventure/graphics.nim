@@ -2338,6 +2338,7 @@ proc runGraphics*() =
               scene.drawCharacter(visual.pose, color(1, 1, 1, 1),
                 color(side.r, side.g, side.b, XrayGlaze))
 
+        discard screenshotTarget.beginScreenshotFrame(window)
         if sunShadowsActive() and layerVertexRanges.len > visibleFrom:
           sunDepthPasses(window.size):
             drawTerrainSunDepth(
@@ -2349,7 +2350,6 @@ proc runGraphics*() =
             drawWorldActors()
             scene.sunDepthPass = false
 
-        discard screenshotTarget.beginScreenshotFrame(window)
         setRenderViewport(window.size)
         when not defined(emscripten):
           setMultisampling(true)

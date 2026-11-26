@@ -1,5 +1,28 @@
 # Game backend benchmarks
 
+## Benchmark an ordinary native build
+
+All seven Polyworld games accept `--benchmark PATH` wherever they accept
+`--screenshot PATH`. For example, from the repository root, this runs a seeded
+Gods of the Arena match with ten bots and writes a report for the selected backend.
+
+```sh
+nim r games/gods_of_the_arena/gota.nim --bot games/gods_of_the_arena/players/base.bas:10 --seed 42 --benchmark tmp/livetest/benchmarks/gota.json --windowSize 800x560 --warmup 30 --frames 180
+```
+
+The game creates a hidden window, renders its usual capture scene offscreen,
+writes the report, and exits. Both the warmup and sample counts default to 30.
+The normal match, menu, and replay arguments select what gets measured.
+
+`frameMs` contains wall-clock intervals between consecutive content frames.
+The clock starts after the warmup GPU work finishes. Subsequent frames submit
+asynchronously, and the last interval includes the final GPU drain.
+`summary.meanMs` gives the elapsed time per completed frame over the whole
+sample. The report also includes the median, p95, minimum, maximum, game,
+backend, and render dimensions. These offscreen timings exclude display pacing.
+
+## Benchmark matrix
+
 Build the benchmark matrix, then measure it with one game process at a time:
 
 ```sh

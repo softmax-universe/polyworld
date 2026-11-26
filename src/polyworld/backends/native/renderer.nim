@@ -35,7 +35,8 @@ proc newGameUi*(window: Window, atlasPath: string): Silky =
 proc beginGameUi*(sk: Silky, window: Window, size: IVec2) =
   sk.beginUiShared(window, size)
 
-proc presentRenderer*(window: Window) = endFrame(not captureActive())
+proc presentRenderer*(window: Window) =
+  endFrame(not captureActive() and not NativeBenchmarkBuild)
 
 proc atlasTexture*(sk: Silky): TextureHandle =
   let view = atlasViews.getOrDefault(cast[pointer](sk))

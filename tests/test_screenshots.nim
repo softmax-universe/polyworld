@@ -2,6 +2,11 @@ import
   std/os,
   polyworld/[cli, screenshots]
 
+const TestRuntimeBenchmark = not (defined(emscripten) or defined(headless) or
+  defined(takeScreenshot) or defined(frameBench) or defined(backendBench))
+when TestRuntimeBenchmark:
+  import std/[json, tempfiles]
+
 proc parseCapture(arguments: openArray[string]): ScreenshotOptions =
   ## Parses capture arguments without requiring a graphical build or window.
   var index = 0
@@ -201,4 +206,44 @@ proc testScreenshotState() =
 
 testScreenshotFlags()
 testScreenshotState()
+when TestRuntimeBenchmark:
+  proc testBenchmarkCapture() =
+    let directory = createTempDir("polyworld-frame-times-", "")
+    defer:
+      configureCapture(ScreenshotOptions(), graphical = true)
+      removeDir(directory)
+    let path = directory / "nested" / "frame times.json"
+    for separator in ["=", ":"]:
+      let options = parseCapture(@["--benchmark" & separator & path,
+        "--warmup" & separator & "1", "--frames" & separator & "2"])
+      doAssert options.benchmarkPath == path and options.warmup == 1 and options.frames == 2
+    for args in [@["--benchmark"], @["--benchmark="], @["--warmup", "0"]]:
+      rejectCapture(args)
+    for args in [@["--screenshot=a.png", "--benchmark=b.json"], @["--warmup=3"]]:
+      var rejected = false
+      try: parseCapture(args).validateCapture(graphical = true)
+      except ScreenshotError: rejected = true
+      doAssert rejected
+    let options = parseCapture(@["--benchmark", path, "--warmup", "2", "--frames", "2"])
+    var rejected = false
+    try: options.validateCapture(graphical = false)
+    except ScreenshotError: rejected = true
+    doAssert rejected
+    configureCapture(options, graphical = true)
+    doAssert captureActive() and benchmarkCaptureActive() and not captureDue(100)
+    var drains = 0
+    proc drain() = inc drains
+    for i in 1..4:
+      doAssert recordBenchmarkBoundary("test game", 640, 480, drain) == (i == 4)
+      doAssert drains == (if i == 4: 2 elif i >= 2: 1 else: 0)
+      doAssert captureFinished() == (i == 4) and fileExists(path) == (i == 4)
+    let report = parseFile(path)
+    doAssert recordBenchmarkBoundary("test game", 640, 480, drain) and drains == 2
+    doAssert report["game"].getStr == "test game" and report["frameMs"].len == 2
+    doAssert report["summary"]["meanMs"].getFloat ==
+      (report["frameMs"][0].getFloat + report["frameMs"][1].getFloat) / 2
+    configureCapture(options, graphical = true)
+    doAssert not recordBenchmarkBoundary("test game", 640, 480, drain)
+    doAssert drains == 2 and not captureFinished()
+  testBenchmarkCapture()
 echo "Shared screenshot command-line and startup unit tests passed."

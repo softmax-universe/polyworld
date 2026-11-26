@@ -66,7 +66,7 @@ proc parseLaunchOptions*(arguments: seq[string]): LaunchOptions =
           count: VillagerCount - ord(result.common.playerSlot > 0)
         )
   elif not defined(headless):
-    if result.common.capture.path.len > 0 and
+    if result.common.capture.runtimeCaptureRequested() and
       result.common.botGroups.len == 0 and
       result.common.replayPath.len == 0 and result.common.playerSlot == 0:
         result.common.botGroups.add BotGroup(

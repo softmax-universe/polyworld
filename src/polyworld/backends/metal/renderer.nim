@@ -61,7 +61,7 @@ proc newGameUi*(window: Window, atlasPath: string): Silky =
 proc presentRenderer*(window: Window) =
   ## Submits the shared scene and UI command buffer for presentation.
   if not metalRenderer.commandBuffer.isNil:
-    endFrame(not captureActive() and not defined(backendBench))
+    endFrame(not captureActive() and not NativeBenchmarkBuild)
 
 proc atlasTexture*(sk: Silky): TextureHandle =
   ## Borrows the current UI atlas for world-space text and labels.

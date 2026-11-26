@@ -172,8 +172,9 @@ For Gods of the Arena alone, use `build gota all`, `run gota all 3 arena`,
 and `nim r tools/bench_report.nim arena 3 gota`. The report includes mean,
 median, and 95th-percentile frame times in milliseconds.
 
-Set `BENCH_PIPELINED=1` before the build to measure normal presentation.
+Set `BENCH_PIPELINED=1` before the build to measure pipelined frame intervals.
 Use a new run ID. This mode drains outstanding GPU work at the end of warmup
-and at the end of measurement. The mean frame interval includes every measured
-presentation and the final drain. The fourth argument to the report selects
+and at the end of measurement. Native runs submit to a hidden offscreen target.
+WebGL runs use headless Chrome and include browser frame scheduling. The
+fourth argument to the report selects
 backends, for example `nim r tools/bench_report.nim arena-present 3 gota OpenGL,DirectX,Vulkan`.

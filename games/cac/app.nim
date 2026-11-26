@@ -379,7 +379,7 @@ proc closeCapture*(app: App) =
 
 proc beginCaptureFrame*(app: App) =
   ## Opens the game's drawing scope on both the visible and capture paths.
-  let capturing = captureActive() or defined(backendBench)
+  let capturing = captureActive() or defined(frameBench) or defined(backendBench)
   if capturing or RendererBackend in ["opengl", "webgl"]:
     when not defined(emscripten):
       if capturing:

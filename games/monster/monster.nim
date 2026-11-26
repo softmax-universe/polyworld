@@ -298,8 +298,8 @@ else:
             return
         else:
           inc frame
-      if capturing and epochTime() - started > 120:
-        raise newException(MonsterError, "Timed out waiting for capture.")
+        if (not ready or not benchmarkCaptureActive()) and epochTime() - started > 120:
+          raise newException(MonsterError, "Timed out waiting for capture.")
       if not capturing:
         window.presentFrame()
         reportReplayFrame(world.tick, 0)

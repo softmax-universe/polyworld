@@ -4,6 +4,7 @@ import std/[asynchttpserver, asyncdispatch, httpcore, json,
   monotimes, os, osproc, strformat, strutils, times, uri]
 
 const
+  BackgroundOptions = when defined(windows): {poDaemon} else: set[ProcessOption]({})
   Games = ["crewrift", "cta", "gota", "lvd", "cac", "heartleaf", "monster"]
   Dirs = ["crewrift", "call_to_adventure", "gods_of_the_arena", "light_vs_dark",
     "cac", "heartleaf", "monster"]
@@ -60,7 +61,7 @@ proc build(game, backend: string, i: int) =
     args.add "-o:" & executable(game, backend)
     if backend != "OpenGL": args.add "-d:" & backend.suffix
   args.add "games" / Dirs[i] / (game & ".nim")
-  let p = startProcess(findExe("nim"), args = args, options = {poParentStreams})
+  let p = startProcess(findExe("nim"), args = args, options = {poParentStreams} + BackgroundOptions)
   let status = p.waitForExit()
   p.close()
   if status != 0: raise newException(IOError, "Build failed for " & game & " " & backend)
@@ -101,7 +102,7 @@ proc web(i: int, entry, record: string): JsonNode =
   let ready = record & ".ready"
   if fileExists(ready): removeFile(ready)
   if fileExists(record): removeFile(record)
-  let server = startProcess(getAppFilename(), args = ["serve", record], options = {poParentStreams})
+  let server = startProcess(getAppFilename(), args = ["serve", record], options = {poParentStreams} + BackgroundOptions)
   defer:
     if server.running: server.terminate()
     discard server.waitForExit()
@@ -119,7 +120,7 @@ proc web(i: int, entry, record: string): JsonNode =
     "--disable-software-rasterizer", "--ignore-gpu-blocklist", "--disable-background-timer-throttling",
     "--disable-renderer-backgrounding", "--force-device-scale-factor=1", "--window-size=800,640",
     "--no-first-run", "--no-default-browser-check", "--disable-extensions",
-    "--user-data-dir=" & profile, url], options = {poParentStreams})
+    "--user-data-dir=" & profile, url], options = {poParentStreams} + BackgroundOptions)
   defer:
     if browser.running: browser.terminate()
     discard browser.waitForExit()
@@ -139,7 +140,8 @@ proc native(i: int, backend, entry: string): JsonNode =
   if Games[i] == "cac": args.add ["--players", "2"]
   if Games[i] == "monster":
     args.add ["--offline", "--no-voice", "--save-dir", absolutePath(BuildDir / ("save-" & entry & "-" & $getTime().toUnix))]
-  let (output, status) = execCmdEx(quoteShellCommand(@[absolutePath(executable(Games[i], backend))] & args))
+  let (output, status) = execCmdEx(quoteShellCommand(@[absolutePath(executable(Games[i], backend))] & args),
+    options = {poStdErrToStdOut, poUsePath} + BackgroundOptions)
   writeFile(BuildDir / (entry & ".log"), output)
   if status == 0:
     for line in output.splitLines:

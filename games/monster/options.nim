@@ -15,6 +15,7 @@ proc help() =
   echo "Common: --seed N --windowSize WxH --vsync BOOL"
   echo "        --play BOOL --speed N --mute --unmute --verbose"
   echo "Capture: --screenshot PATH --frames N (default 30)"
+  echo "Benchmark: --benchmark PATH [--warmup N] [--frames N]"
   echo "Options: --model ID --save-dir PATH --offline --select ID"
   echo "         --prompt TEXT --conversation --no-voice"
   echo "Valued options accept separate, equals, or colon values."
@@ -76,7 +77,8 @@ proc parseOptions*(parameters = commandLineParams()): Options =
           raise newException(MonsterError, "Unknown option: " & argument)
       inc index
     result.game.rejectUnsupportedFlags({SeedFlag, WindowSizeFlag, VsyncFlag,
-      PlayFlag, SpeedFlag, SoundFlag, VerboseFlag, ScreenshotFlag, FramesFlag})
+      PlayFlag, SpeedFlag, SoundFlag, VerboseFlag, ScreenshotFlag, FramesFlag,
+      BenchmarkFlag, WarmupFlag})
     result.game.validateGameOptions(0, "")
   except ValueError, ScreenshotError:
     raise newException(MonsterError,

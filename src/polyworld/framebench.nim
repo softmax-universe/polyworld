@@ -19,10 +19,15 @@ var
   clock = FrameClock(config: configuration)
   measurement = newBenchmarkReport(configuration)
 
+when defined(pipelinedBench) and not defined(emscripten):
+  measurement.metric = "Offscreen frame cadence including event loop and final GPU drain"
+
 proc beginBenchFrame*(window: Window) =
   ## Starts the shared measurement clock after validating the viewport.
   doAssert window.size == ivec2(configuration.width.int32, configuration.height.int32),
     "Benchmark viewport was " & $window.size
+  when not defined(emscripten):
+    doAssert not window.visible, "Native benchmarks require a hidden window"
   clock.beginMeasurement(benchmarkNow())
 
 proc report() =

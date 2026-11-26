@@ -76,7 +76,10 @@ proc presentRenderer*(window: Window) =
   passapi.endGameFrameDraws()
   passapi.gpuRenderer.active = false
   when not defined(backendBench):
-    window.swapBuffers()
+    if benchmarkCaptureActive() or NativeBenchmarkBuild:
+      glFlush()
+    else:
+      window.swapBuffers()
 
 proc atlasTexture*(sk: Silky): TextureHandle =
   ## Borrows the current atlas texture for world-space text.
@@ -354,8 +357,7 @@ proc beginScreenshotFrame*(target: var ScreenshotTarget, window: Window,
     enabled = captureActive()): FramebufferHandle =
   ## Binds an offscreen surface when a hidden window is being captured.
   passapi.beginGameFrameDraws()
-  let offscreen = enabled or
-    (defined(backendBench) and not defined(emscripten))
+  let offscreen = enabled or NativeBenchmarkBuild
   if not offscreen:
     screenshotFrame = FrameTarget()
     glBindFramebuffer(GL_FRAMEBUFFER, 0)

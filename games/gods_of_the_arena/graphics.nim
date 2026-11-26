@@ -240,7 +240,7 @@ var
   sk*: Silky
   screenshotTarget: ScreenshotTarget
   screenshotFrame: int
-  runtimeScreenshot: bool
+  runtimeCaptureEnabled: bool
   terrainReady: bool
   sharedScene: CharacterScene
   towerPacks: array[Team, PropPack]
@@ -273,7 +273,7 @@ proc presentGotaFrame*() =
           "games/gods_of_the_arena/gota_shot.png"):
         window.closeRequested = true
     else:
-      if runtimeScreenshot and captureFrame(window, screenshotFrame, 30,
+      if runtimeCaptureEnabled and captureFrame(window, screenshotFrame, 30,
           "games/gods_of_the_arena/gota_shot.png"):
         window.closeRequested = true
   window.presentFrame(framePaceHz)
@@ -287,7 +287,7 @@ proc initializeGraphics*() =
   ## Creates the application window and shared atlas exactly once.
   if window != nil:
     return
-  runtimeScreenshot = options.capture.path.len > 0
+  runtimeCaptureEnabled = options.capture.runtimeCaptureRequested()
   configureCapture(options.capture, "games/gods_of_the_arena/gota_shot.png")
   when ProfileWarmupFrames > 0:
     finishGameProfile()
@@ -3292,7 +3292,7 @@ proc runGraphics*(
                 drawWorldCharacters(scene, worldCharacters, worldCharacterCount)
                 finishCharacters(scene)
               endReflection()
-              if captureActive() or defined(backendBench):
+              if captureActive() or defined(frameBench) or defined(backendBench):
                 beginGotaFrame()
               else:
                 bindFrameTarget()

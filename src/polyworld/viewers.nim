@@ -171,7 +171,7 @@ proc initGameWindow*(
     msaa = msaaDisabled,
     visible = true
 ): (Window, Silky) =
-  ## Creates the viewer and renderer, keeping screenshot captures hidden.
+  ## Creates the viewer and renderer with capture and benchmark windows hidden.
   let
     selectedSize =
       when defined(frameBench):
@@ -199,8 +199,7 @@ proc initGameWindow*(
   let window = newWindow(
     title,
     selectedSize,
-    visible = visible and not captureActive() and
-      (not defined(backendBench) or defined(emscripten)),
+    visible = visible and not captureActive() and not NativeBenchmarkBuild,
     vsync = vsync and not captureActive() and not defined(frameBench) and
       not defined(backendBench),
     msaa = selectedMsaa
@@ -256,7 +255,7 @@ proc holdSplash*(
     seconds = SplashSeconds
 ) =
   ## Keeps the splash up until the hold time elapses.
-  if captureActive() or defined(emscripten) or defined(backendBench):
+  if captureActive() or defined(emscripten) or NativeBenchmarkBuild:
     drawSplash(sk, window, splash.name)
   else:
     while epochTime() - splash.startedAt < seconds:
@@ -272,6 +271,7 @@ var
 proc presentFrame*(window: Window, paceHz = 60) =
   ## Swaps the back buffer, then waits so presents stay on one cadence.
   ## ProMotion vsync alone flips between 8.33 ms and 16.67 ms.
+  if benchmarkCaptureActive(): return # captureFrame submitted this content frame.
   when defined(frameBench) and not defined(pipelinedBench): endBenchFrame(window)
   window.presentRenderer()
   when defined(frameBench) and defined(pipelinedBench): endPresentedBenchFrame(window)
@@ -344,11 +344,16 @@ proc captureFrame*(
   window: Window, frame: var int, waitFrames = DefaultScreenshotFrames,
   defaultPath = "screenshot.png"
 ): bool =
-  ## Saves the selected rendered frame and lets the game perform normal cleanup.
+  ## Captures a screenshot or frame timings and signals the game to exit normally.
   if not captureActive():
     return false
   if captureFinished():
     return true
+  when not defined(emscripten) and not defined(headless):
+    if benchmarkCaptureActive():
+      window.presentRenderer()
+      let size = window.size
+      return recordBenchmarkBoundary(window.title, size.x, size.y, finishGpu)
   inc frame
   if not captureDue(frame, waitFrames):
     return false

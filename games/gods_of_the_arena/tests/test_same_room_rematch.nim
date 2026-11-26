@@ -44,6 +44,7 @@ macro resultViewLoop(): untyped =
 proc assertResultViewExits(network: NetworkMatch) =
   let connection = TestConnection(client: network.client)
   let window = (closeRequested: false,)
+  const benchmarkFinished = false
   var leaveMatch = false
   proc pollEvents() = doAssert false, "Must exit old graphics before another result frame"
   proc updateWindowSettings(window: tuple[closeRequested: bool]) = discard

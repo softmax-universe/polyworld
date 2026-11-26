@@ -4,10 +4,7 @@ import
   std/math,
   chroma, shady, vmath
 
-when defined(useDirectX) or defined(useVulkan) or defined(useMetal4):
-  include backends/passes/shapes_types
-else:
-  include backends/opengl/shapes_types
+include backends/passes/shapes_types
 
 const
   VertexFloats = 9
@@ -342,7 +339,4 @@ proc addLine*(
   ## Adds one flat ribbon segment in the XZ plane.
   renderer.addPolyline([a, b], color, halfWidth)
 
-when defined(useDirectX) or defined(useVulkan) or defined(useMetal4):
-  include backends/passes/shapes
-else:
-  include backends/opengl/shapes
+include backends/passes/shapes

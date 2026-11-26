@@ -61,7 +61,8 @@ proc drawOutline*(
   outline.program.setUniform("selectionResolution",
     vec2(outline.size.x.float32, outline.size.y.float32))
   outline.program.setUniform("selectionColor", color)
-  outline.program.setUniform("selectionYTransform", vec2(-1, 1))
+  outline.program.setUniform("selectionYTransform",
+    (when PassTopLeftOrigin: vec2(-1, 1) else: vec2(1, 0)))
   draw(outline.program, outline.vertices, 3, DrawState(
     depthTest: outline.visibility == OccludedOutline,
     depthCompare: Greater,

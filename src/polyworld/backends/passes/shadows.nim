@@ -64,9 +64,12 @@ proc sunCutoutProgramId*(): ShaderProgram =
   cutoutDepthProgram
 
 proc sunShadowMvp*(step: int): Mat4 =
-  ## Maps light clip coordinates into the GPU's top-left shadow texture space.
+  ## Maps light clip coordinates into the selected shadow texture origin.
   let lightMatrix = if step == 0: sunLightMvp0 else: sunLightMvp1
-  scale(vec3(1, -1, 1)) * lightMatrix
+  when PassTopLeftOrigin:
+    scale(vec3(1, -1, 1)) * lightMatrix
+  else:
+    lightMatrix
 
 proc beginSunDepthPass*(step: int) =
   ## Selects and clears one shadow target, retaining the caller's target.
@@ -109,13 +112,14 @@ proc endSunDepthPass*(windowSize: IVec2) =
 template sunDepthPasses*(windowSize: IVec2, body: untyped) =
   ## Draws both cross-fade maps and restores the target if a draw fails.
   if sunShadowsActive():
-    try:
-      let lastShadowStep = (sunShadowBlend > 0).ord
-      for sunPassIndex {.inject.} in 0 .. lastShadowStep:
-        beginSunDepthPass(sunPassIndex)
-        body
-    finally:
-      endSunDepthPass(windowSize)
+    preserveDrawState:
+      try:
+        let lastShadowStep = (sunShadowBlend > 0).ord
+        for sunPassIndex {.inject.} in 0 .. lastShadowStep:
+          beginSunDepthPass(sunPassIndex)
+          body
+      finally:
+        endSunDepthPass(windowSize)
 
 proc initUnshadowedShadows*() =
   ## Supplies all-lit comparison textures for scenes without shadow maps.

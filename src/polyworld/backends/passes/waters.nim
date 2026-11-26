@@ -99,7 +99,7 @@ proc beginReflection*(size: IVec2) {.measure.} =
       reflectionTarget.height != size.y:
     destroy(reflectionTarget)
     reflectionTarget = newRenderTarget(size.x, size.y,
-      colorFormat = Rgba16f)
+      colorFormat = (when defined(emscripten): Rgba8 else: Rgba16f))
     reflectionTarget.color.setPassSampling(linear = true)
   pushTarget(reflectionTarget)
   reflectionActive = true
@@ -129,6 +129,7 @@ proc captureScene*(size: IVec2) {.measure.} =
   ## Copies the current color and resolved depth while preserving its target.
   if size.x <= 0 or size.y <= 0:
     raise newException(PolyworldWaterError, "water capture size must be positive")
+  ensureFrame(size.x, size.y)
   let source = gpuRenderer.target
   if source == nil or source.color == nil or source.depth == nil:
     raise newException(PolyworldWaterError,
@@ -163,7 +164,7 @@ proc drawWaterBody*(body: WaterBody, viewProjection: Mat4, eye: Vec3, windowSize
     rect.z / windowSize.x, rect.w / windowSize.y))
   template uniform(name: string, value: untyped) =
     program.setUniform(name, value)
-  uniform("captureFlipY", 1.0'f)
+  uniform("captureFlipY", (when PassTopLeftOrigin: 1.0'f else: 0.0'f))
   uniform("waterColor", params.color)
   uniform("sunColor", vec3(sunLight.r, sunLight.g, sunLight.b))
   uniform("waterSunToward", sunToward)

@@ -4,10 +4,7 @@ import
   std/math,
   chroma, shady, vmath
 
-when defined(useDirectX) or defined(useVulkan) or defined(useMetal4):
-  include backends/passes/worldbars_types
-else:
-  include backends/opengl/worldbars_types
+include backends/passes/worldbars_types
 
 const
   VertexFloats = 12
@@ -284,7 +281,4 @@ proc finishFrame*(tracker: var DamageTrailTracker) =
       inc writeIndex
   tracker.trails.setLen(writeIndex)
 
-when defined(useDirectX) or defined(useVulkan) or defined(useMetal4):
-  include backends/passes/worldbars
-else:
-  include backends/opengl/worldbars
+include backends/passes/worldbars

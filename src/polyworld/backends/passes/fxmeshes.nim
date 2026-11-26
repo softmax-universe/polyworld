@@ -52,7 +52,7 @@ proc initFxRenderer*(): FxRenderer {.raises: [FxMeshError].} =
       )
     )
     result.vertexBuffer = newBuffer([0.0'f])
-    result.indexBuffer = newBuffer([0'u32])
+    result.indexBuffer = newIndexBuffer([0'u32])
     for kind in FxTexture:
       result.patternTextures[kind] = makePatternTexture(kind)
   except Exception as error:

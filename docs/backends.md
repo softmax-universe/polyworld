@@ -24,12 +24,44 @@ find their assets.
 
 ## Boundaries
 
-Public feature modules select implementations in `backends/opengl`,
-`backends/metal`, and `backends/native`. The latter issues commands through
-`backends/directx` or `backends/vulkan`. Common native game passes live in
-`backends/passes`. CPU geometry, simulation, settings, and Shady procedures are
-shared. Cards and Casters and the smaller game-specific passes use the same
-layout within their game directories.
+The pipeline is shared scene preparation, shared rendering passes, then a
+compile-time selected backend adapter. Public feature modules import
+`backends/passes`; their old backend paths remain compatibility facades.
+`backends/passes/common.nim` selects `opengl/passapi`, `metal/passapi`, or
+`native/common`. DirectX and Vulkan implement the native command interface.
+
+Scene traversal, transforms, skinning inputs, material extraction, culling,
+transparent ordering, and shadow-caster caching live in `backends/passes/meshes`,
+`toon`, and `charactercontexts`.
+Terrain baking and scenery batches live in `backends/passes/quadterrain`.
+The same pass implementations submit terrain, Toon characters, shadows, water,
+particles, shapes, world bars, and screen effects on every backend. Cards and
+Casters shares its card faces, courtyard, table, VFX, and post passes under its
+own `backends/passes` directories. Crewrift stars and Light vs Dark fog follow
+the same pattern. The OpenGL PBR facade retains glTF's existing PBR context and
+IBL resources; Toon uses Polyworld's shared mesh preparation on every backend.
+
+OpenGL and WebGL commands are confined to `backends/opengl`. Its `passprograms`
+module owns shader compilation, reflected uniforms, vertex layouts, and draw
+state; `passresources` owns buffers, images, and samplers; `passtargets` owns
+attachments, resolves, copies, and readback. Legacy GLuint texture and framebuffer
+APIs adapt to explicit borrowed resource views, so ownership stays with callers.
+Shared draw groups save and restore OpenGL state once around a pass. Individual
+low-level draws also preserve state when called outside a group. This allows
+shared passes to compose with glTF, Silky, and existing OpenGL clients.
+
+WebGL uses the same adapter with WebGL Shady output and supported attachment
+formats. Water reflections use RGBA8 on WebGL and RGBA16F on desktop. Backend
+sampling preserves per-axis wraps, mip filtering, comparison mode, and supported
+anisotropy. Depth copies match the actual attachment format of borrowed targets,
+including multisampled window framebuffers.
+
+Shared data modules keep backend policy explicit. `renderdescriptions` and
+`texturesampling` describe vertex layouts, draw state, formats, and samplers.
+`texturedata` prepares validated upload payloads, and `shadermetadata` indexes
+uniforms, inputs, and texture bindings. `targetplans` and `uploadplans` validate
+attachment requirements and track reusable upload capacity without GPU handles.
+`measurements` defines consistent benchmark configuration and frame accounting.
 
 `polyworld/renderer` owns frame operations, UI submission, atlas views, capture
 targets, and readback. Games use this facade instead of native graphics handles
@@ -57,7 +89,8 @@ or `metalMSL`. The Windows drivers compile Shady stages at build time and embed
 DXIL or SPIR-V with uniform and texture reflection. Metal uniforms use Shady's reflected field offsets and alignment.
 There are no handwritten GLSL or Metal shader source strings.
 
-Metal textures and fragment positions use a top-left origin. Shared screen
+Metal and native textures and fragment positions use a top-left origin.
+OpenGL and WebGL retain their bottom-left framebuffer convention. Shared screen
 effects explicitly convert coordinates when their math uses OpenGL's bottom-left
 convention. Shady converts vertex clip depth to Metal's zero-to-one range;
 screen-space reconstruction converts sampled depth back to the shared convention.
@@ -67,6 +100,10 @@ screen-space reconstruction converts sampled depth back to the shared convention
 Run `nim check` before compiling each game. All seven entry points are listed in
 [the shader guide](shaders.md), along with screenshot and browser commands.
 The normal unit suite checks shader authorship and backend boundaries.
+Automated GPU fixtures create their windows with `visible = false` from the
+outset and keep them hidden. They must not show, focus, or enter fullscreen.
+Browser checks run headless. Manual visual tests are separate from automated
+validation.
 
 The Windows frame test draws through the selected API, checks offscreen pixels,
 and exercises presentation and resize.

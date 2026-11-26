@@ -5,8 +5,12 @@ import
   chroma, pixie, vmath, gltf,
   common
 
-when defined(useMetal4): import ../metal/meshtextures
-else: import ../native/meshtextures
+when defined(useMetal4):
+  import ../metal/meshtextures
+elif defined(useDirectX) or defined(useVulkan):
+  import ../native/meshtextures
+else:
+  import ../opengl/meshtextures
 export meshtextures.newCubeTexture
 
 type
@@ -142,14 +146,14 @@ proc geometry*(cache: var MeshCache, primitive: gltf.Primitive): MeshBuffers =
         indices.add [source[i - 1], source[i]]
       if primitive.mode == LineLoopMode and source.len > 1:
         indices.add [source[^1], source[0]]
-    result.indices = newBuffer(indices)
+    result.indices = newIndexBuffer(indices)
     result.count = indices.len
     result.index32 = true
   elif primitive.indices16.len > 0:
-    result.indices = newBuffer(primitive.indices16)
+    result.indices = newIndexBuffer(primitive.indices16)
     result.count = primitive.indices16.len
   elif primitive.indices32.len > 0:
-    result.indices = newBuffer(primitive.indices32)
+    result.indices = newIndexBuffer(primitive.indices32)
     result.count = primitive.indices32.len
     result.index32 = true
   cache.meshes[key] = result

@@ -39,7 +39,10 @@ proc fullscreenVertex(gl_Position: var Vec4, uv: var Vec2) =
     float32((gl_VertexID mod 2) * 2),
     float32((gl_VertexID div 2) * 2)
   )
-  uv = vec2(corner.x, 1.0'f - corner.y)
+  when PassTopLeftOrigin:
+    uv = vec2(corner.x, 1.0'f - corner.y)
+  else:
+    uv = corner
   gl_Position = vec4(corner.x * 2.0'f - 1.0'f,
     corner.y * 2.0'f - 1.0'f, 0.0'f, 1.0'f)
 
@@ -166,43 +169,44 @@ proc applyOcclusion*(post: var PostFx, projection: Mat4) =
   ## Filters scene occlusion and captures the scene before emissive effects.
   if not post.settings.enabled:
     return
-  clearStencilState()
-  let settings = post.settings
-  when PostLayerControls:
-    post.inverseProjection = projection.inverse
-  if settings.occlusion:
-    let pass = post.occlusionPass
-    pass.bindTexture("depthTexture", post.scene.depth)
-    pass.bindTexture("normalTexture", post.materialNormals.color)
-    pass.setUniform("inverseProjection", projection.inverse)
-    pass.setUniform("projectionY", -1.0'f)
-    pass.setUniform("projectionScale", vec2(projection[0, 0], projection[1, 1]))
-    pass.setUniform("texel", post.scene.texel)
-    pass.setUniform("radius", settings.occlusionRadius)
-    pass.setUniform("intensity", settings.occlusionIntensity)
-    pass.setUniform("bias", settings.occlusionBias)
-    pass.setUniform("normalDetail", settings.occlusionNormalDetail)
-    pass.drawTo(post.occlusion[0])
+  preserveDrawState:
+    clearStencilState()
+    let settings = post.settings
+    when PostLayerControls:
+      post.inverseProjection = projection.inverse
+    if settings.occlusion:
+      let pass = post.occlusionPass
+      pass.bindTexture("depthTexture", post.scene.depth)
+      pass.bindTexture("normalTexture", post.materialNormals.color)
+      pass.setUniform("inverseProjection", projection.inverse)
+      pass.setUniform("projectionY", (when PassTopLeftOrigin: -1.0'f else: 1.0'f))
+      pass.setUniform("projectionScale", vec2(projection[0, 0], projection[1, 1]))
+      pass.setUniform("texel", post.scene.texel)
+      pass.setUniform("radius", settings.occlusionRadius)
+      pass.setUniform("intensity", settings.occlusionIntensity)
+      pass.setUniform("bias", settings.occlusionBias)
+      pass.setUniform("normalDetail", settings.occlusionNormalDetail)
+      pass.drawTo(post.occlusion[0])
 
-    let blur = post.blurPass
-    blur.bindTexture("depthTexture", post.scene.depth)
-    blur.setUniform("sharpness", settings.occlusionSharpness)
-    blur.setUniform("near", post.near)
-    blur.setUniform("far", post.far)
-    if not post.showing(RawOcclusionLayer):
-      for (source, destination, axis) in
-        [(0, 1, vec2(1, 0)), (1, 0, vec2(0, 1))]:
-          blur.bindTexture("occlusionTexture", post.occlusion[source].color)
-          blur.setUniform("direction", axis * post.occlusion[source].texel)
-          blur.drawTo(post.occlusion[destination])
+      let blur = post.blurPass
+      blur.bindTexture("depthTexture", post.scene.depth)
+      blur.setUniform("sharpness", settings.occlusionSharpness)
+      blur.setUniform("near", post.near)
+      blur.setUniform("far", post.far)
+      if not post.showing(RawOcclusionLayer):
+        for (source, destination, axis) in
+          [(0, 1, vec2(1, 0)), (1, 0, vec2(0, 1))]:
+            blur.bindTexture("occlusionTexture", post.occlusion[source].color)
+            blur.setUniform("direction", axis * post.occlusion[source].texel)
+            blur.drawTo(post.occlusion[destination])
 
-    post.multiplyPass.bindTexture("occlusionTexture", post.occlusion[0].color)
-    post.multiplyPass.setUniform("tint", settings.occlusionTint)
-    post.multiplyPass.drawFullscreen(Multiply)
+      post.multiplyPass.bindTexture("occlusionTexture", post.occlusion[0].color)
+      post.multiplyPass.setUniform("tint", settings.occlusionTint)
+      post.multiplyPass.drawFullscreen(Multiply)
 
-  if settings.bloom:
-    post.copyPass.bindTexture("copySource", post.scene.color)
-    post.copyPass.drawTo(post.beforeVfx)
+    if settings.bloom:
+      post.copyPass.bindTexture("copySource", post.scene.color)
+      post.copyPass.drawTo(post.beforeVfx)
 
 when PostLayerControls:
   proc layerAvailable*(post: PostFx): bool =
@@ -249,7 +253,7 @@ when PostLayerControls:
     pass.bindTexture("depthTexture", post.scene.depth)
     pass.bindTexture("normalTexture", post.materialNormals.color)
     pass.setUniform("inverseProjection", post.inverseProjection)
-    pass.setUniform("projectionY", -1.0'f)
+    pass.setUniform("projectionY", (when PassTopLeftOrigin: -1.0'f else: 1.0'f))
     pass.setUniform("texel", post.scene.texel)
     pass.setUniform("mode", mode)
     pass.setUniform("scale", scale)
@@ -262,59 +266,61 @@ proc present*(post: var PostFx, windowSize: IVec2,
   ## Composes into the caller's frame or screenshot target before its HUD.
   if not post.settings.enabled:
     return
-  clearStencilState()
-  let settings = post.settings
-  if settings.bloom:
-    let pass = post.prefilterPass
-    pass.bindTexture("sceneTexture", post.scene.color)
-    pass.bindTexture("beforeTexture", post.beforeVfx.color)
-    pass.setUniform("texel", post.scene.texel)
-    pass.setUniform("threshold", settings.bloomThreshold)
-    pass.setUniform("vfxWeight", settings.bloomVfx)
-    pass.setUniform("useVfx", 1.0'f)
-    pass.drawTo(post.bloom[0])
-    let levels =
-      if post.showing(BloomSourceLayer):
-        1
-      else:
-        BloomLevels
-    for level in 1 ..< levels:
-      post.downPass.bindTexture("sourceTexture", post.bloom[level - 1].color)
-      post.downPass.setUniform("texel", post.bloom[level - 1].texel)
-      post.downPass.drawTo(post.bloom[level])
-    for level in countdown(levels - 1, 1):
-      post.upPass.bindTexture("sourceTexture", post.bloom[level].color)
-      post.upPass.setUniform("texel", post.bloom[level].texel)
-      post.upPass.drawTo(post.bloom[level - 1], Additive)
+  preserveDrawState:
+    clearStencilState()
+    let settings = post.settings
+    if settings.bloom:
+      let pass = post.prefilterPass
+      pass.bindTexture("sceneTexture", post.scene.color)
+      pass.bindTexture("beforeTexture", post.beforeVfx.color)
+      pass.setUniform("texel", post.scene.texel)
+      pass.setUniform("threshold", settings.bloomThreshold)
+      pass.setUniform("vfxWeight", settings.bloomVfx)
+      pass.setUniform("useVfx", 1.0'f)
+      pass.drawTo(post.bloom[0])
+      let levels =
+        if post.showing(BloomSourceLayer):
+          1
+        else:
+          BloomLevels
+      for level in 1 ..< levels:
+        post.downPass.bindTexture("sourceTexture", post.bloom[level - 1].color)
+        post.downPass.setUniform("texel", post.bloom[level - 1].texel)
+        post.downPass.drawTo(post.bloom[level])
+      for level in countdown(levels - 1, 1):
+        post.upPass.bindTexture("sourceTexture", post.bloom[level].color)
+        post.upPass.setUniform("texel", post.bloom[level].texel)
+        post.upPass.drawTo(post.bloom[level - 1], Additive)
 
-  popTarget()
-  post.sceneActive = false
-  let output =
-    if outputFramebuffer != nil:
-      outputFramebuffer
+    popTarget()
+    post.sceneActive = false
+    let output =
+      when PassTopLeftOrigin:
+        if outputFramebuffer != nil: outputFramebuffer
+        else: gpuRenderer.frameTarget
+      else:
+        targetFromNative(outputFramebuffer, windowSize)
+    pushTarget(output)
+    let pass = post.finalPass
+    pass.bindTexture("sceneTexture", post.scene.color)
+    pass.bindTexture("bloomTexture", post.bloom[0].color)
+    pass.setUniform("texel", post.scene.texel)
+    pass.setUniform("useFxaa", if settings.fxaa: 1.0'f else: 0.0'f)
+    pass.setUniform("bloomStrength",
+      if settings.bloom: settings.bloomStrength else: 0.0'f)
+    pass.setUniform("vignette", settings.vignette)
+    pass.setUniform("vignetteStart", settings.vignetteStart)
+    pass.setUniform("vignetteEnd", settings.vignetteEnd)
+    pass.setUniform("saturation", settings.saturation)
+    pass.setUniform("contrast", settings.contrast)
+    when PostLayerControls:
+      if post.layer == FinalLayer:
+        pass.drawFullscreen()
+      else:
+        post.drawLayer()
     else:
-      gpuRenderer.frameTarget
-  pushTarget(output)
-  let pass = post.finalPass
-  pass.bindTexture("sceneTexture", post.scene.color)
-  pass.bindTexture("bloomTexture", post.bloom[0].color)
-  pass.setUniform("texel", post.scene.texel)
-  pass.setUniform("useFxaa", if settings.fxaa: 1.0'f else: 0.0'f)
-  pass.setUniform("bloomStrength",
-    if settings.bloom: settings.bloomStrength else: 0.0'f)
-  pass.setUniform("vignette", settings.vignette)
-  pass.setUniform("vignetteStart", settings.vignetteStart)
-  pass.setUniform("vignetteEnd", settings.vignetteEnd)
-  pass.setUniform("saturation", settings.saturation)
-  pass.setUniform("contrast", settings.contrast)
-  when PostLayerControls:
-    if post.layer == FinalLayer:
       pass.drawFullscreen()
-    else:
-      post.drawLayer()
-  else:
-    pass.drawFullscreen()
-  popTarget()
+    popTarget()
 
 proc dispose*(post: var PostFx) =
   ## Releases post-processing attachments and compiled shader programs.

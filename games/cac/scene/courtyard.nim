@@ -4,8 +4,5 @@ import courtyardgeometry
 export courtyardgeometry
 
 when not defined(headless):
-  when defined(useDirectX) or defined(useVulkan) or defined(useMetal4):
-    import backends/passes/courtyard
-  else:
-    import backends/opengl/courtyard
+  import backends/passes/courtyard
   export courtyard

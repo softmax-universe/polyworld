@@ -5,10 +5,7 @@ import
   shady, vmath,
   particleshaders
 
-when defined(useDirectX) or defined(useVulkan) or defined(useMetal4):
-  include backends/passes/particles_types
-else:
-  include backends/opengl/particles_types
+include backends/passes/particles_types
 
 const
   MaximumParticleEffects = 192
@@ -289,7 +286,4 @@ proc particlePathVisible*(
               visibility[row * width + col] == 0: return false
   true
 
-when defined(useDirectX) or defined(useVulkan) or defined(useMetal4):
-  include backends/passes/particles
-else:
-  include backends/opengl/particles
+include backends/passes/particles

@@ -468,7 +468,4 @@ proc reflecting*(params: WaterParams): bool =
   ## Whether this water shows reflections, so it needs its reflection pass.
   params.reflectiveness > 0 or params.fresnelStrength > 0
 
-when defined(useDirectX) or defined(useVulkan) or defined(useMetal4):
-  include backends/passes/waters
-else:
-  include backends/opengl/waters
+include backends/passes/waters

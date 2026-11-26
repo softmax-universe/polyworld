@@ -4,7 +4,8 @@ import
   std/[os, random, strformat, strutils, tables],
   chroma, gltf, pixie, pixie/internal, shady, vmath,
   ../../[assets, common, pathing, profiles, shadows, terrainblends,
-    terrainmaps, terrainreliefs, terrainsurfaces, textures, toon]
+    terrainmaps, terrainreliefs, terrainsurfaces, toon]
+import ./textures
 import ./common as driver
 when defined(useDirectX) or defined(useVulkan): import ../../frustums
 
@@ -483,30 +484,31 @@ proc drawTerrain*(
     drawGround = true, drawProps = true
 ) {.measure.} =
   ## Draws opaque terrain, colored props, and cutout foliage in scene order.
-  if drawGround:
-    drawTerrainRange(viewProjection, 0, meshVertexCount, showEdges)
-  if not drawProps:
-    return
-  let state = DrawState(depthTest: true, depthWrite: true)
-  if propMesh.len > 0:
-    propProgram.setEnvUniforms()
-    propProgram.setShadowUniforms()
-    propProgram.setVisibilityUniforms()
-    propProgram.setUniform("mvp", viewProjection)
-    propProgram.setUniform("propModel", mat4())
-    propProgram.setUniform("propTint", vec4(1))
-    draw(propProgram, propVertexBuffer, propMesh.len div 9, state)
-  if treeMesh.len > 0:
-    treeProgram.setEnvUniforms()
-    treeProgram.setShadowUniforms()
-    treeProgram.setVisibilityUniforms()
-    treeProgram.setUniform("mvp", viewProjection)
-    treeProgram.setUniform("treeAlphaCutoff", TreeAlphaCutoff)
-    treeProgram.bindTexture("treeTextures", treeTextureArray)
-    draw(treeProgram, treeVertexBuffer, treeMesh.len div TreeVertexSize, state)
-  for batch in texturedBatches:
-    if batch.mesh.len > 0:
-      drawTexturedBatch(batch, viewProjection)
+  preserveDrawState:
+    if drawGround:
+      drawTerrainRange(viewProjection, 0, meshVertexCount, showEdges)
+    if not drawProps:
+      return
+    let state = DrawState(depthTest: true, depthWrite: true)
+    if propMesh.len > 0:
+      propProgram.setEnvUniforms()
+      propProgram.setShadowUniforms()
+      propProgram.setVisibilityUniforms()
+      propProgram.setUniform("mvp", viewProjection)
+      propProgram.setUniform("propModel", mat4())
+      propProgram.setUniform("propTint", vec4(1))
+      draw(propProgram, propVertexBuffer, propMesh.len div 9, state)
+    if treeMesh.len > 0:
+      treeProgram.setEnvUniforms()
+      treeProgram.setShadowUniforms()
+      treeProgram.setVisibilityUniforms()
+      treeProgram.setUniform("mvp", viewProjection)
+      treeProgram.setUniform("treeAlphaCutoff", TreeAlphaCutoff)
+      treeProgram.bindTexture("treeTextures", treeTextureArray)
+      draw(treeProgram, treeVertexBuffer, treeMesh.len div TreeVertexSize, state)
+    for batch in texturedBatches:
+      if batch.mesh.len > 0:
+        drawTexturedBatch(batch, viewProjection)
 
 proc waterShaderProgram*(): ShaderProgram =
   ## Returns the active water program for additional override shader inputs.
@@ -564,25 +566,26 @@ proc drawDepthMesh(
 
 proc drawTerrainSunDepth*(firstVertex = 0, vertexCount = -1) {.measure.} =
   ## Draws baked terrain and all scenery into the active sun depth map.
-  let
-    transform = sunDepthPassMvp()
-    count =
-      if vertexCount < 0:
-        meshVertexCount - firstVertex
+  preserveDrawState:
+    let
+      transform = sunDepthPassMvp()
+      count =
+        if vertexCount < 0:
+          meshVertexCount - firstVertex
+        else:
+          vertexCount
+    drawDepthMesh(vertexBuffer, count, TerrainVertexSize, transform,
+      first = firstVertex)
+    drawDepthMesh(propVertexBuffer, propMesh.len div 9, 9, transform)
+    drawDepthMesh(treeVertexBuffer, treeMesh.len div TreeVertexSize,
+      TreeVertexSize, transform, treeTextureArray)
+    for batch in texturedBatches:
+      when defined(useDirectX) or defined(useVulkan):
+        bindSunCutoutDepth(transform, TreeAlphaCutoff)
+        sunBindCutoutTexture(batch.textureArray)
+        batch.drawVisible(transform, sunCutoutProgramId(), depthLayout(12, true))
       else:
-        vertexCount
-  drawDepthMesh(vertexBuffer, count, TerrainVertexSize, transform,
-    first = firstVertex)
-  drawDepthMesh(propVertexBuffer, propMesh.len div 9, 9, transform)
-  drawDepthMesh(treeVertexBuffer, treeMesh.len div TreeVertexSize,
-    TreeVertexSize, transform, treeTextureArray)
-  for batch in texturedBatches:
-    when defined(useDirectX) or defined(useVulkan):
-      bindSunCutoutDepth(transform, TreeAlphaCutoff)
-      sunBindCutoutTexture(batch.textureArray)
-      batch.drawVisible(transform, sunCutoutProgramId(), depthLayout(12, true))
-    else:
-      drawDepthMesh(batch.vertexBuffer, batch.mesh.len div 12, 12, transform, batch.textureArray)
+        drawDepthMesh(batch.vertexBuffer, batch.mesh.len div 12, 12, transform, batch.textureArray)
 
 when defined(useDirectX) or defined(useVulkan):
   proc drawCachedTerrainSunDepth*(step: int) =

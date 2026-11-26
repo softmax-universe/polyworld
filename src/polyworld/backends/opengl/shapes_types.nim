@@ -1,9 +1,1 @@
-import opengl
-
-type
-  ShapeTexture* = GLuint
-  ShapeGpu = object
-    program: GLuint
-    vertexArray: GLuint
-    vertexBuffer: GLuint
-    whiteTexture: GLuint
+include ../passes/shapes_types

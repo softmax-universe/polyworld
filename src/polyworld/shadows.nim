@@ -208,7 +208,4 @@ proc sunDepthPassMvp*(): Mat4 =
   ## Returns the light view-projection of the active shadow pass.
   activeDepthMvp
 
-when defined(useDirectX) or defined(useVulkan) or defined(useMetal4):
-  include backends/passes/shadows
-else:
-  include backends/opengl/shadows
+include backends/passes/shadows

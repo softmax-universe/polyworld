@@ -39,11 +39,11 @@ proc supportsBc3(forceRgba: bool): bool =
     result = false
 
 proc loadTerrainTextures*(
-  paths: openArray[string], forceRgba = false
+  paths: openArray[string], forceRgba: bool, plan: var TextureUploadPlan
 ): tuple[texture: TextureArray, compressed: bool] =
-  ## Uploads prebuilt terrain mips, decoding only for the compatibility path.
+  ## Uploads prebuilt terrain mips and retains their prepared dimensions.
   result.compressed = supportsBc3(forceRgba)
-  let plan = prepareTerrainTextures(paths, result.compressed)
+  plan = prepareTerrainTextures(paths, result.compressed)
   glGenTextures(1, result.texture.addr)
   glBindTexture(GL_TEXTURE_2D_ARRAY, result.texture)
   try:
@@ -82,6 +82,13 @@ proc loadTerrainTextures*(
     raise
   finally:
     glBindTexture(GL_TEXTURE_2D_ARRAY, 0)
+
+proc loadTerrainTextures*(
+  paths: openArray[string], forceRgba = false
+): tuple[texture: TextureArray, compressed: bool] =
+  ## Preserves the public native texture handle and compression result.
+  var plan: TextureUploadPlan
+  loadTerrainTextures(paths, forceRgba, plan)
 
 proc deleteTexture*(texture: var Texture) =
   ## Releases an owned texture and clears the caller's handle.

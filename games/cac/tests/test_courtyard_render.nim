@@ -1,13 +1,14 @@
 ## Native GPU regression: normal/depth integration, SSAO/bloom, and sky motion.
 ## nim r --out:build/test_courtyard_render tests/test_courtyard_render.nim
-import std/[math, os]
+import std/[importutils, math, os]
 import opengl, pixie, vmath, windy
 # `post` names the post-processor below, so the module goes by another name.
 import ../scene/courtyard, ../scene/post as postfx, ../paths
 
 const Width = 640
 const Height = 400
-let window = newWindow("CaC material verification", ivec2(Width, Height))
+let window = newWindow("CaC material verification", ivec2(Width, Height),
+  visible = false)
 window.makeContextCurrent()
 loadExtensions()
 let
@@ -24,6 +25,22 @@ let detailed = initCourtyardRenderer()
 putEnv("CAC_STONE_NORMALS", "0")
 let flat = initCourtyardRenderer()
 delEnv("CAC_STONE_NORMALS")
+
+privateAccess(CourtyardRenderer)
+privateAccess(typeof(default(CourtyardRenderer).shadows))
+for renderer in [detailed, flat]:
+  for target in renderer.shadows.targets:
+    var comparison, minify, magnify: GLint
+    glGetSamplerParameteriv(target.depth.sampler, GL_TEXTURE_COMPARE_MODE,
+      comparison.addr)
+    glGetSamplerParameteriv(target.depth.sampler, GL_TEXTURE_MIN_FILTER,
+      minify.addr)
+    glGetSamplerParameteriv(target.depth.sampler, GL_TEXTURE_MAG_FILTER,
+      magnify.addr)
+    doAssert comparison == GL_COMPARE_REF_TO_TEXTURE.GLint,
+      "WebGL shadow samplers require depth comparison sampling."
+    doAssert minify == GL_LINEAR.GLint and magnify == GL_LINEAR.GLint,
+      "Courtyard shadows must retain filtered depth comparisons."
 
 proc readColor(): Image =
   result = newImage(Width, Height)

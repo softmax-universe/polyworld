@@ -23,6 +23,7 @@ proc initStrictFog*(): StrictFog =
 
 proc ensureSize(fog: var StrictFog, size: IVec2) =
   ## Keeps captured attachments compatible with the active frame target.
+  ensureFrame(size.x, size.y)
   let target = gpuRenderer.target
   if target == nil or target.color == nil or target.depth == nil:
     raise newException(GpuError,
@@ -85,7 +86,12 @@ proc restoreHiddenGround*(fog: var StrictFog) =
   fog.program.bindTexture("currentSight", fog.sight)
   fog.program.setUniform("inverseView", fog.inverse)
   fog.program.setUniform("mapSide", fog.side.float32)
-  fog.program.setUniform("textureYTransform", vec2(-1, 1))
+  let textureYTransform =
+    when PassTopLeftOrigin:
+      vec2(-1, 1)
+    else:
+      vec2(1, 0)
+  fog.program.setUniform("textureYTransform", textureYTransform)
   draw(fog.program, nil, 3)
 
 proc closeStrictFog*(fog: var StrictFog) =

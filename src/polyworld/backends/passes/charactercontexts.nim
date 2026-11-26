@@ -194,8 +194,9 @@ proc drawPbr*(renderer: CharacterRenderer, ctx: PbrContext, root: Node) =
   shader.setUniform("environmentMipCount", 3.0'f)
   shader.bindTexture("environmentMap", renderer.environment)
   shader.bindTexture("shadowMap", modelShadowTexture(sunShadowTextures[0]))
-  renderer.blended.setLen(0)
-  renderer.drawNodes(ctx, root, root)
-  for entry in renderer.blended:
-    renderer.drawPrimitive(ctx, root, entry.owner, entry.primitive)
-  renderer.blended.setLen(0)
+  preserveDrawState:
+    renderer.blended.setLen(0)
+    renderer.drawNodes(ctx, root, root)
+    for entry in renderer.blended:
+      renderer.drawPrimitive(ctx, root, entry.owner, entry.primitive)
+    renderer.blended.setLen(0)

@@ -112,11 +112,17 @@ proc drawPrimitive(ctx: ToonContext, root, owner: Node,
   shader.bindTexture("toonBaseColorTexture", textures.baseColor)
   shader.bindTexture("toonEmissiveTexture", textures.emissive)
   shader.bindTexture("toonRamp", ctx.rampTexture)
+  var blend = Opaque
+  if material.alphaMode == BlendAlphaMode:
+    when defined(useMetal4) or defined(useDirectX) or defined(useVulkan):
+      blend = AlphaBlend
+    else:
+      blend = StraightAlpha
   shader.drawGeometry(geometry, DrawState(
     depthTest: true,
     depthWrite: material.alphaMode != BlendAlphaMode,
     cull: if material.doubleSided: CullNone else: CullBack,
-    blend: if material.alphaMode == BlendAlphaMode: AlphaBlend else: Opaque
+    blend: blend
   ))
 
 proc drawToonMesh(ctx: ToonContext, root, node: Node,
@@ -169,16 +175,17 @@ proc draw*(ctx: ToonContext, root: Node, pose: ptr ToonPose = nil) =
   shader.setUniform("toonLightLevel", lightLevel)
   shader.bindTexture("toonShadowMap0", modelShadowTexture(sunShadowTextures[0]))
   shader.bindTexture("toonShadowMap1", modelShadowTexture(sunShadowTextures[1]))
-  ctx.blended.setLen(0)
-  if pose == nil:
-    ctx.drawToonNodes(root, root)
-  else:
-    for i in 0 ..< pose.meshCount:
-      let mesh = addr pose.meshes[i]
-      ctx.drawToonMesh(root, mesh.node, mesh)
-  for entry in ctx.blended:
-    ctx.drawPrimitive(root, entry.node, entry.primitive, entry.pose)
-  ctx.blended.setLen(0)
+  preserveDrawState:
+    ctx.blended.setLen(0)
+    if pose == nil:
+      ctx.drawToonNodes(root, root)
+    else:
+      for i in 0 ..< pose.meshCount:
+        let mesh = addr pose.meshes[i]
+        ctx.drawToonMesh(root, mesh.node, mesh)
+    for entry in ctx.blended:
+      ctx.drawPrimitive(root, entry.node, entry.primitive, entry.pose)
+    ctx.blended.setLen(0)
 
 proc drawSunDepthPrimitive(ctx: ToonContext, root, owner: Node,
     primitive: gltf.Primitive, pose: ptr ToonMeshPose = nil) =
@@ -265,9 +272,10 @@ proc drawSunDepth*(ctx: ToonContext, root: Node,
   ctx.depthShader.setUniform("toonDepthLightMvp", sunDepthPassMvp())
   when defined(useDirectX) or defined(useVulkan):
     ctx.solidDepth.setUniform("toonDepthLightMvp", sunDepthPassMvp())
-  if pose == nil:
-    ctx.drawDepthNodes(root, root)
-  else:
-    for i in 0 ..< pose.meshCount:
-      let mesh = addr pose.meshes[i]
-      ctx.drawDepthMesh(root, mesh.node, mesh)
+  preserveDrawState:
+    if pose == nil:
+      ctx.drawDepthNodes(root, root)
+    else:
+      for i in 0 ..< pose.meshCount:
+        let mesh = addr pose.meshes[i]
+        ctx.drawDepthMesh(root, mesh.node, mesh)

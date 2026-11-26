@@ -1,5 +1,7 @@
 when defined(useMetal4):
   import ../metal/textures
-else:
+elif defined(useDirectX) or defined(useVulkan):
   import ../native/textures
+else:
+  import ../opengl/passtextures as textures
 export textures

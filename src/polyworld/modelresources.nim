@@ -1,20 +1,16 @@
 ## Releases model buffers through the selected graphics backend.
 
 import gltf
-
-when defined(useDirectX) or defined(useVulkan):
-  import backends/native/meshes
-elif defined(useMetal4):
-  import backends/metal/meshes
+import backends/passes/meshes
 
 proc clearModelGpu*(primitive: Primitive) =
   ## Invalidates one primitive after CPU geometry or material replacement.
   if primitive == nil:
     return
-  when defined(useMetal4) or defined(useDirectX) or defined(useVulkan):
-    modelMeshCache.release(primitive)
-    modelMeshCache.release(primitive.material)
-  else:
+  modelMeshCache.release(primitive)
+  modelMeshCache.release(primitive.material)
+  when not (defined(useMetal4) or defined(useDirectX) or defined(useVulkan)):
+    # The glTF PBR renderer owns separate resources from the shared toon pass.
     primitive.clearFromGpu()
 
 proc clearModelGpu*(node: Node) =

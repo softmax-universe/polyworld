@@ -59,6 +59,7 @@ proc drawDistortions*(
   ## Bends a scene target through depth-tested camera-facing effect quads.
   if distortions.len == 0 or size.x <= 0 or size.y <= 0:
     return
+  ensureFrame(size.x, size.y)
   let target = if source == nil: gpuRenderer.frameTarget else: source
   if target == nil or target.color == nil:
     raise newException(DistortionError, "Distortions require a scene color target")
@@ -81,7 +82,8 @@ proc drawDistortions*(
   program.setUniform("viewMatrix", viewMatrix)
   program.setUniform("viewportSize", vec2(size.x.float32, size.y.float32))
   program.setUniform("clock", clock)
-  program.setUniform("shiftScale", vec2(1.0'f, -1.0'f))
+  program.setUniform("shiftScale",
+    (when PassTopLeftOrigin: vec2(1.0'f, -1.0'f) else: vec2(1.0'f)))
   program.bindTexture("scene", renderer.sceneCopy.color)
   pushTarget(target)
   defer:

@@ -23,7 +23,10 @@ proc checkBackends(directory: string) =
       for original in readFile(path).splitLines():
         inc number
         let line = original.split('#')[0].strip()
-        if "backends/opengl/" in line:
+        if "backends/opengl/" in line or line in [
+            "import ../opengl/passapi",
+            "import ../opengl/meshtextures",
+            "import ../opengl/passtextures as textures"]:
           continue
         if "/backends/opengl/" notin normalized:
           doAssert not line.contains(nativeSymbols),

@@ -2,7 +2,10 @@
 
 import
   chroma, opengl, pixie, silky, vmath, windy,
-  ../../screenshots
+  ../../screenshots,
+  passapi, ../passes/meshes as passMeshes,
+  silky/drawers/shader as uiShaders, shady
+from silky/drawers/ogl import DrawerVertex
 
 const
   RendererBackend* = when defined(emscripten): "webgl" else: "opengl"
@@ -30,6 +33,7 @@ type
     viewport: array[4, GLint]
 
 var
+  uiProgram: passapi.ShaderProgram
   targetStack: seq[TargetState]
   multisampleTargets: seq[FrameTarget]
   screenshotFrame: FrameTarget
@@ -52,9 +56,13 @@ proc initRenderer*(window: Window, samples = 1) =
   ## Initializes OpenGL entry points for the active window.
   window.makeContextCurrent()
   loadExtensions()
+  passapi.initNative(window)
 
 proc shutdownRenderer*() =
-  ## Leaves context-owned resources to their explicit feature owners.
+  ## Releases shared model resources before the active context is closed.
+  passMeshes.clearModelResources()
+  passapi.destroy(uiProgram)
+  uiProgram = nil
   when defined(backendThroughput):
     discard drainBenchmarkGpuFrames()
 
@@ -64,6 +72,7 @@ proc newGameUi*(window: Window, atlasPath: string): Silky =
 
 proc presentRenderer*(window: Window) =
   ## Presents the completed OpenGL back buffer.
+  passapi.gpuRenderer.active = false
   when not defined(backendBench):
     window.swapBuffers()
 
@@ -71,9 +80,40 @@ proc atlasTexture*(sk: Silky): TextureHandle =
   ## Borrows the current atlas texture for world-space text.
   sk.atlasTextureId()
 
+proc drawUiLayer*(sk: Silky, vertices: openArray[DrawerVertex], size: Vec2,
+    scale: float32) =
+  ## Renders shared Silky geometry into the application's current target.
+  if vertices.len == 0:
+    return
+  if uiProgram == nil:
+    uiProgram = newProgram(
+      nativeStage(uiShaders.silkyVert, shaderVertex),
+      nativeStage(uiShaders.silkyFrag, shaderFragment),
+      VertexLayout(stride: sizeof(DrawerVertex), attributes: @[
+        VertexAttribute(name: "pos", format: Float2,
+          offset: offsetOf(DrawerVertex, pos)),
+        VertexAttribute(name: "uv", format: Float2,
+          offset: offsetOf(DrawerVertex, uv)),
+        VertexAttribute(name: "color", format: Unorm8x4,
+          offset: offsetOf(DrawerVertex, color)),
+        VertexAttribute(name: "clipPos", format: Float2,
+          offset: offsetOf(DrawerVertex, clipPos)),
+        VertexAttribute(name: "clipSize", format: Float2,
+          offset: offsetOf(DrawerVertex, clipSize)),
+        VertexAttribute(name: "maskUv", format: Float2,
+          offset: offsetOf(DrawerVertex, maskUv))]))
+  uiProgram.setUniform("viewportSize", size / scale)
+  uiProgram.setUniform("atlasSize", sk.atlasImageSize().vec2)
+  uiProgram.bindTexture("atlasSampler", sk.atlasTexture())
+  drawStream(uiProgram, vertices, vertices.len,
+    DrawState(blend: PremultipliedAlpha))
+
 proc setRenderViewport*(size: IVec2) =
   ## Sets the viewport to the complete rendering surface.
   glViewport(0, 0, size.x.GLsizei, size.y.GLsizei)
+  var framebuffer: GLint
+  glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, framebuffer.addr)
+  passapi.syncFrameTarget(framebuffer.GLuint, size)
 
 proc setMultisampling*(enabled: bool) =
   ## Enables desktop multisampling when requested.
@@ -86,6 +126,9 @@ proc setMultisampling*(enabled: bool) =
 proc bindFrameTarget*(target: FramebufferHandle = 0) =
   ## Selects the target for subsequent scene drawing.
   glBindFramebuffer(GL_FRAMEBUFFER, target)
+  var viewport: array[4, GLint]
+  glGetIntegerv(GL_VIEWPORT, viewport[0].addr)
+  passapi.syncFrameTarget(target, ivec2(viewport[2], viewport[3]))
 
 proc clearFrame*(value: Color, depth = true, stencil = false) =
   ## Clears the requested attachments with writable depth and stencil.
@@ -102,6 +145,7 @@ proc clearFrame*(value: Color, depth = true, stencil = false) =
 
 proc prepareUi*(sk: Silky) =
   ## Restores the drawing state needed by a UI pass.
+  passapi.clearStencilState()
   glDisable(GL_DEPTH_TEST)
   glDisable(GL_STENCIL_TEST)
   glDisable(GL_CULL_FACE)
@@ -117,6 +161,7 @@ proc finishUi*(sk: Silky) =
 
 proc beginStencil*(reference: int) =
   ## Marks fragments from the following character draws.
+  passapi.setStencil(true, reference)
   glEnable(GL_STENCIL_TEST)
   glStencilMask(0xff)
   glStencilFunc(GL_ALWAYS, reference.GLint, 0xff)
@@ -124,6 +169,7 @@ proc beginStencil*(reference: int) =
 
 proc endStencil*() =
   ## Ends character stencil marking.
+  passapi.clearStencilState()
   glStencilMask(0)
   glDisable(GL_STENCIL_TEST)
 
@@ -283,6 +329,8 @@ proc popFrameTarget*() =
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, previous.draw.GLuint)
   glViewport(previous.viewport[0], previous.viewport[1],
     previous.viewport[2], previous.viewport[3])
+  passapi.syncFrameTarget(previous.draw.GLuint,
+    ivec2(previous.viewport[2], previous.viewport[3]))
 
 proc releaseScreenshotTarget*(target: var ScreenshotTarget) =
   ## Releases the hidden-window capture target.

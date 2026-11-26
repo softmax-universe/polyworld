@@ -55,31 +55,32 @@ proc drawEffects(renderer: var VfxRenderer, viewProjection: Mat4,
   ## Draws material surfaces before their light, preserving scene depth.
   if renderer.vertices.len == 0 and renderer.materialVertices.len == 0:
     return
-  renderer.program.setUniform("vfxViewProjection", viewProjection)
-  renderer.program.bindTexture("vfxLightningSampler", renderer.lightningTexture)
-  renderer.program.bindTexture("vfxOozeSampler", renderer.oozeTexture)
-  renderer.program.bindTexture(
-    "vfxOozeDropletSampler", renderer.oozeDropletTexture
-  )
-  var state = DrawState(
-    depthTest: depthTest,
-    depthWrite: false,
-    blend: AlphaBlend
-  )
-  if stencilReference >= 0:
-    state.stencilCompare = Equal
-    state.stencilTest = true
-    state.stencilReference = stencilReference
-    state.stencilWrite = false
-  if renderer.materialVertices.len > 0:
-    renderer.materialBuffer.updateBuffer(renderer.materialVertices)
-    draw(renderer.program, renderer.materialBuffer,
-      renderer.materialVertices.len div 12, state)
-  if renderer.vertices.len > 0:
-    renderer.vertexBuffer.updateBuffer(renderer.vertices)
-    state.blend = if additive: Additive else: AlphaBlend
-    draw(renderer.program, renderer.vertexBuffer,
-      renderer.vertices.len div 12, state)
+  preserveDrawState:
+    renderer.program.setUniform("vfxViewProjection", viewProjection)
+    renderer.program.bindTexture("vfxLightningSampler", renderer.lightningTexture)
+    renderer.program.bindTexture("vfxOozeSampler", renderer.oozeTexture)
+    renderer.program.bindTexture(
+      "vfxOozeDropletSampler", renderer.oozeDropletTexture
+    )
+    var state = DrawState(
+      depthTest: depthTest,
+      depthWrite: false,
+      blend: AlphaBlend
+    )
+    if stencilReference >= 0:
+      state.stencilCompare = Equal
+      state.stencilTest = true
+      state.stencilReference = stencilReference
+      state.stencilWrite = false
+    if renderer.materialVertices.len > 0:
+      renderer.materialBuffer.updateBuffer(renderer.materialVertices)
+      draw(renderer.program, renderer.materialBuffer,
+        renderer.materialVertices.len div 12, state)
+    if renderer.vertices.len > 0:
+      renderer.vertexBuffer.updateBuffer(renderer.vertices)
+      state.blend = if additive: Additive else: AlphaBlend
+      draw(renderer.program, renderer.vertexBuffer,
+        renderer.vertices.len div 12, state)
 
 proc draw*(renderer: var VfxRenderer, viewProjection: Mat4,
     additive = true, depthTest = true) =

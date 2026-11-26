@@ -77,45 +77,46 @@ proc drawParticles*(
   if clip and (visibilityWidth <= 0 or
       visibility.len != visibilityWidth * visibilityWidth):
     return
-  let program = system.gpu.program
-  if clip:
-    system.uploadParticleSight(visibility, visibilityWidth)
-    setUniform(program, "uParticleSightOrigin", visibilityOrigin)
-    setUniform(program, "uParticleSightWidth", visibilityWidth.float32)
-  bindTexture(program, "uParticleSight", system.gpu.sightTexture)
-  for effect in system.effects:
-    if effect.startTime > system.time:
-      continue
-    let owned = viewer >= 0 and effect.owner == viewer
-    setUniform(program, "uParticleClipSight", int32(clip and not owned))
-    if not clip and not owned and not particlePathVisible(
-      effect.origin,
-      effect.target,
-      visibility,
-      visibilityWidth,
-      visibilityOrigin,
-      visibilityPadding
-    ):
-      continue
-    let blend =
-      if effect.kind in {
-        ArrowWake, LeafBolt, LeafBurst, BloomSeed, BloomPetals, RootLeaves,
-        IceShard, FrostBurst, IceShatter, BlizzardShards, SnowSquall
-      }:
-        AlphaBlend
-      else:
-        Additive
-    system.uploadParticleEffect(
-      effect,
-      viewProjection,
-      cameraRight,
-      cameraUp,
-      cameraForward
-    )
-    draw(
-      program,
-      nil,
-      4,
-      DrawState(depthTest: true, blend: blend, primitive: TriangleStrip),
-      instanceCount = effect.kind.effectParticleCount
-    )
+  preserveDrawState:
+    let program = system.gpu.program
+    if clip:
+      system.uploadParticleSight(visibility, visibilityWidth)
+      setUniform(program, "uParticleSightOrigin", visibilityOrigin)
+      setUniform(program, "uParticleSightWidth", visibilityWidth.float32)
+    bindTexture(program, "uParticleSight", system.gpu.sightTexture)
+    for effect in system.effects:
+      if effect.startTime > system.time:
+        continue
+      let owned = viewer >= 0 and effect.owner == viewer
+      setUniform(program, "uParticleClipSight", int32(clip and not owned))
+      if not clip and not owned and not particlePathVisible(
+        effect.origin,
+        effect.target,
+        visibility,
+        visibilityWidth,
+        visibilityOrigin,
+        visibilityPadding
+      ):
+        continue
+      let blend =
+        if effect.kind in {
+          ArrowWake, LeafBolt, LeafBurst, BloomSeed, BloomPetals, RootLeaves,
+          IceShard, FrostBurst, IceShatter, BlizzardShards, SnowSquall
+        }:
+          AlphaBlend
+        else:
+          Additive
+      system.uploadParticleEffect(
+        effect,
+        viewProjection,
+        cameraRight,
+        cameraUp,
+        cameraForward
+      )
+      draw(
+        program,
+        nil,
+        4,
+        DrawState(depthTest: true, blend: blend, primitive: TriangleStrip),
+        instanceCount = effect.kind.effectParticleCount
+      )

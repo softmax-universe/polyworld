@@ -70,7 +70,9 @@ proc finishXrayBodies*(
     projection[2, 2], projection[3, 2], projection[2, 3], projection[3, 3]
   ))
   program.setUniform("clearance", xray.settings.clearance)
-  program.setUniform("patternYTransform", vec2(-1.0'f, xray.size.y.float32))
+  program.setUniform("patternYTransform",
+    when PassTopLeftOrigin: vec2(-1.0'f, xray.size.y.float32)
+    else: vec2(1.0'f, 0.0'f))
   draw(program, nil, 3, DrawState(
     depthTest: true,
     depthWrite: false,

@@ -10,23 +10,26 @@ export courtyardmaterials
 const ShadowSize = 2048
 
 type
+  CourtyardShadows = ref object
+    targets: array[2, RenderTarget]
+    matrices: array[2, Mat4]
+    ready: bool
   CourtyardRenderer* = object
     material*: CourtyardMaterial
     lamps*: array[2, Vec3]
     program, skyProgram, depthProgram: ShaderProgram
     vertices: VertexBuffer
     normalMap: GpuImage
-    shadows: array[2, RenderTarget]
-    lightMatrices: array[2, Mat4]
+    shadows: CourtyardShadows
     commonCount, backdropCount, centerCount: int
     playerCount: int
     arenaRadius, balconyLampRadius, balconyLampHalfAngle: float32
-    shadowsReady: bool
 
 proc initCourtyardRenderer*(mesh: CourtyardMesh, playerCount = 2,
     arenaRadius = 0.0'f, balconyLampRadius = 0.0'f,
     balconyLampHalfAngle = 0.0'f): CourtyardRenderer =
   ## Uploads the deterministic stone mesh and prepares its material pipelines.
+  result.shadows = CourtyardShadows()
   result.playerCount = playerCount
   result.arenaRadius = arenaRadius
   result.balconyLampRadius = balconyLampRadius
@@ -65,10 +68,11 @@ proc initCourtyardRenderer*(mesh: CourtyardMesh, playerCount = 2,
       extent = max(18.0'f, arenaRadius + 3.0'f)
       distance = if arenaRadius > 0: extent * 2 else: 35.0'f
       farPlane = if arenaRadius > 0: max(70.0'f, extent * 4) else: 70.0'f
-    result.lightMatrices[seat] = ortho(-extent, extent, -extent, extent,
+    result.shadows.matrices[seat] = ortho(-extent, extent, -extent, extent,
       1.0'f, farPlane) * lookAt(light * distance, vec3(0), vec3(0, 1, 0))
-    result.shadows[seat] = newRenderTarget(ShadowSize, ShadowSize,
+    result.shadows.targets[seat] = newRenderTarget(ShadowSize, ShadowSize,
       color = false, depth = true)
+    result.shadows.targets[seat].depth.setPassSampling(comparison = true)
 
 proc initCourtyardRenderer*(playerCount = 2): CourtyardRenderer =
   ## Builds and uploads the courtyard appropriate for the seat count.
@@ -79,20 +83,20 @@ proc initCourtyardRenderer*(playerCount = 2): CourtyardRenderer =
   else:
     result = initCourtyardRenderer(buildCourtyardMesh(), playerCount)
 
-proc bakeShadows(renderer: var CourtyardRenderer) =
+proc bakeShadows(renderer: CourtyardRenderer) =
   ## Bakes both static camera directions once on the first active frame.
-  if renderer.shadowsReady:
+  if renderer.shadows.ready:
     return
   for seat in 0 .. 1:
-    pushTarget(renderer.shadows[seat])
+    pushTarget(renderer.shadows.targets[seat])
     clearDepth()
-    renderer.depthProgram.setUniform("lightMatrix", renderer.lightMatrices[seat])
+    renderer.depthProgram.setUniform("lightMatrix", renderer.shadows.matrices[seat])
     let state = DrawState(depthTest: true, depthWrite: true)
     draw(renderer.depthProgram, renderer.vertices, renderer.commonCount, state)
     draw(renderer.depthProgram, renderer.vertices, renderer.backdropCount,
       state, first = renderer.commonCount + seat * renderer.backdropCount)
     popTarget()
-  renderer.shadowsReady = true
+  renderer.shadows.ready = true
 
 proc dispose*(renderer: var CourtyardRenderer) =
   ## Releases the battlefield resources before a layout replaces it.
@@ -101,8 +105,9 @@ proc dispose*(renderer: var CourtyardRenderer) =
   destroy(renderer.depthProgram)
   destroy(renderer.vertices)
   destroy(renderer.normalMap)
-  for target in renderer.shadows:
-    destroy(target)
+  if renderer.shadows != nil:
+    for target in renderer.shadows.targets:
+      destroy(target)
   renderer = CourtyardRenderer()
 
 proc drawSky*(renderer: CourtyardRenderer, viewProjection: Mat4,
@@ -115,47 +120,51 @@ proc drawSky*(renderer: CourtyardRenderer, viewProjection: Mat4,
   draw(renderer.skyProgram, nil, 3,
     DrawState(depthTest: true, depthWrite: false, depthCompare: LessEqual))
 
-proc draw*(renderer: var CourtyardRenderer, viewProjection: Mat4,
+proc draw*(renderer: CourtyardRenderer, viewProjection: Mat4,
     cameraEye: Vec3, time, cameraSide: float32,
     normalsOnly = false, normalView = mat4(), stageYaw = 0.0'f) =
   ## Draws the fixed island and rotating balconies in their lighting frames.
-  renderer.bakeShadows()
-  let
-    seat = if cameraSide > 0: 0 else: 1
-    program = renderer.program
-    state = DrawState(depthTest: true, depthWrite: not normalsOnly,
-      depthCompare: if normalsOnly: Equal else: Less)
-  program.setUniform("viewProjection", viewProjection)
-  # textures start at the top left, including sun depth maps.
-  program.setUniform("lightMatrix",
-    scale(vec3(1, -1, 1)) * renderer.lightMatrices[seat])
-  program.setUniform("cameraEye", cameraEye)
-  program.setUniform("time", time)
-  program.setUniform("cameraSide", cameraSide)
-  program.setUniform("normalStrength", renderer.material.normalStrength)
-  program.setUniform("lampIntensity", renderer.material.lampIntensity)
-  program.setUniform("firstLamp", renderer.lamps[0] * vec3(1, 1, cameraSide))
-  program.setUniform("secondLamp", renderer.lamps[1] * vec3(1, 1, cameraSide))
-  program.setUniform("playerCount", renderer.playerCount.int32)
-  program.setUniform("arenaRadius", renderer.arenaRadius)
-  program.setUniform("balconyLampRadius", renderer.balconyLampRadius)
-  program.setUniform("balconyLampHalfAngle", renderer.balconyLampHalfAngle)
-  program.setUniform("slopeBroad", renderer.material.slopeBroad)
-  program.setUniform("scaleBroad", renderer.material.scaleBroad)
-  program.setUniform("normalsOnly", normalsOnly)
-  program.setUniform("normalView", normalView)
-  program.bindTexture("shadowMap", renderer.shadows[seat].depth)
-  program.bindTexture("stoneNormalMap", renderer.normalMap)
-  program.setUniform("stageYaw", stageYaw)
-  draw(program, renderer.vertices, renderer.centerCount, state)
-  let
-    stage = stageRotation(stageYaw)
-    stageEye = (stage.inverse * vec4(cameraEye, 1)).xyz
-  program.setUniform("viewProjection", viewProjection * stage)
-  program.setUniform("normalView", normalView * stage)
-  program.setUniform("cameraEye", stageEye)
-  program.setUniform("stageYaw", 0.0'f)
-  draw(program, renderer.vertices, renderer.commonCount - renderer.centerCount,
-    state, first = renderer.centerCount)
-  draw(program, renderer.vertices, renderer.backdropCount, state,
-    first = renderer.commonCount + seat * renderer.backdropCount)
+  preserveDrawState:
+    renderer.bakeShadows()
+    let
+      seat = if cameraSide > 0: 0 else: 1
+      program = renderer.program
+      state = DrawState(depthTest: true, depthWrite: not normalsOnly,
+        depthCompare: if normalsOnly: Equal else: Less)
+    program.setUniform("viewProjection", viewProjection)
+    let lightMatrix =
+      when PassTopLeftOrigin:
+        scale(vec3(1, -1, 1)) * renderer.shadows.matrices[seat]
+      else:
+        renderer.shadows.matrices[seat]
+    program.setUniform("lightMatrix", lightMatrix)
+    program.setUniform("cameraEye", cameraEye)
+    program.setUniform("time", time)
+    program.setUniform("cameraSide", cameraSide)
+    program.setUniform("normalStrength", renderer.material.normalStrength)
+    program.setUniform("lampIntensity", renderer.material.lampIntensity)
+    program.setUniform("firstLamp", renderer.lamps[0] * vec3(1, 1, cameraSide))
+    program.setUniform("secondLamp", renderer.lamps[1] * vec3(1, 1, cameraSide))
+    program.setUniform("playerCount", renderer.playerCount.int32)
+    program.setUniform("arenaRadius", renderer.arenaRadius)
+    program.setUniform("balconyLampRadius", renderer.balconyLampRadius)
+    program.setUniform("balconyLampHalfAngle", renderer.balconyLampHalfAngle)
+    program.setUniform("slopeBroad", renderer.material.slopeBroad)
+    program.setUniform("scaleBroad", renderer.material.scaleBroad)
+    program.setUniform("normalsOnly", normalsOnly)
+    program.setUniform("normalView", normalView)
+    program.bindTexture("shadowMap", renderer.shadows.targets[seat].depth)
+    program.bindTexture("stoneNormalMap", renderer.normalMap)
+    program.setUniform("stageYaw", stageYaw)
+    draw(program, renderer.vertices, renderer.centerCount, state)
+    let
+      stage = stageRotation(stageYaw)
+      stageEye = (stage.inverse * vec4(cameraEye, 1)).xyz
+    program.setUniform("viewProjection", viewProjection * stage)
+    program.setUniform("normalView", normalView * stage)
+    program.setUniform("cameraEye", stageEye)
+    program.setUniform("stageYaw", 0.0'f)
+    draw(program, renderer.vertices, renderer.commonCount - renderer.centerCount,
+      state, first = renderer.centerCount)
+    draw(program, renderer.vertices, renderer.backdropCount, state,
+      first = renderer.commonCount + seat * renderer.backdropCount)

@@ -20,7 +20,8 @@ proc ensureSize(
     occlusion: var ScreenOcclusion, size: IVec2, source: RenderTarget
 ) =
   ## Matches depth snapshots to the scene and AO targets to half resolution.
-  if occlusion.size == size and occlusion.depth.stencil == source.stencil:
+  if occlusion.size == size and occlusion.depth != nil and
+      occlusion.depth.stencil == source.stencil:
     return
   destroy(occlusion.depth)
   destroy(occlusion.ground)
@@ -43,11 +44,12 @@ proc ensureSize(
 proc initScreenOcclusion*(
     settings = defaultScreenOcclusionSettings()
 ): ScreenOcclusion =
-  ## Compiles the shared Shady passes for Native.
+  ## Compiles the shared Shady ambient occlusion passes.
   result.settings = settings
   const Vertex = nativeStage(fullscreenVertex, shaderVertex)
   result.occlusionPass = newProgram(
-    nativeStage(fullscreenPosition, shaderVertex), nativeStage(occlusionFragment, shaderFragment)
+    nativeStage(fullscreenPosition, shaderVertex),
+    nativeStage(occlusionFragment, shaderFragment)
   )
   result.blurPass = newProgram(
     Vertex, nativeStage(blurFragment, shaderFragment)
@@ -75,6 +77,7 @@ proc captureGround*(
   ## Captures scenery depth before bodies are drawn into the current target.
   if not occlusion.settings.enabled or size.x <= 0 or size.y <= 0:
     return
+  ensureFrame(size.x, size.y)
   let target = if source == nil: gpuRenderer.target else: source
   occlusion.ensureSize(size, target)
   copyTarget(target, occlusion.ground, color = false)
@@ -92,6 +95,7 @@ proc applyScreenOcclusion*(
   let settings = occlusion.settings
   if not settings.enabled or size.x <= 0 or size.y <= 0:
     return
+  ensureFrame(size.x, size.y)
   let destination = if source == nil: gpuRenderer.target else: source
   occlusion.ensureSize(size, destination)
   let
@@ -114,8 +118,10 @@ proc applyScreenOcclusion*(
   samplePass.setUniform("radius", settings.radius)
   samplePass.setUniform("intensity", settings.intensity)
   samplePass.setUniform("bias", settings.bias)
-  samplePass.setUniform("textureYTransform", vec2(-1, 1))
-  samplePass.setUniform("fragmentYTransform", vec2(-1, halfSize.y))
+  samplePass.setUniform("textureYTransform",
+    (when PassTopLeftOrigin: vec2(-1, 1) else: vec2(1, 0)))
+  samplePass.setUniform("fragmentYTransform",
+    (when PassTopLeftOrigin: vec2(-1, halfSize.y) else: vec2(1, 0)))
   pushTarget(occlusion.occlusion[0])
   draw(samplePass, nil, 3)
   popTarget()
@@ -129,7 +135,8 @@ proc applyScreenOcclusion*(
     inverseProjection[2, 3], inverseProjection[3, 3]))
   blurPass.setUniform("clipW", clipW)
   blurPass.setUniform("edgeScale", settings.sharpness * projection[1, 1])
-  blurPass.setUniform("textureYTransform", vec2(-1, 1))
+  blurPass.setUniform("textureYTransform",
+    (when PassTopLeftOrigin: vec2(-1, 1) else: vec2(1, 0)))
   for (input, output, axis) in [(0, 1, vec2(1, 0)), (1, 0, vec2(0, 1))]:
     blurPass.bindTexture("occlusionTexture", occlusion.occlusion[input].color)
     blurPass.setUniform("direction", axis / halfSize)
@@ -145,7 +152,8 @@ proc applyScreenOcclusion*(
     else: occlusion.depth.depth)
   multiplyPass.setUniform("tint", settings.tint)
   multiplyPass.setUniform("bodyOcclusion", settings.bodyOcclusion)
-  multiplyPass.setUniform("textureYTransform", vec2(-1, 1))
+  multiplyPass.setUniform("textureYTransform",
+    (when PassTopLeftOrigin: vec2(-1, 1) else: vec2(1, 0)))
   pushTarget(destination)
   draw(multiplyPass, nil, 3, DrawState(blend: Multiply))
   popTarget()

@@ -108,10 +108,14 @@ proc updateBuffer*[T](b: VertexBuffer, values: openArray[T]) =
 proc width*(image: GpuImage): int = image.handle.width
 proc height*(image: GpuImage): int = image.handle.height
 proc pixelFormat*(image: GpuImage): TextureFormat = image.handle.format
+proc setTextureSampling*(image: GpuImage, state: SamplerState) =
+  ## Retains shared sampling intent for native sampler creation at draw time.
+  image.sampling = state
+
 proc setTextureSampling*(image: GpuImage, linear: bool, repeat = false) =
-  let wrap = if repeat: Repeat else: ClampEdge
-  image.sampling = SamplerState(minLinear: linear, magLinear: linear, mipLinear: linear,
-    mipmaps: image.handle.mipLevels > 1, wrapS: wrap, wrapT: wrap, wrapR: wrap)
+  ## Describes default texture filtering independently of the native API.
+  image.setTextureSampling(linearSampler(linear, repeat,
+    mipmaps = image.handle.mipLevels > 1))
 
 proc allocateImage*(width, height: int, format: TextureFormat, linear = true,
     repeat = false, layers = 1, levels = 1, arrayTexture = false, cube = false, samples = 1): GpuImage =

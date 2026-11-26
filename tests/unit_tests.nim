@@ -6,6 +6,7 @@ import
   polyworld/policies,
   test_bars, test_cli, test_controllers, test_screenshots, test_shader_sources,
   test_backend_boundaries,
+  test_render_descriptions,
   test_hashes,
   test_rngs, test_mailboxes,
   test_tapes, test_replaysaves, test_replaylibraries,

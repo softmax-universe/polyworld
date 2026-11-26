@@ -1,22 +1,14 @@
 ## Material sampling and environment cubemap uploads.
-import pixie, gltf, common
+import pixie, gltf, common, ../../texturesampling
 
 proc uploadTexture*(image: Image, sampler: TextureSampler,
     fallback: GpuImage): GpuImage =
   ## Preserves glTF's straight texture bytes and authored sampling behavior.
   if image == nil:
     return fallback
-  proc address(wrap: TextureWrap): TextureAddress =
-    case wrap
-    of ClampToEdgeWrap: ClampEdge
-    of RepeatWrap: Repeat
-    of MirroredRepeatWrap: MirrorRepeat
-  let mipmaps = sampler.minFilter notin {NearestMinFilter, LinearMinFilter}
-  result = newTexture(image, mipmaps = mipmaps)
-  result.sampling = SamplerState(wrapS: address(sampler.wrapS), wrapT: address(sampler.wrapT),
-    magLinear: sampler.magFilter != NearestMagFilter, mipmaps: mipmaps,
-    minLinear: sampler.minFilter in {LinearMinFilter, LinearMipmapNearestMinFilter, LinearMipmapLinearMinFilter},
-    mipLinear: sampler.minFilter in {NearestMipmapLinearMinFilter, LinearMipmapLinearMinFilter})
+  let state = sampler.samplingState()
+  result = newTexture(image, mipmaps = state.mipmaps)
+  result.setTextureSampling(state)
 
 proc newCubeTexture*(faces: array[6, Image]): GpuImage =
   let size = faces[0].width

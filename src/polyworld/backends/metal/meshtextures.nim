@@ -1,5 +1,5 @@
 ## Material sampling and environment cubemap uploads.
-import pixie, gltf, common
+import pixie, gltf, common, ../../texturesampling
 import windy/platforms/apple/objc as nativeObjc
 
 proc uploadTexture*(image: Image, sampler: TextureSampler,
@@ -7,32 +7,9 @@ proc uploadTexture*(image: Image, sampler: TextureSampler,
   ## Preserves glTF's straight texture bytes and authored sampling behavior.
   if image == nil:
     return fallback
-  result = newTexture(image,
-    linear = sampler.magFilter != NearestMagFilter,
-    repeat = sampler.wrapS == RepeatWrap or sampler.wrapT == RepeatWrap,
-    mipmaps = sampler.minFilter notin {NearestMinFilter, LinearMinFilter})
-  let descriptor = MTLSamplerDescriptor.alloc().init()
-  defer: descriptor.release()
-  descriptor.setMagFilter(if sampler.magFilter == NearestMagFilter:
-    MTLSamplerMinMagFilterNearest else: MTLSamplerMinMagFilterLinear)
-  descriptor.setMinFilter(if sampler.minFilter in {
-    NearestMinFilter, NearestMipmapNearestMinFilter, NearestMipmapLinearMinFilter}:
-    MTLSamplerMinMagFilterNearest else: MTLSamplerMinMagFilterLinear)
-  descriptor.setMipFilter(case sampler.minFilter
-    of NearestMinFilter, LinearMinFilter: MTLSamplerMipFilterNotMipmapped
-    of NearestMipmapNearestMinFilter, LinearMipmapNearestMinFilter:
-      MTLSamplerMipFilterNearest
-    else: MTLSamplerMipFilterLinear)
-  template addressMode(wrap: TextureWrap): MTLSamplerAddressMode =
-    case wrap
-    of ClampToEdgeWrap: MTLSamplerAddressModeClampToEdge
-    of MirroredRepeatWrap: MTLSamplerAddressModeMirrorRepeat
-    of RepeatWrap: MTLSamplerAddressModeRepeat
-  descriptor.setSAddressMode(addressMode(sampler.wrapS))
-  descriptor.setTAddressMode(addressMode(sampler.wrapT))
-  result.sampler.release()
-  result.sampler = metalRenderer.ctx.device.newSamplerStateWithDescriptor(descriptor)
-  checkNil(result.sampler, "Could not create a glTF material sampler.")
+  let state = sampler.samplingState()
+  result = newTexture(image, mipmaps = state.mipmaps)
+  result.setTextureSampling(state)
 
 objc:
   proc replaceRegion(self: MTLTexture, x: MTLRegion,

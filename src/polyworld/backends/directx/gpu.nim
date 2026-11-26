@@ -572,14 +572,20 @@ proc endPass*(encoder: GpuEncoder) =
   discard # Resolve once when the target is consumed or replaced.
 
 proc createSampler*(ctx: GpuContext, state: SamplerState): GpuSampler =
+  ## Translates shared sampling intent to a Direct3D descriptor.
   const address = [D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_WRAP,
     D3D12_TEXTURE_ADDRESS_MODE_MIRROR]
-  let filter = (state.minLinear.uint32 shl D3D12_MIN_FILTER_SHIFT) or
+  let anisotropy = state.samplerAnisotropy()
+  var filter = (state.minLinear.uint32 shl D3D12_MIN_FILTER_SHIFT) or
     (state.magLinear.uint32 shl D3D12_MAG_FILTER_SHIFT) or state.mipLinear.uint32 or
     (state.comparison.uint32 shl D3D12_FILTER_REDUCTION_TYPE_SHIFT)
+  if anisotropy > 1:
+    filter = if state.comparison: D3D12_FILTER_COMPARISON_ANISOTROPIC
+      else: D3D12_FILTER_ANISOTROPIC
   GpuSampler(desc: D3D12_SAMPLER_DESC(Filter: filter, AddressU: address[state.wrapS.ord],
     AddressV: address[state.wrapT.ord], AddressW: address[state.wrapR.ord],
-    MaxAnisotropy: 1, ComparisonFunc: D3D12_COMPARISON_FUNC_LESS_EQUAL,
+    MaxAnisotropy: anisotropy.uint32,
+    ComparisonFunc: D3D12_COMPARISON_FUNC_LESS_EQUAL,
     MaxLOD: (if state.mipmaps: 1000'f else: 0'f)))
 
 proc newPipeline*(ctx: GpuContext, code: ProgramCode, layout: VertexLayout,

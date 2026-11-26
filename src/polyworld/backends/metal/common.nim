@@ -1,7 +1,7 @@
 import
   std/[strutils, tables],
   metal4, pixie, shady, vmath, windy,
-  uniforms, uploads, submissions
+  uniforms, uploads, submissions, ../../renderdescriptions
 
 when defined(metalProfile):
   import profiles
@@ -9,40 +9,12 @@ when defined(metalProfile):
 
 import windy/platforms/apple/objc as nativeObjc
 
-export metal4, MaxFramesInFlight, UploadSlice
+export metal4, MaxFramesInFlight, UploadSlice, renderdescriptions
 
 const GeometryBufferIndex = 2'u
 
 type
   PolyworldMetalError* = object of CatchableError
-  VertexFormat* = enum
-    Float1, Float2, Float3, Float4, UInt1, UInt2, UInt3, UInt4
-  VertexAttribute* = object
-    name*: string
-    format*: VertexFormat
-    offset*: int
-  VertexLayout* = object
-    stride*: int
-    attributes*: seq[VertexAttribute]
-  DepthCompare* = enum
-    LessEqual, Less, Always, Equal, Greater
-  CullMode* = enum
-    CullNone, CullBack, CullFront
-  BlendMode* = enum
-    Opaque, AlphaBlend, PremultipliedAlpha, Additive, Multiply,
-    StraightAlpha, AlphaBlendPreserveAlpha
-  Primitive* = enum
-    Triangles, Lines, Points, TriangleStrip
-  DrawState* = object
-    depthTest*, depthWrite*: bool
-    depthCompare*: DepthCompare
-    cull*: CullMode
-    blend*: BlendMode
-    primitive*: Primitive
-    wireframe*: bool
-    stencilTest*, stencilWrite*: bool
-    stencilReference*: int
-    stencilCompare*: DepthCompare
   MetalBuffer* = ref object
     handle*: MTLBuffer
     size*: int
@@ -66,7 +38,7 @@ type
     comparison: bool
   PipelineEntry = object
     layout: VertexLayout
-    blend: BlendMode
+    blend: renderdescriptions.BlendMode
     colorFormat, depthFormat: MTLPixelFormat
     samples: int
     stencil: bool
@@ -129,6 +101,7 @@ objc:
     x: uint)
   proc setCompareFunction(self: MTLSamplerDescriptor, x: MTLCompareFunction)
   proc setMaxAnisotropy(self: MTLSamplerDescriptor, x: uint)
+  proc setRAddressMode(self: MTLSamplerDescriptor, x: MTLSamplerAddressMode)
   proc setFragmentBuffer(self: MTLRenderCommandEncoder, x: MTLBuffer,
     offset: uint, atIndex: uint)
   proc setVertexTexture(self: MTLRenderCommandEncoder, x: MTLTexture,
@@ -273,37 +246,57 @@ proc destroy*(target: RenderTarget) =
       destroy(target.multisampleDepth)
     destroy(target.multisampleColor)
 
-proc sampler(linear, repeat, comparison: bool,
-    anisotropy = 8'u): MTLSamplerState =
-  ## Creates an explicit sampling state for a texture.
+proc sampler(state: SamplerState): MTLSamplerState =
+  ## Translates shared filtering and independent address modes to Metal.
   let descriptor = MTLSamplerDescriptor.alloc().init()
   defer: descriptor.release()
-  let filter = if linear: MTLSamplerMinMagFilterLinear
-    else: MTLSamplerMinMagFilterNearest
-  descriptor.setMinFilter(filter)
-  descriptor.setMagFilter(filter)
-  descriptor.setMipFilter(MTLSamplerMipFilterLinear)
-  descriptor.setMaxAnisotropy(if linear: anisotropy else: 1'u)
-  let mode = if repeat: MTLSamplerAddressModeRepeat
-    else: MTLSamplerAddressModeClampToEdge
-  descriptor.setSAddressMode(mode)
-  descriptor.setTAddressMode(mode)
-  if comparison:
+  descriptor.setMinFilter(if state.minLinear: MTLSamplerMinMagFilterLinear
+    else: MTLSamplerMinMagFilterNearest)
+  descriptor.setMagFilter(if state.magLinear: MTLSamplerMinMagFilterLinear
+    else: MTLSamplerMinMagFilterNearest)
+  descriptor.setMipFilter(if not state.mipmaps: MTLSamplerMipFilterNotMipmapped
+    elif state.mipLinear: MTLSamplerMipFilterLinear
+    else: MTLSamplerMipFilterNearest)
+  descriptor.setMaxAnisotropy(state.samplerAnisotropy().uint)
+  const Address = [MTLSamplerAddressModeClampToEdge,
+    MTLSamplerAddressModeRepeat, MTLSamplerAddressModeMirrorRepeat]
+  descriptor.setSAddressMode(Address[state.wrapS.ord])
+  descriptor.setTAddressMode(Address[state.wrapT.ord])
+  descriptor.setRAddressMode(Address[state.wrapR.ord])
+  if state.comparison:
     descriptor.setCompareFunction(MTLCompareFunctionLessEqual)
   result = metalRenderer.ctx.device.newSamplerStateWithDescriptor(descriptor)
   checkNil(result, "Could not create a Metal sampler")
 
+proc setTextureSampling*(texture: MetalTexture, state: SamplerState) =
+  ## Replaces the selected ordinary or comparison sampler from shared intent.
+  if state.comparison:
+    texture.comparisonSampler.release()
+    texture.comparisonSampler = sampler(state)
+  else:
+    texture.sampler.release()
+    texture.sampler = sampler(state)
+
+proc setComparisonSampling*(texture: MetalTexture, state: SamplerState) =
+  ## Configures an independent comparison sampler from shared settings.
+  var comparison = state
+  comparison.comparison = true
+  texture.comparisonSampler.release()
+  texture.comparisonSampler = sampler(comparison)
+
 proc setTextureSampling*(texture: MetalTexture, linear: bool,
     repeat = false, anisotropy = 8'u) =
   ## Replaces the sampling state without changing texture contents.
-  texture.sampler.release()
-  texture.sampler = sampler(linear, repeat, false, anisotropy)
+  var state = linearSampler(linear, repeat, maxAnisotropy = anisotropy.int)
+  state.mipLinear = true
+  texture.setTextureSampling(state)
 
 proc setComparisonSampling*(texture: MetalTexture, linear = true,
     anisotropy = 8'u) =
   ## Configures depth comparisons independently of ordinary texture sampling.
-  texture.comparisonSampler.release()
-  texture.comparisonSampler = sampler(linear, false, true, anisotropy)
+  var state = linearSampler(linear, maxAnisotropy = anisotropy.int)
+  state.mipLinear = true
+  texture.setComparisonSampling(state)
 
 proc textureFromNative*(
   handle: MTLTexture, width, height: int, pixelFormat: MTLPixelFormat,
@@ -312,10 +305,12 @@ proc textureFromNative*(
   ## Wraps a native texture with the engine's sampling and lifetime metadata.
   requireRenderer()
   checkNil(handle, "Cannot wrap a nil Metal texture")
+  var state = linearSampler(linear, repeat, maxAnisotropy = anisotropy.int)
+  state.mipLinear = true
   result = MetalTexture(
     handle: handle, width: width, height: height, pixelFormat: pixelFormat,
     ownsHandle: ownsHandle,
-    sampler: sampler(linear, repeat, false, anisotropy)
+    sampler: sampler(state)
   )
   metalRenderer.textures.add(result)
 
@@ -774,6 +769,7 @@ proc vertexDescriptor(program: MetalProgram, layout: VertexLayout):
           of UInt2: MTLVertexFormatUInt2
           of UInt3: MTLVertexFormatUInt3
           of UInt4: MTLVertexFormatUInt4
+          of Unorm8x4: MTLVertexFormatUChar4Normalized
         descriptor.setFormat(format)
         descriptor.setOffset(attribute.offset.uint)
         descriptor.setBufferIndex(GeometryBufferIndex)
@@ -917,7 +913,8 @@ proc bindTextures(program: MetalProgram, bindings: seq[TextureBinding],
     var nativeSampler = texture.sampler
     if binding.comparison:
       if texture.comparisonSampler.isNil:
-        texture.comparisonSampler = sampler(true, false, true)
+        texture.comparisonSampler = sampler(linearSampler(comparison = true,
+          maxAnisotropy = 8))
       nativeSampler = texture.comparisonSampler
     if vertex:
       metalRenderer.encoder.setVertexTexture(texture.handle, binding.index.uint)

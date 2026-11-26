@@ -144,7 +144,8 @@ proc freeGpu*[T](value: var T) =
 
 proc newGpuContext*(window: windy.Window): GpuContext =
   result = GpuContext()
-  result.presentation.initDevice(window.getHWND(), window.size.x, window.size.y, window.vsync)
+  result.presentation.initDevice(window.getHWND(), window.size.x, window.size.y,
+    window.vsync, samplerAnisotropy = true)
   result.instance = result.presentation.instance
   result.physical = result.presentation.physicalDevice
   result.device = result.presentation.device
@@ -615,13 +616,17 @@ proc endPass*(encoder: GpuEncoder) =
   discard
 
 proc createSampler*(ctx: GpuContext, state: SamplerState): GpuSampler =
+  ## Translates shared sampling intent within the device's enabled limits.
   const address = [VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VK_SAMPLER_ADDRESS_MODE_REPEAT,
     VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT]
+  let anisotropy = state.samplerAnisotropy(
+    ctx.presentation.maxSamplerAnisotropy.int)
   var info = VkSamplerCreateInfo(sType: VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
     magFilter: (if state.magLinear: VK_FILTER_LINEAR else: VK_FILTER_NEAREST),
     minFilter: (if state.minLinear: VK_FILTER_LINEAR else: VK_FILTER_NEAREST),
     mipmapMode: (if state.mipLinear: VK_SAMPLER_MIPMAP_MODE_LINEAR else: VK_SAMPLER_MIPMAP_MODE_NEAREST),
     compareEnable: uint32(state.comparison), compareOp: VK_COMPARE_OP_LESS_OR_EQUAL,
+    anisotropyEnable: uint32(anisotropy > 1), maxAnisotropy: anisotropy.float32,
     addressModeU: address[state.wrapS.ord], addressModeV: address[state.wrapT.ord],
     addressModeW: address[state.wrapR.ord], maxLod: (if state.mipmaps: 1000'f else: 0'f))
   result = GpuSampler(ctx: ctx)

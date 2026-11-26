@@ -9,8 +9,8 @@
 
 import
   std/[math, tables, times],
-  chroma, fixxy, opengl, pixie, silky, vmath, windy,
-  polyworld/[actioncam, assets, characters, clickmarks, common, inputs,
+  chroma, fixxy, pixie, silky, vmath, windy,
+  polyworld/[renderer, actioncam, assets, characters, clickmarks, common, inputs,
     particles, particleshaders, chrome, pathing, player, profiles,
     quadterrain, rtscameras, screenocclusions, selectionoutlines, shadows,
     shapes, tapes, terrainsurfaces, viewers, visions, worldbars, worldtexts,
@@ -336,11 +336,10 @@ proc addHudIcons(builder: AtlasBuilder) =
 
 proc addAbilityIcons(builder: AtlasBuilder) =
   ## Packs every ability art file used by the action bar.
-  const AbilityDir = DataRoot & "/abilities/"
   for _, name in AbilityIconFiles:
     if name.len == 0:
       continue
-    let icon = readImage(AbilityDir & name & ".png").resize(128, 128)
+    let icon = readImage(abilityIconPath(name)).resize(128, 128)
     if not builder.addImage("ability_" & name, icon):
       raise newException(
         ValueError,
@@ -1705,7 +1704,7 @@ proc runGraphics*() =
       viewProjection,
       cameraRight,
       cameraUp,
-      sk.atlasTextureId()
+      sk.atlasTexture()
     )
 
   proc attackTargetSlot(visibleFrom: int): int32 =
@@ -1954,7 +1953,10 @@ proc runGraphics*() =
     cameraSeekSerial = -1
 
   holdSplash(sk, window, splash)
+  var benchmarkFinished = false
   window.onFrame = proc() =
+    when defined(frameBench): beginBenchFrame(window)
+    beginBenchmarkFrame("cta", window.size)
     profileBlock "frame":
       let dt = frameDelta(lastFrameTime, SimulationStep)
       viewingDt = viewingClock.viewingDelta(window)
@@ -2336,6 +2338,7 @@ proc runGraphics*() =
               scene.drawCharacter(visual.pose, color(1, 1, 1, 1),
                 color(side.r, side.g, side.b, XrayGlaze))
 
+        discard screenshotTarget.beginScreenshotFrame(window)
         if sunShadowsActive() and layerVertexRanges.len > visibleFrom:
           sunDepthPasses(window.size):
             drawTerrainSunDepth(
@@ -2347,12 +2350,10 @@ proc runGraphics*() =
             drawWorldActors()
             scene.sunDepthPass = false
 
-        discard screenshotTarget.beginScreenshotFrame(window)
-        glViewport(0, 0, window.size.x.GLsizei, window.size.y.GLsizei)
+        setRenderViewport(window.size)
         when not defined(emscripten):
-          glEnable(GL_MULTISAMPLE)
-        glClearColor(0, 0, 0, 1)
-        glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
+          setMultisampling(true)
+        clearFrame(color(0, 0, 0, 1))
 
         if layerVertexRanges.len > visibleFrom:
           let
@@ -2432,14 +2433,8 @@ proc runGraphics*() =
         )
 
       profileBlock "ui":
-        glDisable(GL_DEPTH_TEST)
-        glDisable(GL_CULL_FACE)
-        glDisable(GL_BLEND)
-        when not defined(emscripten):
-          glDisable(GL_MULTISAMPLE)
-        glActiveTexture(GL_TEXTURE0)
-        glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
-        sk.beginUi(window, window.size)
+        prepareUi(sk)
+        sk.beginGameUi(window, window.size)
         drawUi(
           sk,
           window,
@@ -2453,8 +2448,13 @@ proc runGraphics*() =
           focusPlayerHero,
           renderAlpha
         )
-        sk.endUi()
+        sk.finishUi()
         drawStatsOverlay(sk, window)
+      if endBenchmarkFrame(run.world.tick.int):
+        benchmarkFinished = true
+        when not defined(emscripten):
+          window.closeRequested = true
+        return
       if captureFrame(window, screenshotFrame):
         when not defined(emscripten):
           window.closeRequested = true
@@ -2469,7 +2469,7 @@ proc runGraphics*() =
       when not defined(emscripten):
         window.closeRequested = true
 
-  while not window.closeRequested:
+  while not window.closeRequested and not benchmarkFinished:
     pollEvents()
     waitForDisplay()
 

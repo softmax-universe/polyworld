@@ -1,11 +1,11 @@
 ## Requires desktop OpenGL and terrain assets for buffer lifecycle checks.
 
 include test_prop_batches
-import windy
+import windy, opengl
 
-proc readBuffer(buffer: GLuint): seq[float32] =
+proc readBuffer(buffer: VertexBuffer): seq[float32] =
   ## Reads actual uploaded vertices for comparison with an unchanged batch.
-  glBindBuffer(GL_ARRAY_BUFFER, buffer)
+  glBindBuffer(GL_ARRAY_BUFFER, buffer.handle)
   var size: GLint
   glGetBufferParameteriv(GL_ARRAY_BUFFER, GL_BUFFER_SIZE, size.addr)
   result.setLen(size.int div sizeof(float32))
@@ -27,6 +27,7 @@ block gpuUpdates:
     window.close()
   window.makeContextCurrent()
   loadExtensions()
+  driver.initNative(window)
   texturedBatches.setLen(0)
   propPlacements.setLen(0)
   initTerrain(
@@ -43,8 +44,8 @@ block gpuUpdates:
     tile.flags = TileExists or TileConnectedEast or TileConnectedSouth
     tile.kind = GrassTile
   installImmutableLayers(@[layer])
+  var texture = createTextureArray(@[@[newImage(1, 1)]], repeat = false)
   let
-    texture = buildTextureArray(@[@[newImage(1, 1)]], GL_CLAMP_TO_EDGE.GLint)
     tree = fixturePlacement(fixtureModel(texture), -1)
     house = fixturePlacement(fixtureModel(texture), 10)
     taller = fixturePlacement(fixtureModel(texture, 2), 10)
@@ -54,8 +55,7 @@ block gpuUpdates:
     ground = mesh
     groundUpload = readBuffer(vertexBuffer)
     forestBuffer = texturedBatches[groupIndex(-1)].vertexBuffer
-    forestVao = texturedBatches[groupIndex(-1)].vertexArray
-    forestDepth = texturedBatches[groupIndex(-1)].depthVertexArray
+    forestHandle = forestBuffer.handle
     forestUpload = readBuffer(forestBuffer)
     houseBuffer = texturedBatches[groupIndex(10)].vertexBuffer
     houseUpload = readBuffer(houseBuffer)
@@ -75,9 +75,7 @@ block gpuUpdates:
   propPlacements = @[taller]
   bakeProps()
   doAssert texturedBatches.len == 1
-  doAssert glIsBuffer(forestBuffer) == GL_FALSE
-  doAssert glIsVertexArray(forestVao) == GL_FALSE
-  doAssert glIsVertexArray(forestDepth) == GL_FALSE
+  doAssert forestBuffer.handle == 0 and glIsBuffer(forestHandle) == GL_FALSE
   propPlacements = @[tree, house]
   bakeProps()
   doAssert texturedBatches.len == 2
@@ -101,6 +99,6 @@ block gpuUpdates:
   doAssert glGetError() == GL_NO_ERROR
   propPlacements.setLen(0)
   bakeProps()
-  glDeleteTextures(1, unsafeAddr texture)
+  deleteTexture(texture)
 
 echo "GPU prop batch updates passed"

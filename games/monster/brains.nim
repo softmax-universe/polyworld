@@ -6,6 +6,9 @@ import
 when defined(windows):
   import std/winlean
 
+when defined(emscripten):
+  import windy
+
 const
   DefaultMonsterModel* = "gpt-6-sol"
   MaxMessageBytes = 4096
@@ -326,24 +329,36 @@ proc saveBrain*(brain: Brain) {.raises: [MonsterError].} =
   if body.len > MaxSaveBytes:
     raise newException(MonsterError, "Creature save exceeds its byte limit")
   try:
-    let directory = brain.savePath.parentDir()
-    if directory.len > 0:
-      createDir(directory)
-    writeFile(temporary, body)
-    replaceMemory(temporary, brain.savePath)
+    when defined(emscripten):
+      setConfig("Polyworld Monster", brain.savePath, body)
+    else:
+      let directory = brain.savePath.parentDir()
+      if directory.len > 0:
+        createDir(directory)
+      writeFile(temporary, body)
+      replaceMemory(temporary, brain.savePath)
   except OSError, IOError:
     raise newException(MonsterError,
       "Could not save creature memory: " & getCurrentExceptionMsg())
 
 proc loadBrain(brain: Brain) {.raises: [MonsterError].} =
-  ## Restores the complete bounded transcript and lessons from disk.
-  if brain.savePath.len == 0 or not fileExists(brain.savePath):
+  ## Restores bounded conversation from native files or browser storage.
+  if brain.savePath.len == 0:
     return
   var body: string
   try:
-    if getFileSize(brain.savePath) > MaxSaveBytes:
-      raise newException(MonsterError, "Creature save exceeds its byte limit")
-    body = readFile(brain.savePath)
+    when defined(emscripten):
+      body = getConfig("Polyworld Monster", brain.savePath)
+      if body.len == 0:
+        return
+      if body.len > MaxSaveBytes:
+        raise newException(MonsterError, "Creature save exceeds its byte limit")
+    else:
+      if not fileExists(brain.savePath):
+        return
+      if getFileSize(brain.savePath) > MaxSaveBytes:
+        raise newException(MonsterError, "Creature save exceeds its byte limit")
+      body = readFile(brain.savePath)
   except OSError, IOError:
     raise newException(MonsterError,
       "Could not read creature memory: " & getCurrentExceptionMsg())
@@ -475,11 +490,14 @@ proc newBrain*(
     raise newException(MonsterError, getCurrentExceptionMsg())
   if not result.client.available():
     result.failure =
-      if not enabled or getEnv("COGAME_LLM").toLowerAscii() == "off":
-        "Creature conversation is disabled."
+      when defined(emscripten):
+        "Creature conversation is available in the desktop game."
       else:
-        "Set OPENAI_API_KEY, add ~/secrets/openai.key, or configure a " &
-          "Polyworld LLM endpoint to talk."
+        if not enabled or getEnv("COGAME_LLM").toLowerAscii() == "off":
+          "Creature conversation is disabled."
+        else:
+          "Set OPENAI_API_KEY, add ~/secrets/openai.key, or configure a " &
+            "Polyworld LLM endpoint to talk."
 
 proc available*(brain: Brain): bool {.raises: [].} =
   ## Reports whether the creature has a configured native inference endpoint.

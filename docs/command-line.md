@@ -40,7 +40,9 @@ names containing spaces. Repeated scalar options use their last value;
 | `--server URL` | Select the multiplayer relay. |
 | `--room CODE` | Select a multiplayer room. `--join CODE` is an identical alias. |
 | `--screenshot PATH` | Capture one native rendered frame, save it, and exit. |
-| `--frames N` | Select the screenshot's rendered frame, defaulting to 30. |
+| `--benchmark PATH` | Run a hidden native frame-time benchmark and write a JSON report. |
+| `--frames N` | Select the screenshot frame or the number of measured benchmark frames. Defaults to 30. |
+| `--warmup N` | Render this many frames before starting the benchmark clock. Defaults to 30 and must be positive. |
 
 Booleans accept `true/false`, `on/off`, `yes/no`, and `1/0`. Explicit command-line
 choices take precedence over saved window and audio preferences.

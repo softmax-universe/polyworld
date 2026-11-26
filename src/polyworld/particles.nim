@@ -1,69 +1,17 @@
 ## Bounded GPU particle effects shared by Polyworld game renderers.
 
 import
-  std/[math, strutils],
-  opengl, shady, vmath,
+  std/math,
+  shady, vmath,
   particleshaders
+
+include backends/passes/particles_types
 
 const
   MaximumParticleEffects = 192
-  ParticleUniformNames = [
-    "uParticleViewProjection",
-    "uParticleCameraRight",
-    "uParticleCameraUp",
-    "uParticleCameraForward",
-    "uParticleTime",
-    "uParticleStartTime",
-    "uParticleTravelTime",
-    "uParticleSeed",
-    "uParticleEffectKind",
-    "uParticleOrigin",
-    "uParticleTarget",
-    "uParticleSight",
-    "uParticleSightOrigin",
-    "uParticleSightWidth",
-    "uParticleClipSight"
-  ]
-  ParticleVertexSource =
-    when defined(emscripten):
-      toShader(gameParticleVertex, glsl3WebGL, shaderVertex).replace(
-        "precision highp float;",
-        "precision highp float;\nprecision highp int;"
-      )
-    else:
-      toShader(gameParticleVertex, glsl4Desktop, shaderVertex)
-  ParticleFragmentSource =
-    when defined(emscripten):
-      toShader(gameParticleFragment, glsl3WebGL, shaderFragment).replace(
-        "precision highp float;",
-        "precision highp float;\nprecision highp int;"
-      )
-    else:
-      toShader(gameParticleFragment, glsl4Desktop, shaderFragment)
 
 type
   ParticleError* = object of CatchableError
-
-  ParticleUniform = enum
-    ViewProjectionUniform,
-    CameraRightUniform,
-    CameraUpUniform,
-    CameraForwardUniform,
-    TimeUniform,
-    StartTimeUniform,
-    TravelTimeUniform,
-    SeedUniform,
-    EffectKindUniform,
-    OriginUniform,
-    TargetUniform,
-    SightUniform,
-    SightOriginUniform,
-    SightWidthUniform,
-    ClipSightUniform
-
-  ParticleProgram = object
-    id: GLuint
-    locations: array[ParticleUniform, GLint]
 
   ParticleEffect = object
     kind: ParticleEffectKind
@@ -78,93 +26,10 @@ type
       ## What the effect travels with, or 0; see `followParticleAnchors`.
 
   ParticleSystem* = object
-    program: ParticleProgram
-    vertexArray: GLuint
+    gpu: ParticleGpu
     effects: seq[ParticleEffect]
     time: float32
     nextSeed: uint32
-    sightTexture: GLuint
-
-proc compileParticleStage(
-    kind: GLenum,
-    source,
-    label: string
-): GLuint =
-  ## Compiles one particle shader stage or raises its full diagnostic.
-  result = glCreateShader(kind)
-  var sources = allocCStringArray([source])
-  defer: deallocCStringArray(sources)
-  glShaderSource(result, 1, sources, nil)
-  glCompileShader(result)
-  var ok: GLint
-  glGetShaderiv(result, GL_COMPILE_STATUS, ok.addr)
-  if ok != 0:
-    return
-  var length: GLint
-  glGetShaderiv(result, GL_INFO_LOG_LENGTH, length.addr)
-  var log = newString(max(length.int, 1))
-  glGetShaderInfoLog(result, length, nil, log.cstring)
-  glDeleteShader(result)
-  let message = label & " failed:\n" & log.strip(chars = {'\0'}) &
-    "\nExpanded source:\n" & source
-  echo message
-  raise newException(ParticleError, message)
-
-proc compileParticleProgram(): ParticleProgram =
-  ## Compiles and links the shared semantic particle shader pair.
-  let
-    vertex = compileParticleStage(
-      GL_VERTEX_SHADER,
-      ParticleVertexSource,
-      "particle vertex shader"
-    )
-    fragment = compileParticleStage(
-      GL_FRAGMENT_SHADER,
-      ParticleFragmentSource,
-      "particle fragment shader"
-    )
-  result.id = glCreateProgram()
-  glAttachShader(result.id, vertex)
-  glAttachShader(result.id, fragment)
-  glLinkProgram(result.id)
-  glDeleteShader(vertex)
-  glDeleteShader(fragment)
-  var ok: GLint
-  glGetProgramiv(result.id, GL_LINK_STATUS, ok.addr)
-  if ok == 0:
-    var length: GLint
-    glGetProgramiv(result.id, GL_INFO_LOG_LENGTH, length.addr)
-    var log = newString(max(length.int, 1))
-    glGetProgramInfoLog(result.id, length, nil, log.cstring)
-    glDeleteProgram(result.id)
-    raise newException(
-      ParticleError,
-      "particle shaders failed to link:\n" & log.strip(chars = {'\0'})
-    )
-  for uniform in ParticleUniform:
-    result.locations[uniform] = glGetUniformLocation(
-      result.id,
-      ParticleUniformNames[uniform.ord].cstring
-    )
-
-proc initParticleSystem*(): ParticleSystem =
-  ## Creates the shared shaders and empty instanced-quad vertex array.
-  result.program = compileParticleProgram()
-  result.nextSeed = 1
-  glGenVertexArrays(1, result.vertexArray.addr)
-  var previous: GLint
-  glGetIntegerv(GL_TEXTURE_BINDING_2D, previous.addr)
-  glGenTextures(1, result.sightTexture.addr)
-  glBindTexture(GL_TEXTURE_2D, result.sightTexture)
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST.GLint)
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST.GLint)
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE.GLint)
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE.GLint)
-  # Keep the sampler complete even for callers that don't use sight clipping.
-  var white = [255'u8, 255, 255, 255]
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8.GLint, 1, 1, 0,
-    GL_RGBA, GL_UNSIGNED_BYTE, white[0].addr)
-  glBindTexture(GL_TEXTURE_2D, previous.GLuint)
 
 proc effectParticleCount(kind: ParticleEffectKind): int =
   ## Returns the bounded instance count for one semantic effect.
@@ -225,17 +90,17 @@ proc effectLifetime(
   ## Returns how long one effect must remain available for drawing.
   case kind
   of CombatSparks:
-    0.9'f32
+    0.9'f
   of MagicBolt:
-    travelTime + 0.7'f32
+    travelTime + 0.7'f
   of MagicBurst, PortalBurst, PoisonBurst:
-    1.25'f32
+    1.25'f
   of Fireball:
-    travelTime + 0.8'f32
+    travelTime + 0.8'f
   of FireBurst:
-    1.0'f32
+    1.0'f
   of ArrowWake:
-    travelTime + 0.35'f32
+    travelTime + 0.35'f
   of PoisonCapsule:
     travelTime + 0.25'f
   of LeafBolt:
@@ -243,31 +108,31 @@ proc effectLifetime(
   of LeafBurst:
     0.6'f
   of BloomSeed, SolarOrb:
-    travelTime + 0.1'f32
+    travelTime + 0.1'f
   of BloomPetals, RootLeaves:
-    1.8'f32
+    1.8'f
   of SolarFlames:
-    1.65'f32
+    1.65'f
   of HealingAura, ManaAura, PoisonAura, MendingAura:
-    1.75'f32
+    1.75'f
   of BladeFlame:
-    0.5'f32
+    0.5'f
   of FireWave:
-    0.55'f32
+    0.55'f
   of HeatEmbers:
-    1.25'f32
+    1.25'f
   of IceShard:
-    travelTime + 0.6'f32
+    travelTime + 0.6'f
   of FrostBurst:
-    0.9'f32
+    0.9'f
   of IceShatter:
-    1.3'f32
+    1.3'f
   of BlizzardShards:
-    travelTime + 0.4'f32
+    travelTime + 0.4'f
   of SnowSquall:
-    travelTime + 0.1'f32
+    travelTime + 0.1'f
   of LightningBolt:
-    0.45'f32
+    0.45'f
 
 proc addParticleEffect(
     system: var ParticleSystem,
@@ -282,13 +147,13 @@ proc addParticleEffect(
   ## Adds one effect while keeping the presentation queue bounded.
   if system.effects.len >= MaximumParticleEffects:
     system.effects.delete(0)
-  let startTime = system.time + max(delay, 0.0'f32)
+  let startTime = system.time + max(delay, 0.0'f)
   system.effects.add ParticleEffect(
     kind: kind,
     origin: origin,
     target: target,
     startTime: startTime,
-    travelTime: max(travelTime, 0.05'f32),
+    travelTime: max(travelTime, 0.05'f),
     endTime: startTime + kind.effectLifetime(travelTime),
     seed: system.nextSeed,
     anchor: anchor,
@@ -300,7 +165,7 @@ proc emitParticleBurst*(
     system: var ParticleSystem,
     kind: ParticleEffectKind,
     position: Vec3,
-    delay = 0.0'f32,
+    delay = 0.0'f,
     anchor = 0'i32,
     owner = -1'i32
 ) =
@@ -310,7 +175,7 @@ proc emitParticleBurst*(
     kind,
     position,
     position,
-    0.05'f32,
+    0.05'f,
     delay,
     anchor,
     owner
@@ -321,14 +186,14 @@ proc emitParticleSpan*(
     kind: ParticleEffectKind,
     origin,
     target: Vec3,
-    delay = 0.0'f32
+    delay = 0.0'f
 ) =
   ## Emits one effect that spreads between two points without travelling.
   system.addParticleEffect(
     kind,
     origin,
     target,
-    0.05'f32,
+    0.05'f,
     delay
   )
 
@@ -340,7 +205,7 @@ proc emitParticleFlight*(
 ) =
   ## A travelling visual whose impact is emitted by the simulation event.
   system.addParticleEffect(kind, origin, target,
-    max(travelTime, 0.05'f32), 0.0'f32)
+    max(travelTime, 0.05'f), 0.0'f)
 
 proc emitParticleProjectile*(
     system: var ParticleSystem,
@@ -352,13 +217,13 @@ proc emitParticleProjectile*(
     owner = -1'i32
 ) =
   ## Emits a travelling effect and a matching impact at its destination.
-  let duration = max(travelTime, 0.05'f32)
+  let duration = max(travelTime, 0.05'f)
   system.addParticleEffect(
     projectile,
     origin,
     target,
     duration,
-    0.0'f32,
+    0.0'f,
     owner = owner
   )
   system.emitParticleBurst(impact, target, duration, owner = owner)
@@ -380,7 +245,7 @@ proc followParticleAnchors*(
 
 proc advanceParticles*(system: var ParticleSystem, delta: float32) =
   ## Advances presentation time and removes every finished effect.
-  system.time += max(delta, 0.0'f32)
+  system.time += max(delta, 0.0'f)
   var index = system.effects.high
   while index >= 0:
     if system.effects[index].endTime <= system.time:
@@ -390,62 +255,6 @@ proc advanceParticles*(system: var ParticleSystem, delta: float32) =
 proc clearParticles*(system: var ParticleSystem) =
   ## Removes all active effects without rewinding presentation time.
   system.effects.setLen(0)
-
-proc uploadParticleEffect(
-    system: ParticleSystem,
-    effect: ParticleEffect,
-    viewProjection: var Mat4,
-    cameraRight,
-    cameraUp,
-    cameraForward: Vec3
-) =
-  ## Uploads one effect and the current camera basis to the shader.
-  template location(uniform: ParticleUniform): GLint =
-    system.program.locations[uniform]
-  glUniformMatrix4fv(
-    location(ViewProjectionUniform),
-    1,
-    GL_FALSE,
-    cast[ptr float32](viewProjection.addr)
-  )
-  glUniform3f(
-    location(CameraRightUniform),
-    cameraRight.x,
-    cameraRight.y,
-    cameraRight.z
-  )
-  glUniform3f(
-    location(CameraUpUniform),
-    cameraUp.x,
-    cameraUp.y,
-    cameraUp.z
-  )
-  glUniform3f(
-    location(CameraForwardUniform),
-    cameraForward.x,
-    cameraForward.y,
-    cameraForward.z
-  )
-  glUniform1f(location(TimeUniform), system.time)
-  glUniform1f(location(StartTimeUniform), effect.startTime)
-  glUniform1f(location(TravelTimeUniform), effect.travelTime)
-  glUniform1f(
-    location(SeedUniform),
-    (effect.seed mod 65_521'u32).float32
-  )
-  glUniform1i(location(EffectKindUniform), effect.kind.ord.GLint)
-  glUniform3f(
-    location(OriginUniform),
-    effect.origin.x,
-    effect.origin.y,
-    effect.origin.z
-  )
-  glUniform3f(
-    location(TargetUniform),
-    effect.target.x,
-    effect.target.y,
-    effect.target.z
-  )
 
 proc particlePathVisible*(
     origin, target: Vec3,
@@ -477,110 +286,4 @@ proc particlePathVisible*(
               visibility[row * width + col] == 0: return false
   true
 
-proc drawParticles*(
-    system: ParticleSystem,
-    viewProjection: Mat4,
-    cameraRight,
-    cameraUp,
-    cameraForward: Vec3,
-    visibility: openArray[uint8] = [],
-    visibilityWidth = 0,
-    visibilityOrigin = vec2(0),
-    visibilityPadding = 0,
-    viewer = -1'i32,
-    clipToSight = false
-) =
-  ## Draws every visible active effect with instanced, depth-tested billboards.
-  if system.program.id == 0 or system.effects.len == 0:
-    return
-  # Opt-in exact fragment clipping preserves the default path policy for other
-  # games, without suppressing a whole incoming shot at a sight boundary.
-  let clip = clipToSight and visibility.len > 0
-  if clip and (visibilityWidth <= 0 or visibility.len != visibilityWidth * visibilityWidth):
-    return
-  var oldActive, oldTexture, oldAlignment: GLint
-  glGetIntegerv(GL_ACTIVE_TEXTURE, oldActive.addr)
-  glActiveTexture(GL_TEXTURE0)
-  glGetIntegerv(GL_TEXTURE_BINDING_2D, oldTexture.addr)
-  glBindTexture(GL_TEXTURE_2D, system.sightTexture)
-  if clip:
-    glGetIntegerv(GL_UNPACK_ALIGNMENT, oldAlignment.addr)
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8.GLint, visibilityWidth.GLsizei,
-      visibilityWidth.GLsizei, 0, GL_RED, GL_UNSIGNED_BYTE, visibility[0].unsafeAddr)
-    glPixelStorei(GL_UNPACK_ALIGNMENT, oldAlignment)
-  var matrix = viewProjection
-  glEnable(GL_DEPTH_TEST)
-  glDepthMask(GL_FALSE)
-  glEnable(GL_BLEND)
-  glDisable(GL_CULL_FACE)
-  glUseProgram(system.program.id)
-  let clipLocation = system.program.locations[ClipSightUniform]
-  glUniform1i(system.program.locations[SightUniform], 0)
-  glUniform1i(clipLocation, 0)
-  if clip:
-    glUniform2f(system.program.locations[SightOriginUniform],
-      visibilityOrigin.x, visibilityOrigin.y)
-    glUniform1f(system.program.locations[SightWidthUniform],
-      visibilityWidth.float32)
-  glBindVertexArray(system.vertexArray)
-  for effect in system.effects:
-    if effect.startTime > system.time:
-      continue
-    let owned = viewer >= 0 and effect.owner == viewer
-    glUniform1i(clipLocation, (clip and not owned).GLint)
-    if not clip and not owned:
-      if not particlePathVisible(
-        effect.origin,
-        effect.target,
-        visibility,
-        visibilityWidth,
-        visibilityOrigin,
-        visibilityPadding
-      ):
-        continue
-    if effect.kind in
-        {ArrowWake, LeafBolt, LeafBurst, BloomSeed, BloomPetals, RootLeaves,
-         IceShard, FrostBurst, IceShatter, BlizzardShards, SnowSquall}:
-      glBlendFuncSeparate(
-        GL_SRC_ALPHA,
-        GL_ONE_MINUS_SRC_ALPHA,
-        GL_ONE,
-        GL_ONE_MINUS_SRC_ALPHA
-      )
-    else:
-      glBlendFuncSeparate(
-        GL_SRC_ALPHA,
-        GL_ONE,
-        GL_ZERO,
-        GL_ONE
-      )
-    system.uploadParticleEffect(
-      effect,
-      matrix,
-      cameraRight,
-      cameraUp,
-      cameraForward
-    )
-    glDrawArraysInstanced(
-      GL_TRIANGLE_STRIP,
-      0,
-      4,
-      effect.kind.effectParticleCount.GLsizei
-    )
-  glBindVertexArray(0)
-  glUseProgram(0)
-  glDepthMask(GL_TRUE)
-  glDisable(GL_BLEND)
-  glBindTexture(GL_TEXTURE_2D, oldTexture.GLuint)
-  glActiveTexture(oldActive.GLenum)
-
-proc closeParticles*(system: var ParticleSystem) =
-  ## Releases particle GPU resources and clears presentation state.
-  if system.program.id != 0:
-    glDeleteProgram(system.program.id)
-  if system.vertexArray != 0:
-    glDeleteVertexArrays(1, system.vertexArray.addr)
-  if system.sightTexture != 0:
-    glDeleteTextures(1, system.sightTexture.addr)
-  system = ParticleSystem()
+include backends/passes/particles

@@ -60,6 +60,7 @@ proc usage() =
   when not defined(headless):
     echo "  --windowSize WxH  Window size (default 1440x900)."
     echo "  --screenshot PATH Save a PNG and exit after --frames N (default 30)."
+    echo "  --benchmark PATH  Save hidden frame timings in JSON (--warmup N, --frames N)."
     echo "  --capture-ticks:N Advance N ticks before capture frames (default 0)."
     echo "  --vsync BOOL      Enable display synchronization (default true)."
   echo "  --mute[=BOOL]     Request muted audio."

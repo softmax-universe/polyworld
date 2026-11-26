@@ -2,16 +2,14 @@
 
 import
   std/[math, os, strutils, times, unicode],
-  chroma, gltf, opengl, pixie, silky, vmath, windy,
-  polyworld/[actioncam, assets, characters, chargen, chrome, common, gameuis,
-    pathing, player, quadterrain, rtscameras, shapes, toon, viewers],
-  sim, maps, cameras, game, replays, skins, stars
+  chroma, gltf, pixie, silky, vmath, windy,
+  polyworld/[renderer, modelresources, actioncam, assets, characters, chargen, chrome, common, gameuis,
+    pathing, player, quadterrain, rtscameras, shadows, shapes, toon, viewers],
+  sim, maps, cameras, game, replays, skins, stars, assets
 
 const
   AtlasPath = TmpRoot & "/crewrift.atlas.png"
   CrewHeight = 1.8'f
-  CrewLibrary = DataRoot & "/characters/chargen"
-  CrewClips = ["Idle_Loop", "Walk_Loop", "Interact"]
   White = rgbx(255, 255, 255, 255)
   Ink = rgbx(233, 241, 250, 255)
   Muted = rgbx(155, 174, 194, 255)
@@ -77,40 +75,14 @@ proc crewPortrait(window: Window, scene: CharacterScene,
     view = lookAt(eye, target, vec3(0, 1, 0))
     projection = ortho(-extent, extent, -extent, extent, 0.02'f, 50.0'f)
   scene.beginCharacters(window, view, projection, eye)
-  var
-    previousFramebuffer: GLint
-    framebuffer, colorBuffer, depthBuffer: GLuint
-  glGetIntegerv(GL_FRAMEBUFFER_BINDING, previousFramebuffer.addr)
-  glGenFramebuffers(1, framebuffer.addr)
-  glGenRenderbuffers(1, colorBuffer.addr)
-  glGenRenderbuffers(1, depthBuffer.addr)
+  var portraitTarget = newFrameTarget(Size, Size)
+  pushFrameTarget(portraitTarget)
   defer:
-    glBindFramebuffer(GL_FRAMEBUFFER, previousFramebuffer.GLuint)
-    glDeleteFramebuffers(1, framebuffer.addr)
-    glDeleteRenderbuffers(1, colorBuffer.addr)
-    glDeleteRenderbuffers(1, depthBuffer.addr)
-    glViewport(0, 0, window.size.x, window.size.y)
-  glBindFramebuffer(GL_FRAMEBUFFER, framebuffer)
-  glBindRenderbuffer(GL_RENDERBUFFER, colorBuffer)
-  glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, Size, Size)
-  glFramebufferRenderbuffer(
-    GL_FRAMEBUFFER,
-    GL_COLOR_ATTACHMENT0,
-    GL_RENDERBUFFER,
-    colorBuffer
-  )
-  glBindRenderbuffer(GL_RENDERBUFFER, depthBuffer)
-  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, Size, Size)
-  glFramebufferRenderbuffer(
-    GL_FRAMEBUFFER,
-    GL_DEPTH_ATTACHMENT,
-    GL_RENDERBUFFER,
-    depthBuffer
-  )
-  if glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE:
-    raise newException(CrewriftError, "Cannot create crew portrait framebuffer.")
-  glViewport(0, 0, Size, Size)
-  scene.renderer.clearScreen(color(0.10, 0.12, 0.16, 1))
+    popFrameTarget()
+    destroyFrameTarget(portraitTarget)
+    setRenderViewport(window.size)
+  setRenderViewport(ivec2(Size, Size))
+  clearFrame(color(0.10, 0.12, 0.16, 1))
   scene.drawCharacter(
     model,
     vec3(0),
@@ -119,18 +91,7 @@ proc crewPortrait(window: Window, scene: CharacterScene,
     0.35'f
   )
   scene.finishCharacters()
-  result = newImage(Size, Size)
-  glReadBuffer(GL_COLOR_ATTACHMENT0)
-  glReadPixels(
-    0,
-    0,
-    Size,
-    Size,
-    GL_RGBA,
-    GL_UNSIGNED_BYTE,
-    result.data[0].addr
-  )
-  result.flipVertical()
+  result = readFrameImage(Size, Size)
 
 proc inside(mouse, origin, size: Vec2): bool =
   ## Tests one explicit HUD hit rectangle.
@@ -536,8 +497,7 @@ proc drawHud(
       not mouseOverDebugMenu(window.mousePos.vec2)
   if toggleHovered and window.buttonReleased[MouseLeft]:
     state.showRooms = not state.showRooms
-  glDisable(GL_DEPTH_TEST)
-  glDisable(GL_CULL_FACE)
+  prepareUi(sk)
   if state.showRooms and (state.camera.overview or slot < 0):
     for room in world.rooms:
       let point = viewProjection * vec4(
@@ -816,8 +776,12 @@ proc runGraphics*(initial: Options) =
   )
   sk.builder = builder
   defer:
-    saveReplay(options.record, game.recording)
+    when not defined(backendBench):
+      saveReplay(options.record, game.recording)
     window.close()
+  initUnshadowedShadows()
+  defer:
+    closeUnshadowedShadows()
   var
     terrain = loadShipSkin()
     markers = initShapeRenderer()
@@ -825,7 +789,7 @@ proc runGraphics*(initial: Options) =
     captureTarget: ScreenshotTarget
   defer:
     captureTarget.releaseScreenshotTarget()
-    terrain.clearFromGpu()
+    terrain.clearModelGpu()
     markers.closeShapeRenderer()
     starField.close()
   let
@@ -836,7 +800,7 @@ proc runGraphics*(initial: Options) =
   scene.toon.shadowColor = color(0.68, 0.74, 0.84, 1)
   defer:
     for visual in visuals:
-      visual.model.file.root.clearFromGpu()
+      visual.model.file.root.clearModelGpu()
     scene.context.destroy()
   for i in 0 ..< game.world.players.len:
     visuals.add Visual(model: loadCrew(game.world.players[i].color, manifest))
@@ -860,7 +824,12 @@ proc runGraphics*(initial: Options) =
       state.text.len < VoteChatMaxChars:
         state.text.add rune.toUTF8()
   while not window.closeRequested:
-    pollEvents()
+    when not defined(emscripten):
+      pollEvents()
+    when defined(frameBench): beginBenchFrame(window)
+    let benchmarkGameplay = game.world.phase != RoleReveal
+    if benchmarkGameplay:
+      beginBenchmarkFrame("crewrift", window.size)
     let
       dt = min(clock.viewingDelta(window), 0.1'f)
       slot = if game.playback: -1 else: options.player
@@ -875,7 +844,8 @@ proc runGraphics*(initial: Options) =
       if state.typing:
         state.typing = false
       else:
-        break
+        when not defined(emscripten):
+          break
     if not state.typing:
       if window.buttonPressed[KeyTab]:
         actionCam.takeManual()
@@ -952,6 +922,11 @@ proc runGraphics*(initial: Options) =
       state.typing = false
       state.text.setLen(0)
       syncTransport()
+    when defined(frameBench):
+      if renderedFrames == 0:
+        for i in 0 ..< game.world.config.roleRevealTicks:
+          game.advance(slot, record = true)
+        syncTransport()
     if captureActive() and renderedFrames == 0:
       for i in 0 ..< options.captureTicks:
         game.advance(slot, record = true)
@@ -1028,7 +1003,7 @@ proc runGraphics*(initial: Options) =
       )
     scene.beginCharacters(window, view, projection, eye)
     discard captureTarget.beginScreenshotFrame(window)
-    scene.renderer.clearScreen(color(0.025, 0.045, 0.085, 1))
+    clearFrame(color(0.025, 0.045, 0.085, 1))
     starField.draw(
       vp,
       eye,
@@ -1128,7 +1103,7 @@ proc runGraphics*(initial: Options) =
       )
     scene.finishCharacters()
     sk.uiScale = 1
-    sk.beginUi(window, window.size)
+    sk.beginGameUi(window, window.size)
     if sk.drawHud(window, game, state, slot, TransportHeight * uiScale, vp):
       actionCam.takeManual()
     sk.drawReplayControls(
@@ -1139,9 +1114,17 @@ proc runGraphics*(initial: Options) =
       uiScale
     )
     sk.drawDebugMenu(window)
-    sk.endUi()
+    sk.finishUi()
     inc renderedFrames
+    if benchmarkGameplay and endBenchmarkFrame(game.frame):
+      when not defined(emscripten):
+        window.closeRequested = true
+      break
     if captureFrame(window, captureFrames):
       break
-    window.swapBuffers()
+    window.presentFrame()
+    reportReplayFrame(game.frame.int32, 0)
+    when defined(emscripten):
+      # Reset consumed events before yielding for the next browser frame.
+      pollEvents()
     waitForDisplay()

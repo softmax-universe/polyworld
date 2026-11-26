@@ -11,7 +11,9 @@ else:
   import windy
 
 const
-  HudAssetDir = currentSourcePath().parentDir / "assets" / "hud"
+  HudAssetDir =
+    when defined(emscripten): "/monster-hud"
+    else: currentSourcePath().parentDir / "assets" / "hud"
   HudFrameKey* = "monster_woodland_frame"
   HudPortraitKey* = "monster_woodland_portrait"
   HudVillagerPortraitKey* = "monster_villager_portrait"

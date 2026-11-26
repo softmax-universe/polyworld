@@ -58,8 +58,15 @@ proc parseLaunchOptions*(arguments: seq[string]): LaunchOptions =
     result.common.setMaximumTicks(min(
       result.common.maximumTicks, gameLengthTicks(result.dayCount)
     ))
-  when not defined(headless) and not defined(emscripten):
-    if result.common.capture.path.len > 0 and
+  when defined(emscripten):
+    if result.common.botGroups.len == 0 and
+      result.common.replayPath.len == 0:
+        result.common.botGroups.add BotGroup(
+          path: "/players/base.bas",
+          count: VillagerCount - ord(result.common.playerSlot > 0)
+        )
+  elif not defined(headless):
+    if result.common.capture.runtimeCaptureRequested() and
       result.common.botGroups.len == 0 and
       result.common.replayPath.len == 0 and result.common.playerSlot == 0:
         result.common.botGroups.add BotGroup(

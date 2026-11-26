@@ -1,0 +1,104 @@
+## ground capture and current-sight compositing.
+
+import
+  pixie, shady, vmath,
+  polyworld/backends/passes/common,
+  ../../strictfogshaders
+
+type StrictFog* = object
+  program: ShaderProgram
+  ground, target: RenderTarget
+  sight: GpuImage
+  size: IVec2
+  capturing: bool
+  inverse: Mat4
+  side: int
+
+proc initStrictFog*(): StrictFog =
+  ## Compiles the shared visibility shader for the active graphics device.
+  result.program = newProgram(
+    nativeStage(strictFogVertex, shaderVertex),
+    nativeStage(strictFogFragment, shaderFragment)
+  )
+
+proc ensureSize(fog: var StrictFog, size: IVec2) =
+  ## Keeps captured attachments compatible with the active frame target.
+  ensureFrame(size.x, size.y)
+  let target = gpuRenderer.target
+  if target == nil or target.color == nil or target.depth == nil:
+    raise newException(GpuError,
+      "Strict fog requires an active color and depth target")
+  if fog.ground != nil and fog.size == size and
+    fog.ground.color.pixelFormat == target.color.pixelFormat and
+    fog.ground.stencil == target.stencil:
+      return
+  destroy(fog.ground)
+  fog.size = size
+  fog.ground = newRenderTarget(size.x, size.y,
+    colorFormat = target.color.pixelFormat, stencil = target.stencil)
+
+proc beginStrictGround*(fog: var StrictFog, size: IVec2) =
+  ## Redirects the ground pass into preserved color and depth attachments.
+  if fog.capturing:
+    raise newException(GpuError,
+      "Strict fog ground capture is already active")
+  fog.ensureSize(size)
+  fog.target = gpuRenderer.target
+  pushTarget(fog.ground)
+  fog.capturing = true
+
+proc captureStrictGround*(
+  fog: var StrictFog,
+  size: IVec2,
+  inverseView: Mat4,
+  values: openArray[uint8],
+  side: int
+) =
+  ## Completes ground capture and uploads the authoritative current sight.
+  if side <= 0 or values.len != side * side:
+    raise newException(GpuError,
+      "Strict fog sight dimensions must match the map")
+  fog.inverse = inverseView
+  if fog.capturing:
+    popTarget()
+    fog.capturing = false
+  else:
+    fog.ensureSize(size)
+    fog.target = gpuRenderer.target
+    copyTarget(fog.target, fog.ground)
+  let image = newImage(side, side)
+  for i, value in values:
+    image.data[i] = rgbx(value, value, value, 255)
+  if fog.sight == nil or fog.side != side:
+    destroy(fog.sight)
+    fog.sight = newTexture(image, linear = false)
+  else:
+    fog.sight.updateTexture(image)
+  fog.side = side
+
+proc restoreHiddenGround*(fog: var StrictFog) =
+  ## Restores hidden ground while retaining all visible scene pixels.
+  if fog.ground == nil or fog.sight == nil:
+    return
+  setTarget(fog.target)
+  fog.program.bindTexture("groundColor", fog.ground.color)
+  fog.program.bindTexture("groundDepth", fog.ground.depth)
+  fog.program.bindTexture("currentSight", fog.sight)
+  fog.program.setUniform("inverseView", fog.inverse)
+  fog.program.setUniform("mapSide", fog.side.float32)
+  let textureYTransform =
+    when PassTopLeftOrigin:
+      vec2(-1, 1)
+    else:
+      vec2(1, 0)
+  fog.program.setUniform("textureYTransform", textureYTransform)
+  draw(fog.program, nil, 3)
+
+proc closeStrictFog*(fog: var StrictFog) =
+  ## Releases captured attachments and the current-sight shader resources.
+  if fog.capturing:
+    popTarget()
+  destroy(fog.program)
+  destroy(fog.ground)
+  destroy(fog.sight)
+  fog = StrictFog()

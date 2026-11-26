@@ -1,3 +1,4 @@
+from polyworld/renderer import beginGameUi
 import
   bumpy, chroma, pixie, silky, vmath, windy,
   polyworld/[chrome, gameuis, homes, sounds]
@@ -11,7 +12,7 @@ proc drawCacHome*(sk: Silky, window: Window, focus: var int): CacHomeAction =
   sk.uiScale = selectedUiScale(max(0.1'f, min(
     window.size.x.float32 / 760, window.size.y.float32 / 940
   )), 1080.0'f / 940)
-  sk.beginUi(window, window.size)
+  sk.beginGameUi(window, window.size)
   sk.textStyle = "LobbyBody"
   sk.drawHomeBackground(window)
   let

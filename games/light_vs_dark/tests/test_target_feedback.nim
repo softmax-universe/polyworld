@@ -55,19 +55,6 @@ glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, 1200, 900)
 glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depth)
 doAssert glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE
 
-# Shared production shader/GL composite, redirect only its window framebuffer
-# to a readable color/depth FBO (hidden macOS windows have blank backbuffers).
-privateAccess(SelectionOutline)
-macro offscreenComposite(): untyped =
-  for node in parseStmt(staticRead("../../../src/polyworld/selectionoutlines.nim")):
-    if node.kind == nnkProcDef and node[0].repr == "drawOutline*":
-      result = node
-      result[0] = ident("drawOutline")
-      result[^1][1] = parseStmt("glBindFramebuffer(GL_FRAMEBUFFER, framebuffer)")[0]
-      return
-  error("Missing outline composite")
-offscreenComposite()
-
 proc checkTarget(kind: string, armed = false, invalid = "", rally = false) =
   ## Drives a contextual click through production picking and command routing.
   let hooks = GraphicsHooks()
@@ -161,11 +148,11 @@ proc checkTarget(kind: string, armed = false, invalid = "", rally = false) =
     window.onButtonRelease(KeyA)
     require attackMoveArmed
   window.state.buttonDown = {MouseRight}
+  if invalid == "full": window.state.buttonDown.incl KeyLeftShift
   window.state.perFrame = PerFrame(buttonPressed: {MouseRight})
   updatePlayerOrder(vp, focused = invalid != "focus")
-  window.state.buttonDown = {}
+  window.state.buttonDown.excl MouseRight
   window.state.perFrame = PerFrame(buttonReleased: {MouseRight})
-  if invalid == "full": window.state.buttonDown.incl KeyLeftShift
   let before = run.stateHash()
   updatePlayerOrder(vp, focused = invalid != "focus")
   run.networked = true

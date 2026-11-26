@@ -156,7 +156,7 @@ proc parseGameOptions*(
         fail("unknown argument: " & argument)
     inc index
   when not defined(headless) and not defined(emscripten):
-    if options.capture.path.len > 0 and options.botGroups.len == 0 and
+    if options.capture.runtimeCaptureRequested() and options.botGroups.len == 0 and
       options.replayPath.len == 0 and options.playerSlot == 0:
         options.botGroups.add BotGroup(
           path: currentSourcePath().parentDir / "players" / "base.bas",

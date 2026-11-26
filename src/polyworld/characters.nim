@@ -14,6 +14,10 @@ import
   chroma, gltf, vmath, windy,
   animblend, charactermeshes, picking, shadows, toon
 
+when defined(useDirectX) or defined(useVulkan) or defined(useMetal4):
+  import backends/passes/charactercontexts
+  export charactercontexts
+
 type
   CharacterShading* = enum
     PbrCharacters, ToonCharacters
@@ -29,7 +33,10 @@ type
     mergedMesh*: int
 
   CharacterScene* = ref object
-    renderer*: Renderer
+    when defined(useMetal4) or defined(useDirectX) or defined(useVulkan):
+      renderer*: CharacterRenderer
+    else:
+      renderer*: Renderer
     context*: PbrContext
     toon*: ToonContext
     shading*: CharacterShading
@@ -154,14 +161,20 @@ proc attachGear*(
 proc newCharacterScene*(window: Window): CharacterScene =
   ## Creates the shared PBR renderer and attaches its environment map, plus
   ## the toon renderer; `shading` picks which one draws.
-  let renderer = newRenderer(window)
+  when defined(useMetal4) or defined(useDirectX) or defined(useVulkan):
+    let renderer = newCharacterRenderer(window)
+    let context = newPbrContext(nil)
+  else:
+    let renderer = newRenderer(window)
+    let context = newPbrContext(renderer)
   result = CharacterScene(
     renderer: renderer,
-    context: newPbrContext(renderer),
+    context: context,
     toon: newToonContext(),
     shading: PbrCharacters
   )
-  result.context.attachEnvironmentMap(loadDefaultEnvironmentMap())
+  when not (defined(useMetal4) or defined(useDirectX) or defined(useVulkan)):
+    result.context.attachEnvironmentMap(loadDefaultEnvironmentMap())
 
 proc useToonShading*(scene: CharacterScene, rim = ToonRimStrength) =
   ## Draws characters with the toon renderer and its rim light. Games call
@@ -323,7 +336,10 @@ proc drawModel(
   of PbrCharacters:
     scene.context.transform = transform
     scene.context.tint = tint
-    scene.context.draw(root)
+    when defined(useMetal4) or defined(useDirectX) or defined(useVulkan):
+      scene.renderer.drawPbr(scene.context, root)
+    else:
+      scene.context.draw(root)
   of ToonCharacters:
     scene.toon.unlitNodes.clear()
     for name in unlitParts:

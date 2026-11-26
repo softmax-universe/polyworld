@@ -1,7 +1,7 @@
 import
   std/[os, random, strutils, uri],
   bumpy, chroma, jsony, silky, vmath, windy,
-  polyworld/[displays, chrome, connections, menus, roomclients, rooms, policies,
+  polyworld/[renderer, displays, chrome, connections, menus, roomclients, rooms, policies,
     pointers, sounds, viewers],
   content, controls, game, graphics, homes, lobbies, multiplayer, presets,
   rosterstate, participantcontext, lobbyreadiness, joiningseats
@@ -329,13 +329,13 @@ proc runFrontend*() =
                 error = getCurrentExceptionMsg()
           if error.len > 0:
             sk.menuLabel(error, at + vec2(0, 272), color = LobbyRed)
-          sk.endUi()
+          sk.finishUi()
           presentMenu()
           return
       when not defined(emscripten):
         if browsingReplays:
           replayAction = sk.drawReplayBrowser(window, replayBrowser)
-          sk.endUi()
+          sk.finishUi()
           presentMenu()
           return
       if page == HomeMenu:
@@ -371,7 +371,7 @@ proc runFrontend*() =
           sk.menuLabel(error, vec2(24, 24), color = rgbx(245, 151, 139, 255))
         when not defined(emscripten):
           drawReplayRetry()
-        sk.endUi()
+        sk.finishUi()
         presentMenu()
         return
       var layout: LobbyLayout
@@ -828,7 +828,7 @@ proc runFrontend*() =
       when not defined(emscripten):
         drawReplayRetry()
       sk.textStyle = "Default"
-      sk.endUi()
+      sk.finishUi()
       presentMenu()
     pollEvents()
     waitForDisplay()

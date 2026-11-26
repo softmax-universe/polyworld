@@ -5,13 +5,13 @@ when defined(takeScreenshot):
   import std/strutils
 when not defined(emscripten) or defined(takeScreenshot):
   import ../core/replays
-import opengl, pixie, silky, vmath, windy
+import pixie, silky, vmath, windy
 import ../core/sim, ../core/sessions, ../core/bots, ../core/eventtext
 import ../app, ../bench, ../ui/hud, ../scene/table, ../play,
   ../scene/cardrenderer, ../vfx/vfxrenderer, ../scene/post,
   ../scene/courtyard, ../scene/towerarena,
   ../ui/tuning, ../ui/matchmenu, ../ui/controls, ../replayer, ../audios
-import polyworld/[characters, chrome, menus, player, sounds, viewers]
+import polyworld/[renderer, characters, chrome, menus, player, sounds, viewers]
 when defined(emscripten):
   import ../net/web
 else:
@@ -83,7 +83,7 @@ proc drawCardReadingView(
 proc runDuel*(app: App) =
   ## Presents a duel using public replay names when they are available.
   bindApp(app)
-  when not defined(emscripten):
+  when not defined(emscripten) and not defined(backendBench):
     app.useReplayRecording()
   app.setBattlefield(2)
   let names = if app.replay != nil: app.replay.playerNames()
@@ -95,13 +95,16 @@ proc runDuel*(app: App) =
       sessionOptions.common.pauseOnStart)
     # Captures can replay a cast from its visual seed.
     play =
-      if captureActive():
-        when defined(takeScreenshot):
-          initTablePlay(parseBiggestInt(getEnv("CAC_VFX_SEED", "20260909")))
-        else:
-          initTablePlay(20260909)
+      when defined(backendBench):
+        initTablePlay(42)
       else:
-        initTablePlay()
+        if captureActive():
+          when defined(takeScreenshot):
+            initTablePlay(parseBiggestInt(getEnv("CAC_VFX_SEED", "20260909")))
+          else:
+            initTablePlay(20260909)
+        else:
+          initTablePlay()
     animationTime = 0.0'f32
     hudTime = 0.0'f
     lastFrameTime = epochTime()
@@ -193,7 +196,7 @@ proc runDuel*(app: App) =
   proc startDuel(seats: openArray[Seat], seed: int64) =
     ## Deals the exact setup that the local replay will reproduce.
     game = newGame(seats, seed, recordEvents = true)
-    when not defined(emscripten):
+    when not defined(emscripten) and not defined(backendBench):
       play.recorder = app.beginReplayRecording(seats, seed, setupMessages)
       setupMessages.setLen(0)
     play.resetTable()
@@ -611,7 +614,12 @@ proc runDuel*(app: App) =
   window.onButtonPress = proc(button: Button) =
     ## Keep the shared UI size shortcuts available during a battle.
     discard window.scaleKey(button, app.preferences, sk.uiScale, AppName)
+  var benchmarkFinished = false
   window.onFrame = proc() =
+    when defined(frameBench): beginBenchFrame(window)
+    let benchmarkGameplay = phase == PlayGame
+    if benchmarkGameplay:
+      beginBenchmarkFrame("cac", window.size)
     app.beginCaptureFrame()
     when not defined(emscripten):
       window.updateWindowSettings()
@@ -847,10 +855,7 @@ proc runDuel*(app: App) =
           post.layer = layer
           post.settings.enabled = true
     post.beginScene(window.size, CameraNear, CameraFar)
-    glClearColor(0.035, 0.045, 0.065, 1)
-    glStencilMask(0xff)
-    glClearStencil(0)
-    glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT or GL_STENCIL_BUFFER_BIT)
+    clearFrame(color(0.035, 0.045, 0.065, 1), stencil = true)
     let environmentTime =
       when defined(takeScreenshot):
         parseFloat(getEnv("CAC_SCENE_TIME", $animationTime)).float32
@@ -869,9 +874,7 @@ proc runDuel*(app: App) =
 
     beginCharacters(scene, window, view, projection, cameraEye)
     scene.lightLikeCourtyard(currentSide)
-    glEnable(GL_STENCIL_TEST)
-    glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE)
-    glStencilFunc(GL_ALWAYS, 0, 0xff)
+    beginStencil(0)
     if phase == ChooseClasses:
       drawClassHeroes(classHover, animationTime, cameraEye)
     else:
@@ -880,7 +883,7 @@ proc runDuel*(app: App) =
           player = game.players[playerIndex]
           look = play.heroLook(game, playerIndex, hoveredTarget,
             attackChoices, attackHoverTarget)
-        glStencilFunc(GL_ALWAYS, (playerIndex + 1).GLint, 0xff)
+        beginStencil(playerIndex + 1)
         if look.targetable:
           vfx.addTargetRing(
             duelLayout.heroPosition(playerIndex) + vec3(0, 0.04, 0),
@@ -898,7 +901,7 @@ proc runDuel*(app: App) =
           sizeFactor = look.sizeFactor
         )
     finishCharacters(scene)
-    glDisable(GL_STENCIL_TEST)
+    endStencil()
     if post.beginMaterialNormals():
       if phase == PlayGame:
         courtyard.draw(viewProjection, cameraEye, environmentTime, currentSide,
@@ -921,13 +924,7 @@ proc runDuel*(app: App) =
       vfx.draw(viewProjection)
     post.present(window.size, app.captureFramebuffer)
 
-    glDisable(GL_DEPTH_TEST)
-    glDisable(GL_CULL_FACE)
-    glDisable(GL_BLEND)
-    when not defined(emscripten):
-      glDisable(GL_MULTISAMPLE)
-    glActiveTexture(GL_TEXTURE0)
-    glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
+    prepareUi(sk)
     benchStart(Ui)
     sk.mousePos = window.mousePos.vec2 / sk.uiScale
     when PostLayerControls:
@@ -1054,14 +1051,19 @@ proc runDuel*(app: App) =
         play.presentationIdle(game) and not play.attackActive)
       for cue in play.audio.takeSounds():
         playSound(cue)
-    when not defined(emscripten):
+    when not defined(emscripten) and not defined(backendBench):
       if phase == PlayGame:
         app.updateReplaySaving(game.gameOver or app.atLaunchTickLimit())
     menu.draw(app)
-    sk.endUi()
+    sk.finishUi()
     sk.drawHudFaces()
     benchStop(Ui)
     benchEndFrame("duel")
+    if benchmarkGameplay and endBenchmarkFrame(game.turnNumber):
+      benchmarkFinished = true
+      when not defined(emscripten):
+        window.closeRequested = true
+      return
     var screenshotComplete = false
     when defined(takeScreenshot):
       if existsEnv("CAC_CAPTURE_SEQUENCE"):
@@ -1069,11 +1071,8 @@ proc runDuel*(app: App) =
         if screenshotFrame mod 2 == 0:
           let
             outputDir = getEnv("CAC_CAPTURE_SEQUENCE")
-            frameImage = newImage(window.size.x, window.size.y)
+            frameImage = readFrameImage(window.size.x, window.size.y)
           createDir(outputDir)
-          glReadPixels(0, 0, window.size.x.GLsizei, window.size.y.GLsizei,
-            GL_RGBA, GL_UNSIGNED_BYTE, frameImage.data[0].addr)
-          frameImage.flipVertical()
           frameImage.writeFile(outputDir / &"frame-{screenshotFrame div 2:04}.png")
         if screenshotFrame >= max(2, parseInt(getEnv("CAC_CAPTURE_FRAME", "120"))):
           quit(0)
@@ -1097,9 +1096,10 @@ proc runDuel*(app: App) =
       app.replay.reportFrame()
 
   try:
-    while not window.closeRequested and not app.returnToMenu:
-      pollEvents()
-      waitForDisplay()
+    while not window.closeRequested and not app.returnToMenu and
+      not benchmarkFinished:
+        pollEvents()
+        waitForDisplay()
   finally:
     stopSounds()
     window.onFrame = nil

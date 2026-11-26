@@ -153,13 +153,13 @@ when not defined(headless):
     import std/strutils
   when defined(emscripten) or defined(takeScreenshot):
     import std/strformat
-  import opengl, silky, vmath, windy
+  import chroma, silky, vmath, windy
   import ../app, ../bench, ../ui/hud, ../scene/table, ../play,
     ../scene/cardrenderer,
     ../vfx/vfxrenderer, ../scene/post, ../scene/courtyard, ../scene/towerarena,
     ../scene/heroes, ../ui/tuning, ../ui/matchmenu, ../ui/controls, ../audios,
     ../net/multiplayer as networkplay
-  import polyworld/[characters, chrome, connections, menus, player,
+  import polyworld/[renderer, characters, chrome, connections, menus, player,
     roomclients, sounds, viewers]
   import polyworld/rooms except Seat
   import ../replayer
@@ -827,10 +827,7 @@ when not defined(headless):
             post.layer = layer
             post.settings.enabled = true
       post.beginScene(window.size, CameraNear, farPlane)
-      glClearColor(0.035, 0.045, 0.065, 1)
-      glStencilMask(0xff)
-      glClearStencil(0)
-      glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT or GL_STENCIL_BUFFER_BIT)
+      clearFrame(color(0.035, 0.045, 0.065, 1), stencil = true)
       # Silky's frame starts here: it draws card faces into their textures as
       # the cards are built.
       menu.beginFrame(app)
@@ -860,8 +857,6 @@ when not defined(headless):
       if choosingClasses:
         drawClassHeroes(classHover, previewTime, eye)
       else:
-        glEnable(GL_STENCIL_TEST)
-        glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE)
         for balcony in layout.balconies:
           let
             seat = balcony.playerIndex
@@ -869,7 +864,7 @@ when not defined(headless):
             model = seat mod HeroSeats
             look = play.heroLook(match.game, seat, hoveredTarget,
               attackChoices, attackHoverTarget)
-          glStencilFunc(GL_ALWAYS, (seat + 1).GLint, 0xff)
+          beginStencil(seat + 1)
           if look.targetable:
             vfx.addTargetRing(table.heroPosition(seat) + vec3(0, 0.04, 0),
               stageEye, 0.95, if look.hovered: 1.1'f32 else: 0.28'f32)
@@ -880,7 +875,7 @@ when not defined(headless):
             pose.clip, pose.time,
             tint = look.tint, sizeFactor = look.sizeFactor)
       finishCharacters(scene)
-      glDisable(GL_STENCIL_TEST)
+      endStencil()
       if post.beginMaterialNormals():
         if choosingClasses:
           selectionStage.draw(vp, eye, environmentTime, 1,
@@ -916,13 +911,7 @@ when not defined(headless):
         vfx.draw(vp)
       post.present(window.size, app.captureFramebuffer)
 
-      glDisable(GL_DEPTH_TEST)
-      glDisable(GL_CULL_FACE)
-      glDisable(GL_BLEND)
-      when not defined(emscripten):
-        glDisable(GL_MULTISAMPLE)
-      glActiveTexture(GL_TEXTURE0)
-      glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
+      prepareUi(sk)
       benchStart(Ui)
       chooseCanceled = false
       if not menu.visible:
@@ -1057,7 +1046,7 @@ when not defined(headless):
           app.updateReplaySaving(match.game.gameOver or app.atLaunchTickLimit() or
             (online and app.network.finished))
       menu.draw(app)
-      sk.endUi()
+      sk.finishUi()
       sk.drawHudFaces()
       benchStop(Ui)
       benchEndFrame("multiplayer " & $layout.playerCount)

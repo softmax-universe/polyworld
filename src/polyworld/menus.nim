@@ -1,3 +1,4 @@
+from polyworld/renderer import beginGameUi
 import
   std/[os, strutils],
   chroma, jsony, pixie, silky, vmath, windy,
@@ -142,7 +143,8 @@ proc configureSoundLaunch*(silent: bool, explicit = true) =
 
 proc readPreferences*(app: string): Preferences =
   ## Loads native or browser settings through Windy's configuration storage.
-  let bytes = getConfig(app, "settings.json")
+  let bytes = when defined(backendBench): ""
+    else: getConfig(app, "settings.json")
   result = Preferences()
   if bytes.len > 0:
     try:
@@ -349,7 +351,7 @@ proc beginMenu*(sk: Silky, window: Window, title, subtitle: string): Vec2 =
   ## Starts a shared menu frame scaled to fit smaller windows.
   sk.uiScale = selectedUiScale(max(0.7'f, min(window.size.x.float32 / 1150,
     window.size.y.float32 / 880)), 1080.0'f / 880)
-  sk.beginUi(window, window.size)
+  sk.beginGameUi(window, window.size)
   sk.mousePos = window.mousePos.vec2 / sk.uiScale
   sk.clearScreen(rgbx(20, 29, 27, 255))
   let size = window.size.vec2 / sk.uiScale
@@ -366,7 +368,7 @@ proc beginSettings*(
     window.size.x.float32 / 800,
     window.size.y.float32 / (540 + headerHeight)
   )), 1080.0'f / (540 + headerHeight))
-  sk.beginUi(window, window.size)
+  sk.beginGameUi(window, window.size)
   sk.clearScreen(rgbx(0, 0, 0, 255))
   result = vec2(
     (window.size.x.float32 / sk.uiScale - 720) / 2,
@@ -379,7 +381,7 @@ proc beginOverlay*(sk: Silky, window: Window, size: Vec2): Vec2 =
     window.size.x.float32 / 1000,
     window.size.y.float32 / 800
   )), 1080.0'f / 800)
-  sk.beginUi(window, window.size)
+  sk.beginGameUi(window, window.size)
   sk.textStyle = "Default"
   let view = window.size.vec2 / sk.uiScale
   sk.drawRect(vec2(0), view, rgbx(0, 0, 0, 110))

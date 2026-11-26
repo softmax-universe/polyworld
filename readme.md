@@ -66,6 +66,10 @@ nim r games/call_to_adventure/cta.nim --bot games/call_to_adventure/players/base
 Use `-d:headless` to run without a window, `--record PATH` to save a match,
 and `--replay PATH` to watch it. Build a browser client with `-d:emscripten`.
 
+On Windows, select DirectX 12 with `-d:useDirectX` or Vulkan 1.4 with
+`-d:useVulkan`. On macOS, select Metal with `-d:useMetal4`. See the
+[rendering backend guide](docs/backends.md) for build tools and GPU tests.
+
 Game-specific tests live in `games/<game>/tests/`; shared engine and
 cross-game tests live in `tests/`. Run commands from the repository root:
 

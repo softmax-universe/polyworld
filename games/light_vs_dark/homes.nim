@@ -1,3 +1,4 @@
+from polyworld/renderer import beginGameUi
 ## Game-specific art and startup routing over the shared main menu.
 proc opensMultiplayer*(room: string, configuredServer = ""): bool =
   ## Explicit server launches and room invites open the multiplayer menu.
@@ -36,7 +37,7 @@ when not defined(headless):
         window.size.x.float32 / 720,
         window.size.y.float32 / HomeSize.y
       )), 1080.0'f / HomeSize.y)
-      sk.beginUi(window, window.size)
+      sk.beginGameUi(window, window.size)
       sk.mousePos = window.mousePos.vec2 / sk.uiScale
       let
         view = window.size.vec2 / sk.uiScale

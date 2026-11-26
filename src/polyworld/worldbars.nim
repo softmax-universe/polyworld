@@ -2,19 +2,16 @@
 
 import
   std/math,
-  chroma, opengl, shady, vmath
+  chroma, shady, vmath
+
+include backends/passes/worldbars_types
 
 const
   VertexFloats = 12
-  DefaultGap* = 0.045'f32
-  DefaultBorder* = 0.035'f32
-  DefaultDamageHoldSeconds* = 1.25'f32
-  DefaultDamageFadeSeconds* = 0.75'f32
-  ShaderTarget =
-    when defined(emscripten):
-      glsl3WebGL
-    else:
-      glsl4Desktop
+  DefaultGap* = 0.045'f
+  DefaultBorder* = 0.035'f
+  DefaultDamageHoldSeconds* = 1.25'f
+  DefaultDamageFadeSeconds* = 0.75'f
 
 type
   WorldBarError* = object of CatchableError
@@ -23,10 +20,7 @@ type
     MaskTexture, ColorTexture
 
   WorldBarRenderer* = object
-    program: GLuint
-    vertexArray: GLuint
-    vertexBuffer: GLuint
-    whiteTexture: GLuint
+    gpu: WorldBarGpu
     vertices: seq[float32]
 
   WorldResourceBar* = object
@@ -89,110 +83,6 @@ proc barFragment(
       fragColor.xyz = fragColor.xyz * texel.xyz / max(texel.w, 0.00001'f)
     fragColor.w *= texel.w
 
-proc compileShaderStage(
-    kind: GLenum,
-    source,
-    label: string
-): GLuint =
-  ## Compiles one bar shader stage with a useful diagnostic.
-  result = glCreateShader(kind)
-  let sources = allocCStringArray([source])
-  defer:
-    deallocCStringArray(sources)
-  glShaderSource(result, 1, sources, nil)
-  glCompileShader(result)
-  var status: GLint
-  glGetShaderiv(result, GL_COMPILE_STATUS, status.addr)
-  if status == 0:
-    var length: GLint
-    glGetShaderiv(result, GL_INFO_LOG_LENGTH, length.addr)
-    var log = newString(length)
-    glGetShaderInfoLog(result, length, nil, log.cstring)
-    raise newException(
-      WorldBarError,
-      label & " shader failed:\n" & log & "\n" & source
-    )
-
-proc compileProgram(): GLuint =
-  ## Compiles and links the shared world-bar shader program.
-  let
-    vertexShader = compileShaderStage(
-      GL_VERTEX_SHADER,
-      toShader(barVertex, ShaderTarget, shaderVertex),
-      "world bar vertex"
-    )
-    fragmentShader = compileShaderStage(
-      GL_FRAGMENT_SHADER,
-      toShader(barFragment, ShaderTarget, shaderFragment),
-      "world bar fragment"
-    )
-  result = glCreateProgram()
-  glAttachShader(result, vertexShader)
-  glAttachShader(result, fragmentShader)
-  glLinkProgram(result)
-  glDeleteShader(vertexShader)
-  glDeleteShader(fragmentShader)
-  var status: GLint
-  glGetProgramiv(result, GL_LINK_STATUS, status.addr)
-  if status == 0:
-    var length: GLint
-    glGetProgramiv(result, GL_INFO_LOG_LENGTH, length.addr)
-    var log = newString(length)
-    glGetProgramInfoLog(result, length, nil, log.cstring)
-    raise newException(
-      WorldBarError,
-      "world bar program failed:\n" & log
-    )
-
-proc initWorldBarRenderer*(): WorldBarRenderer =
-  ## Creates one dynamic mesh buffer for all world-space resource bars.
-  result.program = compileProgram()
-  glGenTextures(1, result.whiteTexture.addr)
-  glBindTexture(GL_TEXTURE_2D, result.whiteTexture)
-  var white = [255'u8, 255'u8, 255'u8, 255'u8]
-  glTexImage2D(
-    GL_TEXTURE_2D, 0, GL_RGBA.GLint, 1, 1, 0,
-    GL_RGBA, GL_UNSIGNED_BYTE, white[0].addr
-  )
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR.GLint)
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR.GLint)
-  glGenVertexArrays(1, result.vertexArray.addr)
-  glBindVertexArray(result.vertexArray)
-  glGenBuffers(1, result.vertexBuffer.addr)
-  glBindBuffer(GL_ARRAY_BUFFER, result.vertexBuffer)
-  const stride = (VertexFloats * sizeof(float32)).GLsizei
-  for attribute in [
-    (name: "worldCenter", count: 3, offset: 0),
-    (name: "billboardOffset", count: 2, offset: 3 * sizeof(float32)),
-    (name: "vertexColor", count: 4, offset: 5 * sizeof(float32)),
-    (name: "vertexUv", count: 2, offset: 9 * sizeof(float32)),
-    (name: "vertexTextureMode", count: 1, offset: 11 * sizeof(float32))
-  ]:
-    let location = glGetAttribLocation(
-      result.program,
-      attribute.name.cstring
-    )
-    doAssert location >= 0
-    glEnableVertexAttribArray(location.GLuint)
-    glVertexAttribPointer(
-      location.GLuint,
-      attribute.count.GLint,
-      cGL_FLOAT,
-      GL_FALSE,
-      stride,
-      cast[pointer](attribute.offset)
-    )
-  glBindVertexArray(0)
-
-proc closeWorldBarRenderer*(renderer: var WorldBarRenderer) =
-  ## Releases this renderer's GPU resources while its context is current.
-  ## Safe to repeat. Initialize a new renderer before drawing again.
-  glDeleteProgram(renderer.program)
-  glDeleteVertexArrays(1, renderer.vertexArray.addr)
-  glDeleteBuffers(1, renderer.vertexBuffer.addr)
-  glDeleteTextures(1, renderer.whiteTexture.addr)
-  renderer = WorldBarRenderer()
-
 proc clear*(renderer: var WorldBarRenderer) =
   ## Starts one empty bar batch while retaining its vertex allocation.
   renderer.vertices.setLen(0)
@@ -206,7 +96,7 @@ proc addVertex(
     textureMode: BillboardTexture
 ) =
   ## Adds one interleaved billboard vertex to the dynamic mesh.
-  const ByteScale = 1.0'f32 / 255.0'f32
+  const ByteScale = 1.0'f / 255.0'f
   renderer.vertices.add center.x
   renderer.vertices.add center.y
   renderer.vertices.add center.z
@@ -275,21 +165,21 @@ proc addResourceBars*(
     border = DefaultBorder
 ) =
   ## Adds an extensible top-down stack of billboard resource bars.
-  var top = 0.0'f32
+  var top = 0.0'f
   for bar in bars:
     let
-      left = -width * 0.5'f32
+      left = -width * 0.5'f
       bottom = top - bar.height
       ratio =
         if bar.maximum <= 0:
-          0.0'f32
+          0.0'f
         else:
-          clamp(bar.value / bar.maximum, 0.0'f32, 1.0'f32)
+          clamp(bar.value / bar.maximum, 0.0'f, 1.0'f)
       delayedRatio =
         if bar.maximum <= 0:
-          0.0'f32
+          0.0'f
         else:
-          clamp(bar.delayedValue / bar.maximum, ratio, 1.0'f32)
+          clamp(bar.delayedValue / bar.maximum, ratio, 1.0'f)
     renderer.addBillboardQuad(
       anchor,
       vec2(left - border, bottom - border),
@@ -318,77 +208,16 @@ proc addResourceBars*(
       )
     top = bottom - gap
 
-proc draw*(
-    renderer: var WorldBarRenderer,
-    viewProjection: Mat4,
-    cameraRight,
-    cameraUp: Vec3,
-    textureId = 0.GLuint
-) =
-  ## Uploads and draws the world-space billboard batch with scene depth.
-  if renderer.vertices.len == 0:
-    return
-  glBindBuffer(GL_ARRAY_BUFFER, renderer.vertexBuffer)
-  glBufferData(
-    GL_ARRAY_BUFFER,
-    renderer.vertices.len * sizeof(float32),
-    renderer.vertices[0].addr,
-    GL_DYNAMIC_DRAW
-  )
-  glEnable(GL_DEPTH_TEST)
-  glDepthMask(GL_FALSE)
-  glDisable(GL_CULL_FACE)
-  glEnable(GL_BLEND)
-  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
-  glUseProgram(renderer.program)
-  glActiveTexture(GL_TEXTURE0)
-  glBindTexture(
-    GL_TEXTURE_2D,
-    if textureId == 0: renderer.whiteTexture else: textureId
-  )
-  glUniform1i(glGetUniformLocation(renderer.program, "barTexture"), 0)
-  barViewProjection = viewProjection
-  barCameraRight = cameraRight
-  barCameraUp = cameraUp
-  glUniformMatrix4fv(
-    glGetUniformLocation(renderer.program, "barViewProjection"),
-    1,
-    GL_FALSE,
-    cast[ptr float32](barViewProjection.addr)
-  )
-  glUniform3f(
-    glGetUniformLocation(renderer.program, "barCameraRight"),
-    cameraRight.x,
-    cameraRight.y,
-    cameraRight.z
-  )
-  glUniform3f(
-    glGetUniformLocation(renderer.program, "barCameraUp"),
-    cameraUp.x,
-    cameraUp.y,
-    cameraUp.z
-  )
-  glBindVertexArray(renderer.vertexArray)
-  glDrawArrays(
-    GL_TRIANGLES,
-    0,
-    (renderer.vertices.len div VertexFloats).GLsizei
-  )
-  glBindVertexArray(0)
-  glUseProgram(0)
-  glDepthMask(GL_TRUE)
-  glDisable(GL_BLEND)
-
 proc healthColor*(value, maximum: float32): ColorRGBX =
   ## Returns green, yellow, or red for the current health percentage.
   let ratio =
     if maximum <= 0:
-      0.0'f32
+      0.0'f
     else:
-      clamp(value / maximum, 0.0'f32, 1.0'f32)
-  if ratio > 0.6'f32:
+      clamp(value / maximum, 0.0'f, 1.0'f)
+  if ratio > 0.6'f:
     rgbx(62, 201, 92, 255)
-  elif ratio > 0.3'f32:
+  elif ratio > 0.3'f:
     rgbx(238, 195, 55, 255)
   else:
     rgbx(224, 66, 63, 255)
@@ -429,11 +258,11 @@ proc delayedValue*(
     trail.delayedValue = max(trail.delayedValue, current)
   trail.observedValue = current
   if trail.holdSeconds > 0:
-    trail.holdSeconds = max(trail.holdSeconds - dt, 0.0'f32)
+    trail.holdSeconds = max(trail.holdSeconds - dt, 0.0'f)
   elif trail.delayedValue > current:
-    let amount = min(dt / max(fadeSeconds, 0.001'f32), 1.0'f32)
+    let amount = min(dt / max(fadeSeconds, 0.001'f), 1.0'f)
     trail.delayedValue += (current - trail.delayedValue) * amount
-    if trail.delayedValue - current < 0.5'f32:
+    if trail.delayedValue - current < 0.5'f:
       trail.delayedValue = current
   trail.delayedValue = clamp(
     trail.delayedValue,
@@ -451,3 +280,5 @@ proc finishFrame*(tracker: var DamageTrailTracker) =
         tracker.trails[writeIndex] = tracker.trails[readIndex]
       inc writeIndex
   tracker.trails.setLen(writeIndex)
+
+include backends/passes/worldbars

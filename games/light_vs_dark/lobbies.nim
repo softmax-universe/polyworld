@@ -95,8 +95,9 @@ when not defined(headless):
   proc readLvdPreferences*(): Preferences =
     loadLvdShortcuts()
     result = readPreferences("Polyworld LvD")
-    if getConfig("Polyworld LvD", "settings.json").len == 0:
-      result.bindings = LvdControlProfile.defaults
+    if defined(backendBench) or
+      getConfig("Polyworld LvD", "settings.json").len == 0:
+        result.bindings = LvdControlProfile.defaults
     else:
       result.bindings.migrateLvdBindings()
     shortcutSettingsError.add currentShortcuts.reconcileShortcutInputs(

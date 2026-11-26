@@ -1,0 +1,1003 @@
+{
+  "started": "2026-11-25T21:27:52.487117+00:00",
+  "start": {
+    "commit": "d142fd4f14b5fcbd4b00b8715dde100215177b63",
+    "sourceHash": "8ce790b5d5a029c14f3f7fb2eb357a9f0156421755a7b2b57a6ed9eab8449791",
+    "dependencies": {
+      "bassy": {
+        "path": "/Users/me/p/bassy",
+        "commit": "a9effcaab13abc9dfe42d7658cf87ee4783b0e14",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sourceSha256": "ca99dec62dd1cda32aeeada47e56062b56056b377f0277537b5c6dc31c9de686"
+      },
+      "curly": {
+        "path": "/Users/me/p/curly",
+        "commit": "bab28778114b5f5c82a65a28627f5cc264d2ad13",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sourceSha256": "264d12ec9a359be19d078135fa72ce6269f925e756f5683ebf59b17823ea013c"
+      },
+      "libcurl": {
+        "path": "/Users/me/p/libcurl",
+        "commit": "eecbfc31e17ae2f09f0b6d2aaefcfb970c7d2be4",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sourceSha256": "19c5047e15047b5879058d542bc8ae64d67649ed1508fb951ffd47544543ddf7"
+      },
+      "fixxy": {
+        "path": "/Users/me/p/fixxy",
+        "commit": "05e5446dffb70093056cebb0c57721a60deaf52a",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sourceSha256": "c11d57e35190ef0af1097fd0909fb7b8db62dffd9af8d19efac86e0f643eb999"
+      },
+      "silky": {
+        "path": "/Users/me/p/polyworld-metal-perf-deps/silky",
+        "commit": "26537a29e8c83b522fdd54f17a5f421878b2a5f4",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sourceSha256": "af0919d0642e26afa32e00ba6b95bf27ac01e929207386f9788f1d95300f6507"
+      },
+      "pixie": {
+        "path": "/Users/me/p/polyworld-backends-deps/pixie",
+        "commit": "0d89de14462790de0aaf451717a60ea3908bf98d",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sourceSha256": "ccbda03c90d1ce079b20e4bf5738ddc9bddef68b176a6c0251487d2e2ffe4edc"
+      },
+      "vmath": {
+        "path": "/Users/me/p/vmath",
+        "commit": "bc260143102153b76328783e1c76c96e52c52a4b",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sourceSha256": "14cda3f705c7c1e768ce599aaed0050672546f1aab35e20b7e7126d0c5f2fde1"
+      },
+      "chroma": {
+        "path": "/Users/me/p/chroma",
+        "commit": "08b0d65590221bb964544fd9badf29a146b9091a",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sourceSha256": "b2f48c6ac3d78fd73182985d9362294e5578cd6dd32a0eb5dd1303d9a73775ef"
+      },
+      "zippy": {
+        "path": "/Users/me/p/zippy",
+        "commit": "c625c0cee926c30126493581b237aeb861d8849c",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sourceSha256": "8568cc6b3e6a4b260cf54ff128051493f6c09784f9201c44607929690058ddbf"
+      },
+      "flatty": {
+        "path": "/Users/me/p/flatty",
+        "commit": "9c3f14cc287890b742196b4f0f74f0b9faab29cb",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sourceSha256": "9db1ddd7f889144afe93bb6156d4dfde0ce3f342583045e2befca076e0d42ff4"
+      },
+      "nimsimd": {
+        "path": "/Users/me/p/nimsimd",
+        "commit": "dd27017fbfd1c6c00d37776a8f5d322bf6c5a83b",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sourceSha256": "6c617fc636a171e3647949dcd29ce8ed0b42bbd33b953f25d5b1485fa1b91077"
+      },
+      "bumpy": {
+        "path": "/Users/me/p/bumpy",
+        "commit": "93583f6f8056a6259aaa96c89f4c143ba55bc6f0",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sourceSha256": "a58f881e56502176198e7f543e43d83d4f33041a1c71d8e68f75d93dff4522ad"
+      },
+      "spacy": {
+        "path": "/Users/me/p/spacy",
+        "commit": "fe53651c7740bda18cd657bdadbb8d98f7d37d0e",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sourceSha256": "098686a1660d9aceb5c25b960db348007ab13bee6765f568c61220d717c5ad05"
+      },
+      "pathy": {
+        "path": "/Users/me/p/pathy",
+        "commit": "d8cbb2af4876842069ab54530fad114692f873f4",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sourceSha256": "a90d7ada43916df80f139aa549f3fa1e735c08effcb977c3d18528ae84987258"
+      },
+      "crunchy": {
+        "path": "/Users/me/p/crunchy",
+        "commit": "04ec91b0d6ced30447e66468b7e8173e07c422b9",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sourceSha256": "deb6ec990707a56e83dd950222898308662d932df55a64c4d954a90990e04672"
+      },
+      "shady": {
+        "path": "/Users/me/p/polyworld-backends-deps/shady",
+        "commit": "62603f0922cf16ba1ee2463a80e317d7216773de",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sourceSha256": "4779eb72dac9b310a76b1c6c98359d2dc6e732eb431101ac9f41758f41c990a7"
+      },
+      "windy": {
+        "path": "/Users/me/p/polyworld-backends-deps/windy",
+        "commit": "fcaba3a3989cf1e899d98341edaf2e803313084c",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sourceSha256": "dab3f201d81eea36771df00db9fd2f2772e442ce242fa0857807d780f4abdcbd"
+      },
+      "slappy": {
+        "path": "/Users/me/p/slappy",
+        "commit": "c7c81acc468af632fcc8155c92dec48676c098ad",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sourceSha256": "32760b0237eff1012fdf9300c1f64c1ed755bac7cb39be7edf59a15e6e1d38b4"
+      },
+      "openal": {
+        "path": "/Users/me/p/openal",
+        "commit": "1882b562f3d550959794f8b09a1d7538404f300c",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sourceSha256": "6fea5ad639ed869d8f2243e7e6d8c9cbbceb3199cca587c522f6283421e3d405"
+      },
+      "supersnappy": {
+        "path": "/Users/me/p/supersnappy",
+        "commit": "81bf6974ebb928fbd5254c6a5919ec6b82896b79",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sourceSha256": "7709a80f66bc596d4e339c31e056af8a0dba9579a21c693c54d44a305f18d6b0"
+      },
+      "opengl": {
+        "path": "/Users/me/p/opengl",
+        "commit": "8e2e098f82dc5eefd874488c37b5830233cd18f4",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sourceSha256": "1fa1c01cdea3300b45b1d53a75b605db787a849906a93c3d56c4258ab8f1104b"
+      },
+      "urlly": {
+        "path": "/Users/me/p/urlly",
+        "commit": "99784779f05649df25fd9c33003d8ef6de027345",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sourceSha256": "cc70724d0205ac3970cc6f8e1528e9397c18ea670f0d5abef344e2e270f653cf"
+      },
+      "ws": {
+        "path": "/Users/me/p/ws",
+        "commit": "c9c0c7b51e2e83cc9305a895a0b144a297b4bea8",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sourceSha256": "717bcc35e51dcbb7b7f1b968a6b195afadf2e2054808235c5af93a13880195bf"
+      },
+      "dx12": {
+        "path": "/Users/me/p/dx12",
+        "commit": "65049f4e2ec1acbbf1987bfa79817d472650c15e",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sourceSha256": "64693586fee80adf471555404f549e9ab15e382549cfbcf9da3617a9199efef9"
+      },
+      "vk14": {
+        "path": "/Users/me/p/vk14",
+        "commit": "183cf440d6460d97c6b35d6346079d9982f8cd57",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sourceSha256": "53687644e57473d792491fdcc9e515d6031df2237f7bd81921d84910165929b0"
+      },
+      "metal4": {
+        "path": "/Users/me/p/metal4",
+        "commit": "eaec6cef21c446d512bbf18e6fa949eeae47a583",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sourceSha256": "0448dfdbdfc3ae0df711aeb0eb47a08cfcec43fded3d0b4415373cfa2099cdfd"
+      },
+      "jsony": {
+        "path": "/Users/me/p/jsony",
+        "commit": "ce1ea84458c721947bd8e86ec065eeefab2656f1",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sourceSha256": "8c2ad754baf95e848ac70f2f6d945338968f57d042933675d00c8192c635684f"
+      },
+      "fluffy": {
+        "path": "/Users/me/p/fluffy",
+        "commit": "85e37b8e544ff53301fe3f84a4a499b1720f88cd",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sourceSha256": "257b6c5f18450596afdc4d16b79bc5df646c9485e36161dbff65f3baf5aa72a9"
+      },
+      "gltf": {
+        "path": "/Users/me/p/gltf",
+        "commit": "0673a92c515966852c91f9f987bb899d0f6794e9",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sourceSha256": "b08e79b5d191d0b11be707f01ba563dbf9fdcabee14413bc28f195310f6602ec"
+      },
+      "webby": {
+        "path": "/Users/me/p/webby",
+        "commit": "fe515be4ab5d02695289f88fca0d27f703a05599",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sourceSha256": "18e70d318327913c5920e6164c490f407cf408bdc8f45da77fc1c6e197482161"
+      },
+      "noisy": {
+        "path": "/Users/me/p/polyworld-backends-deps/noisy",
+        "commit": "9625ee0a9dbdae44c427df95a4f8de006c061150",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sourceSha256": "2f6f612d2a5893e256b355a303c04d9f5d3f046a57caa8c46f7d854a60c6b957"
+      },
+      "benchy": {
+        "path": "/Users/me/p/benchy",
+        "commit": "6425417b578dc54008285aad020625b4b4f61f7b",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sourceSha256": "51f938ea79594c2290592a84ccd1578a9187a0b1bab0a72a87efabaadcc86c4b"
+      },
+      "mummy": {
+        "path": "/Users/me/p/mummy",
+        "commit": "649146cf391bd8eeff1796f6fc62d54a13c1d635",
+        "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sourceSha256": "276ab9431e9145d72e47b6d6a4f444a52bfb37055884d2a4d73219d49029d624"
+      }
+    }
+  },
+  "binariesStart": {
+    "opengl": {
+      "path": "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/samples-1/opengl/bin/gota-opengl",
+      "sha256": "6b44c19d0236ae3185415c04a145bae0b99bd7230ad7475ed089e57c209d28b9",
+      "bytes": 6685240
+    },
+    "metal-sync": {
+      "path": "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/samples-1/metal-sync/bin/gota-metal",
+      "sha256": "38d276cb53daee7cf72344b7ed195fcd79ac338c20aa33cecf1020b6256432f0",
+      "bytes": 6814040
+    },
+    "metal-async": {
+      "path": "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/samples-1/metal-async/bin/gota-metal",
+      "sha256": "a6ff4a9f6034f784788fb9cb6111bd01b4d3f88175cf96803d93bf591c51ade2",
+      "bytes": 6814152
+    }
+  },
+  "build": {
+    "started": "2026-11-25T21:22:28.148051+00:00",
+    "samples": 1,
+    "mode": "throughput",
+    "start": {
+      "commit": "d142fd4f14b5fcbd4b00b8715dde100215177b63",
+      "sourceHash": "8ce790b5d5a029c14f3f7fb2eb357a9f0156421755a7b2b57a6ed9eab8449791",
+      "dependencies": {
+        "bassy": {
+          "path": "/Users/me/p/bassy",
+          "commit": "a9effcaab13abc9dfe42d7658cf87ee4783b0e14",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "ca99dec62dd1cda32aeeada47e56062b56056b377f0277537b5c6dc31c9de686"
+        },
+        "curly": {
+          "path": "/Users/me/p/curly",
+          "commit": "bab28778114b5f5c82a65a28627f5cc264d2ad13",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "264d12ec9a359be19d078135fa72ce6269f925e756f5683ebf59b17823ea013c"
+        },
+        "libcurl": {
+          "path": "/Users/me/p/libcurl",
+          "commit": "eecbfc31e17ae2f09f0b6d2aaefcfb970c7d2be4",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "19c5047e15047b5879058d542bc8ae64d67649ed1508fb951ffd47544543ddf7"
+        },
+        "fixxy": {
+          "path": "/Users/me/p/fixxy",
+          "commit": "05e5446dffb70093056cebb0c57721a60deaf52a",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "c11d57e35190ef0af1097fd0909fb7b8db62dffd9af8d19efac86e0f643eb999"
+        },
+        "silky": {
+          "path": "/Users/me/p/polyworld-metal-perf-deps/silky",
+          "commit": "26537a29e8c83b522fdd54f17a5f421878b2a5f4",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "af0919d0642e26afa32e00ba6b95bf27ac01e929207386f9788f1d95300f6507"
+        },
+        "pixie": {
+          "path": "/Users/me/p/polyworld-backends-deps/pixie",
+          "commit": "0d89de14462790de0aaf451717a60ea3908bf98d",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "ccbda03c90d1ce079b20e4bf5738ddc9bddef68b176a6c0251487d2e2ffe4edc"
+        },
+        "vmath": {
+          "path": "/Users/me/p/vmath",
+          "commit": "bc260143102153b76328783e1c76c96e52c52a4b",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "14cda3f705c7c1e768ce599aaed0050672546f1aab35e20b7e7126d0c5f2fde1"
+        },
+        "chroma": {
+          "path": "/Users/me/p/chroma",
+          "commit": "08b0d65590221bb964544fd9badf29a146b9091a",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "b2f48c6ac3d78fd73182985d9362294e5578cd6dd32a0eb5dd1303d9a73775ef"
+        },
+        "zippy": {
+          "path": "/Users/me/p/zippy",
+          "commit": "c625c0cee926c30126493581b237aeb861d8849c",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "8568cc6b3e6a4b260cf54ff128051493f6c09784f9201c44607929690058ddbf"
+        },
+        "flatty": {
+          "path": "/Users/me/p/flatty",
+          "commit": "9c3f14cc287890b742196b4f0f74f0b9faab29cb",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "9db1ddd7f889144afe93bb6156d4dfde0ce3f342583045e2befca076e0d42ff4"
+        },
+        "nimsimd": {
+          "path": "/Users/me/p/nimsimd",
+          "commit": "dd27017fbfd1c6c00d37776a8f5d322bf6c5a83b",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "6c617fc636a171e3647949dcd29ce8ed0b42bbd33b953f25d5b1485fa1b91077"
+        },
+        "bumpy": {
+          "path": "/Users/me/p/bumpy",
+          "commit": "93583f6f8056a6259aaa96c89f4c143ba55bc6f0",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "a58f881e56502176198e7f543e43d83d4f33041a1c71d8e68f75d93dff4522ad"
+        },
+        "spacy": {
+          "path": "/Users/me/p/spacy",
+          "commit": "fe53651c7740bda18cd657bdadbb8d98f7d37d0e",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "098686a1660d9aceb5c25b960db348007ab13bee6765f568c61220d717c5ad05"
+        },
+        "pathy": {
+          "path": "/Users/me/p/pathy",
+          "commit": "d8cbb2af4876842069ab54530fad114692f873f4",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "a90d7ada43916df80f139aa549f3fa1e735c08effcb977c3d18528ae84987258"
+        },
+        "crunchy": {
+          "path": "/Users/me/p/crunchy",
+          "commit": "04ec91b0d6ced30447e66468b7e8173e07c422b9",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "deb6ec990707a56e83dd950222898308662d932df55a64c4d954a90990e04672"
+        },
+        "shady": {
+          "path": "/Users/me/p/polyworld-backends-deps/shady",
+          "commit": "62603f0922cf16ba1ee2463a80e317d7216773de",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "4779eb72dac9b310a76b1c6c98359d2dc6e732eb431101ac9f41758f41c990a7"
+        },
+        "windy": {
+          "path": "/Users/me/p/polyworld-backends-deps/windy",
+          "commit": "fcaba3a3989cf1e899d98341edaf2e803313084c",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "dab3f201d81eea36771df00db9fd2f2772e442ce242fa0857807d780f4abdcbd"
+        },
+        "slappy": {
+          "path": "/Users/me/p/slappy",
+          "commit": "c7c81acc468af632fcc8155c92dec48676c098ad",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "32760b0237eff1012fdf9300c1f64c1ed755bac7cb39be7edf59a15e6e1d38b4"
+        },
+        "openal": {
+          "path": "/Users/me/p/openal",
+          "commit": "1882b562f3d550959794f8b09a1d7538404f300c",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "6fea5ad639ed869d8f2243e7e6d8c9cbbceb3199cca587c522f6283421e3d405"
+        },
+        "supersnappy": {
+          "path": "/Users/me/p/supersnappy",
+          "commit": "81bf6974ebb928fbd5254c6a5919ec6b82896b79",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "7709a80f66bc596d4e339c31e056af8a0dba9579a21c693c54d44a305f18d6b0"
+        },
+        "opengl": {
+          "path": "/Users/me/p/opengl",
+          "commit": "8e2e098f82dc5eefd874488c37b5830233cd18f4",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "1fa1c01cdea3300b45b1d53a75b605db787a849906a93c3d56c4258ab8f1104b"
+        },
+        "urlly": {
+          "path": "/Users/me/p/urlly",
+          "commit": "99784779f05649df25fd9c33003d8ef6de027345",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "cc70724d0205ac3970cc6f8e1528e9397c18ea670f0d5abef344e2e270f653cf"
+        },
+        "ws": {
+          "path": "/Users/me/p/ws",
+          "commit": "c9c0c7b51e2e83cc9305a895a0b144a297b4bea8",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "717bcc35e51dcbb7b7f1b968a6b195afadf2e2054808235c5af93a13880195bf"
+        },
+        "dx12": {
+          "path": "/Users/me/p/dx12",
+          "commit": "65049f4e2ec1acbbf1987bfa79817d472650c15e",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "64693586fee80adf471555404f549e9ab15e382549cfbcf9da3617a9199efef9"
+        },
+        "vk14": {
+          "path": "/Users/me/p/vk14",
+          "commit": "183cf440d6460d97c6b35d6346079d9982f8cd57",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "53687644e57473d792491fdcc9e515d6031df2237f7bd81921d84910165929b0"
+        },
+        "metal4": {
+          "path": "/Users/me/p/metal4",
+          "commit": "eaec6cef21c446d512bbf18e6fa949eeae47a583",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "0448dfdbdfc3ae0df711aeb0eb47a08cfcec43fded3d0b4415373cfa2099cdfd"
+        },
+        "jsony": {
+          "path": "/Users/me/p/jsony",
+          "commit": "ce1ea84458c721947bd8e86ec065eeefab2656f1",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "8c2ad754baf95e848ac70f2f6d945338968f57d042933675d00c8192c635684f"
+        },
+        "fluffy": {
+          "path": "/Users/me/p/fluffy",
+          "commit": "85e37b8e544ff53301fe3f84a4a499b1720f88cd",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "257b6c5f18450596afdc4d16b79bc5df646c9485e36161dbff65f3baf5aa72a9"
+        },
+        "gltf": {
+          "path": "/Users/me/p/gltf",
+          "commit": "0673a92c515966852c91f9f987bb899d0f6794e9",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "b08e79b5d191d0b11be707f01ba563dbf9fdcabee14413bc28f195310f6602ec"
+        },
+        "webby": {
+          "path": "/Users/me/p/webby",
+          "commit": "fe515be4ab5d02695289f88fca0d27f703a05599",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "18e70d318327913c5920e6164c490f407cf408bdc8f45da77fc1c6e197482161"
+        },
+        "noisy": {
+          "path": "/Users/me/p/polyworld-backends-deps/noisy",
+          "commit": "9625ee0a9dbdae44c427df95a4f8de006c061150",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "2f6f612d2a5893e256b355a303c04d9f5d3f046a57caa8c46f7d854a60c6b957"
+        },
+        "benchy": {
+          "path": "/Users/me/p/benchy",
+          "commit": "6425417b578dc54008285aad020625b4b4f61f7b",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "51f938ea79594c2290592a84ccd1578a9187a0b1bab0a72a87efabaadcc86c4b"
+        },
+        "mummy": {
+          "path": "/Users/me/p/mummy",
+          "commit": "649146cf391bd8eeff1796f6fc62d54a13c1d635",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "276ab9431e9145d72e47b6d6a4f444a52bfb37055884d2a4d73219d49029d624"
+        }
+      }
+    },
+    "cases": [
+      {
+        "game": "gota",
+        "backend": "opengl",
+        "passed": true,
+        "artifact": "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/samples-1/opengl/bin/gota-opengl",
+        "stages": [
+          {
+            "command": [
+              "nim",
+              "check",
+              "--hints:off",
+              "-d:release",
+              "-d:backendBench",
+              "-d:backendThroughput",
+              "-d:backendBenchSamples=1",
+              "/Users/me/p/polyworld-metal-perf/games/gods_of_the_arena/gota.nim"
+            ],
+            "exitCode": 0,
+            "log": "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/samples-1/opengl/logs/gota-opengl-check.log",
+            "started": 1795641750.398767,
+            "wallSeconds": 10.824032068252563
+          },
+          {
+            "command": [
+              "nim",
+              "c",
+              "--hints:off",
+              "-d:release",
+              "-d:backendBench",
+              "-d:backendThroughput",
+              "-d:backendBenchSamples=1",
+              "--nimcache:/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/samples-1/opengl/cache/gota-opengl",
+              "--out:/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/samples-1/opengl/bin/gota-opengl",
+              "/Users/me/p/polyworld-metal-perf/games/gods_of_the_arena/gota.nim"
+            ],
+            "exitCode": 0,
+            "log": "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/samples-1/opengl/logs/gota-opengl-build.log",
+            "started": 1795641761.2230048,
+            "wallSeconds": 14.772836208343506
+          }
+        ],
+        "variant": "opengl"
+      },
+      {
+        "game": "gota",
+        "backend": "metal",
+        "passed": true,
+        "artifact": "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/samples-1/metal-sync/bin/gota-metal",
+        "stages": [
+          {
+            "command": [
+              "nim",
+              "check",
+              "--hints:off",
+              "-d:release",
+              "-d:backendBench",
+              "-d:metalProfile",
+              "-d:metalSynchronous",
+              "-d:backendThroughput",
+              "-d:backendBenchSamples=1",
+              "-d:useMetal4",
+              "/Users/me/p/polyworld-metal-perf/games/gods_of_the_arena/gota.nim"
+            ],
+            "exitCode": 0,
+            "log": "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/samples-1/metal-sync/logs/gota-metal-check.log",
+            "started": 1795641775.996875,
+            "wallSeconds": 15.592239141464233
+          },
+          {
+            "command": [
+              "nim",
+              "c",
+              "--hints:off",
+              "-d:release",
+              "-d:backendBench",
+              "-d:metalProfile",
+              "-d:metalSynchronous",
+              "-d:backendThroughput",
+              "-d:backendBenchSamples=1",
+              "-d:useMetal4",
+              "--nimcache:/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/samples-1/metal-sync/cache/gota-metal",
+              "--out:/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/samples-1/metal-sync/bin/gota-metal",
+              "/Users/me/p/polyworld-metal-perf/games/gods_of_the_arena/gota.nim"
+            ],
+            "exitCode": 0,
+            "log": "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/samples-1/metal-sync/logs/gota-metal-build.log",
+            "started": 1795641791.589302,
+            "wallSeconds": 13.51230001449585
+          }
+        ],
+        "variant": "metal-sync"
+      },
+      {
+        "game": "gota",
+        "backend": "metal",
+        "passed": true,
+        "artifact": "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/samples-1/metal-async/bin/gota-metal",
+        "stages": [
+          {
+            "command": [
+              "nim",
+              "check",
+              "--hints:off",
+              "-d:release",
+              "-d:backendBench",
+              "-d:metalProfile",
+              "-d:backendThroughput",
+              "-d:backendBenchSamples=1",
+              "-d:useMetal4",
+              "/Users/me/p/polyworld-metal-perf/games/gods_of_the_arena/gota.nim"
+            ],
+            "exitCode": 0,
+            "log": "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/samples-1/metal-async/logs/gota-metal-check.log",
+            "started": 1795641805.1027,
+            "wallSeconds": 18.230104207992554
+          },
+          {
+            "command": [
+              "nim",
+              "c",
+              "--hints:off",
+              "-d:release",
+              "-d:backendBench",
+              "-d:metalProfile",
+              "-d:backendThroughput",
+              "-d:backendBenchSamples=1",
+              "-d:useMetal4",
+              "--nimcache:/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/samples-1/metal-async/cache/gota-metal",
+              "--out:/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/samples-1/metal-async/bin/gota-metal",
+              "/Users/me/p/polyworld-metal-perf/games/gods_of_the_arena/gota.nim"
+            ],
+            "exitCode": 0,
+            "log": "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/samples-1/metal-async/logs/gota-metal-build.log",
+            "started": 1795641823.3330402,
+            "wallSeconds": 14.359986782073975
+          }
+        ],
+        "variant": "metal-async"
+      }
+    ],
+    "end": {
+      "commit": "d142fd4f14b5fcbd4b00b8715dde100215177b63",
+      "sourceHash": "8ce790b5d5a029c14f3f7fb2eb357a9f0156421755a7b2b57a6ed9eab8449791",
+      "dependencies": {
+        "bassy": {
+          "path": "/Users/me/p/bassy",
+          "commit": "a9effcaab13abc9dfe42d7658cf87ee4783b0e14",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "ca99dec62dd1cda32aeeada47e56062b56056b377f0277537b5c6dc31c9de686"
+        },
+        "curly": {
+          "path": "/Users/me/p/curly",
+          "commit": "bab28778114b5f5c82a65a28627f5cc264d2ad13",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "264d12ec9a359be19d078135fa72ce6269f925e756f5683ebf59b17823ea013c"
+        },
+        "libcurl": {
+          "path": "/Users/me/p/libcurl",
+          "commit": "eecbfc31e17ae2f09f0b6d2aaefcfb970c7d2be4",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "19c5047e15047b5879058d542bc8ae64d67649ed1508fb951ffd47544543ddf7"
+        },
+        "fixxy": {
+          "path": "/Users/me/p/fixxy",
+          "commit": "05e5446dffb70093056cebb0c57721a60deaf52a",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "c11d57e35190ef0af1097fd0909fb7b8db62dffd9af8d19efac86e0f643eb999"
+        },
+        "silky": {
+          "path": "/Users/me/p/polyworld-metal-perf-deps/silky",
+          "commit": "26537a29e8c83b522fdd54f17a5f421878b2a5f4",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "af0919d0642e26afa32e00ba6b95bf27ac01e929207386f9788f1d95300f6507"
+        },
+        "pixie": {
+          "path": "/Users/me/p/polyworld-backends-deps/pixie",
+          "commit": "0d89de14462790de0aaf451717a60ea3908bf98d",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "ccbda03c90d1ce079b20e4bf5738ddc9bddef68b176a6c0251487d2e2ffe4edc"
+        },
+        "vmath": {
+          "path": "/Users/me/p/vmath",
+          "commit": "bc260143102153b76328783e1c76c96e52c52a4b",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "14cda3f705c7c1e768ce599aaed0050672546f1aab35e20b7e7126d0c5f2fde1"
+        },
+        "chroma": {
+          "path": "/Users/me/p/chroma",
+          "commit": "08b0d65590221bb964544fd9badf29a146b9091a",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "b2f48c6ac3d78fd73182985d9362294e5578cd6dd32a0eb5dd1303d9a73775ef"
+        },
+        "zippy": {
+          "path": "/Users/me/p/zippy",
+          "commit": "c625c0cee926c30126493581b237aeb861d8849c",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "8568cc6b3e6a4b260cf54ff128051493f6c09784f9201c44607929690058ddbf"
+        },
+        "flatty": {
+          "path": "/Users/me/p/flatty",
+          "commit": "9c3f14cc287890b742196b4f0f74f0b9faab29cb",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "9db1ddd7f889144afe93bb6156d4dfde0ce3f342583045e2befca076e0d42ff4"
+        },
+        "nimsimd": {
+          "path": "/Users/me/p/nimsimd",
+          "commit": "dd27017fbfd1c6c00d37776a8f5d322bf6c5a83b",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "6c617fc636a171e3647949dcd29ce8ed0b42bbd33b953f25d5b1485fa1b91077"
+        },
+        "bumpy": {
+          "path": "/Users/me/p/bumpy",
+          "commit": "93583f6f8056a6259aaa96c89f4c143ba55bc6f0",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "a58f881e56502176198e7f543e43d83d4f33041a1c71d8e68f75d93dff4522ad"
+        },
+        "spacy": {
+          "path": "/Users/me/p/spacy",
+          "commit": "fe53651c7740bda18cd657bdadbb8d98f7d37d0e",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "098686a1660d9aceb5c25b960db348007ab13bee6765f568c61220d717c5ad05"
+        },
+        "pathy": {
+          "path": "/Users/me/p/pathy",
+          "commit": "d8cbb2af4876842069ab54530fad114692f873f4",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "a90d7ada43916df80f139aa549f3fa1e735c08effcb977c3d18528ae84987258"
+        },
+        "crunchy": {
+          "path": "/Users/me/p/crunchy",
+          "commit": "04ec91b0d6ced30447e66468b7e8173e07c422b9",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "deb6ec990707a56e83dd950222898308662d932df55a64c4d954a90990e04672"
+        },
+        "shady": {
+          "path": "/Users/me/p/polyworld-backends-deps/shady",
+          "commit": "62603f0922cf16ba1ee2463a80e317d7216773de",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "4779eb72dac9b310a76b1c6c98359d2dc6e732eb431101ac9f41758f41c990a7"
+        },
+        "windy": {
+          "path": "/Users/me/p/polyworld-backends-deps/windy",
+          "commit": "fcaba3a3989cf1e899d98341edaf2e803313084c",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "dab3f201d81eea36771df00db9fd2f2772e442ce242fa0857807d780f4abdcbd"
+        },
+        "slappy": {
+          "path": "/Users/me/p/slappy",
+          "commit": "c7c81acc468af632fcc8155c92dec48676c098ad",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "32760b0237eff1012fdf9300c1f64c1ed755bac7cb39be7edf59a15e6e1d38b4"
+        },
+        "openal": {
+          "path": "/Users/me/p/openal",
+          "commit": "1882b562f3d550959794f8b09a1d7538404f300c",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "6fea5ad639ed869d8f2243e7e6d8c9cbbceb3199cca587c522f6283421e3d405"
+        },
+        "supersnappy": {
+          "path": "/Users/me/p/supersnappy",
+          "commit": "81bf6974ebb928fbd5254c6a5919ec6b82896b79",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "7709a80f66bc596d4e339c31e056af8a0dba9579a21c693c54d44a305f18d6b0"
+        },
+        "opengl": {
+          "path": "/Users/me/p/opengl",
+          "commit": "8e2e098f82dc5eefd874488c37b5830233cd18f4",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "1fa1c01cdea3300b45b1d53a75b605db787a849906a93c3d56c4258ab8f1104b"
+        },
+        "urlly": {
+          "path": "/Users/me/p/urlly",
+          "commit": "99784779f05649df25fd9c33003d8ef6de027345",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "cc70724d0205ac3970cc6f8e1528e9397c18ea670f0d5abef344e2e270f653cf"
+        },
+        "ws": {
+          "path": "/Users/me/p/ws",
+          "commit": "c9c0c7b51e2e83cc9305a895a0b144a297b4bea8",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "717bcc35e51dcbb7b7f1b968a6b195afadf2e2054808235c5af93a13880195bf"
+        },
+        "dx12": {
+          "path": "/Users/me/p/dx12",
+          "commit": "65049f4e2ec1acbbf1987bfa79817d472650c15e",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "64693586fee80adf471555404f549e9ab15e382549cfbcf9da3617a9199efef9"
+        },
+        "vk14": {
+          "path": "/Users/me/p/vk14",
+          "commit": "183cf440d6460d97c6b35d6346079d9982f8cd57",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "53687644e57473d792491fdcc9e515d6031df2237f7bd81921d84910165929b0"
+        },
+        "metal4": {
+          "path": "/Users/me/p/metal4",
+          "commit": "eaec6cef21c446d512bbf18e6fa949eeae47a583",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "0448dfdbdfc3ae0df711aeb0eb47a08cfcec43fded3d0b4415373cfa2099cdfd"
+        },
+        "jsony": {
+          "path": "/Users/me/p/jsony",
+          "commit": "ce1ea84458c721947bd8e86ec065eeefab2656f1",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "8c2ad754baf95e848ac70f2f6d945338968f57d042933675d00c8192c635684f"
+        },
+        "fluffy": {
+          "path": "/Users/me/p/fluffy",
+          "commit": "85e37b8e544ff53301fe3f84a4a499b1720f88cd",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "257b6c5f18450596afdc4d16b79bc5df646c9485e36161dbff65f3baf5aa72a9"
+        },
+        "gltf": {
+          "path": "/Users/me/p/gltf",
+          "commit": "0673a92c515966852c91f9f987bb899d0f6794e9",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "b08e79b5d191d0b11be707f01ba563dbf9fdcabee14413bc28f195310f6602ec"
+        },
+        "webby": {
+          "path": "/Users/me/p/webby",
+          "commit": "fe515be4ab5d02695289f88fca0d27f703a05599",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "18e70d318327913c5920e6164c490f407cf408bdc8f45da77fc1c6e197482161"
+        },
+        "noisy": {
+          "path": "/Users/me/p/polyworld-backends-deps/noisy",
+          "commit": "9625ee0a9dbdae44c427df95a4f8de006c061150",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "2f6f612d2a5893e256b355a303c04d9f5d3f046a57caa8c46f7d854a60c6b957"
+        },
+        "benchy": {
+          "path": "/Users/me/p/benchy",
+          "commit": "6425417b578dc54008285aad020625b4b4f61f7b",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "51f938ea79594c2290592a84ccd1578a9187a0b1bab0a72a87efabaadcc86c4b"
+        },
+        "mummy": {
+          "path": "/Users/me/p/mummy",
+          "commit": "649146cf391bd8eeff1796f6fc62d54a13c1d635",
+          "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sourceSha256": "276ab9431e9145d72e47b6d6a4f444a52bfb37055884d2a4d73219d49029d624"
+        }
+      }
+    },
+    "binaries": {
+      "opengl": {
+        "path": "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/samples-1/opengl/bin/gota-opengl",
+        "sha256": "6b44c19d0236ae3185415c04a145bae0b99bd7230ad7475ed089e57c209d28b9",
+        "bytes": 6685240
+      },
+      "metal-sync": {
+        "path": "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/samples-1/metal-sync/bin/gota-metal",
+        "sha256": "38d276cb53daee7cf72344b7ed195fcd79ac338c20aa33cecf1020b6256432f0",
+        "bytes": 6814040
+      },
+      "metal-async": {
+        "path": "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/samples-1/metal-async/bin/gota-metal",
+        "sha256": "a6ff4a9f6034f784788fb9cb6111bd01b4d3f88175cf96803d93bf591c51ade2",
+        "bytes": 6814152
+      }
+    },
+    "passed": true
+  },
+  "method": {
+    "mode": "throughput",
+    "samples": 1,
+    "warmup": 600,
+    "frames": 1800,
+    "trials": 3,
+    "width": 1280,
+    "height": 800,
+    "seed": 42,
+    "bots": 10,
+    "fixedStepSeconds": 0.016666666666666666,
+    "timedConcurrency": 1,
+    "preferences": "Benchmark build defaults; stored preferences ignored",
+    "metric": "Completed offscreen frames / wall time including final drain",
+    "excludes": [
+      "warmup",
+      "presentation",
+      "vsync"
+    ],
+    "order": "Rotated treatment order each trial",
+    "removedEnvironmentKeys": [],
+    "profileScope": "Engine counters; Silky internal passes/allocations excluded",
+    "gpuMsMeaning": "Sum of completed command-buffer GPU timestamp spans",
+    "cpuMsMeaning": "Pre-submit elapsed time including frame-begin queue backpressure",
+    "submitMsMeaning": "Backend submission elapsed time including synchronous-control completion waits"
+  },
+  "cases": [
+    {
+      "variant": "opengl",
+      "trial": 1,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/final-1x/raw/opengl-trial1.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/samples-1/opengl/bin/gota-opengl",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/gods_of_the_arena/players/base.bas:10"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/final-1x/logs/opengl-trial1.log",
+        "started": 1795642072.48823,
+        "wallSeconds": 54.21912097930908
+      },
+      "passed": true
+    },
+    {
+      "variant": "metal-sync",
+      "trial": 1,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/final-1x/raw/metal-sync-trial1.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/samples-1/metal-sync/bin/gota-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/gods_of_the_arena/players/base.bas:10"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/final-1x/logs/metal-sync-trial1.log",
+        "started": 1795642126.713723,
+        "wallSeconds": 72.5358190536499
+      },
+      "passed": true
+    },
+    {
+      "variant": "metal-async",
+      "trial": 1,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/final-1x/raw/metal-async-trial1.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/samples-1/metal-async/bin/gota-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/gods_of_the_arena/players/base.bas:10"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/final-1x/logs/metal-async-trial1.log",
+        "started": 1795642199.256275,
+        "wallSeconds": 47.757089138031006
+      },
+      "passed": true
+    },
+    {
+      "variant": "metal-sync",
+      "trial": 2,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/final-1x/raw/metal-sync-trial2.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/samples-1/metal-sync/bin/gota-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/gods_of_the_arena/players/base.bas:10"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/final-1x/logs/metal-sync-trial2.log",
+        "started": 1795642247.019201,
+        "wallSeconds": 93.48689985275269
+      },
+      "passed": true
+    },
+    {
+      "variant": "metal-async",
+      "trial": 2,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/final-1x/raw/metal-async-trial2.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/samples-1/metal-async/bin/gota-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/gods_of_the_arena/players/base.bas:10"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/final-1x/logs/metal-async-trial2.log",
+        "started": 1795642340.5196428,
+        "wallSeconds": 51.33666729927063
+      },
+      "passed": true
+    },
+    {
+      "variant": "opengl",
+      "trial": 2,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/final-1x/raw/opengl-trial2.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/samples-1/opengl/bin/gota-opengl",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/gods_of_the_arena/players/base.bas:10"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/final-1x/logs/opengl-trial2.log",
+        "started": 1795642391.879665,
+        "wallSeconds": 63.92144727706909
+      },
+      "passed": true
+    },
+    {
+      "variant": "metal-async",
+      "trial": 3,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/final-1x/raw/metal-async-trial3.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/samples-1/metal-async/bin/gota-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/gods_of_the_arena/players/base.bas:10"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/final-1x/logs/metal-async-trial3.log",
+        "started": 1795642455.9000142,
+        "wallSeconds": 61.539599895477295
+      },
+      "passed": true
+    },
+    {
+      "variant": "opengl",
+      "trial": 3,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/final-1x/raw/opengl-trial3.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/samples-1/opengl/bin/gota-opengl",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/gods_of_the_arena/players/base.bas:10"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/gota-throughput/final-1x/logs/opengl-trial3.log",
+        "started": 1795642517.525604,
+        "wallSeconds": 46.221739768981934
+      },
+      "passed": true
+    }
+  ],
+  "passed": false,
+  "interruptionReason": "Stopped during the ninth case after observing competing graphics tests, simulator activity and builds. Timing ranges overlap; this run does not establish a winner.",
+  "interrupted": true
+}

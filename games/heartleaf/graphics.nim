@@ -6,8 +6,8 @@
 
 import
   std/[math, os, strutils, times],
-  fixxy, opengl, pixie, vmath, windy, silky,
-  polyworld/[actioncam, assets, characters, chargen, chrome, clickmarks,
+  fixxy, pixie, vmath, windy, silky,
+  polyworld/[renderer, actioncam, assets, characters, chargen, chrome, clickmarks,
     common, gameuis, inputs, occlusions, pathing, player, profiles, quadterrain, rtscameras,
     shadows, shapes, tapes, terrainsurfaces, viewers],
   content,
@@ -565,7 +565,10 @@ proc runGraphics*() =
           run.world.tick < run.maximumTicks and not run.world.over:
         advanceGame()
   holdSplash(sk, window, splash)
+  var benchmarkFinished = false
   window.onFrame = proc() =
+    when defined(frameBench): beginBenchFrame(window)
+    beginBenchmarkFrame("heartleaf", window.size)
     profileBlock "frame":
       discard beginScreenshotFrame(screenshotTarget, window)
       let dt = frameDelta(lastFrameTime, Step)
@@ -662,10 +665,9 @@ proc runGraphics*() =
           scene.sunDepthPass = false
         discard beginScreenshotFrame(screenshotTarget, window)
         if captureLayer in {BuildingsLayer, VegetationLayer, PropsLayer}:
-          glClearColor(0, 0, 0, 0)
+          clearFrame(color(0, 0, 0, 0))
         else:
-          glClearColor(0.13, 0.19, 0.12, 1)
-        glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
+          clearFrame(color(0.13, 0.19, 0.12, 1))
         drawTerrain(viewProjection, showTiles,
           drawGround = captureLayer in {AllLayer, GroundLayer})
         if captureLayer == AllLayer:
@@ -694,14 +696,8 @@ proc runGraphics*() =
           worldShapes.draw(viewProjection)
       when not defined(sceneCapture):
         profileBlock "ui":
-          glDisable(GL_DEPTH_TEST)
-          glDisable(GL_CULL_FACE)
-          glDisable(GL_BLEND)
-          when not defined(emscripten):
-            glDisable(GL_MULTISAMPLE)
-          glActiveTexture(GL_TEXTURE0)
-          glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
-          sk.beginUi(window, window.size)
+          prepareUi(sk)
+          sk.beginGameUi(window, window.size)
 
           ## World overlays drawn in HUD space: occupant portraits float over
           ## each occupied house, and gesture icons over busy villagers.
@@ -760,13 +756,19 @@ proc runGraphics*() =
           )
           if speedClicked:
             snapFollowCamera()
-          sk.endUi()
+          sk.finishUi()
+      if endBenchmarkFrame(run.world.tick.int):
+        benchmarkFinished = true
+        when not defined(emscripten):
+          window.closeRequested = true
+        return
       if captureFrame(window, screenshotFrame, 30, "heartleaf.png"):
         when not defined(emscripten):
           window.closeRequested = true
       else:
         profileBlock "present":
           window.presentFrame(framePaceHz)
+          reportReplayFrame(run.world.tick, int32(run.hashCheck.mismatches))
     if noteProfileFrame():
       when not defined(emscripten):
         window.closeRequested = true
@@ -798,7 +800,7 @@ proc runGraphics*() =
         window.closeRequested = true
     else: discard
 
-  while not window.closeRequested:
+  while not window.closeRequested and not benchmarkFinished:
     pollEvents()
     waitForDisplay()
   saveRecording()

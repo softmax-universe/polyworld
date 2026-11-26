@@ -62,10 +62,10 @@ const
 
 proc assetName*(path: string): string =
   ## Returns a path relative to the source asset directory.
-  if path.startsWith(DataRoot & "/"):
-    path[DataRoot.len + 1 .. ^1]
-  else:
-    path
+  let name = path.replace('\\', '/')
+  let root = DataRoot.replace('\\', '/') & "/"
+  if name.startsWith(root): name[root.len .. ^1]
+  else: name
 
 proc fileAsset*(path: string): Asset =
   ## Declares one unmodified asset path.

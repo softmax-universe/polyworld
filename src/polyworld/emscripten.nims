@@ -13,7 +13,7 @@ proc setupEmscripten*(
   loadingLogo = "loading-logo.png",
   logoWidth = 320,
   logoHeight = 240,
-  minimumWebglVersion = 1,
+  minimumWebglVersion = 2,
   linkOptions = ""
 ) =
   ## Configures the wasm backend and writes the bundle next to the game.
@@ -25,6 +25,8 @@ proc setupEmscripten*(
       dataDir = getEnv("POLYWORLD_ART", repoDir / ".." / "polyworld_art")
       outputDir =
         if output.len > 0: absolutePath(output)
+        elif getEnv("POLYWORLD_WEB_DIR").len > 0:
+          absolutePath(getEnv("POLYWORLD_WEB_DIR"))
         else: gameDir / "emscripten"
       shellTemplate =
         if defined(replayViewer):
@@ -48,7 +50,7 @@ proc setupEmscripten*(
       let
         variant = if defined(webPng): "png" else: "ktx2"
         cache = repoDir / "tmp" / "webassets" / (game & "-" & variant)
-        packer = cache / ("pack_assets" & ExeExt)
+        packer = cache / "pack_assets".addFileExt(ExeExt)
         options = if defined(webPng): " -d:webPng" else: ""
       if not dirExists(cache):
         mkDir(cache)
@@ -60,16 +62,17 @@ proc setupEmscripten*(
         " " & quoteShell(cache)
       if dirExists(cache / "public"):
         cpDir(cache / "public", outputDir)
-      let
-        logoFile = outputDir / loadingLogo
-        logoData = readFile(cache / loadingLogo)
-      if not fileExists(logoFile) or readFile(logoFile) != logoData:
-        writeFile(logoFile, logoData)
-      logo = "<img id=\"loading-logo\" alt=\"Game logo\" " &
-        "width=\"" & $logoWidth & "\" height=\"" & $logoHeight &
-        "\" src=\"" & loadingLogo & "?v=" &
-        $hash(logoData) & "\" " &
-        "fetchpriority=\"high\">"
+      if loadingLogo.len > 0:
+        let
+          logoFile = outputDir / loadingLogo
+          logoData = readFile(cache / loadingLogo)
+        if not fileExists(logoFile) or readFile(logoFile) != logoData:
+          writeFile(logoFile, logoData)
+        logo = "<img id=\"loading-logo\" alt=\"Game logo\" " &
+          "width=\"" & $logoWidth & "\" height=\"" & $logoHeight &
+          "\" src=\"" & loadingLogo & "?v=" &
+          $hash(logoData) & "\" " &
+          "fetchpriority=\"high\">"
       preload = "--preload-file " & quoteShell(cache / "stage" & "@/polyworld_art")
       for asset in preloadMounts:
         preload.add " --preload-file " & quoteShell(
@@ -97,16 +100,13 @@ proc setupEmscripten*(
     --os:linux
     --cpu:wasm32
     --cc:clang
-    when defined(windows):
-      --clang.exe:emcc.bat
-      --clang.linkerexe:emcc.bat
-      --clang.cpp.exe:emcc.bat
-      --clang.cpp.linkerexe:emcc.bat
-    else:
-      --clang.exe:emcc
-      --clang.linkerexe:emcc
-      --clang.cpp.exe:emcc
-      --clang.cpp.linkerexe:emcc
+    let emcc =
+      when defined(windows):
+        if findExe("emcc.exe").len > 0: "emcc.exe" else: "emcc.bat"
+      else:
+        "emcc"
+    for option in ["clang.exe", "clang.linkerexe", "clang.cpp.exe", "clang.cpp.linkerexe"]:
+      switch(option, emcc)
     --gc:arc
     --exceptions:goto
     --define:noSignalHandler

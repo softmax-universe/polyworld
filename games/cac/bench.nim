@@ -14,11 +14,11 @@ type
     CardsDraw   ## Submitting them.
     Ui          ## The HUD, from beginUi to endUi.
     CpuFrame    ## The whole frame on the CPU, before the swap.
-    GpuWait     ## glFinish at the end of the frame (CAC_BENCH_GPU=1).
+    GpuWait     ## GPU completion at the end of the frame (CAC_BENCH_GPU=1).
 
 when defined(cacBench):
   import std/[algorithm, monotimes, os, strformat, strutils, times]
-  import opengl
+  import polyworld/renderer
 
   let processStart = getMonoTime()
 
@@ -74,7 +74,7 @@ when defined(cacBench):
     current[CpuFrame] = millis(frameStart)
     if timeGpu:
       let wait = getMonoTime()
-      glFinish()
+      finishGpu()
       current[GpuWait] = millis(wait)
     inc frames
     if frames > warmup and frames <= warmup + count:

@@ -1,9 +1,44 @@
 ## Native hidden-GL regression for LvD's byte-per-cell fog upload.
 ## Run from repository root; requires desktop OpenGL, but no terrain art.
-include polyworld/quadterrain
+include polyworld/backends/passes/quadterrain
 import windy
 import ../[maps, sim]
 import polyworld/visions
+
+proc terrainProbeVertex(
+    gl_Position: var Vec4,
+    worldPos: var Vec3,
+    vertEdgeMask: var float32,
+    vertNormal: var Vec3,
+    vertColor: var Vec3,
+    vertMaterials: var Vec4,
+    vertWeights: var Vec4,
+    vertSplatRange: var Vec3,
+    shadowPos: var Vec3,
+    fragmentColor: var Vec3,
+    fragmentNormal: var Vec3,
+    fragmentPosition: var Vec3,
+    probePosition: Uniform[Vec2]
+) =
+  ## Supplies constant terrain and prop inputs at the requested world cell.
+  let
+    corner = vec2(
+      float32(gl_VertexID mod 2) * 2.0'f,
+      float32((gl_VertexID div 2) mod 2) * 2.0'f
+    )
+    point = corner * 2.0'f - 1.0'f
+  gl_Position = vec4(point.x, point.y, 0.0'f, 1.0'f)
+  worldPos = vec3(probePosition.x, 0.0'f, probePosition.y)
+  vertEdgeMask = 0.0'f
+  vertNormal = vec3(0, 1, 0)
+  vertColor = vec3(1)
+  vertMaterials = vec4(0)
+  vertWeights = vec4(1, 0, 0, 0)
+  vertSplatRange = vec3(-1)
+  shadowPos = worldPos
+  fragmentColor = vec3(45, 180, 65) / 255.0'f
+  fragmentNormal = vertNormal
+  fragmentPosition = worldPos
 
 proc worldVisibility(world: World, mode: int32): seq[uint8] =
   ## Match updateTerrainVision's encoding, including its presentation blur.
@@ -18,7 +53,7 @@ proc worldVisibility(world: World, mode: int32): seq[uint8] =
     result = blurVisibility(result, world.map.side, world.map.side)
 
 proc readVisibility(): seq[uint8] =
-  glBindTexture(GL_TEXTURE_2D, visibilityTexture)
+  glBindTexture(GL_TEXTURE_2D, visibilityTexture.handle)
   glPixelStorei(GL_PACK_ALIGNMENT, 1)
   result.setLen(visibilitySize * visibilitySize)
   glGetTexImage(GL_TEXTURE_2D, 0, GL_RED, GL_UNSIGNED_BYTE, result[0].addr)
@@ -31,11 +66,9 @@ block visibilityUpload:
   window.makeContextCurrent()
   loadExtensions()
   # Allocate the same R8 target without requiring optional terrain art.
-  glGenTextures(1, visibilityTexture.addr)
-  glBindTexture(GL_TEXTURE_2D, visibilityTexture)
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR.GLint)
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR.GLint)
-  visibilitySize = 0
+  visibilityTexture = createR8Texture(1, 1, [0'u8])
+  visibilitySize = 1
+  defer: visibilityTexture.destroy()
 
   # LvD's ordinary 90-wide map has tightly packed rows, not GL's default
   # 92-byte aligned rows. Asymmetric data detects drift, flips and scaling.
@@ -46,7 +79,7 @@ block visibilityUpload:
       expected[y * Side + x] = uint8((x * 7 + y * 19) mod 256)
   glPixelStorei(GL_UNPACK_ALIGNMENT, 4)
   uploadTerrainVisibility(expected, Side)
-  glBindTexture(GL_TEXTURE_2D, visibilityTexture)
+  glBindTexture(GL_TEXTURE_2D, visibilityTexture.handle)
   glPixelStorei(GL_PACK_ALIGNMENT, 1)
   var actual = newSeq[uint8](expected.len)
   glGetTexImage(GL_TEXTURE_2D, 0, GL_RED, GL_UNSIGNED_BYTE, actual[0].addr)
@@ -82,33 +115,10 @@ block visibilityUpload:
 
   # Render the actual terrain shader and its world-space UVs, without art.
   # Constant varyings keep lighting/materials identical between fog states.
-  let vertexSource = """#version 410
-out vec3 worldPos;
-out float vertEdgeMask;
-out vec3 vertNormal;
-out vec3 vertColor;
-out vec4 vertMaterials;
-out vec4 vertWeights;
-out vec3 vertSplatRange;
-out vec3 shadowPos;
-out vec3 fragmentColor;
-out vec3 fragmentNormal;
-out vec3 fragmentPosition;
-uniform vec2 probePosition;
-void main() {
-  vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
-  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
-  worldPos = vec3(probePosition.x, 0.0, probePosition.y);
-  vertEdgeMask = 0.0; vertNormal = vec3(0,1,0);
-  vertColor = vec3(1); vertMaterials = vec4(0);
-  vertWeights = vec4(1,0,0,0); vertSplatRange = vec3(-1);
-  shadowPos = worldPos;
-  fragmentColor = vec3(45,180,65) / 255.0;
-  fragmentNormal = vertNormal; fragmentPosition = worldPos;
-}
-"""
-  var program = compileProgram(vertexSource,
-    toShader(terrainFrag, OpenGlShaderTarget, shaderFragment))
+  let vertexSource = nativeStage(terrainProbeVertex, shaderVertex)
+  let terrainProbe = newProgram(vertexSource, nativeStage(terrainFrag, shaderFragment))
+  defer: terrainProbe.destroy()
+  var program = terrainProbe.handle
   glUseProgram(program)
   for name in ["envHighlight", "envShadow"]:
     glUniform3f(glGetUniformLocation(program, name.cstring), 1, 1, 1)
@@ -133,8 +143,9 @@ void main() {
   glActiveTexture(GL_TEXTURE0)
   let green = newImage(1, 1)
   green.fill(rgbx(45, 180, 65, 255))
-  let material = buildTextureArray(@[@[green]], GL_CLAMP_TO_EDGE.GLint)
-  glBindTexture(GL_TEXTURE_2D_ARRAY, material)
+  let material = createTextureArray(@[@[green]], repeat = false)
+  glBindTexture(GL_TEXTURE_2D_ARRAY, material.handle)
+  defer: material.destroy()
   var vao: GLuint
   glGenVertexArrays(1, vao.addr)
   glBindVertexArray(vao)
@@ -155,7 +166,7 @@ void main() {
   proc sample(cells: seq[uint8], side, x, y: int): ColorRGBX =
     glActiveTexture(GL_TEXTURE1)
     uploadTerrainVisibility(cells, side)
-    glBindTexture(GL_TEXTURE_2D, visibilityTexture)
+    glBindTexture(GL_TEXTURE_2D, visibilityTexture.handle)
     glUniform1f(glGetUniformLocation(program, "visibilityOffset"), side.float32 / 2)
     glUniform1f(glGetUniformLocation(program, "visibilityScale"), 1'f32 / side.float32)
     glUniform2f(glGetUniformLocation(program, "probePosition"),
@@ -186,8 +197,9 @@ void main() {
     " unexplored=", unexplored
 
   # Building props use the same world-space mapping and fog values.
-  program = compileProgram(vertexSource,
-    toShader(propFrag, OpenGlShaderTarget, shaderFragment))
+  let propProbe = newProgram(vertexSource, nativeStage(propFrag, shaderFragment))
+  defer: propProbe.destroy()
+  program = propProbe.handle
   glUseProgram(program)
   for name in ["envHighlight", "envShadow"]:
     glUniform3f(glGetUniformLocation(program, name.cstring), 1, 1, 1)

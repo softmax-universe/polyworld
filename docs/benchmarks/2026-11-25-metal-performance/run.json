@@ -1,0 +1,1947 @@
+{
+  "generated": "2026-11-25T20:43:02.426214+00:00",
+  "passed": true,
+  "candidateHeadStart": "08bbfb170b9cd4b8110b0525b54a337d5d05c00c",
+  "candidateSourceHashStart": "aab0b89555b34e0e5353626d41d99ed93d67632aeaca3f7fb30642dc2f946e56",
+  "baselineCommit": "5a97de971b36751c6e459d70508e182161038553",
+  "baselineSourceHash": "f4240d2f0cfc1ad2a40e85d89caeb0cbfbe4916ae2af0e4b93b6384cf1c0370d",
+  "candidateBuildCommit": "08bbfb170b9cd4b8110b0525b54a337d5d05c00c",
+  "controlReference": "e65a5dee083679a10321d82e79a3fc08a70f1f7c",
+  "baselineSilkyRevision": "b56d00abb346d96e475cd30826f1d4f811f6fba4",
+  "candidateDependenciesStart": {
+    "silky": {
+      "commit": "f2754a1045a046a9e8366d7522c33cc091814958",
+      "status": "",
+      "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "metal4": {
+      "commit": "eaec6cef21c446d512bbf18e6fa949eeae47a583",
+      "status": "",
+      "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "shady": {
+      "commit": "62603f0922cf16ba1ee2463a80e317d7216773de",
+      "status": "",
+      "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "scriptSha256Start": "9c77d61513fa9fc7e9e28092348e649bc76c27e03e0363c480bd668d19bf1978",
+  "binariesStart": {
+    "gota/opengl-control": {
+      "path": "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/gota-opengl",
+      "sha256": "b73d5f9cc2fb51e36bc65b1bb1b560adad3334d5a8cc257cd5c28e3b53e8f2f7",
+      "bytes": 6661944
+    },
+    "gota/metal-before": {
+      "path": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/gota-metal",
+      "sha256": "2950d9b3c08265c257c7f0c9c77a073ffb4cfc6f953c82b3205ec78e0d45f2bb",
+      "bytes": 6804104
+    },
+    "gota/metal-after": {
+      "path": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/gota-metal",
+      "sha256": "c38ac075388f1b2b237833ba373ada274c20c0e8ee3bdf59f286903ccb579a11",
+      "bytes": 6807864
+    },
+    "lvd/opengl-control": {
+      "path": "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/lvd-opengl",
+      "sha256": "16088181d5f23e49fe9c8ccf5f3ed194cab11fa51373cfe582113967d72ec219",
+      "bytes": 6096616
+    },
+    "lvd/metal-before": {
+      "path": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/lvd-metal",
+      "sha256": "51abed1d393c6602fc9ea27c487b46e64e819f6999612c44e73f6116b69ae546",
+      "bytes": 6224808
+    },
+    "lvd/metal-after": {
+      "path": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/lvd-metal",
+      "sha256": "619b3141a3cb85e7cc713b7c548e72739388ac64daae42793f66b077834d0977",
+      "bytes": 6228600
+    },
+    "cta/opengl-control": {
+      "path": "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/cta-opengl",
+      "sha256": "ee906f22c1b397c2bb9f33eae46c7395d62b11300aee6cc2c5dbac0159a237a9",
+      "bytes": 5161944
+    },
+    "cta/metal-before": {
+      "path": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/cta-metal",
+      "sha256": "3bc79f4246d8d55a9693e018e9ae02f08dd5cfed086f25fbffcd811533043ec7",
+      "bytes": 5284696
+    },
+    "cta/metal-after": {
+      "path": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/cta-metal",
+      "sha256": "02f8a41376a10758ff4d49d61180a23ba50c23f65bb5eb78d239c570e78ebab5",
+      "bytes": 5287864
+    },
+    "cac/opengl-control": {
+      "path": "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/cac-opengl",
+      "sha256": "2f1817d11c60243505eee56c5c314f879ecb5530a42eabd53a98bd6ec60ec03a",
+      "bytes": 5418920
+    },
+    "cac/metal-before": {
+      "path": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/cac-metal",
+      "sha256": "d119f79b61f53474c73f29d8910a43a84bae3c86ebd15e715245ef641f833f7a",
+      "bytes": 5487240
+    },
+    "cac/metal-after": {
+      "path": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/cac-metal",
+      "sha256": "0c2ec09b8b36a47e709f7f8a838a70259dbf34438e1f1dd3d61c924cc4ab100e",
+      "bytes": 5490984
+    },
+    "heartleaf/opengl-control": {
+      "path": "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/heartleaf-opengl",
+      "sha256": "20d8b5b723aa2809e737a4bb3d4e884783d5826696b795dfbec79dc0d4489344",
+      "bytes": 4259232
+    },
+    "heartleaf/metal-before": {
+      "path": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/heartleaf-metal",
+      "sha256": "6e0e193d3cf7f86318554428abec71135f2058c000207d5447229d0c49f4b449",
+      "bytes": 4370720
+    },
+    "heartleaf/metal-after": {
+      "path": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/heartleaf-metal",
+      "sha256": "816e376ec233922ccfefd9cc35ed5812e532a2ab4d06bbd22bd9d1102b9e0d6f",
+      "bytes": 4373760
+    },
+    "crewrift/opengl-control": {
+      "path": "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/crewrift-opengl",
+      "sha256": "3c8cc395e93fc0abc3849ed4ca2cda24efbdda201608f9ddcb2087ca6d92811b",
+      "bytes": 4199392
+    },
+    "crewrift/metal-before": {
+      "path": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/crewrift-metal",
+      "sha256": "25200ca0c7cfd711c36330c4f27fb18fa7e7c724260b77cc092aea77934ac0db",
+      "bytes": 4309984
+    },
+    "crewrift/metal-after": {
+      "path": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/crewrift-metal",
+      "sha256": "48898308bb394dc8b1688a7cbc59d002df6daa3da6cdc28072fb9a6de430e97a",
+      "bytes": 4312976
+    },
+    "monster/opengl-control": {
+      "path": "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/monster-opengl",
+      "sha256": "db65c42a24955e76bf34185c9157efaef2aae307f945e82208f3dd5701afba69",
+      "bytes": 4427904
+    },
+    "monster/metal-before": {
+      "path": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/monster-metal",
+      "sha256": "47136caa115ea4778e0d99632d2e541c6dc58ab117d1d91c7a4b7ff5ef31b987",
+      "bytes": 4540400
+    },
+    "monster/metal-after": {
+      "path": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/monster-metal",
+      "sha256": "5921ba6fcd3133f8f9a1f4915f9c64e20652c069beacbeb3174665285fb5589d",
+      "bytes": 4543248
+    }
+  },
+  "removedEnvironmentNames": [],
+  "method": {
+    "width": 1280,
+    "height": 800,
+    "samples": 1,
+    "seed": 42,
+    "fixedStepSeconds": 0.016666666666666666,
+    "warmupFrames": 120,
+    "measuredFrames": 600,
+    "trials": 3,
+    "timedConcurrency": 1,
+    "games": [
+      "gota",
+      "lvd",
+      "cta",
+      "cac",
+      "heartleaf",
+      "crewrift",
+      "monster"
+    ],
+    "variants": [
+      "opengl-control",
+      "metal-before",
+      "metal-after"
+    ],
+    "metric": "Simulation and rendering through one-pixel readback",
+    "order": "Seeded game shuffle and balanced variant rotation",
+    "gpuValidation": false,
+    "excludes": [
+      "startup",
+      "presentation",
+      "frame pacing"
+    ]
+  },
+  "cases": [
+    {
+      "game": "crewrift",
+      "variant": "metal-after",
+      "backend": "metal",
+      "trial": 1,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/crewrift-metal-after-trial1.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/crewrift-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/crewrift-metal-after-trial1.log",
+        "started": 1795639397.433782,
+        "wallSeconds": 7.279788017272949
+      },
+      "startTick": 168,
+      "endTick": 408
+    },
+    {
+      "game": "crewrift",
+      "variant": "opengl-control",
+      "backend": "opengl",
+      "trial": 1,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/crewrift-opengl-control-trial1.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/crewrift-opengl",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/crewrift-opengl-control-trial1.log",
+        "started": 1795639404.7173178,
+        "wallSeconds": 5.334333181381226
+      },
+      "startTick": 168,
+      "endTick": 408
+    },
+    {
+      "game": "crewrift",
+      "variant": "metal-before",
+      "backend": "metal",
+      "trial": 1,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/crewrift-metal-before-trial1.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/crewrift-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/crewrift-metal-before-trial1.log",
+        "started": 1795639410.053526,
+        "wallSeconds": 10.60211992263794
+      },
+      "startTick": 168,
+      "endTick": 408
+    },
+    {
+      "game": "monster",
+      "variant": "opengl-control",
+      "backend": "opengl",
+      "trial": 1,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/monster-opengl-control-trial1.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/monster-opengl",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--offline",
+          "--no-voice",
+          "--save-dir",
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/saves/monster-opengl-control-trial1"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/monster-opengl-control-trial1.log",
+        "started": 1795639420.658955,
+        "wallSeconds": 6.742733001708984
+      },
+      "startTick": 60,
+      "endTick": 360
+    },
+    {
+      "game": "monster",
+      "variant": "metal-before",
+      "backend": "metal",
+      "trial": 1,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/monster-metal-before-trial1.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/monster-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--offline",
+          "--no-voice",
+          "--save-dir",
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/saves/monster-metal-before-trial1"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/monster-metal-before-trial1.log",
+        "started": 1795639427.4036748,
+        "wallSeconds": 13.997098207473755
+      },
+      "startTick": 60,
+      "endTick": 360
+    },
+    {
+      "game": "monster",
+      "variant": "metal-after",
+      "backend": "metal",
+      "trial": 1,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/monster-metal-after-trial1.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/monster-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--offline",
+          "--no-voice",
+          "--save-dir",
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/saves/monster-metal-after-trial1"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/monster-metal-after-trial1.log",
+        "started": 1795639441.40406,
+        "wallSeconds": 14.000382900238037
+      },
+      "startTick": 60,
+      "endTick": 360
+    },
+    {
+      "game": "heartleaf",
+      "variant": "metal-before",
+      "backend": "metal",
+      "trial": 1,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/heartleaf-metal-before-trial1.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/heartleaf-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/heartleaf/players/base.bas:9"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/heartleaf-metal-before-trial1.log",
+        "started": 1795639455.408322,
+        "wallSeconds": 13.741142988204956
+      },
+      "startTick": 48,
+      "endTick": 288
+    },
+    {
+      "game": "heartleaf",
+      "variant": "metal-after",
+      "backend": "metal",
+      "trial": 1,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/heartleaf-metal-after-trial1.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/heartleaf-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/heartleaf/players/base.bas:9"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/heartleaf-metal-after-trial1.log",
+        "started": 1795639469.15295,
+        "wallSeconds": 7.640984058380127
+      },
+      "startTick": 48,
+      "endTick": 288
+    },
+    {
+      "game": "heartleaf",
+      "variant": "opengl-control",
+      "backend": "opengl",
+      "trial": 1,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/heartleaf-opengl-control-trial1.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/heartleaf-opengl",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/heartleaf/players/base.bas:9"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/heartleaf-opengl-control-trial1.log",
+        "started": 1795639476.797583,
+        "wallSeconds": 6.957848787307739
+      },
+      "startTick": 48,
+      "endTick": 288
+    },
+    {
+      "game": "cac",
+      "variant": "opengl-control",
+      "backend": "opengl",
+      "trial": 1,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/cac-opengl-control-trial1.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/cac-opengl",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--direct",
+          "--players",
+          "2"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/cac-opengl-control-trial1.log",
+        "started": 1795639483.757316,
+        "wallSeconds": 7.030675888061523
+      },
+      "startTick": 1,
+      "endTick": 4
+    },
+    {
+      "game": "cac",
+      "variant": "metal-before",
+      "backend": "metal",
+      "trial": 1,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/cac-metal-before-trial1.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/cac-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--direct",
+          "--players",
+          "2"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/cac-metal-before-trial1.log",
+        "started": 1795639490.7900128,
+        "wallSeconds": 11.317800283432007
+      },
+      "startTick": 1,
+      "endTick": 4
+    },
+    {
+      "game": "cac",
+      "variant": "metal-after",
+      "backend": "metal",
+      "trial": 1,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/cac-metal-after-trial1.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/cac-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--direct",
+          "--players",
+          "2"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/cac-metal-after-trial1.log",
+        "started": 1795639502.111264,
+        "wallSeconds": 11.907406091690063
+      },
+      "startTick": 1,
+      "endTick": 4
+    },
+    {
+      "game": "lvd",
+      "variant": "metal-before",
+      "backend": "metal",
+      "trial": 1,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/lvd-metal-before-trial1.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/lvd-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/light_vs_dark/players/base.bas:2"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/lvd-metal-before-trial1.log",
+        "started": 1795639514.026329,
+        "wallSeconds": 7.0052649974823
+      },
+      "startTick": 48,
+      "endTick": 288
+    },
+    {
+      "game": "lvd",
+      "variant": "metal-after",
+      "backend": "metal",
+      "trial": 1,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/lvd-metal-after-trial1.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/lvd-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/light_vs_dark/players/base.bas:2"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/lvd-metal-after-trial1.log",
+        "started": 1795639521.0353322,
+        "wallSeconds": 5.533994913101196
+      },
+      "startTick": 48,
+      "endTick": 288
+    },
+    {
+      "game": "lvd",
+      "variant": "opengl-control",
+      "backend": "opengl",
+      "trial": 1,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/lvd-opengl-control-trial1.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/lvd-opengl",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/light_vs_dark/players/base.bas:2"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/lvd-opengl-control-trial1.log",
+        "started": 1795639526.5737789,
+        "wallSeconds": 5.366329193115234
+      },
+      "startTick": 48,
+      "endTick": 288
+    },
+    {
+      "game": "cta",
+      "variant": "metal-after",
+      "backend": "metal",
+      "trial": 1,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/cta-metal-after-trial1.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/cta-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/call_to_adventure/players/base.bas:4"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/cta-metal-after-trial1.log",
+        "started": 1795639531.942367,
+        "wallSeconds": 4.905515909194946
+      },
+      "startTick": 48,
+      "endTick": 288
+    },
+    {
+      "game": "cta",
+      "variant": "opengl-control",
+      "backend": "opengl",
+      "trial": 1,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/cta-opengl-control-trial1.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/cta-opengl",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/call_to_adventure/players/base.bas:4"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/cta-opengl-control-trial1.log",
+        "started": 1795639536.8513842,
+        "wallSeconds": 4.00897479057312
+      },
+      "startTick": 48,
+      "endTick": 288
+    },
+    {
+      "game": "cta",
+      "variant": "metal-before",
+      "backend": "metal",
+      "trial": 1,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/cta-metal-before-trial1.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/cta-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/call_to_adventure/players/base.bas:4"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/cta-metal-before-trial1.log",
+        "started": 1795639540.8622022,
+        "wallSeconds": 6.082821846008301
+      },
+      "startTick": 48,
+      "endTick": 288
+    },
+    {
+      "game": "gota",
+      "variant": "opengl-control",
+      "backend": "opengl",
+      "trial": 1,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/gota-opengl-control-trial1.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/gota-opengl",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/gods_of_the_arena/players/base.bas:10"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/gota-opengl-control-trial1.log",
+        "started": 1795639546.948529,
+        "wallSeconds": 9.740025997161865
+      },
+      "startTick": 2928,
+      "endTick": 3168
+    },
+    {
+      "game": "gota",
+      "variant": "metal-before",
+      "backend": "metal",
+      "trial": 1,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/gota-metal-before-trial1.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/gota-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/gods_of_the_arena/players/base.bas:10"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/gota-metal-before-trial1.log",
+        "started": 1795639556.691623,
+        "wallSeconds": 12.052656173706055
+      },
+      "startTick": 2928,
+      "endTick": 3168
+    },
+    {
+      "game": "gota",
+      "variant": "metal-after",
+      "backend": "metal",
+      "trial": 1,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/gota-metal-after-trial1.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/gota-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/gods_of_the_arena/players/base.bas:10"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/gota-metal-after-trial1.log",
+        "started": 1795639568.747906,
+        "wallSeconds": 10.503127098083496
+      },
+      "startTick": 2928,
+      "endTick": 3168
+    },
+    {
+      "game": "cta",
+      "variant": "opengl-control",
+      "backend": "opengl",
+      "trial": 2,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/cta-opengl-control-trial2.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/cta-opengl",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/call_to_adventure/players/base.bas:4"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/cta-opengl-control-trial2.log",
+        "started": 1795639579.254956,
+        "wallSeconds": 3.974608898162842
+      },
+      "startTick": 48,
+      "endTick": 288
+    },
+    {
+      "game": "cta",
+      "variant": "metal-before",
+      "backend": "metal",
+      "trial": 2,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/cta-metal-before-trial2.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/cta-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/call_to_adventure/players/base.bas:4"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/cta-metal-before-trial2.log",
+        "started": 1795639583.2315788,
+        "wallSeconds": 4.47976016998291
+      },
+      "startTick": 48,
+      "endTick": 288
+    },
+    {
+      "game": "cta",
+      "variant": "metal-after",
+      "backend": "metal",
+      "trial": 2,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/cta-metal-after-trial2.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/cta-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/call_to_adventure/players/base.bas:4"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/cta-metal-after-trial2.log",
+        "started": 1795639587.714602,
+        "wallSeconds": 4.142369031906128
+      },
+      "startTick": 48,
+      "endTick": 288
+    },
+    {
+      "game": "lvd",
+      "variant": "metal-after",
+      "backend": "metal",
+      "trial": 2,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/lvd-metal-after-trial2.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/lvd-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/light_vs_dark/players/base.bas:2"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/lvd-metal-after-trial2.log",
+        "started": 1795639591.8601239,
+        "wallSeconds": 5.482509136199951
+      },
+      "startTick": 48,
+      "endTick": 288
+    },
+    {
+      "game": "lvd",
+      "variant": "opengl-control",
+      "backend": "opengl",
+      "trial": 2,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/lvd-opengl-control-trial2.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/lvd-opengl",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/light_vs_dark/players/base.bas:2"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/lvd-opengl-control-trial2.log",
+        "started": 1795639597.346209,
+        "wallSeconds": 5.229337930679321
+      },
+      "startTick": 48,
+      "endTick": 288
+    },
+    {
+      "game": "lvd",
+      "variant": "metal-before",
+      "backend": "metal",
+      "trial": 2,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/lvd-metal-before-trial2.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/lvd-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/light_vs_dark/players/base.bas:2"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/lvd-metal-before-trial2.log",
+        "started": 1795639602.577743,
+        "wallSeconds": 5.455902099609375
+      },
+      "startTick": 48,
+      "endTick": 288
+    },
+    {
+      "game": "monster",
+      "variant": "metal-before",
+      "backend": "metal",
+      "trial": 2,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/monster-metal-before-trial2.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/monster-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--offline",
+          "--no-voice",
+          "--save-dir",
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/saves/monster-metal-before-trial2"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/monster-metal-before-trial2.log",
+        "started": 1795639608.0375512,
+        "wallSeconds": 6.642782926559448
+      },
+      "startTick": 60,
+      "endTick": 360
+    },
+    {
+      "game": "monster",
+      "variant": "metal-after",
+      "backend": "metal",
+      "trial": 2,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/monster-metal-after-trial2.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/monster-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--offline",
+          "--no-voice",
+          "--save-dir",
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/saves/monster-metal-after-trial2"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/monster-metal-after-trial2.log",
+        "started": 1795639614.683705,
+        "wallSeconds": 6.616515874862671
+      },
+      "startTick": 60,
+      "endTick": 360
+    },
+    {
+      "game": "monster",
+      "variant": "opengl-control",
+      "backend": "opengl",
+      "trial": 2,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/monster-opengl-control-trial2.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/monster-opengl",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--offline",
+          "--no-voice",
+          "--save-dir",
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/saves/monster-opengl-control-trial2"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/monster-opengl-control-trial2.log",
+        "started": 1795639621.303669,
+        "wallSeconds": 6.620983123779297
+      },
+      "startTick": 60,
+      "endTick": 360
+    },
+    {
+      "game": "gota",
+      "variant": "metal-before",
+      "backend": "metal",
+      "trial": 2,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/gota-metal-before-trial2.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/gota-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/gods_of_the_arena/players/base.bas:10"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/gota-metal-before-trial2.log",
+        "started": 1795639627.926701,
+        "wallSeconds": 11.026258945465088
+      },
+      "startTick": 2928,
+      "endTick": 3168
+    },
+    {
+      "game": "gota",
+      "variant": "metal-after",
+      "backend": "metal",
+      "trial": 2,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/gota-metal-after-trial2.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/gota-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/gods_of_the_arena/players/base.bas:10"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/gota-metal-after-trial2.log",
+        "started": 1795639638.956692,
+        "wallSeconds": 10.293265104293823
+      },
+      "startTick": 2928,
+      "endTick": 3168
+    },
+    {
+      "game": "gota",
+      "variant": "opengl-control",
+      "backend": "opengl",
+      "trial": 2,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/gota-opengl-control-trial2.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/gota-opengl",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/gods_of_the_arena/players/base.bas:10"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/gota-opengl-control-trial2.log",
+        "started": 1795639649.253349,
+        "wallSeconds": 9.526980876922607
+      },
+      "startTick": 2928,
+      "endTick": 3168
+    },
+    {
+      "game": "crewrift",
+      "variant": "opengl-control",
+      "backend": "opengl",
+      "trial": 2,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/crewrift-opengl-control-trial2.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/crewrift-opengl",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/crewrift-opengl-control-trial2.log",
+        "started": 1795639658.782629,
+        "wallSeconds": 5.2300848960876465
+      },
+      "startTick": 168,
+      "endTick": 408
+    },
+    {
+      "game": "crewrift",
+      "variant": "metal-before",
+      "backend": "metal",
+      "trial": 2,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/crewrift-metal-before-trial2.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/crewrift-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/crewrift-metal-before-trial2.log",
+        "started": 1795639664.014505,
+        "wallSeconds": 7.268355131149292
+      },
+      "startTick": 168,
+      "endTick": 408
+    },
+    {
+      "game": "crewrift",
+      "variant": "metal-after",
+      "backend": "metal",
+      "trial": 2,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/crewrift-metal-after-trial2.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/crewrift-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/crewrift-metal-after-trial2.log",
+        "started": 1795639671.286127,
+        "wallSeconds": 6.299335956573486
+      },
+      "startTick": 168,
+      "endTick": 408
+    },
+    {
+      "game": "heartleaf",
+      "variant": "metal-after",
+      "backend": "metal",
+      "trial": 2,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/heartleaf-metal-after-trial2.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/heartleaf-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/heartleaf/players/base.bas:9"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/heartleaf-metal-after-trial2.log",
+        "started": 1795639677.589089,
+        "wallSeconds": 7.481662034988403
+      },
+      "startTick": 48,
+      "endTick": 288
+    },
+    {
+      "game": "heartleaf",
+      "variant": "opengl-control",
+      "backend": "opengl",
+      "trial": 2,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/heartleaf-opengl-control-trial2.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/heartleaf-opengl",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/heartleaf/players/base.bas:9"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/heartleaf-opengl-control-trial2.log",
+        "started": 1795639685.0747142,
+        "wallSeconds": 7.343616008758545
+      },
+      "startTick": 48,
+      "endTick": 288
+    },
+    {
+      "game": "heartleaf",
+      "variant": "metal-before",
+      "backend": "metal",
+      "trial": 2,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/heartleaf-metal-before-trial2.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/heartleaf-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/heartleaf/players/base.bas:9"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/heartleaf-metal-before-trial2.log",
+        "started": 1795639692.420604,
+        "wallSeconds": 8.88329005241394
+      },
+      "startTick": 48,
+      "endTick": 288
+    },
+    {
+      "game": "cac",
+      "variant": "metal-before",
+      "backend": "metal",
+      "trial": 2,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/cac-metal-before-trial2.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/cac-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--direct",
+          "--players",
+          "2"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/cac-metal-before-trial2.log",
+        "started": 1795639701.307276,
+        "wallSeconds": 7.221625804901123
+      },
+      "startTick": 1,
+      "endTick": 4
+    },
+    {
+      "game": "cac",
+      "variant": "metal-after",
+      "backend": "metal",
+      "trial": 2,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/cac-metal-after-trial2.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/cac-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--direct",
+          "--players",
+          "2"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/cac-metal-after-trial2.log",
+        "started": 1795639708.532799,
+        "wallSeconds": 7.0819549560546875
+      },
+      "startTick": 1,
+      "endTick": 4
+    },
+    {
+      "game": "cac",
+      "variant": "opengl-control",
+      "backend": "opengl",
+      "trial": 2,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/cac-opengl-control-trial2.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/cac-opengl",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--direct",
+          "--players",
+          "2"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/cac-opengl-control-trial2.log",
+        "started": 1795639715.619804,
+        "wallSeconds": 7.063414096832275
+      },
+      "startTick": 1,
+      "endTick": 4
+    },
+    {
+      "game": "heartleaf",
+      "variant": "opengl-control",
+      "backend": "opengl",
+      "trial": 3,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/heartleaf-opengl-control-trial3.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/heartleaf-opengl",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/heartleaf/players/base.bas:9"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/heartleaf-opengl-control-trial3.log",
+        "started": 1795639722.685494,
+        "wallSeconds": 7.063930988311768
+      },
+      "startTick": 48,
+      "endTick": 288
+    },
+    {
+      "game": "heartleaf",
+      "variant": "metal-before",
+      "backend": "metal",
+      "trial": 3,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/heartleaf-metal-before-trial3.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/heartleaf-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/heartleaf/players/base.bas:9"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/heartleaf-metal-before-trial3.log",
+        "started": 1795639729.751488,
+        "wallSeconds": 8.825538158416748
+      },
+      "startTick": 48,
+      "endTick": 288
+    },
+    {
+      "game": "heartleaf",
+      "variant": "metal-after",
+      "backend": "metal",
+      "trial": 3,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/heartleaf-metal-after-trial3.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/heartleaf-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/heartleaf/players/base.bas:9"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/heartleaf-metal-after-trial3.log",
+        "started": 1795639738.5805829,
+        "wallSeconds": 7.363790035247803
+      },
+      "startTick": 48,
+      "endTick": 288
+    },
+    {
+      "game": "lvd",
+      "variant": "opengl-control",
+      "backend": "opengl",
+      "trial": 3,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/lvd-opengl-control-trial3.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/lvd-opengl",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/light_vs_dark/players/base.bas:2"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/lvd-opengl-control-trial3.log",
+        "started": 1795639745.947819,
+        "wallSeconds": 5.464811086654663
+      },
+      "startTick": 48,
+      "endTick": 288
+    },
+    {
+      "game": "lvd",
+      "variant": "metal-before",
+      "backend": "metal",
+      "trial": 3,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/lvd-metal-before-trial3.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/lvd-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/light_vs_dark/players/base.bas:2"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/lvd-metal-before-trial3.log",
+        "started": 1795639751.414836,
+        "wallSeconds": 5.462322950363159
+      },
+      "startTick": 48,
+      "endTick": 288
+    },
+    {
+      "game": "lvd",
+      "variant": "metal-after",
+      "backend": "metal",
+      "trial": 3,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/lvd-metal-after-trial3.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/lvd-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/light_vs_dark/players/base.bas:2"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/lvd-metal-after-trial3.log",
+        "started": 1795639756.880594,
+        "wallSeconds": 5.391917943954468
+      },
+      "startTick": 48,
+      "endTick": 288
+    },
+    {
+      "game": "gota",
+      "variant": "metal-after",
+      "backend": "metal",
+      "trial": 3,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/gota-metal-after-trial3.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/gota-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/gods_of_the_arena/players/base.bas:10"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/gota-metal-after-trial3.log",
+        "started": 1795639762.276146,
+        "wallSeconds": 10.822448015213013
+      },
+      "startTick": 2928,
+      "endTick": 3168
+    },
+    {
+      "game": "gota",
+      "variant": "opengl-control",
+      "backend": "opengl",
+      "trial": 3,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/gota-opengl-control-trial3.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/gota-opengl",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/gods_of_the_arena/players/base.bas:10"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/gota-opengl-control-trial3.log",
+        "started": 1795639773.102465,
+        "wallSeconds": 9.677496194839478
+      },
+      "startTick": 2928,
+      "endTick": 3168
+    },
+    {
+      "game": "gota",
+      "variant": "metal-before",
+      "backend": "metal",
+      "trial": 3,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/gota-metal-before-trial3.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/gota-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/gods_of_the_arena/players/base.bas:10"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/gota-metal-before-trial3.log",
+        "started": 1795639782.781947,
+        "wallSeconds": 10.863903999328613
+      },
+      "startTick": 2928,
+      "endTick": 3168
+    },
+    {
+      "game": "monster",
+      "variant": "metal-after",
+      "backend": "metal",
+      "trial": 3,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/monster-metal-after-trial3.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/monster-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--offline",
+          "--no-voice",
+          "--save-dir",
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/saves/monster-metal-after-trial3"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/monster-metal-after-trial3.log",
+        "started": 1795639793.650801,
+        "wallSeconds": 6.731182098388672
+      },
+      "startTick": 60,
+      "endTick": 360
+    },
+    {
+      "game": "monster",
+      "variant": "opengl-control",
+      "backend": "opengl",
+      "trial": 3,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/monster-opengl-control-trial3.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/monster-opengl",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--offline",
+          "--no-voice",
+          "--save-dir",
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/saves/monster-opengl-control-trial3"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/monster-opengl-control-trial3.log",
+        "started": 1795639800.385519,
+        "wallSeconds": 6.567574977874756
+      },
+      "startTick": 60,
+      "endTick": 360
+    },
+    {
+      "game": "monster",
+      "variant": "metal-before",
+      "backend": "metal",
+      "trial": 3,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/monster-metal-before-trial3.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/monster-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--offline",
+          "--no-voice",
+          "--save-dir",
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/saves/monster-metal-before-trial3"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/monster-metal-before-trial3.log",
+        "started": 1795639806.9551291,
+        "wallSeconds": 6.683932781219482
+      },
+      "startTick": 60,
+      "endTick": 360
+    },
+    {
+      "game": "crewrift",
+      "variant": "metal-before",
+      "backend": "metal",
+      "trial": 3,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/crewrift-metal-before-trial3.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/crewrift-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/crewrift-metal-before-trial3.log",
+        "started": 1795639813.642503,
+        "wallSeconds": 7.672676086425781
+      },
+      "startTick": 168,
+      "endTick": 408
+    },
+    {
+      "game": "crewrift",
+      "variant": "metal-after",
+      "backend": "metal",
+      "trial": 3,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/crewrift-metal-after-trial3.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/crewrift-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/crewrift-metal-after-trial3.log",
+        "started": 1795639821.319125,
+        "wallSeconds": 6.552453994750977
+      },
+      "startTick": 168,
+      "endTick": 408
+    },
+    {
+      "game": "crewrift",
+      "variant": "opengl-control",
+      "backend": "opengl",
+      "trial": 3,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/crewrift-opengl-control-trial3.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/crewrift-opengl",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/crewrift-opengl-control-trial3.log",
+        "started": 1795639827.874825,
+        "wallSeconds": 5.282861948013306
+      },
+      "startTick": 168,
+      "endTick": 408
+    },
+    {
+      "game": "cac",
+      "variant": "metal-after",
+      "backend": "metal",
+      "trial": 3,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/cac-metal-after-trial3.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/cac-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--direct",
+          "--players",
+          "2"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/cac-metal-after-trial3.log",
+        "started": 1795639833.159778,
+        "wallSeconds": 7.05789589881897
+      },
+      "startTick": 1,
+      "endTick": 4
+    },
+    {
+      "game": "cac",
+      "variant": "opengl-control",
+      "backend": "opengl",
+      "trial": 3,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/cac-opengl-control-trial3.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/cac-opengl",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--direct",
+          "--players",
+          "2"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/cac-opengl-control-trial3.log",
+        "started": 1795639840.222126,
+        "wallSeconds": 6.777322053909302
+      },
+      "startTick": 1,
+      "endTick": 4
+    },
+    {
+      "game": "cac",
+      "variant": "metal-before",
+      "backend": "metal",
+      "trial": 3,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/cac-metal-before-trial3.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/cac-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--direct",
+          "--players",
+          "2"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/cac-metal-before-trial3.log",
+        "started": 1795639847.002162,
+        "wallSeconds": 6.9375879764556885
+      },
+      "startTick": 1,
+      "endTick": 4
+    },
+    {
+      "game": "cta",
+      "variant": "metal-before",
+      "backend": "metal",
+      "trial": 3,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/cta-metal-before-trial3.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/cta-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/call_to_adventure/players/base.bas:4"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/cta-metal-before-trial3.log",
+        "started": 1795639853.9433,
+        "wallSeconds": 4.545316934585571
+      },
+      "startTick": 48,
+      "endTick": 288
+    },
+    {
+      "game": "cta",
+      "variant": "metal-after",
+      "backend": "metal",
+      "trial": 3,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/cta-metal-after-trial3.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/cta-metal",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/call_to_adventure/players/base.bas:4"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/cta-metal-after-trial3.log",
+        "started": 1795639858.491989,
+        "wallSeconds": 4.090489149093628
+      },
+      "startTick": 48,
+      "endTick": 288
+    },
+    {
+      "game": "cta",
+      "variant": "opengl-control",
+      "backend": "opengl",
+      "trial": 3,
+      "passed": true,
+      "raw": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/raw/cta-opengl-control-trial3.json",
+      "stage": {
+        "command": [
+          "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/cta-opengl",
+          "--seed",
+          "42",
+          "--windowSize",
+          "1280x800",
+          "--mute",
+          "--bot",
+          "/Users/me/p/polyworld-metal-perf/games/call_to_adventure/players/base.bas:4"
+        ],
+        "exitCode": 0,
+        "log": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/runs/paired/logs/cta-opengl-control-trial3.log",
+        "started": 1795639862.586258,
+        "wallSeconds": 4.03068208694458
+      },
+      "startTick": 48,
+      "endTick": 288
+    }
+  ],
+  "candidateHeadEnd": "08bbfb170b9cd4b8110b0525b54a337d5d05c00c",
+  "candidateSourceHashEnd": "aab0b89555b34e0e5353626d41d99ed93d67632aeaca3f7fb30642dc2f946e56",
+  "candidateDependenciesEnd": {
+    "silky": {
+      "commit": "f2754a1045a046a9e8366d7522c33cc091814958",
+      "status": "",
+      "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "metal4": {
+      "commit": "eaec6cef21c446d512bbf18e6fa949eeae47a583",
+      "status": "",
+      "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "shady": {
+      "commit": "62603f0922cf16ba1ee2463a80e317d7216773de",
+      "status": "",
+      "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "scriptSha256End": "9c77d61513fa9fc7e9e28092348e649bc76c27e03e0363c480bd668d19bf1978",
+  "binariesEnd": {
+    "gota/opengl-control": {
+      "path": "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/gota-opengl",
+      "sha256": "b73d5f9cc2fb51e36bc65b1bb1b560adad3334d5a8cc257cd5c28e3b53e8f2f7",
+      "bytes": 6661944
+    },
+    "gota/metal-before": {
+      "path": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/gota-metal",
+      "sha256": "2950d9b3c08265c257c7f0c9c77a073ffb4cfc6f953c82b3205ec78e0d45f2bb",
+      "bytes": 6804104
+    },
+    "gota/metal-after": {
+      "path": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/gota-metal",
+      "sha256": "c38ac075388f1b2b237833ba373ada274c20c0e8ee3bdf59f286903ccb579a11",
+      "bytes": 6807864
+    },
+    "lvd/opengl-control": {
+      "path": "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/lvd-opengl",
+      "sha256": "16088181d5f23e49fe9c8ccf5f3ed194cab11fa51373cfe582113967d72ec219",
+      "bytes": 6096616
+    },
+    "lvd/metal-before": {
+      "path": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/lvd-metal",
+      "sha256": "51abed1d393c6602fc9ea27c487b46e64e819f6999612c44e73f6116b69ae546",
+      "bytes": 6224808
+    },
+    "lvd/metal-after": {
+      "path": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/lvd-metal",
+      "sha256": "619b3141a3cb85e7cc713b7c548e72739388ac64daae42793f66b077834d0977",
+      "bytes": 6228600
+    },
+    "cta/opengl-control": {
+      "path": "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/cta-opengl",
+      "sha256": "ee906f22c1b397c2bb9f33eae46c7395d62b11300aee6cc2c5dbac0159a237a9",
+      "bytes": 5161944
+    },
+    "cta/metal-before": {
+      "path": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/cta-metal",
+      "sha256": "3bc79f4246d8d55a9693e018e9ae02f08dd5cfed086f25fbffcd811533043ec7",
+      "bytes": 5284696
+    },
+    "cta/metal-after": {
+      "path": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/cta-metal",
+      "sha256": "02f8a41376a10758ff4d49d61180a23ba50c23f65bb5eb78d239c570e78ebab5",
+      "bytes": 5287864
+    },
+    "cac/opengl-control": {
+      "path": "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/cac-opengl",
+      "sha256": "2f1817d11c60243505eee56c5c314f879ecb5530a42eabd53a98bd6ec60ec03a",
+      "bytes": 5418920
+    },
+    "cac/metal-before": {
+      "path": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/cac-metal",
+      "sha256": "d119f79b61f53474c73f29d8910a43a84bae3c86ebd15e715245ef641f833f7a",
+      "bytes": 5487240
+    },
+    "cac/metal-after": {
+      "path": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/cac-metal",
+      "sha256": "0c2ec09b8b36a47e709f7f8a838a70259dbf34438e1f1dd3d61c924cc4ab100e",
+      "bytes": 5490984
+    },
+    "heartleaf/opengl-control": {
+      "path": "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/heartleaf-opengl",
+      "sha256": "20d8b5b723aa2809e737a4bb3d4e884783d5826696b795dfbec79dc0d4489344",
+      "bytes": 4259232
+    },
+    "heartleaf/metal-before": {
+      "path": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/heartleaf-metal",
+      "sha256": "6e0e193d3cf7f86318554428abec71135f2058c000207d5447229d0c49f4b449",
+      "bytes": 4370720
+    },
+    "heartleaf/metal-after": {
+      "path": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/heartleaf-metal",
+      "sha256": "816e376ec233922ccfefd9cc35ed5812e532a2ab4d06bbd22bd9d1102b9e0d6f",
+      "bytes": 4373760
+    },
+    "crewrift/opengl-control": {
+      "path": "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/crewrift-opengl",
+      "sha256": "3c8cc395e93fc0abc3849ed4ca2cda24efbdda201608f9ddcb2087ca6d92811b",
+      "bytes": 4199392
+    },
+    "crewrift/metal-before": {
+      "path": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/crewrift-metal",
+      "sha256": "25200ca0c7cfd711c36330c4f27fb18fa7e7c724260b77cc092aea77934ac0db",
+      "bytes": 4309984
+    },
+    "crewrift/metal-after": {
+      "path": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/crewrift-metal",
+      "sha256": "48898308bb394dc8b1688a7cbc59d002df6daa3da6cdc28072fb9a6de430e97a",
+      "bytes": 4312976
+    },
+    "monster/opengl-control": {
+      "path": "/Users/me/p/polyworld-backends/tmp/benchmarks/bin/monster-opengl",
+      "sha256": "db65c42a24955e76bf34185c9157efaef2aae307f945e82208f3dd5701afba69",
+      "bytes": 4427904
+    },
+    "monster/metal-before": {
+      "path": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/baseline/monster-metal",
+      "sha256": "47136caa115ea4778e0d99632d2e541c6dc58ab117d1d91c7a4b7ff5ef31b987",
+      "bytes": 4540400
+    },
+    "monster/metal-after": {
+      "path": "/Users/me/p/polyworld-metal-perf/tmp/metal-perf/build/bin/monster-metal",
+      "sha256": "5921ba6fcd3133f8f9a1f4915f9c64e20652c069beacbeb3174665285fb5589d",
+      "bytes": 4543248
+    }
+  },
+  "finished": "2026-11-25T20:51:07.337849+00:00"
+}

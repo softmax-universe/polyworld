@@ -16,7 +16,8 @@ type
     BotFlag, PlayerFlag, NameFlag, ReplayFlag, RecordFlag, SeedFlag,
     PlayFlag, SpeedFlag, WindowSizeFlag, VsyncFlag, SecondsFlag,
     MinutesFlag, TicksFlag, SoundFlag, VerboseFlag, HeadlessTickRateFlag,
-    LlmModeFlag, ScreenshotFlag, FramesFlag, ServerFlag, RoomFlag
+    LlmModeFlag, ScreenshotFlag, FramesFlag, ServerFlag, RoomFlag,
+    BenchmarkFlag, WarmupFlag
 
   BotGroup* = object
     path*: string
@@ -68,13 +69,14 @@ const
   DurationFlags* = {SecondsFlag, MinutesFlag, TicksFlag}
   GraphicalFlags* = {
     PlayerFlag, NameFlag, PlayFlag, SpeedFlag, WindowSizeFlag, VsyncFlag,
-    ScreenshotFlag, FramesFlag
+    ScreenshotFlag, FramesFlag, BenchmarkFlag, WarmupFlag
   }
   CommonNames: array[CommonFlag, string] = [
     "--bot", "--player", "--name", "--replay", "--record", "--seed",
     "--play", "--speed", "--windowSize", "--vsync", "--seconds",
     "--minutes", "--ticks", "--mute", "--verbose", "--headless-tick-rate",
-    "--llm-mode", "--screenshot", "--frames", "--server", "--room"
+    "--llm-mode", "--screenshot", "--frames", "--server", "--room",
+    "--benchmark", "--warmup"
   ]
   CommonHelp: array[CommonFlag, string] = [
     "  --bot PATH[:N]       Add N bots from a program; repeatable (--bots also works).",
@@ -95,9 +97,11 @@ const
     "  --headless-tick-rate N  Pace headless ticks per second; 0 is unlimited.",
     "  --llm-mode MODE      Use async or barrier LLM requests (default async).",
     "  --screenshot PATH    Save one native screenshot and exit.",
-    "  --frames N           Capture the Nth rendered frame (default 30).",
+    "  --frames N           Screenshot frame or number of benchmark samples (default 30).",
     "  --server URL         Set the multiplayer relay address.",
-    "  --room CODE          Select a multiplayer room (--join also works)."
+    "  --room CODE          Select a multiplayer room (--join also works).",
+    "  --benchmark PATH     Save hidden rendering timings in milliseconds per frame as JSON.",
+    "  --warmup N           Render N warmup frames before benchmarking (default 30)."
   ]
 
 func commonUsageFor*(supported: set[CommonFlag]): string =
@@ -267,9 +271,11 @@ proc takeCommonFlag*(
   try:
     if options.capture.takeCaptureFlag(arguments, index, argument):
       let flag = splitFlag(argument).name
-      options.specifiedFlags.incl(
-        if flag == "--frames": FramesFlag else: ScreenshotFlag
-      )
+      options.specifiedFlags.incl(case flag
+        of "--benchmark": BenchmarkFlag
+        of "--warmup": WarmupFlag
+        of "--frames": FramesFlag
+        else: ScreenshotFlag)
       return true
     if takeWindowSizeFlag(
       options.windowWidth, options.windowHeight, arguments, index, argument

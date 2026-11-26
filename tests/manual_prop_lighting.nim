@@ -1,9 +1,14 @@
-## Requires desktop GL and polyworld_data to check building fog and lighting.
+## Checks building fog and lighting on the selected desktop renderer.
 
 import
   std/os,
-  chroma, opengl, pixie, vmath, windy,
+  chroma, pixie, vmath, windy,
   polyworld/[assets, common, quadterrain, shadows]
+
+when defined(useMetal4):
+  import polyworld/backends/metal/common
+else:
+  import opengl
 
 const
   MapSize = 64
@@ -15,19 +20,26 @@ proc capture(
     pack: PropPack, name: string, matrix: Mat4, size: IVec2, baked = false
 ): Image =
   ## Reads the rendered building without a buffer swap or UI overlay.
-  glViewport(0, 0, size.x, size.y)
-  glDepthMask(GL_TRUE)
-  glClearColor(0, 0, 0, 1)
-  glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
+  when defined(useMetal4):
+    beginFrame(size.x, size.y, color(0, 0, 0, 1))
+  else:
+    glViewport(0, 0, size.x, size.y)
+    glDepthMask(GL_TRUE)
+    glClearColor(0, 0, 0, 1)
+    glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
   if baked:
     drawTerrain(matrix)
   else:
     pack.drawProp(name, Position, Rotation, Scale, matrix)
-  result = newImage(size.x, size.y)
-  glReadPixels(
-    0, 0, size.x, size.y, GL_RGBA, GL_UNSIGNED_BYTE, result.data[0].addr
-  )
-  doAssert glGetError() == GL_NO_ERROR
+  when defined(useMetal4):
+    result = captureImage()
+    endFrame(present = false)
+  else:
+    result = newImage(size.x, size.y)
+    glReadPixels(
+      0, 0, size.x, size.y, GL_RGBA, GL_UNSIGNED_BYTE, result.data[0].addr
+    )
+    doAssert glGetError() == GL_NO_ERROR
 
 proc brightness(image: Image): int =
   ## Sums the rendered RGB values, ignoring opaque black background pixels.
@@ -36,17 +48,23 @@ proc brightness(image: Image): int =
 
 block:
   let window = newWindow(
-    "Building lighting check", ivec2(320, 320), vsync = false
+    "Building lighting check", ivec2(320, 320), visible = false, vsync = false
   )
   defer:
+    when defined(useMetal4):
+      shutdownMetal()
     window.close()
-  window.makeContextCurrent()
-  loadExtensions()
+  when defined(useMetal4):
+    initMetal(window)
+  else:
+    window.makeContextCurrent()
+    loadExtensions()
   pollEvents()
   initTerrain(
     treeStyle = NoTrees,
+    terrainStyle = GeneratedTerrain,
     rockStyle = NoRocks,
-    settings = TerrainAssets(size: 1024, materials: CartoonMaterials)
+    settings = TerrainAssets(size: 1024)
   )
   sunShadowsEnabled = false
   setEnvironmentPalette(color(1, 1, 1), color(0.15, 0.15, 0.2))

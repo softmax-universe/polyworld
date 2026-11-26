@@ -11,6 +11,10 @@ display pacing or sound, saves the image, and exits through normal cleanup.
 Parent directories are created automatically. Relative output paths are resolved
 from the launch directory, even when a game changes its working directory.
 
+The same hidden capture path can record frame times for any of the seven
+Polyworld games. Use `--benchmark PATH` to write a JSON report in milliseconds
+per frame. See [game backend benchmarks](backend-benchmarks.md).
+
 | Argument | Meaning |
 | --- | --- |
 | `--screenshot PATH` | Save one image to this path and exit. |

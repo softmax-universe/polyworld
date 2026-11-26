@@ -2,10 +2,17 @@
 
 import
   std/[math, os, strutils, times],
-  chroma, opengl, pixie, silky, vmath, windy,
-  actioncam, assets, fullscreens, player, screenshots
+  chroma, pixie, silky, vmath, windy,
+  actioncam, assets, fullscreens, player, screenshots, renderer, benchmarks
 
-export screenshots
+export screenshots, renderer, benchmarks
+
+when defined(frameBench) and defined(backendBench):
+  {.error: "Select either frameBench or backendBench, not both".}
+
+when defined(frameBench):
+  import framebench
+  export framebench
 
 when defined(emscripten):
   {.emit: "#include <emscripten.h>".}
@@ -81,7 +88,7 @@ proc viewingDelta*(clock: var ViewingClock, window: Window): float32 =
     result = max(now - clock.last, 0).float32
   clock.last = now
   clock.hidden = hidden
-  if captureActive():
+  if captureActive() or defined(frameBench) or defined(backendBench):
     result = 1.0'f / 60
 
 proc damping*(rate, dt: float32): float32 =
@@ -164,18 +171,42 @@ proc initGameWindow*(
     msaa = msaaDisabled,
     visible = true
 ): (Window, Silky) =
-  ## Creates the viewer and GL context, keeping screenshot captures hidden.
+  ## Creates the viewer and renderer with capture and benchmark windows hidden.
+  let
+    selectedSize =
+      when defined(frameBench):
+        ivec2(BenchWidth, BenchHeight)
+      elif defined(backendBench):
+        ivec2(1280, 800)
+      else:
+        size
+    selectedMsaa =
+      when defined(frameBench):
+        msaaDisabled
+      elif defined(backendBench):
+        when BackendBenchSamples == 1:
+          msaaDisabled
+        elif BackendBenchSamples == 2:
+          msaa2x
+        elif BackendBenchSamples == 4:
+          msaa4x
+        elif BackendBenchSamples == 8:
+          msaa8x
+        else:
+          {.error: "backendBenchSamples must be 1, 2, 4, or 8".}
+      else:
+        msaa
   let window = newWindow(
     title,
-    size,
-    visible = visible and not captureActive(),
-    vsync = vsync and not captureActive(),
-    msaa = msaa
+    selectedSize,
+    visible = visible and not captureActive() and not NativeBenchmarkBuild,
+    vsync = vsync and not captureActive() and not defined(frameBench) and
+      not defined(backendBench),
+    msaa = selectedMsaa
   )
   window.prepareDesktopFullscreen()
-  window.makeContextCurrent()
-  loadExtensions()
-  let sk = newSilky(window, atlasPath)
+  initRenderer(window, max(1, ord(selectedMsaa)))
+  let sk = newGameUi(window, atlasPath)
   sk.applyThemePatches()
   (window, sk)
 
@@ -185,8 +216,8 @@ proc drawSplash*(
     name = SplashName
 ) =
   ## Draws the theme logo centered on a black frame.
-  sk.beginUi(window, window.size)
-  sk.clearScreen(rgbx(0, 0, 0, 255))
+  clearFrame(color(0, 0, 0, 1))
+  sk.beginGameUi(window, window.size)
   if name in sk.atlas.entries:
     let
       uv = sk.atlas.entries[name]
@@ -203,8 +234,8 @@ proc drawSplash*(
       src,
       rgbx(255, 255, 255, 255)
     )
-  sk.endUi()
-  window.swapBuffers()
+  sk.finishUi()
+  window.presentRenderer()
   pollEvents()
 
 proc startSplash*(
@@ -224,7 +255,7 @@ proc holdSplash*(
     seconds = SplashSeconds
 ) =
   ## Keeps the splash up until the hold time elapses.
-  if captureActive() or defined(emscripten):
+  if captureActive() or defined(emscripten) or NativeBenchmarkBuild:
     drawSplash(sk, window, splash.name)
   else:
     while epochTime() - splash.startedAt < seconds:
@@ -240,8 +271,12 @@ var
 proc presentFrame*(window: Window, paceHz = 60) =
   ## Swaps the back buffer, then waits so presents stay on one cadence.
   ## ProMotion vsync alone flips between 8.33 ms and 16.67 ms.
-  window.swapBuffers()
-  if paceHz <= 0 or captureActive():
+  if benchmarkCaptureActive(): return # captureFrame submitted this content frame.
+  when defined(frameBench) and not defined(pipelinedBench): endBenchFrame(window)
+  window.presentRenderer()
+  when defined(frameBench) and defined(pipelinedBench): endPresentedBenchFrame(window)
+  if paceHz <= 0 or captureActive() or defined(frameBench) or
+      defined(backendBench):
     presentDeadline = 0
     presentPaceHz = 0
     return
@@ -267,8 +302,13 @@ proc frameDelta*(
   let now = epochTime()
   result = clamp(now - lastFrameTime, 0.0, 0.1).float32
   lastFrameTime = now
-  if captureActive():
-    result = captureStep
+  when defined(frameBench):
+    result = BenchStep
+  else:
+    if defined(backendBench):
+      result = 1.0'f / 60
+    elif captureActive():
+      result = captureStep
 
 proc simulationActive*(transport: Player): bool =
   ## Returns whether presentation should advance on this frame.
@@ -284,82 +324,14 @@ proc applyScreenshotCamera*(cameraDistance: var float32) =
     if existsEnv("CAM_DIST"):
       cameraDistance = getEnv("CAM_DIST").parseFloat.float32
 
-type ScreenshotTarget* = object
-  ## Owns a native offscreen color and depth target for hidden capture windows.
-  framebuffer*, texture*, depth*: GLuint
-  size*: IVec2
-
-proc releaseScreenshotTarget*(target: var ScreenshotTarget) =
-  ## Releases capture attachments while their owning GL context is current.
-  if target.depth != 0:
-    glDeleteRenderbuffers(1, target.depth.addr)
-  if target.texture != 0:
-    glDeleteTextures(1, target.texture.addr)
-  if target.framebuffer != 0:
-    glDeleteFramebuffers(1, target.framebuffer.addr)
-  target = ScreenshotTarget()
-
-proc beginScreenshotFrame*(
-  target: var ScreenshotTarget, window: Window, enabled = captureActive()
-): GLuint =
-  ## Binds a complete hidden-window target without relying on its drawable.
-  if not enabled:
-    return 0
-  let size = window.size
-  if size.x <= 0 or size.y <= 0:
-    raise newException(ScreenshotError, "Screenshot window has no drawable size")
-  if target.framebuffer == 0 or target.size != size:
-    target.releaseScreenshotTarget()
-    glGenFramebuffers(1, target.framebuffer.addr)
-    glBindFramebuffer(GL_FRAMEBUFFER, target.framebuffer)
-    glGenTextures(1, target.texture.addr)
-    glBindTexture(GL_TEXTURE_2D, target.texture)
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8.GLint, size.x.GLsizei,
-      size.y.GLsizei, 0, GL_RGBA, GL_UNSIGNED_BYTE, nil)
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR.GLint)
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR.GLint)
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-      GL_TEXTURE_2D, target.texture, 0)
-    glGenRenderbuffers(1, target.depth.addr)
-    glBindRenderbuffer(GL_RENDERBUFFER, target.depth)
-    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8,
-      size.x.GLsizei, size.y.GLsizei)
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
-      GL_RENDERBUFFER, target.depth)
-    if glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE:
-      target.releaseScreenshotTarget()
-      raise newException(ScreenshotError,
-        "Unable to allocate screenshot framebuffer")
-    target.size = size
-  else:
-    glBindFramebuffer(GL_FRAMEBUFFER, target.framebuffer)
-  glViewport(0, 0, size.x.GLsizei, size.y.GLsizei)
-  target.framebuffer
-
 proc writeScreenshot*(window: Window, path: string) =
   ## Writes the current draw target and creates its parent directory if needed.
   if path.len == 0:
     raise newException(ScreenshotError, "Screenshot output path is empty")
   let
     size = window.size
-    image = newImage(size.x, size.y)
+    image = readFrameImage(size.x, size.y)
     directory = path.parentDir
-  var
-    previousRead, drawing, readBuffer, packAlignment: GLint
-  glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, previousRead.addr)
-  glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, drawing.addr)
-  glBindFramebuffer(GL_READ_FRAMEBUFFER, drawing.GLuint)
-  glGetIntegerv(GL_READ_BUFFER, readBuffer.addr)
-  glGetIntegerv(GL_PACK_ALIGNMENT, packAlignment.addr)
-  defer:
-    glPixelStorei(GL_PACK_ALIGNMENT, packAlignment)
-    glReadBuffer(readBuffer.GLenum)
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, previousRead.GLuint)
-  glReadBuffer(if drawing == 0: GL_BACK else: GL_COLOR_ATTACHMENT0)
-  glPixelStorei(GL_PACK_ALIGNMENT, 1)
-  glReadPixels(0, 0, size.x.GLsizei, size.y.GLsizei,
-    GL_RGBA, GL_UNSIGNED_BYTE, image.data[0].addr)
-  image.flipVertical()
   try:
     if directory.len > 0:
       createDir(directory)
@@ -372,11 +344,16 @@ proc captureFrame*(
   window: Window, frame: var int, waitFrames = DefaultScreenshotFrames,
   defaultPath = "screenshot.png"
 ): bool =
-  ## Saves the selected rendered frame and lets the game perform normal cleanup.
+  ## Captures a screenshot or frame timings and signals the game to exit normally.
   if not captureActive():
     return false
   if captureFinished():
     return true
+  when not defined(emscripten) and not defined(headless):
+    if benchmarkCaptureActive():
+      window.presentRenderer()
+      let size = window.size
+      return recordBenchmarkBoundary(window.title, size.x, size.y, finishGpu)
   inc frame
   if not captureDue(frame, waitFrames):
     return false

@@ -2,7 +2,7 @@
 
 import
   std/[math, os, strutils, tables, times],
-  bumpy, chroma, opengl, pixie, silky, vmath,
+  bumpy, chroma, pixie, silky, vmath,
   assets, brushes, content, groves, landscapes, sim, game, maps, replays, ui, walls,
   aiming, cameras, controls, faces, lighting, spelleffects, multiplayer, homes, lobbies, cursors, pointers,
   minimaporders, spectator, chats, chatinput, chatui, shops, audios, matchresults,
@@ -16,7 +16,7 @@ import
   polyworld/quadterrain,
   polyworld/shadows, polyworld/screenocclusions,
   polyworld/terrainsurfaces, polyworld/waters,
-  polyworld/[displays, chrome, inputs, rtscameras, selectionoutlines, shapes, viewers,
+  polyworld/[renderer, displays, chrome, inputs, rtscameras, selectionoutlines, shapes, viewers,
     visions, worldbars, worldtexts, connections, roomclients, rooms, menus, networks]
 
 when defined(emscripten):
@@ -240,7 +240,7 @@ var
   sk*: Silky
   screenshotTarget: ScreenshotTarget
   screenshotFrame: int
-  runtimeScreenshot: bool
+  runtimeCaptureEnabled: bool
   terrainReady: bool
   sharedScene: CharacterScene
   towerPacks: array[Team, PropPack]
@@ -273,7 +273,7 @@ proc presentGotaFrame*() =
           "games/gods_of_the_arena/gota_shot.png"):
         window.closeRequested = true
     else:
-      if runtimeScreenshot and captureFrame(window, screenshotFrame, 30,
+      if runtimeCaptureEnabled and captureFrame(window, screenshotFrame, 30,
           "games/gods_of_the_arena/gota_shot.png"):
         window.closeRequested = true
   window.presentFrame(framePaceHz)
@@ -287,7 +287,7 @@ proc initializeGraphics*() =
   ## Creates the application window and shared atlas exactly once.
   if window != nil:
     return
-  runtimeScreenshot = options.capture.path.len > 0
+  runtimeCaptureEnabled = options.capture.runtimeCaptureRequested()
   configureCapture(options.capture, "games/gods_of_the_arena/gota_shot.png")
   when ProfileWarmupFrames > 0:
     finishGameProfile()
@@ -348,7 +348,8 @@ proc runGraphics*(
       echo "Live multiplayer follows the server clock; --play and --speed " &
         "apply to local games, replays, and spectators."
   initializeGraphics()
-  let saveAutomatically = autoSaveReplay and not captureActive()
+  let saveAutomatically = autoSaveReplay and not captureActive() and
+    not defined(backendBench)
   stopSounds()
   defer: stopSounds()
   clearHudTooltip()
@@ -482,6 +483,9 @@ proc runGraphics*(
     standingBuildings: seq[int]
     worldCharacterCount: int
     directorSubjects: seq[Subject]
+  when defined(useDirectX) or defined(useVulkan):
+    var previousStructures, structures: seq[SceneProp]
+    var structureVisibility: seq[bool]
   if heroModels[HeroClass.low] == nil:
     profileBlock "models":
       let
@@ -1247,7 +1251,7 @@ proc runGraphics*(
         viewProjection,
         cameraRight,
         cameraUp,
-        sk.atlasTextureId()
+        sk.atlasTexture()
       )
 
   proc pickEntity(viewProjection: Mat4): int32 =
@@ -1624,7 +1628,7 @@ proc runGraphics*(
         vec3(0, 0.35'f, 0)
     waypointShapes.addPolyline(waypointRoute, rgbx(116, 242, 226, 255), 0.09'f)
     waypointShapes.draw(viewProjection)
-    waypointText.draw(viewProjection, right, up, sk.atlasTextureId())
+    waypointText.draw(viewProjection, right, up, sk.atlasTexture())
 
   proc playerMode(): bool =
     ## Returns whether this client issues orders for one hero.
@@ -2728,6 +2732,11 @@ proc runGraphics*(
       startReplayRecording(uint32(options.maximumTicks))
     replayCheckpoints = @[captureCheckpoint()]
 
+  when defined(frameBench):
+    # Start the measured match after drafting and preparation on every backend.
+    for i in 0 ..< 135 * TickRate.int:
+      advanceGame()
+
   let cleanScreenshot = captureActive() and existsEnv("CLEAN_SCREENSHOT")
   if captureActive():
     applyScreenshotCamera(cameraDistance)
@@ -2796,6 +2805,14 @@ proc runGraphics*(
       followSelection = false
       actionCam.takeManual()
 
+  when defined(backendBench):
+    # Start the matched renderer workload after drafting and initial movement.
+    if network == nil and not run.replayMode:
+      for _ in 0 ..< 120 * TickRate:
+        if run.world.gameOver:
+          break
+        advanceGame()
+
   var
     viewingClock: ViewingClock
     cameraSeekSerial = -1
@@ -2808,7 +2825,10 @@ proc runGraphics*(
     ProfileWarmupFrames == 0:
     # Exclude loading and the requested simulation seek from frame captures.
     startTrace()
+  var benchmarkFinished = false
   window.onFrame = proc() =
+    when defined(frameBench): beginBenchFrame(window)
+    beginBenchmarkFrame("gota", window.size)
     updateSounds()
     updateMatchResults()
     let previousCapture = bindingCapture
@@ -3033,6 +3053,7 @@ proc runGraphics*(
         aimVisible = false
 
       profileBlock "drawWorld":
+        beginGotaFrame()
         # The clock changes palettes while the light stays fixed for
         # readable silhouettes and shadows on both sides of the map.
         scene.toon.setArenaHour(
@@ -3044,6 +3065,17 @@ proc runGraphics*(
         for i, tower in run.world.buildings:
           if tower.hp > 0:
             standingBuildings.add i
+        when defined(useDirectX) or defined(useVulkan):
+          structures.setLen(0)
+          structureVisibility.setLen(0)
+          for tower in run.world.buildings:
+            structureVisibility.add tower.hp > 0
+            structures.add (towerPacks[tower.team], buildingPropName(tower), renderPoint(tower.position),
+              renderFacing(tower.facing), buildingScale(tower))
+          if structures != previousStructures:
+            replaceTexturedGroup(int32.low, structures)
+            swap(previousStructures, structures)
+          setPropVisibility(int32.low, structureVisibility)
         profileBlock "prepare character poses":
           var count = 0
           for footman in run.world.footmen:
@@ -3142,25 +3174,27 @@ proc runGraphics*(
 
         profileBlock "Shadow pass":
           sunDepthPasses(window.size):
-            drawTerrainSunDepth()
-            for index in standingBuildings:
-              let tower {.cursor.} = run.world.buildings[index]
-              towerPacks[tower.team].drawPropSunDepth(
-                buildingPropName(tower),
-                renderPoint(tower.position),
-                renderFacing(tower.facing),
-                buildingScale(tower)
-              )
+            when defined(useDirectX) or defined(useVulkan):
+              drawCachedTerrainSunDepth(sunPassIndex)
+            else:
+              drawTerrainSunDepth()
+            when not (defined(useDirectX) or defined(useVulkan)):
+              for index in standingBuildings:
+                let tower {.cursor.} = run.world.buildings[index]
+                towerPacks[tower.team].drawPropSunDepth(
+                  buildingPropName(tower),
+                  renderPoint(tower.position),
+                  renderFacing(tower.facing),
+                  buildingScale(tower)
+                )
             scene.sunDepthPass = true
             profileBlock "Shadow characters":
               drawWorldCharacters(scene, worldCharacters, worldCharacterCount)
             scene.sunDepthPass = false
         profileBlock "Main pass":
-          beginGotaFrame()
           when not defined(emscripten):
-            glEnable(GL_MULTISAMPLE)
-          glClearColor(0.05, 0.06, 0.09, 1.0)
-          glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
+            setMultisampling(true)
+          clearFrame(color(0.05, 0.06, 0.09, 1.0))
           scene.toon.drawBackground()
           updateTerrainVision()
           if showTiles and (terrainEdgeWorld != run.world or
@@ -3169,18 +3203,19 @@ proc runGraphics*(
             terrainEdgeWorld = run.world
             terrainEdgeRevision = run.world.navigationRevision
           drawTerrain(viewProjection, showTiles)
-          for index in standingBuildings:
-            let tower {.cursor.} = run.world.buildings[index]
-            towerPacks[tower.team].drawProp(
-              buildingPropName(tower),
-              renderPoint(tower.position),
-              renderFacing(tower.facing),
-              buildingScale(tower),
-              viewProjection
-            )
+          when not (defined(useDirectX) or defined(useVulkan)):
+            for index in standingBuildings:
+              let tower {.cursor.} = run.world.buildings[index]
+              towerPacks[tower.team].drawProp(
+                buildingPropName(tower),
+                renderPoint(tower.position),
+                renderFacing(tower.facing),
+                buildingScale(tower),
+                viewProjection
+              )
 
           occlusion.settings.enabled = preferences.ambientOcclusion
-          occlusion.captureGround(window.size)
+          occlusion.captureGround(window.size, screenshotTarget.framebuffer)
 
           if showOccludedCharacters:
             profileBlock "Character outline pass":
@@ -3202,7 +3237,9 @@ proc runGraphics*(
             finishCharacters(scene)
 
         profileBlock "Ambient occlusion":
-          occlusion.applyScreenOcclusion(window.size, projection)
+          occlusion.applyScreenOcclusion(
+            window.size, projection, screenshotTarget.framebuffer
+          )
 
         # The arena's lakes, each with its own reflection. The water mirrors the sky,
         # terrain, towers and characters; particles, spells and markers stay out of it.
@@ -3234,15 +3271,16 @@ proc runGraphics*(
                 scene.toon.groundColor
               )
               drawTerrain(mirroredViewProjection, false)
-              for index in standingBuildings:
-                let tower {.cursor.} = run.world.buildings[index]
-                towerPacks[tower.team].drawProp(
-                  buildingPropName(tower),
-                  renderPoint(tower.position),
-                  renderFacing(tower.facing),
-                  buildingScale(tower),
-                  mirroredViewProjection
-                )
+              when not (defined(useDirectX) or defined(useVulkan)):
+                for index in standingBuildings:
+                  let tower {.cursor.} = run.world.buildings[index]
+                  towerPacks[tower.team].drawProp(
+                    buildingPropName(tower),
+                    renderPoint(tower.position),
+                    renderFacing(tower.facing),
+                    buildingScale(tower),
+                    mirroredViewProjection
+                  )
               profileBlock "Water mirror characters":
                 beginCharacters(
                   scene,
@@ -3253,11 +3291,12 @@ proc runGraphics*(
                 )
                 drawWorldCharacters(scene, worldCharacters, worldCharacterCount)
                 finishCharacters(scene)
-              if captureActive():
+              endReflection()
+              if captureActive() or defined(frameBench) or defined(backendBench):
                 beginGotaFrame()
               else:
-                glBindFramebuffer(GL_FRAMEBUFFER, 0)
-              glViewport(0, 0, window.size.x, window.size.y)
+                bindFrameTarget()
+              setRenderViewport(window.size)
           drawWaterBody(
             lake,
             viewProjection,
@@ -3381,16 +3420,10 @@ proc runGraphics*(
 
       profileBlock "ui":
         if not cleanScreenshot and matchMenu != MatchResults:
-          glDisable(GL_DEPTH_TEST)
-          glDisable(GL_CULL_FACE)
-          glDisable(GL_BLEND)
-          when not defined(emscripten):
-            glDisable(GL_MULTISAMPLE)
-          glActiveTexture(GL_TEXTURE0)
-          glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
+          prepareUi(sk)
           var menuOrigin: Vec2
           if matchMenu == HiddenMatchMenu:
-            sk.beginUi(window, window.size)
+            sk.beginGameUi(window, window.size)
           elif matchMenu == MatchSettings:
             menuOrigin = sk.beginOverlay(window, vec2(768, 488)) + vec2(24)
           elif matchMenu == MatchPlayers:
@@ -3644,19 +3677,13 @@ proc runGraphics*(
                else: run.visibleReplayChat(
                  if viewMode == 0: -1 else: viewMode - 1)),
               network.canHumanChat)
-          sk.endUi()
+          sk.finishUi()
           window.syncChatInput(chat)
           if matchMenu == HiddenMatchMenu:
             drawStatsOverlay(sk, window)
           window.syncChatInput(chat)
         if not cleanScreenshot and matchMenu == MatchResults:
-          glDisable(GL_DEPTH_TEST)
-          glDisable(GL_CULL_FACE)
-          glDisable(GL_BLEND)
-          when not defined(emscripten):
-            glDisable(GL_MULTISAMPLE)
-          glActiveTexture(GL_TEXTURE0)
-          glBindTexture(GL_TEXTURE_2D, sk.atlasTextureId())
+          prepareUi(sk)
           let
             heroId = if playerMode(): playerHeroId() else: 0'i32
             ready = network == nil or
@@ -3670,12 +3697,17 @@ proc runGraphics*(
               resultsInputReady = true
           when not defined(emscripten):
             if saveAutomatically:
-              sk.beginUi(window, window.size)
+              sk.beginGameUi(window, window.size)
               sk.menuLabel(if saveError.len > 0: saveError
                 elif replaySaving.savedPath.len > 0:
                   "Replay saved to your library." else: "",
                 vec2(24, 24), 1000, MenuAccent)
-              sk.endUi()
+              sk.finishUi()
+      if endBenchmarkFrame(run.world.tick.int):
+        benchmarkFinished = true
+        when not defined(emscripten):
+          window.closeRequested = true
+        return
       profileBlock "present":
         presentGotaFrame()
         reportDirectorFrame(
@@ -3697,7 +3729,7 @@ proc runGraphics*(
       when not defined(emscripten):
         window.closeRequested = true
 
-  while not window.closeRequested and not leaveMatch:
+  while not window.closeRequested and not leaveMatch and not benchmarkFinished:
     if network != nil:
       connection.pump()
       if network.returnedToLobby():

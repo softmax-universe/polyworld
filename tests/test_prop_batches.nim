@@ -1,6 +1,15 @@
-include ../src/polyworld/quadterrain
+include ../src/polyworld/backends/passes/quadterrain
 
-proc fixtureModel(texture: GLuint, height = 1.0'f): PropModel =
+proc fixtureTexture(id: uint): Texture =
+  ## Provides a distinct texture key without allocating a GPU resource.
+  when defined(useMetal4):
+    Texture(handle: cast[typeof(result.handle)](id))
+  elif defined(useDirectX) or defined(useVulkan):
+    Texture(handle: GpuTexture())
+  else:
+    Texture(handle: id.GLuint)
+
+proc fixtureModel(texture: Texture, height = 1.0'f): PropModel =
   ## Builds a tiny textured triangle without requiring a graphics context.
   PropModel(
     name: "triangle",
@@ -46,9 +55,9 @@ proc changedGroups(): seq[int32] =
 echo "Testing independent building and scenery batches"
 block updates:
   let
-    tree = fixtureModel(1)
-    foundation = fixtureModel(2)
-    walls = fixtureModel(2, 2)
+    tree = fixtureModel(fixtureTexture(1))
+    foundation = fixtureModel(fixtureTexture(2))
+    walls = fixtureModel(foundation.textureArray, 2)
     firstTree = fixturePlacement(tree, -1)
     secondTree = fixturePlacement(tree, -2, 32)
     house = fixturePlacement(foundation, 100, 10)
@@ -90,7 +99,7 @@ block updates:
 echo "Testing all transform and material changes invalidate their own group"
 block transforms:
   texturedBatches.setLen(0)
-  let original = fixturePlacement(fixtureModel(7), 11)
+  let original = fixturePlacement(fixtureModel(fixtureTexture(7)), 11)
   propPlacements = @[original]
   prepareTexturedBatches()
   for field in 0 ..< 6:
@@ -101,7 +110,7 @@ block transforms:
     of 2: changed.scale = 1.5'f
     of 3: changed.stretch = vec3(1, 2, 3)
     of 4: changed.tint = vec3(0.2, 0.4, 0.6)
-    else: changed.model = fixtureModel(7, 4)
+    else: changed.model = fixtureModel(original.model.textureArray, 4)
     propPlacements = @[changed]
     prepareTexturedBatches()
     doAssert changedGroups() == @[11'i32]
@@ -110,7 +119,7 @@ block transforms:
     propPlacements = @[original]
     prepareTexturedBatches()
     doAssert changedGroups() == @[11'i32]
-  propPlacements[0].model = fixtureModel(8)
+  propPlacements[0].model = fixtureModel(fixtureTexture(8))
   prepareTexturedBatches()
   doAssert texturedBatches.len == 2
   doAssert texturedBatches[0].mesh.len == 0

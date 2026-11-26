@@ -1,3 +1,4 @@
+from polyworld/renderer import beginGameUi
 import
   std/tables,
   pixie, silky, vmath, windy,
@@ -53,7 +54,7 @@ proc beginFrame*(menu: var MatchMenu, app: App) =
     sk.resetInteractions()
     menu.previousPage = menu.page
   if not menu.visible:
-    sk.beginUi(window, window.size)
+    sk.beginGameUi(window, window.size)
     return
   menu.origin = sk.beginOverlay(window,
     if menu.page == MenuSettings: vec2(768, 488) else: BattleMenuSize)

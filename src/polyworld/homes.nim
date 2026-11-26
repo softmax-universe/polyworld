@@ -1,3 +1,4 @@
+from polyworld/renderer import beginGameUi
 import
   std/os,
   pixie, silky, vmath, windy,
@@ -84,7 +85,7 @@ proc drawHome*(sk: Silky, window: Window, focus: var int,
     window.size.x.float32 / 720,
     window.size.y.float32 / HomeSize.y
   )), 1080.0'f / HomeSize.y)
-  sk.beginUi(window, window.size)
+  sk.beginGameUi(window, window.size)
   sk.mousePos = window.mousePos.vec2 / sk.uiScale
   let
     size = window.size.vec2 / sk.uiScale

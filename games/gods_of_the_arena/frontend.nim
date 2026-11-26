@@ -1,7 +1,7 @@
 import
   std/[os, random, strutils, uri],
   bumpy, chroma, jsony, silky, vmath, windy,
-  polyworld/[displays, chrome, connections, menus, roomclients, rooms, policies,
+  polyworld/[renderer, displays, chrome, connections, menus, roomclients, rooms, policies,
     sounds, tapes, viewers],
   content, controls, game, graphics, homes, lobbies, multiplayer, playernames,
   pointers, presets, replays, settings, joiningseats
@@ -320,14 +320,14 @@ proc runFrontend*() =
                 error = getCurrentExceptionMsg()
           if error.len > 0:
             sk.menuLabel(error, at + vec2(0, 272), color = LobbyRed)
-          sk.endUi()
+          sk.finishUi()
           presentGotaFrame()
           reportReplayFrame(0, 0)
           return
       when not defined(emscripten):
         if browsingReplays:
           replayAction = sk.drawReplayBrowser(window, replayBrowser)
-          sk.endUi()
+          sk.finishUi()
           presentGotaFrame()
           reportReplayFrame(0, 0)
           return
@@ -358,7 +358,7 @@ proc runFrontend*() =
           sk.menuLabel(error, vec2(24, 24), color = rgbx(245, 151, 139, 255))
         when not defined(emscripten):
           drawReplayRetry()
-        sk.endUi()
+        sk.finishUi()
         presentGotaFrame()
         reportReplayFrame(0, 0)
         return
@@ -794,7 +794,7 @@ proc runFrontend*() =
       when not defined(emscripten):
         drawReplayRetry()
       sk.textStyle = "Default"
-      sk.endUi()
+      sk.finishUi()
       presentGotaFrame()
       reportReplayFrame(0, 0)
     pollEvents()

@@ -1,6 +1,12 @@
 import windy, fullscreens
 export fullscreens
 
+when defined(linux):
+  from windy/platforms/linux/x11/xlib import nil
+
+  proc XCloseDisplay(display: xlib.Display): cint
+    {.cdecl, dynlib: xlib.libX11, importc, discardable.}
+
 type
   WindowMode* = enum
     Windowed = "Windowed"
@@ -102,6 +108,13 @@ when not defined(emscripten):
           screen = candidate
           break
       ((screen.size.vec2 - vec2(80, 140)) * window.contentScale).ivec2
+    elif defined(linux):
+      # X11 root dimensions are already pixels, including desktop scaling.
+      let display = xlib.XOpenDisplay(nil)
+      if display == nil:
+        raise newException(WindyError, "Unable to open the X11 display")
+      defer: XCloseDisplay(display)
+      xlib.screen(display, xlib.defaultScreen(display)).size - ivec2(80, 140)
     else:
       # Do not cap requested resolutions at the current window size.
       ivec2(int32.high, int32.high)

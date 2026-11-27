@@ -182,3 +182,28 @@ experience requests, three successful league rounds including an automatic cycle
 and game/player log plus browser replay evidence in the release handoff.
 
 The published release receipt is [9 September 2026](releases/2026-09-09.md).
+
+## Mixed file and container seats
+
+Opt in with `coworldOptions(requiredSlots, mixedPlayers = true)` and declare both
+player runtimes in the manifest. The host accepts `coworld-play-seats/2`, preserves
+original slot indices, and opens logs/artifacts only for `kind: policy` seats.
+Existing file-only callers keep their roster contract.
+
+The game owns its player messages. Import `polyworld/coworld`, call
+`nextPlayerEvent(timeoutMs)` while waiting for required connections, and send
+configuration with `sendPlayer(slot, message)`. For each observation, pass
+`expectReply = true` to grant exactly one reply. Consume `PlayerMessage` and
+translate the action in the game. Decide file and container actions against the
+same pre-tick state before advancing. `PlayerTimeout`, disconnects, and overflow
+are explicit events; attribute terminal faults through `rejectPlayer`.
+
+The shared transport authenticates `/player?slot=N&token=TOKEN`, rejects duplicate
+connections, bounds packets to 64 KiB and queues to 128 events, and answers Ping.
+Slots cannot reconnect during an episode. The game chooses startup/action
+deadlines and validates its own message schema. Containers and human clients use
+the same transport; browser controls require the game's own client protocol.
+
+The platform owns container launch, logs, and status. `finishCoworld` writes only
+file-seat status and publishes results after private outputs close. Do not load
+remote seats as files or create synthetic file logs for them.

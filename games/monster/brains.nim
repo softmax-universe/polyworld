@@ -11,6 +11,8 @@ const
   MaxMessageBytes = 4096
   MaxLessonBytes = 320
   MaxSaveBytes = MaxResponseBytes
+  FullHistoryMessage = "Conversation memory is full. No history was discarded. " &
+    "Use a new --save-dir to start a fresh conversation."
   CanceledRequestMessage =
     "Moss stopped. The previous request is still settling."
   BrainInstructions = """
@@ -600,7 +602,7 @@ proc stopConversation*(brain: Brain, text: string) =
     brain.messages.add Message(role: PlayerMessage, text: text.strip())
     brain.messages.add Message(role: CreatureMessage, text: brain.reply.speech)
   else:
-    brain.failure = "Stopped. Conversation memory is full; no history was discarded."
+    brain.failure = "Stopped. " & FullHistoryMessage
   brain.saveVisible()
 
 proc requestFailure(brain: Brain): string =
@@ -665,7 +667,7 @@ proc submit*(brain: Brain, text, observation: string): bool =
     brain.failure = "That message is too long. Use at most 4096 bytes."
     return false
   if brain.messages.len > MaxMessages - 2:
-    brain.failure = "Conversation memory is full. No history was discarded."
+    brain.failure = FullHistoryMessage
     return false
   let body = brain.requestBody(spoken, observation)
   if body.len > MaxRequestBytes:
@@ -693,7 +695,7 @@ proc reportProblem*(brain: Brain, text: string) =
   if brain == nil or text.len == 0:
     return
   if brain.messages.len >= MaxMessages - 1:
-    brain.failure = "Conversation memory is full. No history was discarded."
+    brain.failure = FullHistoryMessage
     return
   if text.len > MaxMessageBytes:
     brain.failure = "Action feedback exceeds the creature message limit."
@@ -718,7 +720,7 @@ proc explainProblems*(brain: Brain, observation: string): bool =
     return false
   if brain.messages.len >= MaxMessages:
     brain.explanationPending = false
-    brain.failure = "Conversation memory is full. No history was discarded."
+    brain.failure = FullHistoryMessage
     return false
   let body = brain.requestBody("", observation, explaining = true)
   if body.len > MaxRequestBytes:
@@ -793,8 +795,7 @@ proc pollBrain*(brain: Brain, tick: int32): bool =
       raise newException(MonsterError,
         "Creature lesson memory is full. No memories were discarded.")
     if brain.messages.len >= MaxMessages:
-      raise newException(MonsterError,
-        "Conversation memory is full. No history was discarded.")
+      raise newException(MonsterError, FullHistoryMessage)
     brain.reply = answer
     brain.lessons.add additions
     brain.messages.add Message(role: CreatureMessage, text: answer.speech)
@@ -817,7 +818,7 @@ proc addEvent*(brain: Brain, text: string) =
     return
   let limit = MaxMessages - int(brain.pending)
   if brain.messages.len >= limit:
-    brain.failure = "Conversation memory is full. No history was discarded."
+    brain.failure = FullHistoryMessage
     return
   if text.len > MaxMessageBytes:
     brain.failure = "World event exceeds the creature message limit."

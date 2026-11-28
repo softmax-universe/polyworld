@@ -24,6 +24,7 @@ import
   test_recording_library,
   test_recording_play,
   test_sessions,
-  test_towerarena
+  test_towerarena,
+  test_ui_scales
 
 echo "Game tests passed"

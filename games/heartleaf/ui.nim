@@ -65,11 +65,13 @@ proc hudLayoutFits(layoutSize: Vec2): bool =
   )
 
 proc hudUiScale*(windowSize: Vec2): float32 =
-  ## Returns the stepped Silky scale that keeps HUD panels from overlapping.
-  if run.world.phase in {ScorePhase, GameOverPhase}:
-    fitUiScale(windowSize, scoreLayoutFits, ScoreUiScales)
-  else:
-    fitUiScale(windowSize, hudLayoutFits, UiCrispSteps)
+  ## Applies the shared scale preference to the HUD and scorecard.
+  let automatic =
+    if run.world.phase in {ScorePhase, GameOverPhase}:
+      fitUiScale(windowSize, scoreLayoutFits, ScoreUiScales)
+    else:
+      fitUiScale(windowSize, hudLayoutFits, UiCrispSteps)
+  selectedUiScale(automatic)
 
 proc hudUiScale*(window: Window): float32 =
   ## Returns the stepped Silky scale that fits the HUD on this window.

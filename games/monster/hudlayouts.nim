@@ -17,9 +17,9 @@ type ChatLayout* = object
   artScale*: float32
 
 proc chatScale*(size: Vec2): float32 {.raises: [].} =
-  ## Keeps the text and controls proportional to the compact artwork.
-  min(clamp(size.y / 900, 0.75'f, 2'f),
-    max(0.1'f, size.x / 1040)) * HudSize
+  ## Fits the compact artwork without magnifying its text and controls.
+  min(1.0'f, min(clamp(size.y / 900, 0.75'f, 2'f),
+    max(0.1'f, size.x / 1040)) * HudSize)
 
 proc sourcePanel(
   frame: GameUiPanel,

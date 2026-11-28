@@ -11,13 +11,19 @@ const
   ShortRole: array[HeroClass, string] = ["Ranged", "Might", "Arcane"]
   HeroKeys: array[HeroClass, Button] = [Key1, Key2, Key3]
 
-proc heroSelectScale*(window: Window): float32 =
+proc heroSelectScale*(size: Vec2, density = 1.0'f): float32 =
+  ## Applies the shared scale preference to the hero selection labels.
   let
-    size = window.size.vec2
     portrait = size.x < size.y * 0.9'f32
-    density = when defined(emscripten): window.contentScale else: 1'f32
     reference = if portrait: vec2(1000, 1500) else: vec2(2400, 1500)
-  max(0.01'f32, min(density, min(size.x / reference.x, size.y / reference.y)))
+    automatic = max(0.01'f,
+      min(density, min(size.x / reference.x, size.y / reference.y)))
+  selectedUiScale(automatic, 1080.0'f / 1500)
+
+proc heroSelectScale*(window: Window): float32 =
+  ## Uses the same layout and display density for rendering and picking.
+  let density = when defined(emscripten): window.contentScale else: 1.0'f
+  heroSelectScale(window.size.vec2, density)
 
 proc heroCharacterRect*(window: Window, viewProjection: Mat4,
     heroClass: HeroClass): UiRect =

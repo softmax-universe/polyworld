@@ -30,7 +30,6 @@ const
   ]
   UiCrispSteps* = [0.25'f32, 0.5'f32, 1.0'f32, 2.0'f32, 4.0'f32]
   HudReferenceSize* = vec2(1920, 1080)
-  HudDoubleScaleSize = HudReferenceSize * 2.0'f * 0.8'f
   DebugWindowTitle* = "Debug"
   DebugWindowOrigin* = vec2(360, 32)
   DebugWindowSize* = vec2(460, 380)
@@ -324,11 +323,12 @@ proc snapUiScalePercent*(percent: int): int =
       result = candidate
 
 proc selectedUiScale*(automatic: float32, reference = 1.0'f): float32 =
-  ## Keeps custom scaling fixed when the window or fullscreen mode changes.
+  ## Caps automatic scaling at native size while preserving explicit zoom.
   uiScaleReference = reference
   case uiScaleMode
   of AutoUiScale:
-    automatic
+    # Respect both the page's 100% reference and the atlas's native scale.
+    min(automatic, min(reference, 1.0'f))
   of CustomUiScale:
     reference * clamp(uiScalePercent, 25, 400).float32 / 100
 
@@ -342,9 +342,6 @@ proc gameUiScale*(windowSize: Vec2): float32 =
         layoutSize.y >= HudReferenceSize.y,
     UiCrispSteps
   )
-  if windowSize.x >= HudDoubleScaleSize.x and
-    windowSize.y >= HudDoubleScaleSize.y:
-      result = max(result, 2.0'f)
   result = selectedUiScale(result)
 
 proc gameUiScale*(window: Window): float32 =

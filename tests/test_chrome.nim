@@ -42,6 +42,17 @@ block:
   uiScalePercent = 100
   doAssert selectedUiScale(0.8'f) == 0.8'f
 
+echo "Testing automatic UI scaling never enlarges native assets"
+block:
+  uiScaleMode = AutoUiScale
+  for automatic in [1.0'f, 1.25'f, 2.0'f, 4.0'f, 16.0'f]:
+    doAssert selectedUiScale(automatic) == 1.0'f
+  # CaC's HUD reference is smaller than the shared menus' reference.
+  doAssert selectedUiScale(2.0'f, 0.72'f) == 0.72'f
+  doAssert selectedUiScale(4.0'f, 2.0'f) == 1.0'f
+  doAssert selectedUiScale(0.5'f, 0.72'f) == 0.5'f
+  doAssert selectedUiScale(0.25'f) == 0.25'f
+
 echo "Testing tenths and quarter-step UI scale snapping"
 block:
   for (input, expected) in [
@@ -63,9 +74,10 @@ block:
     (vec2(1280, 720), 0.5'f),
     (vec2(1920, 1080), 1.0'f),
     (vec2(2560, 1440), 1.0'f),
-    (vec2(3072, 1728), 2.0'f),
-    (vec2(3840, 2160), 2.0'f),
-    (vec2(7680, 4320), 4.0'f),
+    (vec2(3072, 1728), 1.0'f),
+    (vec2(3840, 2160), 1.0'f),
+    (vec2(7680, 4320), 1.0'f),
+    (vec2(15360, 8640), 1.0'f),
     (vec2(3440, 1440), 1.0'f),
     (vec2(1080, 1920), 0.5'f),
     (vec2(400, 300), 0.25'f),
@@ -75,9 +87,7 @@ block:
 
   for (size, previous, current) in [
     (vec2(960, 540), 0.25'f, 0.5'f),
-    (vec2(1920, 1080), 0.5'f, 1.0'f),
-    (vec2(3072, 1728), 1.0'f, 2.0'f),
-    (vec2(7680, 4320), 2.0'f, 4.0'f)
+    (vec2(1920, 1080), 0.5'f, 1.0'f)
   ]:
     doAssert gameUiScale(size - vec2(1, 0)) == previous
     doAssert gameUiScale(size - vec2(0, 1)) == previous
